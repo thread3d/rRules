@@ -114,17 +114,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CORE-01, CORE-02, CORE-03, CORE-04 | Phase 1 | Pending |
-| CORE-05, CORE-06, CORE-07, CORE-08 | Phase 1 | Pending |
-| RULE-01, RULE-02 | Phase 2 | Pending |
-| RULE-03, RULE-04, RULE-05, RULE-06 | Phase 2 | Pending |
-| API-01, API-02, API-03 | Phase 3 | Pending |
-| API-04, API-05 | Phase 3 | Pending |
-| AUTH-01, AUTH-02, AUTH-03 | Phase 4 | Pending |
-| GOV-01, GOV-02 | Phase 4 | Pending |
-| TEST-01, TEST-02, TEST-03 | Phase 5 | Pending |
-| MON-01, MON-02, MON-03, MON-04 | Phase 5 | Pending |
-| DMN-01, DMN-02, DMN-03 | Phase 6 | Pending |
+| CORE-01, CORE-02, CORE-03, CORE-04, CORE-05, CORE-06, CORE-07, CORE-08 | Phase 1: Core Engine Foundation | Pending |
+| RULE-01, RULE-02, RULE-03, RULE-04, RULE-05, RULE-06 | Phase 2: Rule Authoring Interface | Pending |
+| API-01, API-02, API-03, DEPLOY-01, DEPLOY-02 | Phase 3: REST API Layer | Pending |
+| AUTH-01, AUTH-02, AUTH-03, GOV-01, GOV-02 | Phase 4: Governance & Access Control | Pending |
+| TEST-01, TEST-02, TEST-03, MON-01, MON-02, MON-03, MON-04 | Phase 5: Testing & Monitoring | Pending |
+| DMN-01, DMN-02, DMN-03 | Phase 6: DMN Compliance | Pending |
 
 **Coverage:**
 - v1 requirements: 39 total
@@ -133,4 +128,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-05-22*
-*Last updated: 2026-05-22 after initial definition*
+*Last updated: 2026-05-22 after roadmap creation*
