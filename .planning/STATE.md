@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-05-22)
 ## Current Position
 
 Phase: 1 of 6 (Core Engine Foundation)
-Plan: Not yet planned
-Status: Ready to plan
-Last activity: 2026-05-22 — Roadmap created with 6 phases mapping all 39 v1 requirements
+Plan: In planning
+Status: Context gathered, ready for plan
+Last activity: 2026-05-23 — Phase 1 context discussion complete with decisions on hybrid architecture, automatic chaining, explicit session lifecycle
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -55,10 +55,24 @@ Progress: [░░░░░░░░░░] 0%
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
+Decisions captured in `.planning/phases/01-core-engine-foundation/01-CONTEXT.md`.
+
 Recent decisions affecting current work:
 
-- Phase 1: Rust chosen for backend performance, safety, and concurrency; Rete algorithm selected as the pattern matching foundation
+| Phase | Decision | Date |
+|-------|----------|------|
+| 1 | Hybrid module organization with domain layers and feature subdirectories | 2026-05-23 |
+| 1 | Typed internal data structures with dynamic casting support | 2026-05-23 |
+| 1 | Rete: start with crate, replace if needed | 2026-05-23 |
+| 1 | Automatic chaining mode selection (forward/backward mixed) | 2026-05-23 |
+| 1 | Backward chaining for interactive debugging | 2026-05-23 |
+| 1 | Explicit lifecycle session management, long-lived sessions | 2026-05-23 |
+| 1 | Hybrid rule definition (API + file-based DSL) | 2026-05-23 |
+| 1 | Syntax + semantic validation; hot reload KIE base support | 2026-05-23 |
+
+### Pending Todos
+
+(None — discussion focused on implementation decisions)
 
 ### Pending Todos
 
@@ -79,5 +93,12 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-05-23T08:27:24.137Z
-Stopped at: Phase 1 context gathered
+Stopped at: Phase 1 context gathered, ready for planning
 Resume file: .planning/phases/01-core-engine-foundation/01-CONTEXT.md
+
+## Progress Summary
+
+**Phases completed:** 0 of 6
+**Current phase:** 1 (Core Engine Foundation)
+**Plans created:** 0
+**Plans executed:** 0
