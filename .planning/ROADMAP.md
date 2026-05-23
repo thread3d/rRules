@@ -141,7 +141,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core Engine Foundation | 0/6 | Not started | - |
+| 1. Core Engine Foundation | 0/6 | Planning | - |
 | 2. Rule Authoring Interface | 0/5 | Not started | - |
 | 3. REST API Layer | 0/6 | Not started | - |
 | 4. Governance & Access Control | 0/5 | Not started | - |
