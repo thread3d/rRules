@@ -51,14 +51,19 @@ Plans:
   3. Non-technical users can build rules through form-based guided editors
   4. Rule templates can be parameterized and reused across rule sets
   5. Users get immediate inline validation and error messages when editing rules
-**Plans**: TBD
+**Plans**: 5 plans
 
 Plans:
-- [ ] 02-01: Build web-based IDE with syntax highlighting for rule expressions
-- [ ] 02-02: Implement decision table editor (spreadsheet-style grid)
-- [ ] 02-03: Create guided rule editor with form-based UI for business users
-- [ ] 02-04: Add rule templates with parameterization support
-- [ ] 02-05: Implement inline validation engine for real-time error reporting
+- [x] 02-01: Build web-based IDE with syntax highlighting for rule expressions
+  (files: code-mirror-editor.tsx, syntax-highlighter.ts, realtime-validator.ts, dual-pane-view.tsx)
+- [x] 02-02: Implement decision table editor using ag-Grid with mixed editing and full row CRUD
+  (files: ag-grid-table.tsx, cell-editors.tsx, row-operations.ts, decision-table-view.tsx)
+- [x] 02-03: Create guided rule editor with hybrid accordion structure and adaptive vocabulary
+  (files: hybrid-accordion.tsx, vocabulary-toggle.tsx, guided-form.tsx)
+- [x] 02-04: Add rule templates with parameterization support
+  (files: template-system.ts, storage.ts, version-history.tsx, template-manager.tsx)
+- [x] 02-05: Implement inline validation engine for real-time error reporting
+  (files: inline-validator.ts, error-reporting.tsx, integration.ts)
 
 ### Phase 3: REST API Layer
 **Goal**: Expose complete REST API for all rule operations and enable container-based deployment
@@ -137,12 +142,12 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Core Engine Foundation | 6/6 | Planning complete | 2026-05-23 |
-| 2. Rule Authoring Interface | 0/5 | Not started | - |
+| 2. Rule Authoring Interface | 5/5 | Planning complete | 2026-05-24 |
 | 3. REST API Layer | 0/6 | Not started | - |
 | 4. Governance & Access Control | 0/5 | Not started | - |
 | 5. Testing & Monitoring | 0/6 | Not started | - |
