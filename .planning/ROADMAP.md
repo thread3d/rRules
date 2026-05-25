@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Core Engine Foundation** - Rule engine with Rete algorithm, forward/backward chaining, and execution modes
 - [ ] **Phase 2: Rule Authoring Interface** - Web-based IDE with syntax highlighting, decision tables, and guided editing
 - [ ] **Phase 3: REST API Layer** - Complete REST API for rule management and container deployment support
-- [ ] **Phase 4: Governance & Access Control** - RBAC, approval workflows, audit trails, and version control
+- [x] **Phase 4: Governance & Access Control** - RBAC, approval workflows, audit trails, and version control
 - [ ] **Phase 5: Testing & Monitoring** - Test framework, coverage reporting, metrics, and analytics dashboards
 - [ ] **Phase 6: DMN Compliance** - Full OMG DMN Level 3 compliance with FEEL expression language
 
@@ -95,14 +95,19 @@ Plans:
   3. Rules can be assigned to owners with stewardship responsibilities
   4. Every rule modification is recorded in a complete audit trail
   5. Users can create branches for rule development and merge to production safely
-**Plans**: TBD
+**Plans**: 5 plans
 
 Plans:
-- [ ] 04-01: Implement RBAC system with predefined roles and permissions
-- [ ] 04-02: Build maker-checker approval workflow engine
-- [ ] 04-03: Add rule ownership assignment and stewardship tracking
-- [ ] 04-04: Implement comprehensive audit trail for all rule modifications
-- [ ] 04-05: Build version control system with branching and merging support
+- [x] 04-01: Implement RBAC system with predefined roles and permissions
+  (files: src/governance/rbac/mod.rs, src/governance/rbac/roles.rs, src/governance/rbac/permissions.rs, src/api/v1/middleware/auth.rs)
+- [x] 04-02: Build maker-checker approval workflow engine
+  (files: src/governance/approval/mod.rs, src/governance/approval/workflows.rs, src/governance/approval/notifications.rs, src/api/v1/routes/approvals.rs)
+- [x] 04-03: Add rule ownership assignment and stewardship tracking
+  (files: src/governance/rbac/role_manager.rs, prisma/schema.prisma, src/api/v1/routes/users.rs)
+- [x] 04-04: Implement comprehensive audit trail for all rule modifications
+  (files: src/governance/audit/mod.rs, src/governance/audit/events.rs, src/governance/audit/storage.rs, src/api/v1/routes/rules.rs)
+- [x] 04-05: Build version control system with branching and merging support
+  (files: src/governance/versioning/mod.rs, src/governance/versioning/branches.rs, src/governance/versioning/merging.rs, src/git/repository.rs)
 
 ### Phase 5: Testing & Monitoring
 **Goal**: Provide tools for testing rules in isolation and monitoring execution in production
@@ -114,15 +119,15 @@ Plans:
   3. Coverage reports show which rules fired and which were skipped during execution
   4. Real-time dashboards display throughput, latency, and hit counts for rules
   5. Dead rule detection identifies rules that never fire despite being active
-**Plans**: TBD
+**Plans**: 6 plans
 
 Plans:
-- [ ] 05-01: Build unit test framework for individual rules with assertions
-- [ ] 05-02: Implement scenario-based simulation engine for what-if analysis
-- [ ] 05-03: Add coverage reporting showing rule execution statistics
-- [ ] 05-04: Create real-time metrics collection for throughput and latency
-- [ ] 05-05: Build monitoring dashboards with key performance indicators
-- [ ] 05-06: Implement dead rule detection algorithm
+- [x] 05-01: Build BDD test framework with Gherkin syntax for business-readable scenarios (testing/bdd/)
+- [x] 05-02: Implement scenario-based simulation engine for what-if analysis (testing/simulation/)
+- [x] 05-03: Add coverage reporting showing full execution traces and timing per rule (testing/coverage/)
+- [x] 05-04: Create real-time metrics collection with adaptive sampling for throughput and latency (monitoring/metrics/)
+- [x] 05-05: Build unified monitoring dashboards with combined technical + business KPIs (monitoring/dashboard/)
+- [x] 05-06: Implement dead rule detection algorithm with owner notification (monitoring/detection/)
 
 ### Phase 6: DMN Compliance
 **Goal**: Achieve full OMG DMN Level 3 compliance including Decision Tables, Contexts, Literals, and FEEL expression language
@@ -132,12 +137,21 @@ Plans:
   1. All OMG DMN Level 3 specifications are fully implemented and verified
   2. Users can create and execute DMN Decision Tables, Contexts, and Literals
   3. FEEL expression language is supported for all rule conditions and actions
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 06-01: Implement full DMN Level 3 parser and validator
-- [ ] 06-02: Build execution engine for DMN constructs (Tables, Contexts, Literals)
-- [ ] 06-03: Implement FEEL expression language support
+- [x] 06-01: Implement full DMN Level 3 parser and validator (06-01-PLAN.md)
+  - Full DMN 1.5 XML parser with namespace support
+  - Validation of all required elements and attributes
+  - Cross-reference resolution between components
+- [x] 06-02: Build execution engine for DMN constructs (Tables, Contexts, Literals) (06-02-PLAN.md)
+  - Decision Table execution with all hit policies (First, Any, Collect, Override, Priority, RuleOrder, Sum, Min, Max, Count)
+  - Context evaluation with property access
+  - Literal expression handling
+- [x] 06-03: Implement FEEL expression language support (06-03-PLAN.md)
+  - Complete FEEL lexer/parser with AST
+  - All DMN-specified built-in functions
+  - Support for intervals, lists, contexts
 
 ## Progress
 
@@ -148,7 +162,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 |-------|----------------|--------|-----------|
 | 1. Core Engine Foundation | 6/6 | Planning complete | 2026-05-23 |
 | 2. Rule Authoring Interface | 5/5 | Planning complete | 2026-05-24 |
-| 3. REST API Layer | 0/6 | Not started | - |
-| 4. Governance & Access Control | 0/5 | Not started | - |
-| 5. Testing & Monitoring | 0/6 | Not started | - |
-| 6. DMN Compliance | 0/3 | Not started | - |
+| 3. REST API Layer | 10/10 | Planning complete | 2026-05-24 |
+| 4. Governance & Access Control | 5/5 | Planning complete | 2026-05-24 |
+| 5. Testing & Monitoring | 6/6 | Planning complete | 2026-05-24 |
+| 6. DMN Compliance | 3/3 | Planning complete | 2026-05-24 |
