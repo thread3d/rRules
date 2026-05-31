@@ -133,8 +133,12 @@ impl<'a> TraceExplorer<'a> {
 
     /// Gets the current step without advancing.
     pub fn current(&self) -> Option<&InferenceStep> {
-        if self.position < self.trace.path.len() && self.position < self.max_depth {
-            Some(&self.trace.path[self.position])
+        if self.position == 0 && !self.trace.path.is_empty() {
+            // Before any next() call, return first item
+            Some(&self.trace.path[0])
+        } else if self.position > 0 && self.position <= self.trace.path.len() && self.position <= self.max_depth {
+            // After next(), return the last step returned (position - 1)
+            Some(&self.trace.path[self.position - 1])
         } else {
             None
         }

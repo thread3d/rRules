@@ -290,14 +290,16 @@ mod tests {
     fn test_duplicate_id_error() {
         let mut wm = WorkingMemory::new();
 
-        let payload = HashMap::new();
+        let mut payload = HashMap::new();
+        payload.insert("field1".to_string(), Value::Integer(42));
         let fact = Fact::new("test".to_string(), payload);
         let id = fact.id;
 
         wm.insert_fact(fact).unwrap();
 
         // Try to insert another fact with same ID
-        let payload2 = HashMap::new();
+        let mut payload2 = HashMap::new();
+        payload2.insert("field1".to_string(), Value::Integer(100));
         let fact2 = Fact::with_id(id, "test2".to_string(), payload2);
 
         assert!(matches!(

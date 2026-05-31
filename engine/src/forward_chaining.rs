@@ -5,6 +5,7 @@
 use crate::environment::{Engine, Session};
 use crate::fact::Fact;
 use crate::rules::Rule;
+use crate::salience::agenda::{Activation, Agenda};
 
 /// Result of a forward chaining execution.
 pub struct ExecutionResult {
@@ -51,79 +52,7 @@ pub fn execute_forward(engine: &mut Engine, session: &Session) -> ExecutionResul
 }
 
 /// Conflict resolution strategy for ordering rule firings.
-pub enum ConflictResolver {
-    /// Higher salience fires first (default)
-    Salience,
-    /// Depth-first traversal of rule network
-    DepthFirst,
-    /// Breadth-first traversal
-    BreadthFirst,
-    /// Random order when salience is equal
-    Random,
-}
-
-impl Default for ConflictResolver {
-    fn default() -> Self {
-        ConflictResolver::Salience
-    }
-}
-
-/// Agenda for managing activations (pending rule firings).
-pub struct Agenda {
-    /// Pending activations sorted by priority
-    activations: Vec<Activation>,
-    /// Conflict resolver strategy
-    resolver: ConflictResolver,
-}
-
-impl Agenda {
-    pub fn new() -> Self {
-        Self {
-            activations: Vec::new(),
-            resolver: ConflictResolver::default(),
-        }
-    }
-
-    pub fn add_activation(&mut self, activation: Activation) {
-        self.activations.push(activation);
-        // Sort by priority based on resolver strategy
-        self.sort();
-    }
-
-    pub fn pop(&mut self) -> Option<Activation> {
-        self.activations.pop()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.activations.is_empty()
-    }
-
-    fn sort(&mut self) {
-        // Sort by salience (descending - higher first)
-        self.activations
-            .sort_by(|a, b| b.salience.cmp(&a.salience));
-    }
-}
-
-/// A single rule activation on the agenda.
-pub struct Activation {
-    /// The rule to fire
-    pub rule: Rule,
-    /// Salience/priority for ordering
-    pub salience: i32,
-    /// Fact matches that triggered this activation
-    pub matches: Vec<String>,
-}
-
-impl Activation {
-    pub fn new(rule: Rule, salience: i32) -> Self {
-        Self {
-            rule,
-            salience,
-            matches: Vec::new(),
-        }
-    }
-}
+pub use crate::salience::conflict_resolution::ConflictResolver;
 
 #[cfg(test)]
 mod tests {
@@ -138,14 +67,22 @@ mod tests {
         let rule_low = Rule::builder("low", "Low Priority").salience(-50).build();
         let rule_med = Rule::builder("med", "Medium Priority").salience(50).build();
 
-        agenda.add_activation(Activation::new(rule_high, 100));
-        agenda.add_activation(Activation::new(rule_low, -50));
-        agenda.add_activation(Activation::new(rule_med, 50));
+        agenda.push(Activation::new(rule_high, 100));
+        agenda.push(Activation::new(rule_low, -50));
+        agenda.push(Activation::new(rule_med, 50));
 
         // Should pop in priority order
         assert_eq!(agenda.pop().unwrap().salience, 100);
         assert_eq!(agenda.pop().unwrap().salience, 50);
         assert_eq!(agenda.pop().unwrap().salience, -50);
         assert!(agenda.is_empty());
+    }
+
+    #[test]
+    fn test_conflict_resolver() {
+        let resolver = ConflictResolver::default();
+
+        // Verify the default strategy is Salience
+        assert_eq!(resolver.strategy_name(), "salience");
     }
 }

@@ -6,6 +6,7 @@
 use crate::data_types::{TypeInfo, TypeClass};
 use crate::fact::WorkingMemory;
 use crate::rules::RuleSet;
+use crate::ChainingMode;
 
 /// Builder for creating configured engine instances.
 pub struct EngineBuilder {
@@ -71,17 +72,6 @@ impl Default for EngineBuilder {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Chaining mode selection strategy.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ChainingMode {
-    /// Automatic mode selection based on rule structure and query type
-    Automatic,
-    /// Only use forward chaining
-    ForwardOnly,
-    /// Only use backward chaining
-    BackwardOnly,
 }
 
 /// The main engine instance managing rules and execution.

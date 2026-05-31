@@ -9,7 +9,10 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 /// A rule with a condition (LHS) and actions (RHS).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Note: We use PartialEq but not Eq because Condition contains Value which
+/// has Float(f64) that doesn't implement Eq.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Rule {
     /// Unique identifier for the rule
     pub id: String,
@@ -107,7 +110,10 @@ impl RuleBuilder {
 }
 
 /// Condition AST for rule LHS expressions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Note: We use PartialEq but not Eq because Value contains Float(f64) which
+/// doesn't implement Eq (due to NaN comparisons).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Condition {
     /// Always true condition
     True,
@@ -134,7 +140,7 @@ pub enum Condition {
 }
 
 /// Comparison operators for conditions.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ComparisonOp {
     Eq,      // ==
     Ne,      // !=
@@ -187,7 +193,10 @@ impl Condition {
 }
 
 /// Action for rule RHS execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Note: We use PartialEq but not Eq because Value contains Float(f64) which
+/// doesn't implement Eq.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Action {
     /// Insert a new fact into working memory
     InsertFact { fact_type: String, fields: HashMap<String, Value> },
@@ -205,7 +214,7 @@ pub enum Action {
 }
 
 /// Log levels for debug messages.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LogLevel {
     Debug,
     Info,

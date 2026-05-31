@@ -8,6 +8,10 @@ use std::collections::HashMap;
 
 /// Represents a value in the rule engine, supporting both strongly-typed Rust values
 /// and dynamic key-value lookups for business users.
+///
+/// Note: We use PartialEq but not Eq for Value because f64 doesn't implement Eq
+/// (due to NaN comparisons). This is acceptable as we compare Float values using
+/// epsilon-based comparison in the evaluation logic.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     /// Boolean value
