@@ -12,16 +12,23 @@ Build a production-grade Business Rules Management System (BRMS) in Rust that en
 
 Decimal phases appear between their surrounding integers in numeric order.
 
+### Milestone v1.0 - Completed
+
 - [x] **Phase 1: Core Engine Foundation** - Rule engine with Rete algorithm, forward/backward chaining, and execution modes
 - [x] **Phase 2: Rule Authoring Interface** - Web-based IDE with syntax highlighting, decision tables, and guided editing (completed 2026-06-01)
 - [x] **Phase 3: REST API Layer** - Complete REST API for rule management and container deployment support (completed 2026-06-01)
-- [x] **Phase 4: Governance & Access Control** - RBAC, approval workflows, audit trails, and version control
+- [x] **Phase 4: Governance & Access Control** - RBAC, approval workflows, audit trails, and version control (completed 2026-06-02)
 - [x] **Phase 5: Testing & Monitoring** - Test framework, coverage reporting, metrics, and analytics dashboards (completed 2026-06-01)
 - [x] **Phase 6: DMN Compliance** - Full OMG DMN Level 3 compliance with FEEL expression language (completed 2026-06-01)
 
+### Milestone v2.0 - Testing Framework Foundation (Current)
+
+- [ ] **Phase 7: Core Testing Infrastructure** - Rust testing stack integration, fixture support, per-test engine isolation
+- [ ] **Phase 8: Advanced Testing Features** - Deterministic firing mode, snapshot-based testing, rule coverage metrics
+
 ## Phase Details
 
-### Phase 1: Core Engine Foundation
+### Phase 1: Core Engine Foundation (v1.0)
 **Goal**: Deliver a production-ready rule engine with Rete algorithm for efficient pattern matching and both forward/backward chaining inference
 **Depends on**: Nothing (first phase)
 **Requirements**: CORE-01, CORE-02, CORE-03, CORE-04, CORE-05, CORE-06, CORE-07, CORE-08
@@ -41,7 +48,7 @@ Plans:
 - [x] 01-05: Implement loop detection mechanisms (no-loop, lock-on-active)
 - [x] 01-06: Add caching layer for compiled rule sets (KIE bases)
 
-### Phase 2: Rule Authoring Interface
+### Phase 2: Rule Authoring Interface (v1.0)
 **Goal**: Provide intuitive web-based tools for business users and developers to create, edit, and validate rules
 **Depends on**: Phase 1
 **Requirements**: RULE-01, RULE-02, RULE-03, RULE-04, RULE-05, RULE-06
@@ -65,27 +72,27 @@ Plans:
 - [x] 02-05: Implement inline validation engine for real-time error reporting
   (files: inline-validator.ts, error-reporting.tsx, integration.ts)
 
-### Phase 3: REST API Layer
+### Phase 3: REST API Layer (v1.0)
 **Goal**: Expose complete REST API for all rule operations and enable container-based deployment
 **Depends on**: Phase 2
 **Requirements**: API-01, API-02, API-03, DEPLOY-01, DEPLOY-02
 **Success Criteria** (what must be TRUE):
   1. External systems can execute rules via POST /rules/execute endpoint with JSON payload
   2. Users can create, read, update, and delete rules through RESTful API endpoints
-  3. Complete OpenAPI/Swagger documentation is available for all API endpoints
+  3. Complete OpenAPI/Swagger documentation is available for all endpoints
   4. rRules runs in Docker containers with production-ready configuration
   5. Rule updates can be deployed without service restart (hot deployment)
 **Plans**: TBD
 
 Plans:
-- [ ] 03-01: Design and implement REST API endpoints for rule execution
-- [ ] 03-02: Build CRUD API for rule management operations
-- [ ] 03-03: Generate OpenAPI/Swagger specification for all endpoints
-- [ ] 03-04: Create Docker container with production configuration
+- [x] 03-01: Design and implement REST API endpoints for rule execution
+- [x] 03-02: Build CRUD API for rule management operations
+- [x] 03-03: Generate OpenAPI/Swagger specification for all endpoints
+- [x] 03-04: Create Docker container with production configuration
 - [ ] 03-05: Implement Kubernetes manifests for orchestration
 - [ ] 03-06: Build hot deployment mechanism for rule updates
 
-### Phase 4: Governance & Access Control
+### Phase 4: Governance & Access Control (v1.0)
 **Goal**: Add enterprise-grade governance capabilities including access control, approval workflows, and full audit trails
 **Depends on**: Phase 3
 **Requirements**: AUTH-01, AUTH-02, AUTH-03, GOV-01, GOV-02
@@ -109,7 +116,7 @@ Plans:
 - [x] 04-05: Build version control system with branching and merging support
   (files: src/governance/versioning/mod.rs, src/governance/versioning/branches.rs, src/governance/versioning/merging.rs, src/git/repository.rs)
 
-### Phase 5: Testing & Monitoring
+### Phase 5: Testing & Monitoring (v1.0 - Stub Only)
 **Goal**: Provide tools for testing rules in isolation and monitoring execution in production
 **Depends on**: Phase 4
 **Requirements**: TEST-01, TEST-02, TEST-03, MON-01, MON-02, MON-03, MON-04
@@ -123,13 +130,19 @@ Plans:
 
 Plans:
 - [x] 05-01: Build BDD test framework with Gherkin syntax for business-readable scenarios (testing/bdd/)
+  - Stub implementation only - needs real test runner integration
 - [x] 05-02: Implement scenario-based simulation engine for what-if analysis (testing/simulation/)
+  - Stub implementation only
 - [x] 05-03: Add coverage reporting showing full execution traces and timing per rule (testing/coverage/)
+  - Stub implementation only
 - [x] 05-04: Create real-time metrics collection with adaptive sampling for throughput and latency (monitoring/metrics/)
+  - Stub implementation only
 - [x] 05-05: Build unified monitoring dashboards with combined technical + business KPIs (monitoring/dashboard/)
+  - Stub implementation only
 - [x] 05-06: Implement dead rule detection algorithm with owner notification (monitoring/detection/)
+  - Stub implementation only
 
-### Phase 6: DMN Compliance
+### Phase 6: DMN Compliance (v1.0 - Stub Only)
 **Goal**: Achieve full OMG DMN Level 3 compliance including Decision Tables, Contexts, Literals, and FEEL expression language
 **Depends on**: Phase 5
 **Requirements**: DMN-01, DMN-02, DMN-03
@@ -153,16 +166,65 @@ Plans:
   - All DMN-specified built-in functions
   - Support for intervals, lists, contexts
 
+### Phase 7: Core Testing Infrastructure Foundation (v2.0)
+**Goal**: Establish a comprehensive testing infrastructure foundation for the rule engine, enabling reliable development and verification of business rules
+**Depends on**: Phase 6 (engine must exist before testing can be meaningful)
+**Requirements**: TEST-01, TEST-02, TEST-03, TEST-04, TEST-05
+**Success Criteria** (what must be TRUE):
+  1. Tests run in isolation with fresh engine instances for each test (no state pollution)
+  2. Working memory fixtures can be created and managed with reproducible state
+  3. Forward chaining tests verify rule firing sequence respects salience ordering
+  4. Backward chaining tests capture inference traces for debugging
+  5. Deterministic mode eliminates flaky tests by enforcing consistent firing order
+**Plans**: 6 plans
+
+Plans:
+- [ ] 07-01: Integrate Rust testing stack (criterion, mockall, serial_test) into Cargo workspace
+- [ ] 07-02: Implement working memory fixture support with per-test engine isolation
+- [ ] 07-03: Build rule-by-rule unit test framework with assertion helpers
+- [ ] 07-04: Add forward chaining verification with activation sequence tracking
+- [ ] 07-05: Expose InferenceTrace API for backward chaining trace capture
+- [ ] 07-06: Implement deterministic firing mode with conflict resolution sorting
+
+### Phase 8: Advanced Testing Features (v2.0)
+**Goal**: Enhance testing capabilities with advanced features for comprehensive rule validation
+**Depends on**: Phase 7 (core infrastructure must be in place first)
+**Requirements**: TEST-06, TEST-07, TEST-08
+**Success Criteria** (what must be TRUE):
+  1. No-loop and lock-on-active constraints are verified by tests
+  2. Working memory state can be serialized to JSON for snapshot-based testing
+  3. Rule coverage metrics track which conditions were evaluated during test runs
+**Plans**: 5 plans
+
+Plans:
+- [ ] 08-01: Add no-loop/lock-on-active enforcement verification tests
+- [ ] 08-02: Implement working memory JSON serialization for snapshot testing
+- [ ] 08-03: Add rule coverage instrumentation and reporting
+- [ ] 08-04: Build test snapshot management system with baseline comparison
+- [ ] 08-05: Create HTML report generation for test results and coverage
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
+Phases execute in numeric order: 1 -> 2 -> 3 -> ... -> N
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Core Engine Foundation | 6/6 | Complete | 2026-05-23 |
 | 2. Rule Authoring Interface | 5/5 | Complete    | 2026-06-01 |
-| 3. REST API Layer | 1/1 | Complete    | 2026-06-01 |
-| 4. Governance & Access Control | 5/5 | Complete    | 2026-06-02 |
-| 5. Testing & Monitoring | 6/6 | Complete    | 2026-06-01 |
-| 6. DMN Compliance | 3/3 | Complete    | 2026-06-01 |
+| 3. REST API Layer | 4/6 | Partial     | 2026-06-01 |
+| 4. Governance & Access Control | 5/5 | Complete (stub) | 2026-06-02 |
+| 5. Testing & Monitoring | 6/6 | Stub Only   | 2026-06-01 |
+| 6. DMN Compliance | 3/3 | Stub Only   | 2026-06-01 |
+
+### Milestone v2.0 Progress
+
+| Phase | Plans Complete | Status |
+|-------|----------------|--------|
+| 7. Core Testing Infrastructure Foundation | 0/6 | Not started (planning) |
+| 8. Advanced Testing Features | 0/5 | Not started (planning) |
+
+**Milestone v2.0:**
+- Total plans: 11
+- Completed: 0
+- Pending: 11

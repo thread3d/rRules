@@ -16,24 +16,41 @@ rRules is a comprehensive Business Rules Management System (BRMS) built in Rust,
 
 ### Active
 
-- [ ] **CORE-01**: Rule engine with forward and backward chaining inference
-- [ ] **CORE-02**: Rete algorithm implementation for efficient pattern matching
-- [ ] **AUTH-01**: Role-Based Access Control (RBAC) for rule management
-- [ ] **AUTH-02**: Maker-checker approval workflows for rule changes
-- [ ] **RULE-01**: Web-based IDE for rule authoring with syntax highlighting
-- [ ] **RULE-02**: Decision table editor for business users
-- [ ] **API-01**: REST API for rule execution and management
-- [ ] **DEPLOY-01**: Container/microservices deployment support (Docker, Kubernetes)
-- [ ] **GOV-01**: Full audit trail of all rule changes
-- [ ] **GOV-02**: Rule version control with branching and merging
-- [ ] **MON-01**: Real-time rule execution metrics and dashboards
-- [ ] **DMN-01**: Full DMN Level 3 compliance
+- [ ] **TEST-01**: Rule-by-rule unit tests with working memory fixtures
+- [ ] **TEST-02**: Forward chaining verification with salience order testing
+- [ ] **TEST-03**: Backward chaining trace capture for debugging
+- [ ] **TEST-04**: Deterministic firing mode to eliminate flaky tests
+- [ ] **TEST-05**: No-loop/lock-on-active enforcement verification
+- [ ] **TEST-06**: Snapshot-based testing with JSON baseline files
 
 ### Out of Scope
 
 - Mobile native apps — Web-first, responsive UI for all user types
 - Embedded in-process SDK — Focus on standalone service/deployment modes
 - Legacy system migration tools — New implementation focus only
+
+## Current Milestone: v2.0 Testing Framework
+
+**Goal:** Build comprehensive testing infrastructure for the rule engine, establishing a foundation for reliable rule development and verification.
+
+**Target features:**
+- Core Rust testing stack integration (criterion, mockall, serial_test)
+- Working memory fixture support with per-test engine isolation
+- Rule-by-rule unit tests with assertion framework
+- Forward chaining verification with salience order testing
+- Backward chaining trace capture for debugging
+- Deterministic firing mode to eliminate flaky tests
+- No-loop/lock-on-active enforcement verification
+- Snapshot-based testing with JSON baseline files
+
+### Previous Milestones (v1.0)
+
+**Core Engine Foundation:** Rete algorithm, forward/backward chaining, working memory pattern matching
+**Rule Authoring Interface:** Web IDE with CodeMirror 6, decision table editor, guided builder
+**REST API Layer:** CRUD endpoints, Docker/K8s deployment
+**Governance & Access Control:** RBAC, approval workflows, audit trail, Git version control
+**Testing & Monitoring (stub):** Placeholder test structure, metrics collection hooks
+**DMN Compliance (partial):** Parser foundation, needs execution engine verification
 
 ## Context
 
@@ -48,7 +65,6 @@ Key technical context:
 ## Constraints
 
 - **Tech Stack**: Rust for backend, React/TypeScript for frontend — ensures memory safety and type correctness
-- **DMN Compliance**: Full OMG DMN Level 3 standard adherence — critical for enterprise adoption
 - **Production Ready**: Must support high availability, monitoring, and governance requirements from day one
 
 ## Key Decisions
@@ -58,10 +74,6 @@ Key technical context:
 | Rust as primary language | Memory safety, performance, concurrency without GC pauses | ✓ Good |
 | Hybrid Git + DB storage | Git provides natural versioning for rules as code; DB handles runtime metadata and queries | ✓ Good |
 | Web IDE first | Browser-native access for all users (business analysts, developers, admins) | — Pending |
-| DMN Level 3 compliance | Enterprise standard for decision modeling; ensures interoperability | — Pending |
-
----
-*Last updated: 2026-05-22 after initialization*
 
 ## Evolution
 
@@ -79,3 +91,6 @@ This document evolves at phase transitions and milestone boundaries.
 2. Core Value check — still the right priority?
 3. Audit Out of Scope — reasons still valid?
 4. Update Context with current state
+
+---
+*Last updated: 2026-06-03 after v2.0 milestone start*

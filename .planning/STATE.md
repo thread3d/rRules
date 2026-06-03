@@ -1,40 +1,38 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: completed
-last_updated: "2026-06-02T17:35:00Z"
+milestone: v2.0
+milestone_name: Testing Framework Foundation
+status: planning
+last_updated: "2026-06-03T18:00:00Z"
 progress:
-  total_phases: 6
-  completed_plans: 26
-  total_plans: 26
-  percent: 100
+  total_phases: 2
+  completed_plans: 0
+  total_plans: 11
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-22)
+See: `.planning/PROJECT.md` (updated 2026-06-03)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying application code.
-**Current focus:** Milestone v1.0 complete - all phases verified
+**Current focus:** Milestone v2.0 - Testing Framework Foundation (Phase 7: Core Infrastructure)
 
 ## Current Position
 
-Phase: N/A
-Status: Milestone Complete (v1.0)
+Phase: Not started (planning)
+Plan: Phase 7 - Core Testing Infrastructure
+Status: Defining requirements for v2.0 milestone
+Last activity: 2026-06-03 — Milestone v2.0 started, requirements defined
 
-Progress: [██████████] 100% All Phases Complete
+Progress: [ ] 0% Planning phase
 
 | Phase | Plans | Status |
 |-------|-------|--------|
-| 1 | 6 | Complete - Core Engine Foundation shipped |
-| 2 | 5 | Complete - Rule Authoring Interface shipped |
-| 3 | 1 | Complete - REST API Layer shipped |
-| 4 | 5 | Complete - Governance & Access Control shipped |
-| 5 | 6 | Complete - Testing & Monitoring shipped |
-| 6 | 3 | Complete - DMN Compliance shipped |
+| 7 | 6 | Not started - Core Testing Infrastructure Foundation |
+| 8 | 5 | Not started - Advanced Testing Features |
 
 ## Accumulated Context
 
@@ -91,80 +89,61 @@ Decisions captured in phase CONTEXT.md files.
 
 ### Blockers/Concerns
 
-None identified at milestone completion.
+**Phase 7 Critical Path:**
+1. Engine must exist before testing - v1.0 implementation was stubbed, needs real engine
+2. WorkingMemory API exposure needed for test fixtures
+3. InferenceTrace structure needs public API access for backward chaining tests
+4. Deterministic conflict resolution mode requires engine modification
+
+**Research Flags:**
+- cucumber-rs async integration patterns need investigation (deferred to Phase 9/v2.1)
 
 ## Deferred Items
 
-Items acknowledged and carried forward from milestone close:
+Items acknowledged and carried forward from v1.0 milestone:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| *none* | | | |
+| API Layer | Hot deployment mechanism | Not implemented | v1.0 |
+| Governance | Real RBAC implementation | Only stubs exist | v1.0 |
 
 ## Session Continuity
 
-Last session: 2026-06-02T17:35:00Z
-Milestone v1.0 complete - all 24 plans verified with VERIFICATION.md files
+Last session: 2026-06-03T18:00:00Z
+Milestone v2.0 started - Testing Framework Foundation planning in progress
 
-**Milestone Completion Summary (v1.0):**
+**v2.0 Milestone Planning Summary:**
 
-Phase 1: Core Engine Foundation (6 plans)
+Phase 7: Core Testing Infrastructure Foundation (6 plans)
 
-- Plan 01: Core engine foundation with Rete algorithm, forward/backward chaining
-- Plan 02: Chaining selection & agenda control with salience/conflict resolution
-- Plan 03: Execution coordinator & event system for rule triggering
-- Plan 04: Hybrid rule definition (API + DSL) with validation
-- Plan 05: Testing framework, coverage reporting, loop detection
+- Plan 01: Integrate Rust testing stack (criterion, mockall, serial_test)
+- Plan 02: Working memory fixture support with per-test engine isolation
+- Plan 03: Rule-by-rule unit test framework with assertion helpers
+- Plan 04: Forward chaining verification with activation sequence tracking
+- Plan 05: InferenceTrace API exposure for backward chaining trace capture
+- Plan 06: Deterministic firing mode with conflict resolution sorting
 
-Phase 2: Rule Authoring Interface (5 plans)
+Phase 8: Advanced Testing Features (5 plans)
 
-- Plan 01: Web-based IDE with CodeMirror 6 syntax highlighting
-- Plan 02: ag-Grid decision table editor
-- Plan 03: Guided rule editor with hybrid accordion structure
-- Plan 04: Template system with parameterization
-- Plan 05: Inline validation engine for real-time error reporting
+- Plan 01: No-loop/lock-on-active enforcement verification tests
+- Plan 02: Working memory JSON serialization for snapshot testing
+- Plan 03: Rule coverage instrumentation and reporting
+- Plan 04: Test snapshot management system with baseline comparison
+- Plan 05: HTML report generation for test results and coverage
 
-Phase 3: REST API Layer (1 plan)
+## Research Summary (v2.0)
 
-- Plan 01: Complete REST API with CRUD, execution, Docker/K8s deployment
+**Stack Recommendations:**
+- criterion (benchmarking), mockall (mocking), serial_test (parallel isolation)
+- cucumber-rs (BDD/Gherkin integration) - deferred to v2.1
+- assert_cmd (CLI tests), wiremock (HTTP mocks), tempfile (cleanup)
 
-Phase 4: Governance & Access Control (5 plans)
-
-- Plan 01: RBAC system with predefined roles and permissions
-- Plan 02: Maker-checker approval workflow engine
-- Plan 03: Rule ownership assignment and stewardship tracking
-- Plan 04: Comprehensive audit trail for all modifications
-- Plan 05: Git-based version control with branching and merging
-
-Phase 5: Testing & Monitoring (6 plans)
-
-- Plan 01: BDD testing framework with Gherkin syntax
-- Plan 02: Scenario-based simulation engine for what-if analysis
-- Plan 03: Coverage reporting showing execution traces per rule
-- Plan 04: Real-time metrics collection with adaptive sampling
-- Plan 05: Unified monitoring dashboards
-- Plan 06: Dead rule detection algorithm
-
-Phase 6: DMN Compliance (3 plans)
-
-- Plan 01: Full DMN Level 3 parser and validator
-- Plan 02: Execution engine for Tables, Contexts, Literals
-- Plan 03: FEEL expression language support
-
-## Progress Summary
-
-**Phases completed:** 6 of 6 (v1.0 complete)
-**Plans created:** 24 total across 6 phases
-**Verification files generated:** 10 (all phases have VERIFICATION.md)
-
-**Shipped Components:**
-
-- Rust backend rule engine with Rete algorithm, forward/backward chaining
-- React TypeScript web-based IDE for rule authoring
-- REST API layer with full CRUD and execution endpoints
-- Governance features (RBAC, approval workflows, audit trail)
-- Testing and monitoring infrastructure
+**Critical Pitfalls to Address:**
+1. Infinite Loop Detection — Max 1000 firings per test scenario
+2. State Isolation — Per-test engine instances with unique session IDs
+3. Non-Deterministic Firing — Deterministic conflict resolution (sort by name)
+4. Test Data Cleanup — RAII patterns for fact lifecycle management
 
 ---
 
-*Last updated: 2026-06-02 after milestone completion*
+*Last updated: 2026-06-03 after v2.0 milestone planning*
