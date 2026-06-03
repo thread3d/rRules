@@ -8,22 +8,22 @@ use std::collections::HashMap;
 pub struct CreateRuleRequest {
     /// Unique identifier for the rule
     pub name: String,
-    
+
     /// Human-readable description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    
+
     /// Rule category for organization
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
-    
+
     /// Rule owner (email or user ID)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
-    
+
     /// DSL body of the rule
     pub dsl_body: String,
-    
+
     /// Tags for filtering/searching
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tags: Vec<String>,
@@ -34,35 +34,35 @@ pub struct CreateRuleRequest {
 pub struct RuleResponse {
     /// Unique identifier (UUID)
     pub id: String,
-    
+
     /// Rule name
     pub name: String,
-    
+
     /// Description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    
+
     /// Category
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
-    
+
     /// Owner
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
-    
+
     /// Rule status (draft, active, deprecated)
     pub status: String,
-    
+
     /// Version number
     pub version: u32,
-    
+
     /// Tags
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tags: Vec<String>,
-    
+
     /// When the rule was created
     pub created_at: String,
-    
+
     /// When the rule was last updated
     pub updated_at: String,
 }
@@ -73,23 +73,23 @@ pub struct UpdateRuleRequest {
     /// New description (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    
+
     /// New category (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
-    
+
     /// New owner (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
-    
+
     /// Updated DSL body (optional - only if rule should be modified)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dsl_body: Option<String>,
-    
+
     /// New tags (replaces all existing)
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tags: Vec<String>,
-    
+
     /// New status (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
@@ -100,13 +100,13 @@ pub struct UpdateRuleRequest {
 pub struct RuleListResponse {
     /// Total number of rules matching filters
     pub total_count: usize,
-    
+
     /// Number of rules in this page
     pub page_size: usize,
-    
+
     /// Current page number (1-indexed)
     pub page_number: u32,
-    
+
     /// List of rules on this page
     pub rules: Vec<RuleResponse>,
 }
@@ -117,15 +117,15 @@ pub struct RuleListRequest {
     /// Page number (1-indexed), default 1
     #[serde(default)]
     pub page: u32,
-    
+
     /// Items per page, default 50
     #[serde(default)]
     pub page_size: u32,
-    
+
     /// Filter by category
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
-    
+
     /// Filter by status (draft, active, deprecated)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
@@ -136,10 +136,10 @@ pub struct RuleListRequest {
 pub struct DeleteRuleResponse {
     /// ID of the deleted rule
     pub id: String,
-    
+
     /// Name of the deleted rule
     pub name: String,
-    
+
     /// Timestamp of deletion
     pub deleted_at: String,
 }
@@ -149,7 +149,7 @@ pub struct DeleteRuleResponse {
 pub struct UndeleteRuleResponse {
     /// ID of the restored rule
     pub id: String,
-    
+
     /// New status after restoration
     pub new_status: String,
 }

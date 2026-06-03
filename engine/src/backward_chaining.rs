@@ -136,7 +136,10 @@ impl<'a> TraceExplorer<'a> {
         if self.position == 0 && !self.trace.path.is_empty() {
             // Before any next() call, return first item
             Some(&self.trace.path[0])
-        } else if self.position > 0 && self.position <= self.trace.path.len() && self.position <= self.max_depth {
+        } else if self.position > 0
+            && self.position <= self.trace.path.len()
+            && self.position <= self.max_depth
+        {
             // After next(), return the last step returned (position - 1)
             Some(&self.trace.path[self.position - 1])
         } else {

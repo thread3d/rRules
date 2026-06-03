@@ -224,7 +224,11 @@ impl<'a> SemanticValidator<'a> {
                     }
                 }
             }
-            Condition::Pattern { fact_type, field, value } => {
+            Condition::Pattern {
+                fact_type,
+                field,
+                value,
+            } => {
                 // Check if fact type exists
                 if !self.fact_types.contains_key(fact_type) {
                     result = result.with_error(ValidationError {
@@ -237,7 +241,10 @@ impl<'a> SemanticValidator<'a> {
                 if let Some(fields) = self.fact_types.get(fact_type) {
                     if !fields.contains(field) {
                         result = result.with_warning(ValidationWarning {
-                            message: format!("Unknown field '{}' in fact type '{}'", field, fact_type),
+                            message: format!(
+                                "Unknown field '{}' in fact type '{}'",
+                                field, fact_type
+                            ),
                             location: None,
                         });
                     }
@@ -317,10 +324,7 @@ impl<'a> SemanticValidator<'a> {
     }
 
     /// Validates an entire rule set for semantic errors.
-    pub fn validate_rule_set(
-        &self,
-        rules: &[crate::rules::Rule],
-    ) -> ValidationResult {
+    pub fn validate_rule_set(&self, rules: &[crate::rules::Rule]) -> ValidationResult {
         let mut result = ValidationResult::new();
 
         // Check for circular references between rules
@@ -364,7 +368,10 @@ impl ValidationPipeline {
     }
 
     /// Sets the fact type registry for semantic validation.
-    pub fn with_fact_types(mut self, types: std::collections::HashMap<String, Vec<String>>) -> Self {
+    pub fn with_fact_types(
+        mut self,
+        types: std::collections::HashMap<String, Vec<String>>,
+    ) -> Self {
         // Safety: We're creating a static lifetime for the validator
         let static_validator = unsafe {
             std::mem::transmute::<SemanticValidator<'_>, SemanticValidator<'static>>(
@@ -421,7 +428,10 @@ mod tests {
         // Unbalanced - missing open
         let result = validator.validate_expression("a && b)");
         assert!(!result.is_valid);
-        assert!(result.errors.iter().any(|e| e.message.contains("Unexpected closing")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.message.contains("Unexpected closing")));
 
         // Unbalanced - missing close
         let result = validator.validate_expression("(a && b");

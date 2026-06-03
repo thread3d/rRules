@@ -73,11 +73,7 @@ impl ChainingSelector {
     /// - ForwardOnly if all rules are data-driven and no query provided
     /// - BackwardOnly if a target is provided with no matching facts (query context)
     /// - Automatic if mixed or complex conditions detected
-    pub fn select(
-        &self,
-        rules: &[Rule],
-        target_fact_type: Option<&str>,
-    ) -> ChainingMode {
+    pub fn select(&self, rules: &[Rule], target_fact_type: Option<&str>) -> ChainingMode {
         // Check for query context first
         if let Some(target) = target_fact_type {
             // If we have a specific goal/fact to prove, use backward chaining
@@ -243,26 +239,19 @@ mod tests {
     #[test]
     fn test_select_forward_only() {
         let selector = ChainingSelector::new();
-        let rules = vec![
-            RuleBuilder::new("r1", "Rule 1")
-                .condition(Condition::True)
-                .build(),
-        ];
+        let rules = vec![RuleBuilder::new("r1", "Rule 1")
+            .condition(Condition::True)
+            .build()];
 
-        assert_eq!(
-            selector.select(&rules, None),
-            ChainingMode::ForwardOnly
-        );
+        assert_eq!(selector.select(&rules, None), ChainingMode::ForwardOnly);
     }
 
     #[test]
     fn test_select_backward_only_with_query() {
         let selector = ChainingSelector::new();
-        let rules = vec![
-            RuleBuilder::new("r1", "Rule 1")
-                .condition(Condition::True)
-                .build(),
-        ];
+        let rules = vec![RuleBuilder::new("r1", "Rule 1")
+            .condition(Condition::True)
+            .build()];
 
         assert_eq!(
             selector.select(&rules, Some("query_eligibility")),

@@ -3,12 +3,13 @@
 //! This module provides the EngineBuilder for configuration and the Engine struct
 //! that manages rule execution with automatic or explicit chaining modes.
 
-use crate::data_types::{TypeInfo, TypeClass};
+use crate::data_types;
 use crate::fact::WorkingMemory;
 use crate::rules::RuleSet;
 use crate::ChainingMode;
 
 /// Builder for creating configured engine instances.
+#[derive(Clone)]
 pub struct EngineBuilder {
     /// Chaining mode selection strategy
     chaining_mode: ChainingMode,
@@ -97,11 +98,7 @@ impl Engine {
     /// * `stateful` - If true, creates a long-lived session (days to weeks).
     ///                If false, creates a stateless session for single-use execution.
     /// * `session_id` - Optional explicit ID for session lifecycle management.
-    pub fn create_session(
-        &self,
-        stateful: bool,
-        session_id: Option<String>,
-    ) -> Session {
+    pub fn create_session(&self, stateful: bool, session_id: Option<String>) -> Session {
         Session::new(self, stateful, session_id)
     }
 

@@ -3,7 +3,7 @@
 //! This module implements the Rule AST with conditions and actions,
 //! along with RuleSet for managing collections of rules.
 
-use crate::data_types::{DynamicCast, TypeInfo, TypeClass, Value};
+use crate::data_types::{DynamicCast, TypeClass, TypeInfo, Value};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -142,12 +142,12 @@ pub enum Condition {
 /// Comparison operators for conditions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ComparisonOp {
-    Eq,      // ==
-    Ne,      // !=
-    Lt,      // <
-    Le,      // <=
-    Gt,      // >
-    Ge,      // >=
+    Eq, // ==
+    Ne, // !=
+    Lt, // <
+    Le, // <=
+    Gt, // >
+    Ge, // >=
 }
 
 impl Condition {
@@ -156,12 +156,8 @@ impl Condition {
         match self {
             Condition::True => true,
             Condition::False => false,
-            Condition::And(conditions) => {
-                conditions.iter().all(|c| c.evaluate(_facts))
-            }
-            Condition::Or(conditions) => {
-                conditions.iter().any(|c| c.evaluate(_facts))
-            }
+            Condition::And(conditions) => conditions.iter().all(|c| c.evaluate(_facts)),
+            Condition::Or(conditions) => conditions.iter().any(|c| c.evaluate(_facts)),
             Condition::Not(condition) => !condition.evaluate(_facts),
             Condition::Compare { left, op, right } => {
                 // Simplified evaluation - full implementation would use working memory
@@ -170,7 +166,9 @@ impl Condition {
 
                 match (left_val, right_val, op) {
                     (Some(Value::Integer(l)), Some(Value::Integer(r)), ComparisonOp::Eq) => l == r,
-                    (Some(Value::Float(l)), Some(Value::Float(r)), ComparisonOp::Eq) => (l - r).abs() < f64::EPSILON,
+                    (Some(Value::Float(l)), Some(Value::Float(r)), ComparisonOp::Eq) => {
+                        (l - r).abs() < f64::EPSILON
+                    }
                     (Some(Value::String(l)), Some(Value::String(r)), ComparisonOp::Eq) => l == r,
                     _ => false,
                 }
@@ -199,16 +197,19 @@ impl Condition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Action {
     /// Insert a new fact into working memory
-    InsertFact { fact_type: String, fields: HashMap<String, Value> },
+    InsertFact {
+        fact_type: String,
+        fields: HashMap<String, Value>,
+    },
     /// Update an existing fact
-    UpdateFact { id: String, fields: HashMap<String, Value> },
+    UpdateFact {
+        id: String,
+        fields: HashMap<String, Value>,
+    },
     /// Remove a fact from working memory
     RetractFact { id: String },
     /// Call a registered function
-    CallFunction {
-        name: String,
-        args: Vec<Value>,
-    },
+    CallFunction { name: String, args: Vec<Value> },
     /// Log a message for debugging
     LogMessage { level: LogLevel, message: String },
 }
@@ -311,7 +312,12 @@ pub struct RuleValidationResult {
 
 impl std::fmt::Display for RuleValidationResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Rule validation failed with {} errors and {} warnings", self.errors.len(), self.warnings.len())?;
+        writeln!(
+            f,
+            "Rule validation failed with {} errors and {} warnings",
+            self.errors.len(),
+            self.warnings.len()
+        )?;
         for error in &self.errors {
             writeln!(f, "  Error: {}", error)?;
         }

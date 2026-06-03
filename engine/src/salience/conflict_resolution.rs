@@ -48,7 +48,9 @@ impl ConflictResolver {
             ConflictStrategy::Salience => {
                 // Higher salience first; earlier timestamp for ties
                 result.sort_by(|a, b| {
-                    b.salience.cmp(&a.salience).then_with(|| a.timestamp.cmp(&b.timestamp))
+                    b.salience
+                        .cmp(&a.salience)
+                        .then_with(|| a.timestamp.cmp(&b.timestamp))
                 });
             }
             ConflictStrategy::DepthFirst => {
@@ -77,7 +79,9 @@ impl ConflictResolver {
         match self.strategy {
             ConflictStrategy::Salience => {
                 activations.sort_by(|a, b| {
-                    b.salience.cmp(&a.salience).then_with(|| a.timestamp.cmp(&b.timestamp))
+                    b.salience
+                        .cmp(&a.salience)
+                        .then_with(|| a.timestamp.cmp(&b.timestamp))
                 });
             }
             ConflictStrategy::DepthFirst => {
@@ -116,7 +120,7 @@ impl Default for ConflictResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::{RuleBuilder};
+    use crate::rules::RuleBuilder;
 
     #[test]
     fn test_salience_strategy() {

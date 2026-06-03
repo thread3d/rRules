@@ -151,7 +151,9 @@ impl ConflictResolver {
             ConflictStrategy::Salience => {
                 // Higher salience first; timestamp for ties
                 result.sort_by(|a, b| {
-                    b.salience.cmp(&a.salience).then_with(|| a.timestamp.cmp(&b.timestamp))
+                    b.salience
+                        .cmp(&a.salience)
+                        .then_with(|| a.timestamp.cmp(&b.timestamp))
                 });
             }
             ConflictStrategy::DepthFirst => {
@@ -180,7 +182,9 @@ impl ConflictResolver {
         match self.strategy {
             ConflictStrategy::Salience => {
                 activations.sort_by(|a, b| {
-                    b.salience.cmp(&a.salience).then_with(|| a.timestamp.cmp(&b.timestamp))
+                    b.salience
+                        .cmp(&a.salience)
+                        .then_with(|| a.timestamp.cmp(&b.timestamp))
                 });
             }
             ConflictStrategy::DepthFirst => {
@@ -208,16 +212,22 @@ impl Default for ConflictResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::{RuleBuilder};
+    use crate::rules::RuleBuilder;
 
     #[test]
     fn test_agenda_priority_ordering() {
         let mut agenda = Agenda::new();
 
         // Create activations with different saliences
-        let rule_low = RuleBuilder::new("low", "Low Priority").salience(-50).build();
-        let rule_high = RuleBuilder::new("high", "High Priority").salience(100).build();
-        let rule_med = RuleBuilder::new("med", "Medium Priority").salience(50).build();
+        let rule_low = RuleBuilder::new("low", "Low Priority")
+            .salience(-50)
+            .build();
+        let rule_high = RuleBuilder::new("high", "High Priority")
+            .salience(100)
+            .build();
+        let rule_med = RuleBuilder::new("med", "Medium Priority")
+            .salience(50)
+            .build();
 
         agenda.push(Activation::new(rule_low.clone(), -50));
         agenda.push(Activation::new(rule_high.clone(), 100));

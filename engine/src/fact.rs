@@ -111,10 +111,14 @@ impl FactRetrievalIndex {
         // Remove from secondary indexes
         for (field_name, value) in &fact.payload {
             let value_key = format!("{:?}", value);
-            if let Some(set) = self.secondary_indexes.get_mut(&(field_name.clone(), value_key.clone())) {
+            if let Some(set) = self
+                .secondary_indexes
+                .get_mut(&(field_name.clone(), value_key.clone()))
+            {
                 set.remove(&id);
                 if set.is_empty() {
-                    self.secondary_indexes.remove(&(field_name.clone(), value_key));
+                    self.secondary_indexes
+                        .remove(&(field_name.clone(), value_key));
                 }
             }
         }
