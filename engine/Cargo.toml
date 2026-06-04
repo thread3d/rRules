@@ -12,12 +12,12 @@ anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["async_tokio"] }
-mockall = "0.12"
-serial_test = "3"
-tokio = { version = "1.0", features = ["full"] }
-tempfile = "3.12"
-gherkin = "0.16.0"
-assert_cmd = "2.2.2"
-wiremock = "0.6.5"
-proptest = "1.11.0"
+criterion = { workspace = true, features = ["async_tokio"] }
+mockall = { workspace = true }
+serial_test = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tempfile = { workspace = true }
+gherkin = { workspace = true }
+assert_cmd = { workspace = true }
+wiremock = { workspace = true }
+proptest = { workspace = true }
