@@ -2,13 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Testing Framework Foundation
-status: planning
-last_updated: "2026-06-03T18:00:00Z"
+status: Defining requirements for v2.0 milestone
+last_updated: "2026-06-04T06:42:20.136Z"
+last_activity: 2026-06-03 — Milestone v2.0 started, requirements defined
 progress:
-  total_phases: 2
-  completed_plans: 0
-  total_plans: 11
-  percent: 0
+  total_phases: 8
+  completed_phases: 2
+  total_plans: 26
+  completed_plans: 13
+  percent: 25
 ---
 
 # Project State
@@ -41,6 +43,7 @@ Progress: [ ] 0% Planning phase
 Decisions captured in phase CONTEXT.md files.
 
 **Phase 1 Core Engine Foundation:**
+
 - D-01: Hybrid typed/dynamic data structures
 - D-02: Fact representation with WorkingMemory for pattern matching
 - D-03: Rule AST with conditions, actions, and validation
@@ -55,6 +58,7 @@ Decisions captured in phase CONTEXT.md files.
 - D-12: Hot reload support for KIE base
 
 **Phase 2 Rule Authoring Interface:**
+
 - D-21: CodeMirror 6-based IDE with syntax highlighting
 - D-22: ag-Grid decision table editor
 - D-23: Hybrid accordion guided rule builder
@@ -62,6 +66,7 @@ Decisions captured in phase CONTEXT.md files.
 - D-25: Real-time inline validation
 
 **Phase 3 REST API Layer:**
+
 - D-31: URL path versioning (/v1/...)
 - D-32: Flexible execution payload (facts or session_id)
 - D-33: Full trace output for debugging
@@ -69,6 +74,7 @@ Decisions captured in phase CONTEXT.md files.
 - D-35: Kubernetes orchestration support
 
 **Phase 4 Governance & Access Control:**
+
 - D-41: RBAC roles (admin, author, reviewer)
 - D-42: Maker-checker approval workflow
 - D-43: Rule ownership assignment
@@ -76,6 +82,7 @@ Decisions captured in phase CONTEXT.md files.
 - D-45: Git-based version control
 
 **Phase 5 Testing & Monitoring:**
+
 - D-51: BDD testing with Gherkin syntax
 - D-52: Scenario-based simulation
 - D-53: Rule coverage reporting
@@ -83,6 +90,7 @@ Decisions captured in phase CONTEXT.md files.
 - D-55: Dead rule detection
 
 **Phase 6 DMN Compliance:**
+
 - D-61: Full DMN 1.5 XML parser
 - D-62: Decision Table execution with all hit policies
 - D-63: FEEL expression language support
@@ -90,12 +98,14 @@ Decisions captured in phase CONTEXT.md files.
 ### Blockers/Concerns
 
 **Phase 7 Critical Path:**
+
 1. Engine must exist before testing - v1.0 implementation was stubbed, needs real engine
 2. WorkingMemory API exposure needed for test fixtures
 3. InferenceTrace structure needs public API access for backward chaining tests
 4. Deterministic conflict resolution mode requires engine modification
 
 **Research Flags:**
+
 - cucumber-rs async integration patterns need investigation (deferred to Phase 9/v2.1)
 
 ## Deferred Items
@@ -109,7 +119,7 @@ Items acknowledged and carried forward from v1.0 milestone:
 
 ## Session Continuity
 
-Last session: 2026-06-03T18:00:00Z
+Last session: 2026-06-04T06:42:20.129Z
 Milestone v2.0 started - Testing Framework Foundation planning in progress
 
 **v2.0 Milestone Planning Summary:**
@@ -134,11 +144,13 @@ Phase 8: Advanced Testing Features (5 plans)
 ## Research Summary (v2.0)
 
 **Stack Recommendations:**
+
 - criterion (benchmarking), mockall (mocking), serial_test (parallel isolation)
 - cucumber-rs (BDD/Gherkin integration) - deferred to v2.1
 - assert_cmd (CLI tests), wiremock (HTTP mocks), tempfile (cleanup)
 
 **Critical Pitfalls to Address:**
+
 1. Infinite Loop Detection — Max 1000 firings per test scenario
 2. State Isolation — Per-test engine instances with unique session IDs
 3. Non-Deterministic Firing — Deterministic conflict resolution (sort by name)
