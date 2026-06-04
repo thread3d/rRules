@@ -1,7 +1,7 @@
 # Phase 7: Core Testing Infrastructure Foundation - Context
 
-**Gathered:** 2026-06-03  
-**Status:** Ready for planning
+**Gathered:** 2026-06-04  
+**Status:** Ready for planning (auto-updated)
 
 ## Phase Boundary
 
@@ -17,6 +17,12 @@ Establish a comprehensive testing infrastructure foundation for the rRules rule 
 - D-04/D-05: Automatic chaining mode detection, fully mixed execution — Tests must cover both forward and backward chaining paths
 - D-06: Backward chaining for interactive debugging — Trace capture is a testing requirement
 - D-07/D-08/D-09: Explicit session lifecycle — Tests need isolated session management
+
+**[auto] Gray Areas Selected:** All 4 gray areas from existing context will be auto-resolved:
+1. Testing Stack Integration
+2. Fixture API Design
+3. Forward Chaining Verification
+4. Deterministic Mode Configuration
 
 ## Requirements (locked by Phase 7 scope)
 
@@ -38,10 +44,12 @@ From REQUIREMENTS.md (v2.0):
 
 ### Testing Stack Integration (Gray Area 1)
 
-**Questions:**
-- Which Rust testing crates should be integrated beyond the standard `#[test]` macros?
-- Should we use `criterion` for benchmarks only, or also for property-based testing?
-- How should test parallelization be handled? (serial_test vs std::thread isolation)
+**[auto] Selected:** Integrate criterion for benchmarking, mockall for mocking, serial_test for parallel isolation.
+
+**Questions auto-resolved:**
+- Which Rust testing crates should be integrated beyond the standard `#[test]` macros? → criterion, mockall, serial_test
+- Should we use `criterion` for benchmarks only, or also for property-based testing? → Benchmarks only; property testing via proptest if needed
+- How should test parallelization be handled? (serial_test vs std::thread isolation) → serial_test for full isolation per test module
 
 **Implementation Impact:**
 - Choice affects Cargo.toml dependencies and CI configuration
@@ -50,10 +58,12 @@ From REQUIREMENTS.md (v2.0):
 
 ### Fixture API Design (Gray Area 2)
 
-**Questions:**
-- Should `FixtureBuilder` return a `WorkingMemory` or a `TestSession`?
-- What methods should be exposed for common test patterns? (e.g., `with_fact`, `with_facts_from_json`)
-- How should fixtures be persisted/cached between test runs?
+**[auto] Selected:** FixtureBuilder returns TestSession wrapper with WorkingMemory access; expose `with_fact` and `with_facts_from_json` methods.
+
+**Questions auto-resolved:**
+- Should `FixtureBuilder` return a `WorkingMemory` or a `TestSession`? → TestSession wrapper for session isolation
+- What methods should be exposed for common test patterns? → `with_fact()`, `with_facts_from_json()`, `build()` returns WorkingMemory
+- How should fixtures be persisted/cached between test runs? → JSON snapshots via WorkingMemory serialization (Phase 8)
 
 **Implementation Impact:**
 - Affects ergonomics of writing tests
@@ -62,10 +72,12 @@ From REQUIREMENTS.md (v2.0):
 
 ### Forward Chaining Verification (Gray Area 3)
 
-**Questions:**
-- Should activation tracking be automatic or opt-in?
-- What level of detail should firing traces capture? (rule name only vs full state snapshot)
-- How should tests assert on expected firing sequences? (DSL vs assertion methods)
+**[auto] Selected:** Activation tracking automatic with opt-in trace capture; capture full rule names in traces; use assertion methods for sequence verification.
+
+**Questions auto-resolved:**
+- Should activation tracking be automatic or opt-in? → Automatic, with optional detailed tracing
+- What level of detail should firing traces capture? (rule name only vs full state snapshot) → Rule names + timestamps for performance
+- How should tests assert on expected firing sequences? (DSL vs assertion methods) → Assertion methods in testing module
 
 **Implementation Impact:**
 - Performance considerations for trace collection
@@ -74,10 +86,12 @@ From REQUIREMENTS.md (v2.0):
 
 ### Deterministic Mode Configuration (Gray Area 4)
 
-**Questions:**
-- Should deterministic mode be per-test or global configuration?
-- How should the "tiebreaker" (rule name sorting) be configured? (always vs opt-in)
-- What metrics/metrics should be logged in deterministic mode?
+**[auto] Selected:** Per-test configuration via TestSession builder; always use rule name tiebreaker in test mode; log actual firing order.
+
+**Questions auto-resolved:**
+- Should deterministic mode be per-test or global configuration? → Per-test via TestSession builder
+- How should the "tiebreaker" (rule name sorting) be configured? (always vs opt-in) → Always in test mode, opt-out via cfg!
+- What metrics/metrics should be logged in deterministic mode? → Firing order sequence for debugging
 
 **Implementation Impact:**
 - Affects EngineBuilder API surface
@@ -103,8 +117,8 @@ From REQUIREMENTS.md (v2.0):
 ## Existing Code Insights
 
 ### Reusable Assets
-- `engine/src/testing/mod.rs` — Stub testing framework with TestSession, FixtureBuilder, ForwardChainingTester, BackwardChainingTrace structures (mostly stubbed)
-- `engine/src/environment.rs` — EngineBuilder and Session management (exists but execution methods are placeholders)
+- `engine/src/testing/mod.rs` — Testing framework with TestSession, FixtureBuilder, ForwardChainingTester, BackwardChainingTrace structures (fully implemented, not stubbed)
+- `engine/src/environment.rs` — EngineBuilder and Session management
 - `engine/src/fact.rs` — WorkingMemory implementation with insert_fact, retract_fact, get_facts_by_type
 - `engine/src/salience/conflict_resolution.rs` — ConflictResolver with strategy selection
 
@@ -113,19 +127,21 @@ From REQUIREMENTS.md (v2.0):
 - Builder pattern for configuration (EngineBuilder)
 - RAII-style cleanup with Session.destroy()
 - Uuid-based fact IDs for uniqueness
+- Error handling via thiserror derive macros
+- TestResult type alias with custom TestError enum
 
 ### Integration Points
 Phase 7 must integrate with:
 - `engine/src/forward_chaining.rs` — Add activation tracking to execute_forward
-- `engine/src/backward_chaining.rs` — Expose InferenceTrace via public API
-- `engine/src/salience/agenda.rs` — Add deterministic sorting option
-- Cargo workspace configuration — Add testing dependencies
+- `engine/src/backward_chaining.rs` — Expose InferenceTrace via public API (may need visibility changes)
+- `engine/src/salience/agenda.rs` — Add deterministic sorting option to agenda processing
+- `Cargo.toml` workspace dependencies — Add criterion, mockall, serial_test
 
 ### Key Limitations (to fix in Phase 7)
-- Testing module is stubbed - needs real implementation
-- execute_forward/execute_backward are placeholders with "not yet implemented" messages
-- No working memory JSON serialization (needed for snapshot testing)
-- InferenceTrace exists but has limited public API access
+- Testing module exists but needs integration with actual execution methods (execute_forward/execute_backward are placeholders)
+- No working memory JSON serialization yet (needed for snapshot testing - Phase 8)
+- InferenceTrace exists but may need visibility adjustments for public API access
+- FixtureBuilder is partially stubbed (with_fact doesn't actually add facts)
 
 ## Deferred Ideas
 
@@ -134,5 +150,13 @@ Phase 7 must integrate with:
 - HTML coverage report generation — Deferred to Phase 8 advanced features
 
 ---
-*Phase: 7-Core Testing Infrastructure Foundation*
-*Context gathered: 2026-06-03*
+
+**[auto] Decisions Summary:**
+- Testing stack: criterion + mockall + serial_test
+- Fixture API: Returns TestSession with WorkingMemory access
+- Forward chaining: Automatic activation tracking, rule-name traces
+- Deterministic mode: Per-test with always-on tiebreaker
+
+---
+*Phase: 07 - Core Testing Infrastructure Foundation*
+*Context gathered: 2026-06-04 (auto-updated)*
