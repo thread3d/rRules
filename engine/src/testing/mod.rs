@@ -183,6 +183,84 @@ impl ForwardChainingTester {
     pub fn firing_count(&self) -> usize {
         self.activations.len()
     }
+
+    /// Assert that rules fired in the expected sequence
+    ///
+    /// Returns an error if the actual trace doesn't match the expected sequence.
+    pub fn assert_rule_sequence(&mut self, expected: &[&str]) -> TestResult<()> {
+        let actual: Vec<&str> = self.activations.iter().map(|s| s.as_str()).collect();
+        if actual != expected {
+            return Err(TestError::AssertionFailed(format!(
+                "Rule sequence mismatch.\nExpected: {:?}\nActual:   {:?}",
+                expected, actual
+            )));
+        }
+        Ok(())
+    }
+
+    /// Assert that the exact number of rules fired
+    ///
+    /// Returns an error if the count doesn't match.
+    pub fn assert_fired_count(&mut self, expected: usize) -> TestResult<()> {
+        let actual = self.activations.len();
+        if actual != expected {
+            return Err(TestError::AssertionFailed(format!(
+                "Fired count mismatch.\nExpected: {}\nActual:   {}",
+                expected, actual
+            )));
+        }
+        Ok(())
+    }
+
+    /// Assert that rules fired in the specified order (not necessarily consecutive)
+    ///
+    /// Returns an error if the relative ordering is incorrect.
+    pub fn assert_fired_in_order(&mut self, expected: &[&str]) -> TestResult<()> {
+        let actual: Vec<&str> = self.activations.iter().map(|s| s.as_str()).collect();
+
+        let mut last_pos = 0;
+        for rule in expected {
+            match actual[last_pos..].iter().position(|&r| r == *rule) {
+                Some(pos) => last_pos += pos,
+                None => {
+                    return Err(TestError::AssertionFailed(format!(
+                        "Rule '{}' not found or out of order. Expected: {:?}, Actual: {:?}",
+                        rule, expected, actual
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Assert that a specific rule did NOT fire
+    ///
+    /// Returns an error if the rule appears in the activation trace.
+    pub fn assert_rule_not_fired(&mut self, rule_name: &str) -> TestResult<()> {
+        if self.activations.contains(&rule_name.to_string()) {
+            return Err(TestError::AssertionFailed(format!(
+                "Rule '{}' was not expected to fire but appeared in trace",
+                rule_name
+            )));
+        }
+        Ok(())
+    }
+
+    /// Add multiple rules to the engine from an iterator for fluent API usage
+    pub fn with_rules<I>(&mut self, rules: I) -> &mut Self
+    where
+        I: IntoIterator<Item = crate::rules::Rule>,
+    {
+        for rule in rules {
+            self.add_rule(rule);
+        }
+        self
+    }
+
+    /// Clear the activation trace (for multiple test runs)
+    pub fn clear_trace(&mut self) {
+        self.activations.clear();
+    }
 }
 
 /// Backward chaining trace capture
@@ -314,6 +392,54 @@ mod tests {
     #[test]
     fn test_forward_chaining_tester_new() {
         let tester = ForwardChainingTester::new();
+        assert_eq!(tester.firing_count(), 0);
+    }
+
+    #[test]
+    fn test_assert_rule_sequence() {
+        let mut tester = ForwardChainingTester::new();
+        tester.activations_mut().extend(vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+
+        assert!(tester.assert_rule_sequence(&["a", "b", "c"]).is_ok());
+        assert!(tester.assert_rule_sequence(&["a", "b"]).is_err());
+    }
+
+    #[test]
+    fn test_assert_fired_count() {
+        let mut tester = ForwardChainingTester::new();
+        tester.activations_mut().extend(vec!["a".to_string(), "b".to_string()]);
+
+        assert!(tester.assert_fired_count(2).is_ok());
+        assert!(tester.assert_fired_count(3).is_err());
+    }
+
+    #[test]
+    fn test_assert_fired_in_order() {
+        let mut tester = ForwardChainingTester::new();
+        tester.activations_mut().extend(vec!["a".to_string(), "x".to_string(), "b".to_string(), "y".to_string(), "c".to_string()]);
+
+        // Partial order should pass
+        assert!(tester.assert_fired_in_order(&["a", "b", "c"]).is_ok());
+        // Wrong order should fail
+        assert!(tester.assert_fired_in_order(&["b", "a", "c"]).is_err());
+    }
+
+    #[test]
+    fn test_assert_rule_not_fired() {
+        let mut tester = ForwardChainingTester::new();
+        tester.activations_mut().extend(vec!["a".to_string(), "b".to_string()]);
+
+        assert!(tester.assert_rule_not_fired("c").is_ok());
+        assert!(tester.assert_rule_not_fired("a").is_err());
+    }
+
+    #[test]
+    fn test_clear_trace() {
+        let mut tester = ForwardChainingTester::new();
+        tester.activations_mut().push("test".to_string());
+        assert_eq!(tester.firing_count(), 1);
+
+        tester.clear_trace();
         assert_eq!(tester.firing_count(), 0);
     }
 }
