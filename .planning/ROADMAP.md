@@ -178,13 +178,20 @@ Plans:
   5. Deterministic mode eliminates flaky tests by enforcing consistent firing order
 **Plans**: 6 plans
 
+**Wave 1 (Foundation):**
 Plans:
-- [ ] 07-01: Integrate Rust testing stack (criterion, mockall, serial_test) into Cargo workspace
-- [ ] 07-02: Implement working memory fixture support with per-test engine isolation
-- [ ] 07-03: Build rule-by-rule unit test framework with assertion helpers
-- [ ] 07-04: Add forward chaining verification with activation sequence tracking
-- [ ] 07-05: Expose InferenceTrace API for backward chaining trace capture
-- [ ] 07-06: Implement deterministic firing mode with conflict resolution sorting
+- [x] 07-01: Integrate Rust testing stack (criterion, mockall, serial_test) into Cargo workspace
+- [x] 07-02: Implement working memory fixture support with per-test engine isolation
+
+**Wave 2 (Forward Chaining):**
+Plans:
+- [x] 07-03: Build rule-by-rule unit test framework with assertion helpers
+- [x] 07-04: Add forward chaining verification with activation sequence tracking
+
+**Wave 3 (Backward Chaining & Determinism):**
+Plans:
+- [x] 07-05: Expose InferenceTrace API for backward chaining trace capture
+- [x] 07-06: Implement deterministic firing mode with conflict resolution sorting
 
 ### Phase 8: Advanced Testing Features (v2.0)
 **Goal**: Enhance testing capabilities with advanced features for comprehensive rule validation
@@ -221,7 +228,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> ... -> N
 
 | Phase | Plans Complete | Status |
 |-------|----------------|--------|
-| 7. Core Testing Infrastructure Foundation | 0/6 | Not started (planning) |
+| 7. Core Testing Infrastructure Foundation | 6/6 | Planned | 2026-06-04 |
 | 8. Advanced Testing Features | 0/5 | Not started (planning) |
 
 **Milestone v2.0:**
