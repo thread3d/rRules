@@ -38,7 +38,8 @@ impl ExecutionResult {
 /// Executes forward chaining using Rete algorithm.
 ///
 /// This is the main entry point for forward rule execution as exported from lib.rs.
-pub fn execute_forward(engine: &mut Engine, session: &Session) -> ExecutionResult {
+#[allow(dead_code)]
+pub fn execute_forward(engine: &mut Engine, _session: &Session) -> ExecutionResult {
     // Placeholder implementation - actual Rete integration would go here
     let mut result = ExecutionResult::new();
 
@@ -48,6 +49,16 @@ pub fn execute_forward(engine: &mut Engine, session: &Session) -> ExecutionResul
     // 3. Trigger rule actions when conditions match
     // 4. Handle salience-based agenda ordering
 
+    result
+}
+
+/// Executes forward chaining using just the engine (no session needed).
+///
+/// This is a convenience wrapper for testing purposes.
+#[allow(dead_code)]
+pub fn execute_forward_simple(engine: &mut Engine) -> ExecutionResult {
+    // Placeholder implementation - actual Rete integration would go here
+    let mut result = ExecutionResult::new();
     result
 }
 

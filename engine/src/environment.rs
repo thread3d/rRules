@@ -76,6 +76,7 @@ impl Default for EngineBuilder {
 }
 
 /// The main engine instance managing rules and execution.
+#[derive(Clone, Debug)]
 pub struct Engine {
     /// Working memory for facts
     working_memory: WorkingMemory,
@@ -159,7 +160,9 @@ pub struct Session {
 }
 
 impl Session {
-    fn new(engine: &Engine, stateful: bool, session_id: Option<String>) -> Self {
+    /// Creates a new session from the engine.
+    #[allow(dead_code)]
+    pub fn new(engine: &Engine, stateful: bool, session_id: Option<String>) -> Self {
         Self {
             engine: engine as *const Engine,
             stateful,

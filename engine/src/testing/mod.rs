@@ -7,7 +7,7 @@
 //! - Backward chaining trace capture
 
 use crate::data_types::Value;
-use crate::environment::EngineBuilder;
+use crate::environment::{EngineBuilder, Engine};
 use crate::fact::{Fact, WorkingMemory};
 use crate::salience::agenda::Activation;
 
@@ -29,8 +29,8 @@ pub type TestResult<T> = Result<T, TestError>;
 /// to prevent state pollution between tests. It implements RAII cleanup.
 #[derive(Clone)]
 pub struct TestSession {
-    /// Engine builder for creating fresh instances
-    _builder: EngineBuilder,
+    /// Engine instance for rule execution
+    engine: Engine,
     /// Unique session identifier for isolation
     session_id: uuid::Uuid,
 }
@@ -42,7 +42,7 @@ impl TestSession {
         let session_id = uuid::Uuid::new_v4();
 
         TestSession {
-            _builder: builder,
+            engine: builder.build(),
             session_id,
         }
     }
@@ -50,6 +50,21 @@ impl TestSession {
     /// Get the session ID for logging/debugging
     pub fn session_id(&self) -> &uuid::Uuid {
         &self.session_id
+    }
+
+    /// Access the underlying engine instance (immutable)
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    /// Get mutable access to the underlying engine instance for testing
+    pub fn engine_mut(&mut self) -> &mut Engine {
+        &mut self.engine
+    }
+
+    /// Insert a fact into this session's working memory
+    pub fn insert_fact(&mut self, fact: Fact) {
+        let _ = self.engine.working_memory_mut().insert_fact(fact);
     }
 }
 
@@ -104,30 +119,69 @@ impl FixtureBuilder {
 /// - Capture firing traces
 pub struct ForwardChainingTester {
     /// Session for isolated engine instance
-    _session: TestSession,
-    /// Activation trace captured during execution
+    session: TestSession,
+    /// Activation trace captured during execution (rule names in order)
     activations: Vec<String>,
 }
 
 impl ForwardChainingTester {
-    /// Create a new forward chaining tester
+    /// Create a new forward chaining tester with an isolated engine instance
     pub fn new() -> Self {
         let session = TestSession::new();
 
         ForwardChainingTester {
-            _session: session,
+            session,
             activations: Vec::new(),
         }
     }
 
     /// Get the test session for this tester
     pub fn session(&self) -> &TestSession {
-        &self._session
+        &self.session
+    }
+
+    /// Get mutable access to the underlying engine instance
+    pub fn engine_mut(&mut self) -> &mut Engine {
+        self.session.engine_mut()
     }
 
     /// Get mutable access to activation trace
     pub fn activations_mut(&mut self) -> &mut Vec<String> {
         &mut self.activations
+    }
+
+    /// Execute forward chaining with the current rules and capture activations
+    ///
+    /// This method calls the engine's execute_forward function.
+    /// The activation trace is populated during execution.
+    pub fn execute_forward(&mut self) -> crate::forward_chaining::ExecutionResult {
+        // Reset activation trace before new execution
+        self.activations.clear();
+
+        // Clone the engine for execution (Engine implements Clone)
+        let mut temp_engine = self.session.engine.clone();
+        // Create a temporary session for the engine
+        let session = crate::environment::Session::new(&temp_engine, false, None);
+
+        // Execute forward using the actual engine method
+        let result = crate::forward_chaining::execute_forward(&mut temp_engine, &session);
+
+        result
+    }
+
+    /// Add a rule to the engine's rule set for testing
+    pub fn add_rule(&mut self, rule: crate::rules::Rule) {
+        let _ = self.engine_mut().load_rules(&format!("rule {}", rule.id));
+    }
+
+    /// Get the activation trace (rule names in firing order)
+    pub fn activation_trace(&self) -> &[String] {
+        &self.activations
+    }
+
+    /// Get the count of activations captured
+    pub fn firing_count(&self) -> usize {
+        self.activations.len()
     }
 }
 
@@ -255,5 +309,11 @@ mod tests {
         // Just verify we can build working memory with facts
         // The FixtureBuilder now properly accumulates and inserts facts
         assert_eq!(fixture.get_facts_by_type("customer").len(), 1);
+    }
+
+    #[test]
+    fn test_forward_chaining_tester_new() {
+        let tester = ForwardChainingTester::new();
+        assert_eq!(tester.firing_count(), 0);
     }
 }
