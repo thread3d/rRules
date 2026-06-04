@@ -6,6 +6,7 @@
 //! - Forward chaining verification helpers
 //! - Backward chaining trace capture
 
+use crate::data_types::Value;
 use crate::environment::EngineBuilder;
 use crate::fact::{Fact, WorkingMemory};
 use crate::salience::agenda::Activation;
@@ -57,30 +58,41 @@ impl TestSession {
 /// Usage:
 /// ```no_run
 /// use engine::testing::FixtureBuilder;
+/// use std::collections::HashMap;
+///
+/// let mut payload = HashMap::new();
+/// payload.insert("score".to_string(), "high".into());
 ///
 /// let fixture = FixtureBuilder::new()
-///     .with_fact("customer", "high_score")
+///     .with_fact("customer", payload)
 ///     .build();
 /// ```
 pub struct FixtureBuilder {
-    _facts: Vec<Fact>,
+    facts: Vec<Fact>,
 }
 
 impl FixtureBuilder {
     /// Create a new fixture builder
     pub fn new() -> Self {
-        FixtureBuilder { _facts: Vec::new() }
+        FixtureBuilder { facts: Vec::new() }
     }
 
-    /// Add a fact to the fixture (stub implementation)
-    #[allow(dead_code)]
-    pub fn with_fact(self, _name: &str, _value: impl Into<String>) -> Self {
+    /// Add a fact to the fixture with the given name and payload
+    ///
+    /// The fact will be assigned a unique ID and its type derived from the name.
+    pub fn with_fact(mut self, name: &str, payload: std::collections::HashMap<String, Value>) -> Self {
+        let fact = Fact::new(name.to_string(), payload);
+        self.facts.push(fact);
         self
     }
 
-    /// Build the fixture with all added facts (returns empty working memory in stub)
+    /// Build the fixture with all added facts into a WorkingMemory instance
     pub fn build(self) -> WorkingMemory {
-        WorkingMemory::new()
+        let mut memory = WorkingMemory::new();
+        for fact in self.facts {
+            let _ = memory.insert_fact(fact);
+        }
+        memory
     }
 }
 
@@ -229,5 +241,19 @@ mod tests {
         // Just verify we can create a working memory
         WorkingMemory::new();
         assert!(true);
+    }
+
+    #[test]
+    fn test_fixture_builder_adds_facts() {
+        let mut payload = std::collections::HashMap::new();
+        payload.insert("score".to_string(), Value::Integer(100));
+
+        let fixture = FixtureBuilder::new()
+            .with_fact("customer", payload)
+            .build();
+
+        // Just verify we can build working memory with facts
+        // The FixtureBuilder now properly accumulates and inserts facts
+        assert_eq!(fixture.get_facts_by_type("customer").len(), 1);
     }
 }
