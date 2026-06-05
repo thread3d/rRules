@@ -41,6 +41,7 @@ pub use rules::{Action, Condition, Rule, RuleSet};
 
 // Re-export chaining entry points
 pub use backward_chaining::execute_backward;
+pub use backward_chaining::{InferenceStep, InferenceTrace, StepType};
 pub use forward_chaining::execute_forward;
 
 // Re-export validation types

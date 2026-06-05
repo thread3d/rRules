@@ -11,6 +11,9 @@ use crate::environment::{EngineBuilder, Engine};
 use crate::fact::{Fact, WorkingMemory};
 use crate::salience::agenda::Activation;
 
+// Re-export backward chaining tracing types for testing use
+pub use crate::backward_chaining::{InferenceStep, InferenceTrace, StepType};
+
 /// Test error type for testing framework
 #[derive(Debug, thiserror::Error)]
 pub enum TestError {
@@ -65,6 +68,16 @@ impl TestSession {
     /// Insert a fact into this session's working memory
     pub fn insert_fact(&mut self, fact: Fact) {
         let _ = self.engine.working_memory_mut().insert_fact(fact);
+    }
+
+    /// Execute backward chaining from a goal and capture the trace
+    pub fn execute_backward_chaining(&self, goal: &str) -> InferenceTrace {
+        // Clone engine for execution (Engine implements Clone)
+        let mut temp_engine = self.engine.clone();
+        let session = crate::environment::Session::new(&temp_engine, false, None);
+
+        // Use the public execute_backward from backward_chaining
+        crate::backward_chaining::execute_backward(&temp_engine, &session, goal)
     }
 }
 
@@ -260,6 +273,47 @@ impl ForwardChainingTester {
     /// Clear the activation trace (for multiple test runs)
     pub fn clear_trace(&mut self) {
         self.activations.clear();
+    }
+
+    /// Verify that a specific step exists in the trace
+    pub fn assert_trace_contains_step(trace: &InferenceTrace, expected_desc: &str) -> TestResult<()> {
+        if !trace.path.iter().any(|s| s.description == expected_desc) {
+            return Err(TestError::AssertionFailed(format!(
+                "Trace missing step with description '{}'",
+                expected_desc
+            )));
+        }
+        Ok(())
+    }
+
+    /// Verify the trace represents a successful inference
+    pub fn assert_trace_success(trace: &InferenceTrace) -> TestResult<()> {
+        if !trace.success {
+            return Err(TestError::AssertionFailed("Trace does not represent success".to_string()));
+        }
+        Ok(())
+    }
+
+    /// Verify the trace path has expected length
+    pub fn assert_trace_path_length(trace: &InferenceTrace, expected_len: usize) -> TestResult<()> {
+        if trace.path.len() != expected_len {
+            return Err(TestError::AssertionFailed(format!(
+                "Trace path length mismatch. Expected {}, got {}",
+                expected_len,
+                trace.path.len()
+            )));
+        }
+        Ok(())
+    }
+
+    /// Find a rule application step by rule ID
+    pub fn find_rule_application<'a>(trace: &'a InferenceTrace, rule_id: &str) -> Option<&'a InferenceStep> {
+        trace.path.iter().find(|s| s.rule_id.as_deref() == Some(rule_id))
+    }
+
+    /// Check if trace contains a fact match step
+    pub fn has_fact_match_step(trace: &InferenceTrace) -> bool {
+        trace.path.iter().any(|s| s.step_type == StepType::FactMatch)
     }
 }
 
