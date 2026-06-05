@@ -36,18 +36,31 @@ pub struct TestSession {
     engine: Engine,
     /// Unique session identifier for isolation
     session_id: uuid::Uuid,
+    /// Deterministic mode setting for conflict resolution
+    deterministic_mode: DeterministicMode,
 }
 
 impl TestSession {
-    /// Create a new test session with isolated engine instance
+    /// Create a new test session with default (non-deterministic) conflict resolution
     pub fn new() -> Self {
+        Self::new_with_deterministic(DeterministicMode::Disabled)
+    }
+
+    /// Create a new test session with specified deterministic mode
+    pub fn new_with_deterministic(mode: DeterministicMode) -> Self {
         let builder = EngineBuilder::new();
         let session_id = uuid::Uuid::new_v4();
 
         TestSession {
             engine: builder.build(),
             session_id,
+            deterministic_mode: mode,
         }
+    }
+
+    /// Get the current deterministic mode
+    pub fn deterministic_mode(&self) -> DeterministicMode {
+        self.deterministic_mode
     }
 
     /// Get the session ID for logging/debugging
@@ -353,6 +366,20 @@ impl BackwardChainingTrace {
 ///
 /// When enabled, rules with equal salience are ordered by name
 /// to ensure deterministic test execution.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DeterministicMode {
+    /// Use default conflict resolution (non-deterministic for equal salience)
+    Disabled,
+    /// Sort by rule name when salience is equal
+    EnabledByName,
+}
+
+impl Default for DeterministicMode {
+    fn default() -> Self {
+        DeterministicMode::Disabled
+    }
+}
+
 pub fn deterministic_conflict_strategy(mut activations: Vec<Activation>) -> Vec<Activation> {
     // Sort by (salience DESC, rule_name ASC) for determinism
     activations.sort_by(|a, b| {
