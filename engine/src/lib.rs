@@ -16,7 +16,6 @@ pub mod forward_chaining;
 pub mod validation;
 
 // Testing framework for rule engine verification
-#[cfg(test)]
 pub mod testing;
 
 // Chaining mode selection

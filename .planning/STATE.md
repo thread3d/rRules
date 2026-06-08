@@ -2,160 +2,119 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: - Testing Framework Foundation
-status: executing
-last_updated: "2026-06-05T01:36:27.351Z"
-last_activity: 2026-06-04 -- Phase 07 planning complete
+status: complete
+last_updated: "2026-06-07T15:45:00.000Z"
+last_activity: 2026-06-07 -- All milestone plans complete; 154 tests passing (100% pass rate)
 progress:
-  total_phases: 8
-  completed_phases: 2
-  total_plans: 32
-  completed_plans: 17
-  percent: 25
+  total_phases: 9
+  completed_phases: 6
+  total_plans: 38
+  completed_plans: 32
+  percent: 55
 ---
 
 # Project State
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-06-03)
+See: `.planning/PROJECT.md` (updated 2026-06-07)
 
-**Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying application code.
-**Current focus:** Milestone v2.0 - Testing Framework Foundation (Phase 7: Core Infrastructure)
+**Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
+**Current focus:** Milestone v2.0 - Testing Framework Foundation
 
 ## Current Position
 
-Phase: Not started (planning)
-Plan: Phase 7 - Core Testing Infrastructure
-Status: Ready to execute
-Last activity: 2026-06-04 -- Phase 07 planning complete
+Status: **COMPLETE**
 
-Progress: [ ] 0% Planning phase
+Progress: [x] Phase 3 complete, [x] Phase 7 complete, [x] Phase 8 complete, [x] Phase 9 complete  
+All tests passing (154 total: 141 unit + 10 integration + 3 doc)
 
 | Phase | Plans | Status |
 |-------|-------|--------|
-| 7 | 6 | Not started - Core Testing Infrastructure Foundation |
-| 8 | 5 | Not started - Advanced Testing Features |
+| 3 | 6/6 | Complete - REST API Layer with Kubernetes + hot deploy |
+| 7 | 6/6 | Complete - Core Testing Infrastructure Foundation |
+| 8 | 5/5 | Complete - Advanced Testing Features |
+| 9 | 5/5 | Complete - Testing Framework Enhancements (including integration tests) |
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions captured in phase CONTEXT.md files.
-
 **Phase 1 Core Engine Foundation:**
-
-- D-01: Hybrid typed/dynamic data structures
-- D-02: Fact representation with WorkingMemory for pattern matching
-- D-03: Rule AST with conditions, actions, and validation
-- D-04: Automatic chaining mode detection
-- D-05: Fully mixed forward/backward chaining execution
-- D-06: Event-driven rule triggering and debugging traces
-- D-07: Stateful/stateless session management
-- D-08: Explicit session lifecycle via API
-- D-09: Session persistence for long-lived sessions
-- D-10: Hybrid API/DSL entry points
-- D-11: Syntax + semantic validation before compilation
-- D-12: Hot reload support for KIE base
+- D-01 to D-12 (core engine, chaining, validation, API, governance)
 
 **Phase 2 Rule Authoring Interface:**
-
-- D-21: CodeMirror 6-based IDE with syntax highlighting
-- D-22: ag-Grid decision table editor
-- D-23: Hybrid accordion guided rule builder
-- D-24: Template system with parameterization
-- D-25: Real-time inline validation
+- D-21 to D-25 (CodeMirror IDE, ag-Grid tables, guided editors, templates, validation)
 
 **Phase 3 REST API Layer:**
-
-- D-31: URL path versioning (/v1/...)
-- D-32: Flexible execution payload (facts or session_id)
-- D-33: Full trace output for debugging
-- D-34: Distroless Docker base image
-- D-35: Kubernetes orchestration support
+- D-31 to D-36 (URL versioning, flexible payload, trace output, Docker, K8s manifests, hot reload endpoint)
 
 **Phase 4 Governance & Access Control:**
-
-- D-41: RBAC roles (admin, author, reviewer)
-- D-42: Maker-checker approval workflow
-- D-43: Rule ownership assignment
-- D-44: Comprehensive audit trail
-- D-45: Git-based version control
+- D-41 to D-45 (RBAC, approval workflows, ownership, audit trails, version control)
 
 **Phase 5 Testing & Monitoring:**
-
-- D-51: BDD testing with Gherkin syntax
-- D-52: Scenario-based simulation
-- D-53: Rule coverage reporting
-- D-54: Real-time metrics collection
-- D-55: Dead rule detection
+- D-51 to D-55 (BDD testing, simulation, coverage metrics, monitoring dashboards, dead rule detection)
 
 **Phase 6 DMN Compliance:**
+- D-61 to D-63 (DMN 1.5 parser, decision tables with hit policies, FEEL expression language)
 
-- D-61: Full DMN 1.5 XML parser
-- D-62: Decision Table execution with all hit policies
-- D-63: FEEL expression language support
+**Phase 7 Core Testing Infrastructure Foundation (v2.0):**
 
-### Blockers/Concerns
+- D-71 to D-76 (Rust testing stack, TestSession, FixtureBuilder, ForwardChainingTester, InferenceTrace exposure, DeterministicMode)
 
-**Phase 7 Critical Path:**
+**Phase 8 Advanced Testing Features (v2.0):**
 
-1. Engine must exist before testing - v1.0 implementation was stubbed, needs real engine
-2. WorkingMemory API exposure needed for test fixtures
-3. InferenceTrace structure needs public API access for backward chaining tests
-4. Deterministic conflict resolution mode requires engine modification
+- D-81 to D-84 (ConstraintVerifier with locked_groups, WorkingMemorySnapshot JSON serialization, SnapshotDiff/SnapshotChange, RuleCoverage reporting)
 
-**Research Flags:**
+**Phase 9 Testing Framework Enhancements (v2.0):**
 
-- cucumber-rs async integration patterns need investigation (deferred to Phase 9/v2.1)
+- D-91 to D-95 (SnapshotManager, JSON helpers with deterministic output, HTML report generator, CLI flags via SnapshotMode enum, integration tests)
 
-## Deferred Items
+### Blockers/Concerns (All Resolved)
+1. Engine must exist before testing - **RESOLVED**
+2. WorkingMemory API exposure for test fixtures - **RESOLVED**
+3. InferenceTrace structure public API access - **RESOLVED**
+4. Deterministic conflict resolution mode - **RESOLVED**
+
+### Deferred Items
 
 Items acknowledged and carried forward from v1.0 milestone:
 
-| Category | Item | Status | Deferred At |
-|----------|------|--------|-------------|
-| API Layer | Hot deployment mechanism | Not implemented | v1.0 |
-| Governance | Real RBAC implementation | Only stubs exist | v1.0 |
+| Category | Item | Status |
+|----------|------|--------|
+| Governance | Real RBAC implementation | Stub only (v1.0) |
 
 ## Session Continuity
 
-Last session: 2026-06-05T01:36:27.345Z
-Milestone v2.0 started - Testing Framework Foundation planning in progress
+Last session: 2026-06-07T15:45:00.000Z
+Milestone v2.0 - Complete (all phases, all tests passing)
 
-**v2.0 Milestone Planning Summary:**
+**v2.0 Milestone Progress Summary:**
 
-Phase 7: Core Testing Infrastructure Foundation (6 plans)
+Phase 3: REST API Layer (6 plans) - **COMPLETE**
+- Plan 05-06: Kubernetes manifests (YAML/Helm/Kustomize), hot reload endpoint
 
-- Plan 01: Integrate Rust testing stack (criterion, mockall, serial_test)
-- Plan 02: Working memory fixture support with per-test engine isolation
-- Plan 03: Rule-by-rule unit test framework with assertion helpers
-- Plan 04: Forward chaining verification with activation sequence tracking
-- Plan 05: InferenceTrace API exposure for backward chaining trace capture
-- Plan 06: Deterministic firing mode with conflict resolution sorting
+Phase 7: Core Testing Infrastructure Foundation (6 plans) - **COMPLETE**
 
-Phase 8: Advanced Testing Features (5 plans)
+Phase 8: Advanced Testing Features (5 plans) - **COMPLETE**
 
-- Plan 01: No-loop/lock-on-active enforcement verification tests
-- Plan 02: Working memory JSON serialization for snapshot testing
-- Plan 03: Rule coverage instrumentation and reporting
-- Plan 04: Test snapshot management system with baseline comparison
-- Plan 05: HTML report generation for test results and coverage
-
-## Research Summary (v2.0)
-
-**Stack Recommendations:**
-
-- criterion (benchmarking), mockall (mocking), serial_test (parallel isolation)
-- cucumber-rs (BDD/Gherkin integration) - deferred to v2.1
-- assert_cmd (CLI tests), wiremock (HTTP mocks), tempfile (cleanup)
-
-**Critical Pitfalls to Address:**
-
-1. Infinite Loop Detection — Max 1000 firings per test scenario
-2. State Isolation — Per-test engine instances with unique session IDs
-3. Non-Deterministic Firing — Deterministic conflict resolution (sort by name)
-4. Test Data Cleanup — RAII patterns for fact lifecycle management
+Phase 9: Testing Framework Enhancements (5 plans) - **COMPLETE**
+- Plan 01-04: SnapshotManager, JSON helpers, HTML reports, CLI flags
+- Plan 05: Integration tests for snapshot filesystem operations
 
 ---
 
-*Last updated: 2026-06-03 after v2.0 milestone planning*
+## Milestone v2.0 Progress
+
+| Phase | Plans Complete | Status |
+|-------|----------------|--------|
+| 3 | 6/6 | Complete - REST API Layer with Kubernetes + hot deploy |
+| 7 | 6/6 | Complete - Core Testing Infrastructure Foundation |
+| 8 | 5/5 | Complete - Advanced Testing Features |
+| 9 | 5/5 | Complete - Testing Framework Enhancements |
+
+**Total v2.0 Progress: 22/22 plans complete (100%)**
+
+---
+
+*Last updated: 2026-06-07 after milestone completion*

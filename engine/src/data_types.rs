@@ -179,4 +179,88 @@ mod tests {
         let string_value = Value::String("test".to_string());
         assert_eq!(string_value.as_string(), Some("test"));
     }
+
+    #[test]
+    fn test_all_value_types() {
+        // Bool
+        let v = Value::Bool(true);
+        assert_eq!(v, Value::Bool(true));
+        assert_ne!(v, Value::Bool(false));
+
+        // Integer (edge cases)
+        let v_min = Value::Integer(i64::MIN);
+        let v_max = Value::Integer(i64::MAX);
+        let v_zero = Value::Integer(0);
+
+        // Float (including special values)
+        let v_float = Value::Float(3.14159);
+        let v_nan = Value::Float(f64::NAN);
+        let v_inf = Value::Float(f64::INFINITY);
+
+        // String with unicode
+        let v_unicode = Value::String("hello 世界 🌍".to_string());
+
+        // DateTime
+        let v_datetime = Value::DateTime(chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
+
+        // Object
+        let mut obj = std::collections::HashMap::new();
+        obj.insert("key".to_string(), Value::Integer(42));
+        let v_object = Value::Object(obj);
+
+        // Array
+        let v_array = Value::Array(vec![Value::Integer(1), Value::Integer(2)]);
+
+        // Null
+        let v_null = Value::Null;
+    }
+
+    #[test]
+    fn test_value_float_special_values() {
+        // Test that regular float comparisons work correctly
+        let f1 = Value::Float(3.14);
+        let f2 = Value::Float(3.14);
+        assert_eq!(f1, f2);
+
+        // Test comparison with epsilon
+        let f3 = Value::Float(3.14159);
+        let f4 = Value::Float(3.14160);
+        // With f64's default PartialEq, these are not equal due to precision
+        assert_ne!(f3, f4);
+    }
+
+    #[test]
+    fn test_value_to_json_all_types() {
+        let values = vec![
+            Value::Bool(true),
+            Value::Integer(42),
+            Value::Float(3.14),
+            Value::String("hello".to_string()),
+            Value::Null,
+            Value::Array(vec![Value::Integer(1), Value::Integer(2)]),
+        ];
+
+        for v in values {
+            let json = v.to_json().unwrap();
+            assert!(!json.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_value_roundtrip_all_types() {
+        // Test roundtrip for each value type
+        let values = vec![
+            Value::Bool(true),
+            Value::Integer(42),
+            Value::Float(3.14),
+            Value::String("hello".to_string()),
+            Value::Null,
+        ];
+
+        for v in values {
+            let json = v.to_json().unwrap();
+            let parsed = Value::from_json(&json).unwrap();
+            assert_eq!(v, parsed);
+        }
+    }
 }

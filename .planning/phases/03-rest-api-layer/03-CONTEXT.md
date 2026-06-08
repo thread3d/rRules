@@ -1,7 +1,8 @@
-# Phase 3: REST API Layer - Context
+# Phase 3: REST API Layer - Context (Updated)
 
-**Gathered:** 2026-05-24
-**Status:** Ready for planning
+**Gathered:** 2026-05-24  
+**Updated:** 2026-06-07  
+**Status:** Ready for completion
 
 ## Phase Boundary
 
@@ -23,29 +24,29 @@ This phase focuses on the HTTP API layer that exposes these capabilities.
 ## Implementation Decisions
 
 ### API Design Approach (D-04)
-- **API-D1:** Hybrid REST/GraphQL approach - REST for CRUD operations, GraphQL for rule execution and exploration
-- **API-D2:** URL path versioning (/v1/rules) - most common and straightforward for clients
-- **API-D3:** Session-based authentication - Cookie-based sessions tied to user login from Phase 4
+- **API-D1:** REST for CRUD operations, GraphQL for rule execution and exploration
+- **API-D2:** URL path versioning (/v1/rules) - most common and straightforward
+- **API-D3:** Session-based authentication via cookies tied to user login from Phase 4
 
 ### Rule Execution Endpoint (D-05)
 - **EXEC-F1:** Flexible data model payload - Supports both facts object and session_id; auto-detects mode
 - **EXEC-R1:** Full trace output response - Includes execution_id, fired_rules, facts_after, inference_trace for debugging
-- **EXEC-A1:** Webhook callbacks for async jobs - Async POST returns immediately, results posted to callback URL when complete
+- **EXEC-A1:** Webhook callbacks for async jobs
 
 ### CRUD Operations (D-05)
 - **CRUD-M1:** Standard REST methods - POST /rules (create), GET /rules (list), PUT /rules/{id} (update), DELETE /rules/{id}
-- **CRUD-B1:** Conditional bulk operations - POST /rules/bulk with transaction option for all-or-nothing
-- **CRUD-F1:** Advanced filtering - ?filter[name]=test&filter[tag]=production for structured queries
+- **CRUD-B1:** Conditional bulk operations
+- **CRUD-F1:** Advanced filtering
 
-### Docker/K8s Deployment (D-06)
+### Docker/K8s Deployment (D-06) - UPDATED
 - **DEP-I1:** Distroless base image - No shell/pkg manager; highest security, smallest footprint
 - **DEP-H1:** Separate /health/live and /health/ready endpoints - K8s-style health checks
-- **DEP-N1:** Nginx Ingress controller for production - Most common; good documentation
+- **DEP-N1:** Nginx Ingress controller for production
+- **K8S-A1:** All three deployment approaches: basic YAML manifests, Helm chart, Kustomize overlay
 
-### Claude's Discretion
-- Exact OpenAPI schema details can be finalized during plan implementation
-- Specific JWT library choice left to planner/researcher (e.g., jsonwebtoken, go-jose)
-- Container registry strategy (Docker Hub, ECR, GCR) deferred to deployment phase
+### Hot Deployment (UPDATED)
+- **HOT-A1:** API endpoint trigger - POST /v1/rules/reload endpoint manually triggers rule reloading
+- **HOT-C1:** Reload preserves existing sessions and working memory state
 
 ## Canonical References
 
@@ -67,65 +68,38 @@ This phase focuses on the HTTP API layer that exposes these capabilities.
 ## Existing Code Insights
 
 ### Reusable Assets
-(None yet — initial project setup; Phases 1-2 will establish patterns)
+The API crate structure is already established:
+```
+src/api/
+├── Cargo.toml              # actix-web dependency configured
+├── lib.rs                  # Root module exports (models, v1)
+├── main.rs                 # Entry point with actix_web setup
+└── v1/                     # Versioned API group
+    ├── mod.rs              # Route modules
+    ├── rules.rs            # Rule CRUD endpoints (stub implementations)
+    └── execution.rs        # Execution endpoint with DTOs
+```
 
 ### Established Patterns
-(None yet — first phases of implementation)
+- Actix-web 4.4 for async HTTP handling
+- Serde for JSON serialization/deserialization
+- UUID v4 for request IDs
 
 ### Integration Points
 Phase 3 API must integrate with:
 - Phase 1 Engine - Rule execution via execute_forward/execute_backward functions
 - Phase 2 Web UI - CORS configuration, authentication session validation
-- Hybrid Git + PostgreSQL storage (Git for versioning, DB for metadata per PROJECT.md)
+- Hybrid Git + PostgreSQL storage (Git for versioning, DB for metadata)
 - Future Phase 4 - RBAC role checking on endpoints
-
-## Specific Ideas
-
-### API Directory Structure
-```
-src/api/
-├── Cargo.toml              # API crate with actix-web/axum dependency
-├── lib.rs                  # Root module exports
-├── v1/                     # Versioned API group
-│   ├── mod.rs
-│   ├── rules.rs           # Rule CRUD endpoints
-│   ├── execution.rs       # POST /rules/execute endpoint
-│   └── health.rs          # Health check endpoints
-├── middleware/
-│   ├── auth.rs            # Session-based authentication
-│   └── logging.rs         # Request/response logging
-└── models/
-    ├── rules.rs           # DTOs for rule CRUD
-    └── execution.rs       # DTOs for execution requests/responses
-```
-
-### Rule Execution Request/Response
-```json
-// Request - flexible model (auto-detects mode)
-{
-  "session_id": "abc123",  // OR facts object if stateless
-  "actions": ["fire"],
-  "webhook_url": "https://example.com/callback"
-}
-
-// Response - full trace output
-{
-  "execution_id": "exec_12345",
-  "fired_rules": [{"id": "r1", "name": "Rule A"}],
-  "facts_after": {...},
-  "inference_trace": [...]
-}
-```
 
 ## Deferred Ideas
 
-### Reviewed Todos (not folded)
-(None — no todos were cross-referenced or reviewed)
+### Reviewed Todos
+None — no todos were cross-referenced or reviewed in this update.
 
 ### General
 (None — discussion stayed within phase scope)
 
 ---
-
-*Phase: 3-REST API Layer*
-*Context gathered: 2026-05-24*
+*Phase: 3-REST API Layer (Continuation)*  
+*Context updated: 2026-06-07*

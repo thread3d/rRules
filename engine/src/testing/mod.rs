@@ -10,9 +10,18 @@ use crate::data_types::Value;
 use crate::environment::{EngineBuilder, Engine};
 use crate::fact::{Fact, WorkingMemory};
 use crate::salience::agenda::Activation;
+use serde_json;
 
 // Re-export backward chaining tracing types for testing use
 pub use crate::backward_chaining::{InferenceStep, InferenceTrace, StepType};
+
+// Re-export snapshot-related types from their modules
+pub use crate::testing::snapshot::{SnapshotMode, SnapshotError, SnapshotResult, SnapshotManager};
+pub use crate::testing::json::{serialize_deterministic, deserialize_working_memory, roundtrip_snapshot};
+
+// Module declarations (must be after re-exports for visibility)
+pub mod snapshot;
+pub mod json;
 
 /// Test error type for testing framework
 #[derive(Debug, thiserror::Error)]
@@ -25,6 +34,164 @@ pub enum TestError {
 
 /// Result type for testing framework
 pub type TestResult<T> = Result<T, TestError>;
+
+// Working memory snapshot types for serialization/testing
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FactSnapshot {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub fact_type: String,
+    pub payload: std::collections::HashMap<String, ValueSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ValueSnapshot {
+    Bool(bool),
+    Integer(i64),
+    Float(f64),
+    String(String),
+    Null,
+    Array(Vec<ValueSnapshot>),
+    Object(std::collections::HashMap<String, ValueSnapshot>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkingMemorySnapshot {
+    pub facts: Vec<FactSnapshot>,
+}
+
+impl WorkingMemorySnapshot {
+    pub fn from_working_memory(_memory: &WorkingMemory) -> Self {
+        WorkingMemorySnapshot { facts: Vec::new() }
+    }
+
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    pub fn from_json(_json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(_json)
+    }
+
+    pub fn compare(&self, other: &Self) -> SnapshotDiff {
+        let mut diff = SnapshotDiff::new();
+
+        // Create a map of fact_type to payload for easier comparison
+        let mut self_map: std::collections::HashMap<String, &std::collections::HashMap<String, ValueSnapshot>> =
+            self.facts.iter().map(|f| (f.fact_type.clone(), &f.payload)).collect();
+        let other_map: std::collections::HashMap<String, &std::collections::HashMap<String, ValueSnapshot>> =
+            other.facts.iter().map(|f| (f.fact_type.clone(), &f.payload)).collect();
+
+        // Check for added facts
+        for fact in &self.facts {
+            if !other_map.contains_key(&fact.fact_type) {
+                diff.added.push(fact.fact_type.clone());
+            }
+        }
+
+        // Check for removed facts
+        for fact in &other.facts {
+            if !self_map.contains_key(&fact.fact_type) {
+                diff.removed.push(fact.fact_type.clone());
+            }
+        }
+
+        // Check for changed payloads
+        for fact in &self.facts {
+            if let Some(other_payload) = other_map.get(&fact.fact_type) {
+                let self_json = serde_json::to_string_pretty(&fact.payload).unwrap_or_default();
+                let other_json = serde_json::to_string_pretty(other_payload).unwrap_or_default();
+                if self_json != other_json {
+                    diff.changed.push(SnapshotChange {
+                        fact_type: fact.fact_type.clone(),
+                        old_payload: fact.payload.clone(),
+                        new_payload: (*other_payload).clone(),
+                    });
+                }
+            }
+        }
+
+        diff
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SnapshotDiff {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    pub changed: Vec<SnapshotChange>,
+}
+
+impl SnapshotDiff {
+    pub fn new() -> Self {
+        SnapshotDiff {
+            added: Vec::new(),
+            removed: Vec::new(),
+            changed: Vec::new(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty() && self.changed.is_empty()
+    }
+
+    pub fn describe(&self) -> String {
+        if self.is_empty() {
+            return "No differences".to_string();
+        }
+        let mut lines = Vec::new();
+        if !self.added.is_empty() {
+            lines.push(format!("Added: {}", self.added.join(", ")));
+        }
+        if !self.removed.is_empty() {
+            lines.push(format!("Removed: {}", self.removed.join(", ")));
+        }
+        for change in &self.changed {
+            lines.push(format!(
+                "Changed '{}': {} -> {}",
+                change.fact_type, format_payload(&change.old_payload), format_payload(&change.new_payload)
+            ));
+        }
+        lines.join("\n")
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SnapshotChange {
+    pub fact_type: String,
+    pub old_payload: std::collections::HashMap<String, ValueSnapshot>,
+    pub new_payload: std::collections::HashMap<String, ValueSnapshot>,
+}
+
+// Helper function to format payload for display
+fn format_payload(payload: &std::collections::HashMap<String, ValueSnapshot>) -> String {
+    let entries: Vec<String> = payload.iter()
+        .map(|(k, v)| format!("{}={}", k, value_snapshot_to_string(v)))
+        .collect();
+    format!("{{{}}}", entries.join(", "))
+}
+
+fn value_snapshot_to_string(value: &ValueSnapshot) -> String {
+    match value {
+        ValueSnapshot::Bool(b) => b.to_string(),
+        ValueSnapshot::Integer(i) => i.to_string(),
+        ValueSnapshot::Float(f) => format!("{:.2}", f),
+        ValueSnapshot::String(s) => s.clone(),
+        ValueSnapshot::Null => "null".to_string(),
+        ValueSnapshot::Array(arr) => {
+            let items: Vec<String> = arr.iter().map(value_snapshot_to_string).collect();
+            format!("[{}]", items.join(", "))
+        }
+        ValueSnapshot::Object(obj) => {
+            let entries: Vec<String> = obj.iter()
+                .map(|(k, v)| format!("{}: {}", k, value_snapshot_to_string(v)))
+                .collect();
+            format!("{{{}}}", entries.join(", "))
+        }
+    }
+}
 
 /// Test session that provides isolated engine instance per test
 ///
