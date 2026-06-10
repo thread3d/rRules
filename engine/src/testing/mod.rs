@@ -38,6 +38,18 @@ pub type TestResult<T> = Result<T, TestError>;
 // Working memory snapshot types for serialization/testing
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ValueSnapshot {
+    Bool(bool),
+    Integer(i64),
+    Float(f64),
+    String(String),
+    DateTime(String),
+    Null,
+    Array(Vec<ValueSnapshot>),
+    Object(std::collections::HashMap<String, ValueSnapshot>),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FactSnapshot {
     pub id: String,
@@ -46,15 +58,53 @@ pub struct FactSnapshot {
     pub payload: std::collections::HashMap<String, ValueSnapshot>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum ValueSnapshot {
-    Bool(bool),
-    Integer(i64),
-    Float(f64),
-    String(String),
-    Null,
-    Array(Vec<ValueSnapshot>),
-    Object(std::collections::HashMap<String, ValueSnapshot>),
+impl FactSnapshot {
+    /// Create a FactSnapshot from a Fact
+    pub fn from_fact(fact: &crate::fact::Fact) -> Self {
+        let payload = fact
+            .payload
+            .iter()
+            .map(|(k, v)| (k.clone(), ValueSnapshot::from_value(v)))
+            .collect();
+
+        FactSnapshot {
+            id: fact.id.to_string(),
+            fact_type: fact.fact_type_id.clone(),
+            payload,
+        }
+    }
+}
+
+impl ValueSnapshot {
+    /// Convert a Value to ValueSnapshot
+    pub fn from_value(value: &crate::data_types::Value) -> Self {
+        match value {
+            crate::data_types::Value::Bool(b) => ValueSnapshot::Bool(*b),
+            crate::data_types::Value::Integer(i) => ValueSnapshot::Integer(*i),
+            crate::data_types::Value::Float(f) => ValueSnapshot::Float(*f),
+            crate::data_types::Value::String(s) => ValueSnapshot::String(s.clone()),
+            crate::data_types::Value::Null => ValueSnapshot::Null,
+            crate::data_types::Value::DateTime(dt) => {
+                ValueSnapshot::DateTime(format!("{:?}", dt))
+            }
+            crate::data_types::Value::Array(arr) => {
+                ValueSnapshot::Array(arr.iter().map(ValueSnapshot::from_value).collect())
+            }
+            crate::data_types::Value::Object(obj) => {
+                ValueSnapshot::Object(
+                    obj.iter()
+                        .map(|(k, v)| (k.clone(), ValueSnapshot::from_value(v)))
+                        .collect(),
+                )
+            }
+        }
+    }
+}
+
+impl Default for ValueSnapshot {
+    fn default() -> Self {
+        ValueSnapshot::Null
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,8 +113,10 @@ pub struct WorkingMemorySnapshot {
 }
 
 impl WorkingMemorySnapshot {
-    pub fn from_working_memory(_memory: &WorkingMemory) -> Self {
-        WorkingMemorySnapshot { facts: Vec::new() }
+    /// Create a snapshot from working memory
+    pub fn from_working_memory(memory: &WorkingMemory) -> Self {
+        let facts = memory.get_all_facts().into_iter().map(FactSnapshot::from_fact).collect();
+        WorkingMemorySnapshot { facts }
     }
 
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
@@ -179,6 +231,7 @@ fn value_snapshot_to_string(value: &ValueSnapshot) -> String {
         ValueSnapshot::Integer(i) => i.to_string(),
         ValueSnapshot::Float(f) => format!("{:.2}", f),
         ValueSnapshot::String(s) => s.clone(),
+        ValueSnapshot::DateTime(dt) => dt.clone(),
         ValueSnapshot::Null => "null".to_string(),
         ValueSnapshot::Array(arr) => {
             let items: Vec<String> = arr.iter().map(value_snapshot_to_string).collect();
@@ -266,10 +319,11 @@ impl TestSession {
 /// Usage:
 /// ```no_run
 /// use engine::testing::FixtureBuilder;
+/// use engine::data_types::Value;
 /// use std::collections::HashMap;
 ///
 /// let mut payload = HashMap::new();
-/// payload.insert("score".to_string(), "high".into());
+/// payload.insert("score".to_string(), Value::String("high".to_string()));
 ///
 /// let fixture = FixtureBuilder::new()
 ///     .with_fact("customer", payload)

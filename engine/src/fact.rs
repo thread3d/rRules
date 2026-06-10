@@ -225,6 +225,11 @@ impl WorkingMemory {
             .collect()
     }
 
+    /// Gets all facts in working memory.
+    pub fn get_all_facts(&self) -> Vec<&Fact> {
+        self.facts.values().collect()
+    }
+
     /// Matches facts against a pattern (placeholder for Rete integration).
     pub fn match_pattern(&self, _pattern: &str) -> Vec<&Fact> {
         // This will be implemented when integrating with the Rete algorithm

@@ -8,6 +8,9 @@ pub mod environment;
 pub mod fact;
 pub mod rules;
 
+// Engine modules (pluggable architecture)
+pub mod engine;
+
 // Forward and backward chaining execution
 pub mod backward_chaining;
 pub mod forward_chaining;
@@ -17,6 +20,19 @@ pub mod validation;
 
 // Testing framework for rule engine verification
 pub mod testing;
+
+// Governance modules (Phase 18)
+pub mod governance {
+    pub mod approval;
+    pub mod audit;
+    pub mod rbac;
+    pub mod versioning;
+}
+
+// Monitoring modules (Phase 19)
+pub mod monitoring {
+    pub mod detection;
+}
 
 // Chaining mode selection
 pub mod chaining {

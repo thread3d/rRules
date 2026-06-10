@@ -247,13 +247,13 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> ... -> N
 | 5. Testing & Monitoring | 6/6 | Stub Only   | 2026-06-01 |
 | 6. DMN Compliance | 3/3 | Stub Only   | 2026-06-01 |
 
-### Milestone v2.0 Progress
+### Milestone v3.0 Progress (New)
 
 | Phase | Plans Complete | Status |
 |-------|----------------|--------|
-| 7. Core Testing Infrastructure Foundation | 6/6 | Complete | 2026-06-07 |
-| 8. Advanced Testing Features | 5/5 | Complete | 2026-06-07 |
-| 9. Testing Framework Enhancements | 4/5 | Complete | 2026-06-07 |
+| 10 | 0/8 | Pending - Pluggable Engine Architecture & Implementations |
+
+---
 
 **Milestone v2.0:**
 - Total plans: 16
@@ -265,3 +265,98 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> ... -> N
 - `WorkingMemorySnapshot` with JSON serialization and comparison utilities
 - `RuleCoverage` with CSV reporting and threshold assertions
 - `ForwardChainingTester::assert_no_loop_violation()` and `assert_lock_on_active_violation()`
+
+### Milestone v3.0 - Multiple Rule Engine Implementations
+
+**Goal:** Implement multiple Rete-family algorithms (Rete, TREAT, LEAPS, PHREAK) with pluggable architecture and runtime selection
+
+**Depends on:** Phase 9 (testing infrastructure must exist for algorithm verification)
+
+**Requirements:** ENGINE-01 through ENGINE-06, METRIC-01, METRIC-02
+
+**Success Criteria:**
+1. Engine trait provides unified interface for all Rete-family algorithms
+2. Rete implementation includes party tokens, alpha/beta memory, network caching
+3. TREAT implementation optimizes left-memory management with join node caching
+4. LEAPS implementation supports aggregation nodes with efficient partial state updates
+5. PHREAK implementation maintains incremental truth maintenance with justification tracking
+6. Users can select engine via configuration file or API endpoint
+7. Engine-specific metrics track execution characteristics per algorithm
+
+**Plans:** 8 phases (10-17)
+
+Plans:
+- [ ] 10-01: Design pluggable engine architecture with trait-based interface
+- [ ] 10-02: Implement native Rete algorithm with party tokens, alpha/beta memory
+- [ ] 10-03: Implement TREAT algorithm with optimized left-memory management
+- [ ] 10-04: Implement LEAPS algorithm with aggregation node support
+- [ ] 10-05: Implement PHREAK algorithm with incremental truth maintenance
+- [ ] 10-06: Build runtime engine selection via configuration and API endpoint
+- [ ] 10-07: Add per-engine metrics collection (firing rate, memory usage, network traversal)
+- [ ] 10-08: Create comparison dashboard for algorithm performance analysis
+
+### Milestone v4.0 - Production Platform (In Progress)
+
+**Goal:** Complete production-ready platform with full web frontend, enterprise governance, and monitoring dashboards
+
+**Depends on:** Phase 10 (engine implementations must exist before API/frontend integration)
+
+**Requirements:** FRONTEND-01 through FRONTEND-02, GOV-01 through GOV-04, MON-01 through MON-04, API-04, DEPLOY-03 through DEPLOY-04
+
+**Success Criteria:**
+1. Full React-based rule authoring interface with all editing features
+2. Complete RBAC system with maker-checker workflows and full audit trails
+3. Prometheus metrics endpoint with live monitoring dashboards
+4. Complete REST API for all engine management operations
+5. Production-ready Docker/Kubernetes deployment with hot reload
+
+**Plans:** 18 phases (17-34)
+
+Plans:
+- [x] 17-01: Design production frontend architecture (React, TypeScript, routing)
+  - Plan: .planning/phases/17-production-frontend/17-PLAN.md
+  - Status: PLAN COMPLETE (research + verification done, ready for execution)
+- [ ] 17-02: Implement rule management dashboard with filtering and sorting
+- [ ] 17-03: Build decision table editor with hit policy support
+- [ ] 18-01: Complete RBAC implementation with predefined roles and permissions
+- [ ] 18-02: Implement maker-checker approval workflow engine
+- [ ] 18-03: Add rule ownership assignment and stewardship tracking
+- [ ] 18-04: Build comprehensive audit trail for all modifications
+- [ ] 18-05: Create version control system with branching and merging support
+- [ ] 19-01: Integrate Prometheus metrics client into engine layer
+- [ ] 19-02: Implement real-time monitoring dashboard UI
+- [ ] 19-03: Build dead rule detection algorithm with notifications
+- [ ] 19-04: Create rule coverage reporting system
+- [ ] 20-01: Design and implement complete management API endpoints
+- [ ] 20-02: Add batch execution endpoint for performance-critical scenarios
+- [ ] 21-01: Optimize Docker image with multi-stage builds
+- [ ] 21-02: Create Kubernetes manifests (Deployment, Service, ConfigMap)
+- [ ] 21-03: Implement hot reload mechanism for rule updates
+
+### Phase 18: Enterprise Governance (v4.0)
+
+**Goal:** Deliver complete enterprise-grade governance capabilities including full RBAC implementation, maker-checker approval workflows, comprehensive audit trails, and robust version control system
+
+**Depends on:** Phase 17 (frontend foundation must exist for UI components)
+
+**Requirements:** GOV-01 through GOV-04
+
+**Success Criteria** (what must be TRUE):
+1. RBAC system supports predefined roles (admin, author, reviewer, viewer) with granular permissions
+2. Rule changes require maker-checker approval workflow before deployment to production
+3. Every rule modification is recorded in an immutable audit trail with user, timestamp, and diff
+4. Users can create branches for rule development and merge to main branch safely
+
+**Plans:** 5 plans (18-01 through 18-05)
+
+## Progress
+
+**Milestone v4.0 Progress:**
+
+| Phase | Plans Complete | Status |
+|-------|----------------|--------|
+| 17 | 1/3 | Plan Complete (Ready for Execution) |
+
+---
+
+*Roadmap last updated: 2026-06-09 after Phase 17 plan creation*

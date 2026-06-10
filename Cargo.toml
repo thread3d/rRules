@@ -12,3 +12,4 @@ gherkin = "0.16.0"
 assert_cmd = "2.2.2"
 wiremock = "0.6.5"
 proptest = "1.11.0"
+prometheus = { version = "0.13", features = ["process"] }

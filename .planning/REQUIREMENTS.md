@@ -1,12 +1,343 @@
 # Requirements: rRules - Business Rules Management System
 
 **Defined:** 2026-05-22  
-**Updated:** 2026-06-03  
+**Updated:** 2026-06-09  
 **Core Value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying application code.
 
-## Milestone v2.0: Testing Framework
+## Milestone v4.0: Production Platform (NEW)
 
-This milestone establishes a comprehensive testing infrastructure for the rule engine, enabling reliable development and verification of business rules.
+This milestone delivers a complete production-ready platform with full web frontend for enterprise rule management.
+
+### Research Summary
+
+**Production BRMS Requirements (from domain research):**
+- **Monitoring:** Prometheus metrics endpoint, Grafana dashboards, alerting
+- **RBAC:** Maker-checker workflows, tenant isolation, role-based permissions
+- **API:** RESTful endpoints with batch execution commands
+- **Frontend:** Guided editors, real-time validation, version comparison
+
+**Tech Stack Recommendations:**
+- Frontend: React + TypeScript + CodeMirror + ag-Grid
+- Backend: Rust with Prometheus client library
+- Deployment: Docker/Kubernetes with ConfigMap/Secrets
+
+---
+
+## v4 Requirements - Production Platform Features
+
+### FRONTEND-01: Complete Rule Authoring Interface
+
+**Category:** User Experience  
+**Priority:** P1  
+**Description:** Full-featured web interface for rule creation, editing, and management.
+
+**Acceptance Criteria:**
+- Web-based IDE with syntax highlighting for Drools/DRL rules
+- Decision table editor with all hit policies (Unique, Any, Priority, Collect, etc.)
+- Guided rule editor for business users without coding experience
+- Real-time validation with inline error messages
+- Side-by-side version comparison for branch/merge workflow
+
+---
+
+### FRONTEND-02: Rule Management Dashboard
+
+**Category:** User Experience  
+**Priority:** P1  
+**Description:** Central dashboard for monitoring and managing all rules.
+
+**Acceptance Criteria:**
+- List view of all rules with filtering by category, owner, status
+- Quick access to edit, clone, or delete rules
+- Visual indicators for rule health (zero-hit rules, conflicts)
+- Bulk operations support (disable multiple rules at once)
+
+---
+
+### GOV-01: Complete RBAC Implementation
+
+**Category:** Governance  
+**Priority:** P1  
+**Description:** Full role-based access control with predefined roles and permissions.
+
+**Acceptance Criteria:**
+- Admin: Full access to all features and settings
+- Author: Create, edit, and submit rules for approval
+- Reviewer: Approve or reject submitted rule changes
+- Viewer: Read-only access to rules and execution results
+
+---
+
+### GOV-02: Maker-Checker Approval Workflow
+
+**Category:** Governance  
+**Priority:** P1  
+**Description:** Enforce maker-checker pattern for all rule modifications.
+
+**Acceptance Criteria:**
+- Rule changes require submission before deployment
+- Reviewers receive notifications for pending approvals
+- Approved changes can be deployed to production
+- Rejected changes return to author with feedback
+
+---
+
+### GOV-03: Full Audit Trail
+
+**Category:** Governance  
+**Priority:** P1  
+**Description:** Complete audit log of all system activities.
+
+**Acceptance Criteria:**
+- Track all rule modifications with user, timestamp, and diff
+- Log access events for compliance reporting
+- Exportable audit reports in CSV/JSON formats
+- Immutable audit storage (append-only)
+
+---
+
+### GOV-04: Version Control & Branching
+
+**Category:** Governance  
+**Priority:** P1  
+**Description:** Full Git-backed version control with branching and merging.
+
+**Acceptance Criteria:**
+- Create branches for rule development without affecting production
+- Merge branches to main with conflict resolution
+- View history of all changes to rules
+- Compare versions with side-by-side diff view
+
+---
+
+### MON-01: Prometheus Metrics Integration
+
+**Category:** Monitoring  
+**Priority:** P1  
+**Description:** Export engine metrics in Prometheus format.
+
+**Acceptance Criteria:**
+- HTTP endpoint `/metrics` serves Prometheus-formatted metrics
+- Track rule firing rates, match counts, memory usage
+- Engine-specific metrics per algorithm (Rete, TREAT, LEAPS, PHREAK)
+- Metrics include labels for rule names, categories, owners
+
+---
+
+### MON-02: Real-Time Monitoring Dashboard
+
+**Category:** Monitoring  
+**Priority:** P1  
+**Description:** Live dashboard showing current engine state and activity.
+
+**Acceptance Criteria:**
+- Real-time rule firing visualization
+- Current working memory status (fact count, memory usage)
+- Active sessions and their resource consumption
+- Alerting for anomalous behavior (high latency, zero-hit rules)
+
+---
+
+### MON-03: Dead Rule Detection
+
+**Category:** Monitoring  
+**Priority:** P2  
+**Description:** Identify rules that never fire despite being active.
+
+**Acceptance Criteria:**
+- Daily analysis of rule execution logs
+- Report rules with zero hits in configurable time window
+- Optional notification to rule owners
+- Dashboard widget showing top dead rules by category
+
+---
+
+### MON-04: Rule Coverage Reporting
+
+**Category:** Monitoring  
+**Priority:** P2  
+**Description:** Track which rules execute during test runs and production.
+
+**Acceptance Criteria:**
+- Coverage data per test run with pass/fail status
+- Historical coverage trends over time
+- Exportable reports for compliance audits
+
+---
+
+### API-04: Complete Management API
+
+**Category:** API Layer  
+**Priority:** P1  
+**Description:** REST API endpoints for all engine management operations.
+
+**Acceptance Criteria:**
+- CRUD endpoints for rules, categories, and tags
+- Engine management endpoints (select, reload, stats)
+- Approval workflow endpoints (submit, review, approve, reject)
+- Batch execution endpoint for performance-critical scenarios
+
+---
+
+### DEPLOY-03: Docker/Kubernetes Support
+
+**Category:** Deployment  
+**Priority:** P1  
+**Description:** Production-ready container deployment.
+
+**Acceptance Criteria:**
+- Multi-stage Dockerfile with layer optimization
+- Kubernetes manifests (Deployment, Service, ConfigMap)
+- Environment variable-based configuration
+- Health and readiness probes for K8s
+
+---
+
+### DEPLOY-04: Hot Reload Support
+
+**Category:** Deployment  
+**Priority:** P2  
+**Description:** Update rules without service restart.
+
+**Acceptance Criteria:**
+- Detect file changes in watched directories
+- Rebuild and reload rule sets atomically
+- No dropped executions during reload
+- Graceful degradation if rebuild fails
+
+---
+
+## Milestone v3.0: Multiple Rule Engine Implementations (In Progress)
+
+This milestone implements multiple Rete-family rule engine algorithms with a pluggable architecture allowing runtime selection.
+
+### Research Summary
+
+**Algorithm Selection Criteria:**
+1. **Rete**: Foundational algorithm, well-documented, party tokens for pattern matching
+2. **TREAT**: Optimized left-memory management, join node caching for efficiency
+3. **LEAPS**: Aggregation node support for SUM/COUNT/MAX/MIN operations
+4. **PHREAK**: Incremental truth maintenance with justification tracking
+
+**Architecture Patterns:**
+- Trait-based engine interface for pluggability
+- Factory pattern for engine registration and instantiation
+- Configuration-driven selection (YAML) + API endpoint override
+- Metrics collection via unified instrumentation trait
+
+---
+
+## v3 Requirements - Pluggable Engine Architecture
+
+### ENGINE-01: Pluggable Engine Architecture
+
+**Category:** Core Engine  
+**Priority:** P1  
+**Description:** Rule engine architecture supporting multiple Rete-family algorithms with runtime selection.
+
+**Acceptance Criteria:**
+- Engine trait defines core methods: `execute`, `insert_fact`, `remove_fact`, `run`
+- EngineRegistry supports dynamic registration by algorithm name
+- Configuration file specifies engine to use (e.g., `engine = "rete"`)
+
+---
+
+### ENGINE-02: Native Rete Algorithm
+
+**Category:** Core Engine  
+**Priority:** P1  
+**Description:** Full Rete algorithm implementation with party tokens, alpha/beta memory, and network caching.
+
+**Acceptance Criteria:**
+- Party tokens (MemoryReference, Nagrams) for efficient pattern matching
+- Alpha memory network with test nodes and join nodes
+- Beta memory maintained at join nodes for partial matches
+- Network caching to avoid reevaluating unchanged facts
+
+---
+
+### ENGINE-03: TREAT Algorithm
+
+**Category:** Core Engine  
+**Priority:** P1  
+**Description:** TREAT algorithm implementation with optimized left-memory management.
+
+**Acceptance Criteria:**
+- Optimized left-memory management with join node caching
+- Partial matching without full Nagram creation when possible
+- Equivalence with Rete results for same inputs
+
+---
+
+### ENGINE-04: LEAPS Algorithm
+
+**Category:** Core Engine  
+**Priority:** P1  
+**Description:** LEAPS algorithm implementation with aggregation node support.
+
+**Acceptance Criteria:**
+- Aggregation nodes for SUM, COUNT, MAX, MIN operations
+- Efficient partial state updates when base facts change
+- Equivalence with Rete results for same inputs
+
+---
+
+### ENGINE-05: PHREAK Algorithm
+
+**Category:** Core Engine  
+**Priority:** P2  
+**Description:** PHREAK algorithm implementation with incremental truth maintenance.
+
+**Acceptance Criteria:**
+- Incremental truth maintenance with justifications
+- Dependency chains tracked for fact derivation
+- Equivalence with Rete results for same inputs
+
+---
+
+### ENGINE-06: Runtime Engine Selection
+
+**Category:** Core Engine  
+**Priority:** P1  
+**Description:** Users can select engine via configuration or API endpoint.
+
+**Acceptance Criteria:**
+- Configuration file specifies engine name
+- HTTP API endpoint `/engine/select` allows runtime switching
+- Active sessions support graceful engine migration (or error if incompatible)
+
+---
+
+### METRIC-01: Engine Metrics Collection
+
+**Category:** Monitoring  
+**Priority:** P2  
+**Description:** Track execution characteristics per algorithm.
+
+**Acceptance Criteria:**
+- Rule firing rate measured per engine
+- Memory usage tracked for alpha/beta memory structures
+- Network traversal counts recorded (test node visits, join activations)
+- Metrics exportable in Prometheus format
+
+---
+
+### METRIC-02: Algorithm Comparison Dashboard
+
+**Category:** Monitoring  
+**Priority:** P3  
+**Description:** Web dashboard displays algorithm performance characteristics.
+
+**Acceptance Criteria:**
+- Real-time engine metrics displayed
+- Historical comparison of algorithm performance available
+- Exportable reports for benchmarking
+
+---
+
+## Milestone v2.0: Testing Framework (Completed)
+
+This milestone established a comprehensive testing infrastructure for the rule engine, enabling reliable development and verification of business rules.
 
 ### Research Summary
 
@@ -137,34 +468,6 @@ This milestone establishes a comprehensive testing infrastructure for the rule e
 
 ---
 
-### TEST-09: Gherkin Feature File Support (Deferred to v2.1)
-
-**Category:** BDD Integration  
-**Priority:** P3  
-**Description:** Write tests in human-readable Given/When/Then syntax.
-
-**Acceptance Criteria:**
-- Parser accepts `.feature` files with Gherkin syntax
-- Steps map to Rust test functions (#[given], #[when], #[then])
-- Tests execute via cucumber-rs or compatible runner
-- Integration with cargo test
-
----
-
-### TEST-10: BDD Test Runner Integration (Deferred to v2.1)
-
-**Category:** BDD Integration  
-**Priority:** P3  
-**Description:** Run Gherkin tests as part of regular test suite.
-
-**Acceptance Criteria:**
-- `cargo test` discovers and runs feature files
-- Results reported alongside Rust unit tests
-- CI/CD integration for feature file testing
-- Failure reporting with step context
-
----
-
 ## v1 Requirements (Completed)
 
 Requirements for initial release. Each maps to roadmap phases.
@@ -203,7 +506,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **DEPLOY-02**: Kubernetes manifests for orchestration
 - [ ] **DEPLOY-03**: Multi-environment support (dev, test, staging, prod)
 
-### Governance & Access Control - COMPLETED
+### Governance & Access Control - COMPLETED (Stub Only)
 
 - [ ] **AUTH-01**: Role-Based Access Control (RBAC) with predefined roles - Stub only
 - [ ] **AUTH-02**: Maker-checker approval workflow for rule changes - Stub only
@@ -249,13 +552,34 @@ Explicitly excluded. Documented to prevent scope creep.
 
 Which phases cover which requirements. Updated during roadmap creation.
 
-### Milestone v2.0 (Testing Framework)
+### Milestone v4.0 (New)
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TEST-01, TEST-02, TEST-03, TEST-04, TEST-05 | Phase 7: Testing Infrastructure Foundation | Planned |
-| TEST-06, TEST-07, TEST-08 | Phase 8: Advanced Testing Features | Planned |
-| TEST-09, TEST-10 | Phase 9: BDD/Gherkin Integration (v2.1) | Deferred |
+| FRONTEND-01, FRONTEND-02 | Phase 17: Production Frontend Architecture | Complete |
+| GOV-01, GOV-02, GOV-03, GOV-04 | Phase 18: Enterprise Governance | Planned |
+| MON-01, MON-02, MON-03, MON-04 | Phase 19: Monitoring & Metrics | Planned |
+| API-04 | Phase 20: Complete Management API | Planned |
+| DEPLOY-03, DEPLOY-04 | Phase 21: Deployment & CI/CD | Planned |
+
+**Phase 17 Coverage:**
+- FRONTEND-01: Production Frontend Architecture (syntax highlighting, decision table editor)
+- FRONTEND-02: Rule Management Dashboard with filtering/sorting
+- GOV-01: RBAC implementation in frontend navigation controls
+
+### Milestone v3.0 (In Progress)
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| ENGINE-01, ENGINE-02, ENGINE-03, ENGINE-04, ENGINE-05, ENGINE-06 | Phase 10: Pluggable Engine Architecture & Implementations | In Progress |
+| METRIC-01, METRIC-02 | Phase 11: Metrics & Comparison Dashboard | Planned |
+
+### Milestone v2.0 (Completed)
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| TEST-01, TEST-02, TEST-03, TEST-04, TEST-05 | Phase 7: Testing Infrastructure Foundation | Complete |
+| TEST-06, TEST-07, TEST-08 | Phase 8: Advanced Testing Features | Complete |
 
 ### Milestone v1.0 (Completed)
 
@@ -271,9 +595,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 - v1 requirements mapped: 39 total
-- v2 requirements mapped: 10 testing framework requirements
+- v2 requirements mapped: 8 testing framework requirements  
+- v3 requirements mapped: 8 pluggable engine requirements
+- v4 requirements mapped: 15+ production platform requirements (including Phase 17 frontend)
 
 ---
 
 *Requirements defined: 2026-05-22*
-*Last updated: 2026-06-03 after v2.0 milestone start*
+*Last updated: 2026-06-09 after v4.0 milestone start*
