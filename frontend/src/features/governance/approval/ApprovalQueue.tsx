@@ -36,21 +36,32 @@ export function ApprovalQueue() {
 
   async function fetchPendingApprovals() {
     try {
-      const response = await fetch('/api/v1/approvals?state=submitted')
+      const response = await fetch('/api/v1/approvals/pending')
       if (response.ok) {
-        setRequests(await response.json())
+        const data = await response.json()
+        // Transform the API response to match our expected format
+        const transformed: ApprovalRequest[] = (data.approvals || []).map((a: any) => ({
+          id: a.id,
+          ruleName: `Rule ${a.rule_id.slice(0, 8)}...`,
+          makerName: a.maker_id,
+          submittedAt: a.created_at,
+          tier: 1,
+          workflowType: 'standard',
+        }))
+        setRequests(transformed)
       }
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleReview(id: string, approve: boolean, reason?: string) {
+  async function handleReview(id: string, approve: boolean) {
     try {
-      const response = await fetch(`/api/v1/approvals/${id}/review`, {
-        method: 'PUT',
+      const endpoint = approve ? `/api/v1/approvals/${id}/approve` : `/api/v1/approvals/${id}/reject`
+      const response = await fetch(endpoint, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approve, reason }),
+        body: JSON.stringify({ approver_id: 'current-user' }),
       })
 
       if (response.ok) {
