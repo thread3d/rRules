@@ -16,7 +16,8 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        runAsUser: 65534
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: rrules-server
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -26,7 +27,11 @@ spec:
               protocol: TCP
           env:
             - name: RUST_LOG
-              value: info
+              value: {{ .Values.rustLog | default "info" }}
+            - name: RULE_STORAGE_PATH
+              value: {{ .Values.ruleStoragePath | default "/app/rules" }}
+            - name: WATCH_RULES_DIR
+              value: {{ .Values.watchRulesDir | default "true" }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           livenessProbe:
@@ -35,9 +40,19 @@ spec:
               port: {{ .Values.containerPort }}
             initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health/ready
               port: {{ .Values.containerPort }}
-            initialDelaySeconds: 5
-            periodSeconds: 5
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL

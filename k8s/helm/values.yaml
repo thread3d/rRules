@@ -7,6 +7,12 @@ image:
 
 containerPort: 8080
 
+rustLog: info
+
+ruleStoragePath: /app/rules
+
+watchRulesDir: "true"
+
 service:
   type: ClusterIP
   port: 80
@@ -17,8 +23,8 @@ resources:
     memory: "128Mi"
     cpu: "100m"
   limits:
-    memory: "256Mi"
-    cpu: "200m"
+    memory: "512Mi"
+    cpu: "500m"
 
 ingress:
   enabled: true
@@ -33,12 +39,16 @@ livenessProbe:
   httpGet:
     path: /health/live
     port: 8080
-  initialDelaySeconds: 10
+  initialDelaySeconds: 30
   periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
 
 readinessProbe:
   httpGet:
     path: /health/ready
     port: 8080
-  initialDelaySeconds: 5
+  initialDelaySeconds: 10
   periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3

@@ -2,6 +2,7 @@
 
 use actix_web::{web, App, HttpServer};
 
+mod health;
 mod metrics;
 
 // Phase 20 modules
@@ -47,6 +48,9 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(audit_store.clone()))
             .app_data(web::Data::new(branch_store.clone()))
             .app_data(web::Data::new(job_store.clone()))
+            // Health check endpoints (must be before /v1 to avoid prefix conflict)
+            .configure(health::configure_health)
+            // API v1 endpoints
             .service(
                 web::scope("/v1")
                     // Execution endpoint

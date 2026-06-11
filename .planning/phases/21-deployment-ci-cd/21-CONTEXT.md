@@ -32,15 +32,15 @@ This phase builds upon the completed API layer (Phase 20) and infrastructure fou
   - `k8s/helm/` directory contains complete Helm chart with values templates
 
 ### Hot Reload Behavior (D-21-03)
-- **Decision:** Async reload with job tracking
+- **Decision:** Async reload with job tracking via existing in-memory JobStore
 - **Rationale:** 
   - Rule set recompilation may take seconds for large rule bases
   - Immediate API response prevents client timeouts
   - Job status endpoint allows monitoring progress
 - **Implementation:**
-  - POST /v1/rules/reload returns job ID immediately
-  - GET /v1/rules/reload/{job_id} returns status (pending/running/completed/failed)
-  - Completion response includes rules reloaded count and timing
+  - POST /v1/rules/reload returns job ID immediately (async background reload)
+  - GET /v1/jobs/{job_id} retrieves status from in-memory store per D-21-06
+  - GET /v1/jobs lists all jobs
 
 ### Docker Optimization Priority (D-21-04)
 - **Decision:** Minimize runtime image size as top priority
@@ -60,16 +60,16 @@ This phase builds upon the completed API layer (Phase 20) and infrastructure fou
   - Current multi-stage build with dependency caching layer remains as-is
   - Revisit when CI/CD times exceed acceptable thresholds
 
-### Reload Status Storage (D-21-06) - NEW
-- **Decision:** Persist reload job status to PostgreSQL database
+### Reload Status Storage (D-21-06) - UPDATED
+- **Decision:** Use existing in-memory `JobStore` with Arc<RwLock<HashMap>>
 - **Rationale:** 
-  - Audit trail required for governance (Phase 18)
-  - Reload history survives container restarts
-  - Enables compliance reporting on rule changes
+  - Codebase has no database dependencies (SQLx/Prisma/diesel)
+  - Existing implementation uses in-memory store in `api/src/v1/execution.rs`
+  - PostgreSQL audit trail deferred to Phase 22 or later when DB integration is added
 - **Implementation:**
-  - Create `reload_jobs` table with columns: job_id, status, rules_count, error_message, created_at, completed_at
-  - POST /v1/rules/reload creates record and returns job_id
-  - GET /v1/rules/reload/{job_id} queries database for status
+  - `JobStore` type alias in execution.rs: `Arc<RwLock<HashMap<String, ReloadJob>>>`
+  - POST /v1/rules/reload creates job record and returns job_id immediately
+  - GET /v1/jobs/{job_id} retrieves status from in-memory store
 
 ### Helm Chart Configuration (D-21-07) - NEW
 - **Decision:** Support replica scaling, resource limits, ingress configuration, and feature flags as environment-specific values
@@ -110,9 +110,11 @@ This phase builds upon the completed API layer (Phase 20) and infrastructure fou
 - **Rust backend with Actix Web** (Phase 3): REST API structure already established
 
 ### Integration Points
-- Phase 20 API (completed) — Add reload endpoint to rules.rs module
+- Phase 20 API (completed) — Reload endpoint exists in execution.rs
 - Dockerfile (existing) — Multi-stage build already in place, can add BuildKit later if needed
 - k8s/ manifests (existing) — Create Helm chart templates with environment-specific values
+
+**Missing Route:** GET `/v1/jobs/{job_id}` is not registered in main.rs - needs to be added per D-21-03
 
 ## Deferred Ideas
 

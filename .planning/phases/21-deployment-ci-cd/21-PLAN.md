@@ -1,411 +1,173 @@
-# Phase 21: Deployment & CI/CD
+# Phase 21: Deployment & CI/CD - Implementation Plan
 
 **Phase Number:** 21  
-**Milestone:** v4.0 - Production Platform  
-**Target Completion:** 2026-06-15  
+**Plan Number:** 01  
+**Type:** execute  
+**Wave:** 1 (Kubernetes Setup) / Wave 2 (Hot Reload Route Registration)  
+**Files Modified:**
+- `k8s/helm/secret.yaml.template` — Helm secret template
+- `k8s/helm/values-dev.yaml` — Dev environment values
+- `k8s/helm/values-staging.yaml` — Staging environment values
+- `k8s/helm/values-prod.yaml` — Prod environment values
+- `api/src/main.rs` — Register missing /v1/jobs routes
+
+**Autonomous:** true (no checkpoints)
 
 ---
 
-## Goal
+## Objective
 
-Complete the production deployment stack with optimized Docker images, Kubernetes manifests, and hot reload mechanism for rule updates without service restart.
+Complete Phase 21 deployment infrastructure with:
+1. **Wave 1 (P1):** Helm secret management and multi-environment values configuration
+2. **Wave 2 (P2):** Register existing hot reload endpoints in main.rs routing
 
----
+**Purpose:** Enable production deployments across dev/staging/prod environments with secure secret handling and rule hot reload without container restarts.
 
-## Requirements Addressed
-
-| Requirement | Priority |
-|-------------|----------|
-| DEPLOY-03: Optimized Docker Image | P1 |
-| DEPLOY-04: Kubernetes Manifests | P1 |
-| API-05: Hot Reload Mechanism | P2 |
-
----
-
-## Success Criteria (what must be TRUE)
-
-1. Docker image uses multi-stage builds with layer caching optimization
-2. Runtime image size < 100MB as verified by `docker images --format "{{.Size}}"`
-3. Kubernetes manifests include ConfigMap, Deployment, Service, HPA, and Ingress
-4. Hot reload endpoint triggers atomic rule set swap without container restart
+**Output:**
+- `k8s/helm/secret.yaml.template` — Secret template for external generation
+- Three environment-specific Helm values files (dev, staging, prod)
+- Registered routes in main.rs for reload job status tracking
 
 ---
 
-## Plans
+## Execution Context
 
-### Phase 21-01: Docker Image Optimization (P1)
+@$HOME/.claude/get-shit-done/workflows/execute-plan.md  
+@$HOME/.claude/get-shit-done/templates/summary.md  
 
-**Goal:** Optimize Docker image with multi-stage builds for faster builds and smaller runtime image.
+**Reference:** `21-CONTEXT.md`, `21-RESEARCH.md`, `STATE.md`
 
-**Wave:** 1
+---
 
-**Files modified:**
-- `Dockerfile` - Multi-stage build with Alpine + musl static linking
+## Context
 
-**Tasks:**
+@.planning/PROJECT.md  
+@.planning/ROADMAP.md  
+@.planning/REQUIREMENTS.md  
+@.planning/phases/21-deployment-ci-cd/21-CONTEXT.md  
+@.planning/phases/21-deployment-ci-cd/21-RESEARCH.md  
 
-#### 21-01-01: Add cargo cache layer with BuildKit mounts
-**Priority:** P1  
-**Read first:** None  
-**Action:** Modify Dockerfile to use BuildKit cache mounts for cargo registry and target directories
+**Existing codebase interfaces:**
 
-```dockerfile
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/target/ \
-    cargo fetch --manifest-path api/Cargo.toml
-```
-
-**Acceptance criteria:**
-- `cargo fetch` caches dependencies in /usr/local/cargo/registry
-- `docker history rrules:latest` shows separate layer for dependencies
-
-#### 21-01-02: Use Alpine Linux base with musl-tools
-**Priority:** P1  
-**Read first:** None  
-**Action:** Change build stage to `rust:1.79-alpine` and install musl-dev, musl-utils for static linking
-
-```dockerfile
-FROM rust:1.79-alpine AS build
-RUN apk add --no-cache musl-dev musl-utils
-```
-
-**Acceptance criteria:**
-- Build stage uses `rust:1.79-alpine`
-- Runtime image uses `alpine:3.19` per D-21-01 decision
-
-#### 21-01-03b: Verify runtime size < 100MB
-**Priority:** P1  
-**Read first:** None  
-**Action:** Add automated test to verify Docker image meets size requirement
-
+From `engine/src/environment.rs`:
 ```rust
-// tests/docker_test.rs
-use assert_cmd::Command;
+pub type EngineHandle = Arc<RwLock<Engine>>;
+```
 
-#[test]
-fn docker_image_size_under_100mb() {
-    let cmd = Command::new("docker")
-        .args(["images", "rrules:latest", "--format", "{{.Size}}"])
-        .assert()
-        .success();
-    
-    // Parse size and verify < 100MB
-    // (implementation would parse output string like "85MiB")
+From `api/src/v1/execution.rs` (existing implementation):
+```rust
+// Job tracking for async operations
+pub struct JobStore(Arc<RwLock<HashMap<String, ReloadJob>>>);
+pub fn init_job_store() -> JobStore;
+
+// Hot reload with atomic swap
+impl EngineState {
+    pub async fn reload_from_directory(&self, directory: &str) -> Result<usize, String>;
 }
+
+// Reload endpoints (defined but not all registered in main.rs):
+pub async fn reload_rules(...) -> impl Responder  // POST /v1/rules/reload - ALREADY REGISTERED
+pub async fn get_job_status(...) -> impl Responder // GET /v1/jobs/{job_id} - NOT YET REGISTERED
+pub async fn list_jobs(...) -> impl Responder      // GET /v1/jobs - NOT YET REGISTERED
 ```
 
-**Acceptance criteria:**
-- `docker images rrules:latest --format "{{.Size}}"` returns <100MB
-
-#### 21-01-03: Implement multi-stage build with builder and runtime stages
-**Priority:** P1  
-**Read first:** None  
-**Action:** Structure Dockerfile with two stages:
-1. Build stage: Compile with musl-static linking
-2. Runtime stage: Copy binary to distroless image
-
-```dockerfile
-# Runtime stage
-FROM gcr.io/distroless/cc-debian12
-COPY --from=build /build/target/release/rRules-server /app/rules-server
-USER 65534:65534
-EXPOSE 8080
-ENTRYPOINT ["/app/rules-server"]
-```
-
-**Acceptance criteria:**
-- `docker build .` completes successfully
-- `docker images rrules:latest --format "{{.Size}}"` returns <100MB
+**Missing Route Registration:**
+- `GET /v1/jobs/{job_id}` — Get reload job status (defined in execution.rs, not registered)
+- `GET /v1/jobs` — List all jobs (defined in execution.rs, not registered)
 
 ---
 
-### Phase 21-02: Kubernetes Manifests (P1)
+## Tasks
 
-**Goal:** Create complete K8s manifests for deployment and management.
+<task type="auto">
+  <name>Task 1: Create Helm secret template</name>
+  <files>/home/threaded/projects/rRules/k8s/helm/secret.yaml.template</files>
+  <action>Create k8s/helm/secret.yaml.template with database credentials and API secrets. Use Helm placeholder syntax for values provided at install time. Per D-21-07, separate secrets from ConfigMaps for security.</action>
+  <verify>File exists with proper YAML structure and Helm templating placeholders</verify>
+  <done>Template file created at k8s/helm/secret.yaml.template with database_url, api_secret_key fields</done>
+</task>
 
-**Wave:** 1
+<task type="auto">
+  <name>Task 2: Create environment-specific Helm values files</name>
+  <files>/home/threaded/projects/rRules/k8s/helm/values-dev.yaml,/home/threaded/projects/rRules/k8s/helm/values-staging.yaml,/home/threaded/projects/rRules/k8s/helm/values-prod.yaml</files>
+  <action>Create three environment-specific values files per D-21-07:
+  - values-dev.yaml: 1 replica, minimal resources (128Mi/100m), ingress host dev.example.com
+  - values-staging.yaml: 2 replicas, moderate resources (256Mi/200m limits), ingress host staging.example.com  
+  - values-prod.yaml: 3 replicas, configured resources (512Mi requests/1Gi limits), ingress host prod.example.com
 
-**Files created:**
-- `k8s/configmap.yaml` - Configuration values
-- `k8s/service-account.yaml` - ServiceAccount with RBAC
-- `k8s/hpa.yaml` - HorizontalPodAutoscaler (enhanced)
-- `k8s/ingress.yaml` - Ingress controller config
+  All files must reference secret via rrules-secrets secretRef.</action>
+  <verify>Three files exist with correct replica counts and resource configurations</verify>
+  <done>All three values files created with environment-appropriate configurations per D-21-07</done>
+</task>
 
-**Files modified:**
-- `k8s/deployment.yaml` - Add liveness/readiness probes
-- `k8s/service.yaml` - Service definition with proper ports
+<task type="auto">
+  <name>Task 3: Register missing reload job routes in main.rs</name>
+  <files>/home/threaded/projects/rRules/api/src/main.rs</files>
+  <action>Add route registrations for existing endpoints from execution.rs:
+  - Import get_job_status and list_jobs functions
+  - Add routes for GET /v1/jobs/{job_id} and GET /v1/jobs
 
-**Tasks:**
+  Code to add in the .service() block (after /rules/reload route):
+  ```rust
+  // Reload job status endpoints
+  .route("/jobs/{job_id}", web::get().to(v1::execution::get_job_status))
+  .route("/jobs", web::get().to(v1::execution::list_jobs))
+  ```
 
-#### 21-02-01: Create ConfigMap for configuration values
-**Priority:** P1  
-**Read first:** None  
-**Action:** Create k8s/configmap.yaml with non-sensitive environment variables:
+  Per D-21-03, this enables job tracking for async reload operations.</action>
+  <verify>Build compiles successfully with cargo check --bin rRules-server</verify>
+  <done>Routes registered in main.rs per D-21-03</done>
+</task>
 
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: rrules-config
-data:
-  RUST_LOG: "info"
-  APP_ENV: "production"
-  RULE_STORAGE_PATH: "/app/rules"
-```
-
-**Acceptance criteria:**
-- ConfigMap includes all non-sensitive config values
-- Values match those in existing Dockerfile ENV directives
-
-#### 21-02-02: Configure ServiceAccount with RBAC roles
-**Priority:** P1  
-**Read first:** None  
-**Action:** Create k8s/service-account.yaml with minimal permissions:
-
-```yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: rrules-service-account
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: rrules-role
-rules:
-- apiGroups: [""]
-  resources: ["configmaps", "pods"]
-  verbs: ["get", "list", "watch"]
-```
 
-**Acceptance criteria:**
-- ServiceAccount created with minimal RBAC permissions
-- No admin or cluster-admin roles used
+## Threat Model
 
-#### 21-02-03: Add HorizontalPodAutoscaler for scaling
-**Priority:** P1  
-**Read first:** None  
-**Action:** Create k8s/hpa.yaml with CPU/memory metrics:
+### Trust Boundaries
 
-```yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: rrules-hpa
-spec:
-  minReplicas: 2
-  maxReplicas: 5
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-```
+| Boundary | Description |
+|----------|-------------|
+| Client → `/v1/rules/reload` | Untrusted job_id input, must validate UUID format |
+| Kubernetes Secret → Pod env | Secrets mounted via volume, not environment variables |
 
-**Acceptance criteria:**
-- HPA scales between 2-5 replicas
-- Uses CPU utilization as scaling metric
+### STRIDE Threat Register
 
-#### 21-02-04: Verify manifests with kubectl dry-run
-**Priority:** P1  
-**Read first:** None  
-**Action:** Test all manifests with `kubectl apply --dry-run=client`:
+| Threat ID | Category | Component | Disposition | Mitigation Plan |
+|-----------|----------|-----------|-------------|-----------------|
+| T-21-01 | Spoofing | POST /v1/rules/reload | mitigate | Validate job_id is valid UUID, reject malformed requests |
+| T-21-02 | Tampering | Secret values in Helm templates | accept | Template uses placeholders only; secrets generated externally with kubectl create secret |
 
+---
+
+## Verification
+
+### Phase Completion Checks
 ```bash
-kubectl apply --dry-run=client -f k8s/configmap.yaml
-kubectl apply --dry-run=client -f k8s/service-account.yaml
-kubectl apply --dry-run=client -f k8s/hpa.yaml
-```
+# Verify secret template exists
+ls -la k8s/helm/secret.yaml.template
 
-**Acceptance criteria:**
-- All manifests pass dry-run without errors
-- Service discovery works within cluster
+# Verify environment values files exist
+cat k8s/helm/values-dev.yaml | grep replicaCount: 1
+cat k8s/helm/values-staging.yaml | grep replicaCount: 2  
+cat k8s/helm/values-prod.yaml | grep replicaCount: 3
+
+# Build and verify API compiles with new routes
+cargo check --bin rRules-server
+```
 
 ---
 
-### Phase 21-03: Hot Reload Mechanism (P2)
+## Success Criteria
 
-**Goal:** Implement rule hot reload without container restart.
-
-**Wave:** 2
-
-**Files modified:**
-- `api/src/v1/rules.rs` - Add hot reload endpoints
-- `engine/src/environment.rs` - Create EngineHandle type alias
-
-**Tasks:**
-
-#### 21-03-01: Create EngineHandle with Arc<RwLock<Engine>> pattern
-**Priority:** P1  
-**Read first:** None  
-**Action:** Modify engine/src/environment.rs to add shared state wrapper:
-
-```rust
-use std::sync::{Arc, RwLock};
-use uuid::Uuid;
-use std::collections::HashMap;
-
-pub type EngineHandle = Arc<RwLock<engine::environment::Engine>>;
-
-pub struct AppState {
-    pub engine: EngineHandle,
-    pub reload_status: Arc<RwLock<HashMap<String, ReloadStatus>>>,
-}
-
-pub enum ReloadStatus {
-    Pending,
-    Running,
-    Completed { rules_reloaded: usize },
-    Failed { error: String },
-}
-```
-
-**Acceptance criteria:**
-- `EngineHandle` type alias defined as `Arc<RwLock<Engine>>`
-- `AppState` includes engine field with proper synchronization
-
-#### 21-03-02: Implement async reload endpoint with job tracking
-**Priority:** P1  
-**Read first:** None  
-**Action:** Add POST /v1/rules/reload endpoint that spawns background reload:
-
-```rust
-use uuid::Uuid;
-
-pub struct ReloadRequest {
-    pub rule_file: Option<String>,
-}
-
-pub struct ReloadResponse {
-    pub reload_id: String,
-    pub status: String,
-}
-
-pub async fn reload_rules(
-    req: web::Json<ReloadRequest>,
-    state: web::Data<AppState>,
-) -> impl Responder {
-    let reload_id = Uuid::new_v4().to_string();
-    
-    // Get rules directory from request or environment
-    let rules_dir = req.rule_file
-        .as_deref()
-        .unwrap_or_else(|| std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string()));
-
-    // Spawn reload in background (returns immediately)
-    let state_clone = web::Data::clone(&state);
-    tokio::spawn(async move {
-        match state_clone.reload_from_directory(&rules_dir).await {
-            Ok(count) => log::info!("Reloaded {} rules", count),
-            Err(e) => log::error!("Reload failed: {}", e),
-        }
-    });
-
-    HttpResponse::Accepted().json(ReloadResponse {
-        reload_id,
-        status: "reload initiated".to_string(),
-    })
-}
-```
-
-**Acceptance criteria:**
-- POST /v1/rules/reload returns job ID immediately
-- Reload spawns async background task
-
-#### 21-03-03: Add GET /v1/rules/reload/{job_id} status endpoint
-**Priority:** P1  
-**Read first:** None  
-**Action:** Add status tracking with in-memory HashMap for job IDs:
-
-```rust
-use std::sync::{Arc, RwLock};
-use uuid::Uuid;
-
-pub enum ReloadStatus {
-    Pending,
-    Running,
-    Completed { rules_reloaded: usize },
-    Failed { error: String },
-}
-
-pub struct AppState {
-    pub engine: EngineHandle,
-    pub reload_status: Arc<RwLock<HashMap<String, ReloadStatus>>>,
-}
-```
-
-**Acceptance criteria:**
-- GET /v1/rules/reload/{job_id} returns status
-- Status transitions: pending -> running -> completed/failed
-
-#### 21-03-04: Implement atomic swap in reload_from_directory method
-**Priority:** P1  
-**Read first:** None  
-**Action:** Add method to AppState that performs atomic engine swap:
-
-```rust
-impl AppState {
-    pub async fn reload_from_directory(&self, dir: &str) -> Result<usize, String> {
-        // 1. Load new rules into temporary engine
-        let mut temp_engine = EngineBuilder::new().build();
-        let rule_count = load_rules_from_directory(&mut temp_engine, dir).await?;
-
-        // 2. Atomic swap - write lock blocks until all readers are done
-        let mut existing_engine = self.engine.write()
-            .map_err(|e| format!("Failed to acquire engine write lock: {}", e))?;
-        
-        *existing_engine = temp_engine;
-
-        Ok(rule_count)
-    }
-}
-```
-
-**Acceptance criteria:**
-- Reload completes without dropped executions
-- Active sessions continue without interruption
+Phase 21 plan complete when:
+- [ ] `k8s/helm/secret.yaml.template` created with Helm templating placeholders
+- [ ] Three environment values files (dev/staging/prod) exist with correct replica counts
+- [ ] Reload job routes registered in main.rs (GET /v1/jobs/{job_id}, GET /v1/jobs)
+- [ ] Code compiles successfully per verification checks
+- [ ] All artifacts committed to git
 
 ---
 
-## Dependencies
+## Output
 
-| Phase | Status |
-|-------|--------|
-| Phase 20 | Must be complete (API endpoints depend on existing structure) |
-
----
-
-## Success Metrics
-
-- **Docker build time:** < 60 seconds from cache
-- **Runtime image size:** < 100MB (verified with docker images --format "{{.Size}}")
-- **Hot reload latency:** < 5 seconds for rule set recompilation
-
----
-
-## Implementation Checklist
-
-### Phase 21-01: Docker Image
-- [ ] Multi-stage build with cargo cache layer
-- [ ] Use rust:1.79-alpine with musl-tools for build stage
-- [ ] Use distroless/cc-debian12 as runtime base
-- [ ] Verify size < 100MB with docker images --format "{{.Size}}"
-
-### Phase 21-02: Kubernetes
-- [ ] ConfigMap with all non-sensitive configuration values
-- [ ] ServiceAccount with minimal RBAC role (no admin privileges)
-- [ ] HPA with CPU utilization target (70%)
-- [ ] All manifests pass kubectl apply --dry-run
-
-### Phase 21-03: Hot Reload
-- [ ] EngineHandle = Arc<RwLock<Engine>> in AppState
-- [ ] POST /v1/rules/reload returns job ID immediately
-- [ ] GET /v1/rules/reload/{job_id} returns status
-- [ ] Atomic swap via RwLock write lock during reload
-
----
-
-*Phase planned: 2026-06-11*
-*Verified by gsd-plan-checker on 2026-06-11*
+Create `.planning/phases/21-deployment-ci-cd/21-01-SUMMARY.md` when done
