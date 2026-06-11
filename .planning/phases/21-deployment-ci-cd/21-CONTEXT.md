@@ -1,6 +1,6 @@
 # Phase 21: Deployment & CI/CD - Context
 
-**Gathered:** 2026-06-11  
+**Gathered:** 2026-06-11 (updated)  
 **Status:** Ready for Planning
 
 ## Phase Boundary
@@ -53,6 +53,32 @@ This phase builds upon the completed API layer (Phase 20) and infrastructure fou
   - Static linking to eliminate libc dependency
   - Remove build tools from final image
 
+### Dependency Caching Strategy (D-21-05) - NEW
+- **Decision:** Keep current approach for now, no BuildKit cache mounts or cargo-chef
+- **Rationale:** Current Dockerfile already implements good caching via layer ordering (copy Cargo.toml first). BuildKit optimization can be added later if build times become a bottleneck.
+- **Implementation:**
+  - Current multi-stage build with dependency caching layer remains as-is
+  - Revisit when CI/CD times exceed acceptable thresholds
+
+### Reload Status Storage (D-21-06) - NEW
+- **Decision:** Persist reload job status to PostgreSQL database
+- **Rationale:** 
+  - Audit trail required for governance (Phase 18)
+  - Reload history survives container restarts
+  - Enables compliance reporting on rule changes
+- **Implementation:**
+  - Create `reload_jobs` table with columns: job_id, status, rules_count, error_message, created_at, completed_at
+  - POST /v1/rules/reload creates record and returns job_id
+  - GET /v1/rules/reload/{job_id} queries database for status
+
+### Helm Chart Configuration (D-21-07) - NEW
+- **Decision:** Support replica scaling, resource limits, ingress configuration, and feature flags as environment-specific values
+- **Rationale:** Different environments have different requirements for availability, resources, and exposed hosts
+- **Implementation:**
+  - `values-dev.yaml`: 1 replica, minimal resources, dev.example.com
+  - `values-staging.yaml`: 2 replicas, moderate resources, staging.example.com  
+  - `values-prod.yaml`: 3+ replicas, configured resources, prod.example.com
+
 ## Canonical References
 
 **Downstream agents MUST read these before planning or implementing.**
@@ -85,8 +111,8 @@ This phase builds upon the completed API layer (Phase 20) and infrastructure fou
 
 ### Integration Points
 - Phase 20 API (completed) — Add reload endpoint to rules.rs module
-- Dockerfile (existing) — Modify for multi-stage build optimization
-- k8s/ manifests (existing) — Create Helm chart templates
+- Dockerfile (existing) — Multi-stage build already in place, can add BuildKit later if needed
+- k8s/ manifests (existing) — Create Helm chart templates with environment-specific values
 
 ## Deferred Ideas
 
@@ -102,3 +128,4 @@ This phase builds upon the completed API layer (Phase 20) and infrastructure fou
 
 *Phase: 21-Deployment & CI/CD*
 *Context gathered: 2026-06-11*
+*Last updated: 2026-06-11*
