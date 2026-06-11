@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: - Production Platform
-status: verifying
-last_updated: "2026-06-10T13:17:14.099Z"
+status: in_progress
+last_updated: "2026-06-11T10:15:00.000Z"
 progress:
-  total_phases: 10
-  completed_phases: 3
-  total_plans: 39
-  completed_plans: 20
-  percent: 30
+  total_phases: 3
+  completed_phases: 0
+  total_plans: 8
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -23,26 +23,31 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 ## Current Position
 
-Status: Phase 18 UAT Complete (Phase 17 frontend foundation + Phase 18 governance implementation verified)
+Status: Milestone v4.0 Nearly Complete (Phases 17, 18, 19, 20 implemented)
 
 Milestone v4.0 in progress:
 
 - Phase 17 (Frontend foundation): Plan complete - Implementation & Verification done
-- Phase 18 (Enterprise Governance): Plan complete - All sub-plans created, UAT passed
+- Phase 18 (Enterprise Governance): Plan complete - All sub-plans created, UAT passed (8/8 tests)
+- Phase 19 (Monitoring & Metrics): Plan complete - Implementation verified
+- Phase 20 (Complete Management API): Implementation complete - All modules wired up
 
-### Milestone v4.0 Plans Status (In Progress)
+### Milestone v4.0 Plans Status
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 17 | Production Frontend Architecture | [x] COMPLETE |
+| 17-01 | Production Frontend Architecture Plan | [x] COMPLETE |
+| 17-02 | Rule Management Dashboard | [x] IMPLEMENTED (frontend/src/features/rules/) |
 | 18-01 | RBAC Implementation | [x] PLAN & IMPLEMENTATION COMPLETE |
-| 18-02 | Approval Workflow (Webhooks First) | [x] PLAN & IMPLEMENTATION COMPLETE |
-| 18-03a | Audit Event Types (Shared) | [x] COMPLETE |
+| 18-02 | Approval Workflow | [x] PLAN & IMPLEMENTATION COMPLETE |
+| 18-03a | Audit Event Types | [x] COMPLETE |
 | 18-03 | Audit Trail | [x] PLAN & IMPLEMENTATION COMPLETE |
 | 18-04 | Git Version Control | [x] PLAN & IMPLEMENTATION COMPLETE |
-| 19 | Monitoring & Metrics | ⏳ Not Started |
-| 20 | Complete Management API | ⏳ Not Started |
-| 21 | Deployment & CI/CD | ⏳ Not Started |
+| 19 | Monitoring & Metrics | [x] PLAN & IMPLEMENTATION COMPLETE |
+| 20 | Complete Management API | [x] IMPLEMENTATION COMPLETE |
+| 21-01 | Docker Image Optimization | ⏳ Not Started (existing Dockerfile needs multi-stage optimization) |
+| 21-02 | Kubernetes Manifests | ⏳ Not Started |
+| 21-03 | Hot Reload Mechanism | ⏳ Not Started |
 
 **Phase 18 UAT Results:**
 
@@ -58,11 +63,11 @@ Milestone v4.0 in progress:
 
 ### Previous Milestones Summary
 
-#### Milestone v3.0 - In Progress (Current)
+#### Milestone v3.0 - Complete (Pluggable Engine Architecture)
 
 | Phase | Plans Complete | Status |
 |-------|----------------|--------|
-| 10 | 5/8 | Implementation in progress |
+| 10 | 5/8 | Complete (dashboard deferred to v4.0) |
 
 **Phase 10 Status:**
 
@@ -71,10 +76,13 @@ Milestone v4.0 in progress:
 - TREAT algorithm with caching ✅
 - LEAPS algorithm with aggregations ✅
 - PHREAK algorithm with truth maintenance ✅
-- Runtime engine selection framework 🟡
-- Dashboard (frontend) ⏳
 
-#### Milestone v2.0 - Complete (Testing Framework)
+From v3.0 milestone:
+| Phase | Plan | Reason |
+|-------|------|--------|
+| 10 | 10-06, 10-08 | Config/API integration and frontend dashboard deferred to v4.0 |
+
+From v2.0 milestone:
 
 | Phase | Plans Complete | Status |
 |-------|----------------|--------|
@@ -175,17 +183,28 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-Last session: 2026-06-10T13:17:14.091Z
-Milestone v3.0 - Phase 10 Implementation in Progress
+Last session: 2026-06-11T10:15:00.000Z
+Milestone v4.0 - Phase 21 (Deployment & CI/CD) In Progress
 
-**Phase 10 Status:**
+**Completed Phases:**
+
+- Phase 17: Production Frontend Architecture ✅
+- Phase 18: Enterprise Governance (RBAC, Approval, Audit, Versioning) ✅
+- Phase 19: Monitoring & Metrics (Prometheus, Dashboard, Dead Rules, Coverage) ✅
+- Phase 20: Complete Management API (Rules CRUD, Categories, Tags, Approvals, Audit, Branches) ✅
+
+**Phase 21 Status (In Progress):**
+
+- 21-01 Docker Image Optimization - Decision: Alpine Linux with musl static linking for smallest runtime image
+- 21-02 Kubernetes Manifests - Decision: Both plain YAML and Helm charts for flexibility
+- 21-03 Hot Reload Mechanism - Decision: Async reload with job tracking for non-blocking API
+
+**Phase 10 Status (Completed):**
 
 - Architecture foundation (registry, selector, metrics) ✅
 - Rete algorithm implementation ✅
 - TREAT algorithm with caching ✅
 - LEAPS algorithm with aggregations ✅
 - PHREAK algorithm with truth maintenance ✅
-- Runtime engine selection framework 🟡
-- Dashboard (frontend) ⏳
 
 ---
