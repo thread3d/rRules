@@ -1,0 +1,25 @@
+# Staging environment configuration
+# Moderate resources for QA and integration testing
+
+replicaCount: 2
+
+image:
+  tag: staging
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+ingress:
+  hosts:
+    - host: staging.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+database:
+  url: postgresql://rrules:staging@db.staging.svc.cluster.local:5432/rrules_staging

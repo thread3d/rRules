@@ -8,6 +8,9 @@ mod metrics;
 // Phase 20 modules
 pub mod v1;
 
+// Import execution endpoints for hot reload job tracking
+use crate::v1::execution::{get_job_status, list_jobs};
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!("rRules REST API Server v0.1.0");
@@ -66,6 +69,9 @@ async fn main() -> std::io::Result<()> {
                     .route("/rules/{id}", web::delete().to(v1::rules::delete_rule))
                     // Hot reload endpoint for updating rules without restart
                     .route("/rules/reload", web::post().to(v1::execution::reload_rules))
+                    // Reload job status endpoints (Phase 21)
+                    .route("/jobs/{job_id}", web::get().to(get_job_status))
+                    .route("/jobs", web::get().to(list_jobs))
                     // Approval workflow endpoints (Phase 20-03)
                     .route("/rules/{id}/submit", web::post().to(v1::approvals::submit_for_approval))
                     .route("/approvals/pending", web::get().to(v1::approvals::list_pending_approvals))

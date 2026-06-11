@@ -1,0 +1,25 @@
+# Production environment configuration
+# High availability with redundant replicas and configured resources
+
+replicaCount: 3
+
+image:
+  tag: prod
+
+resources:
+  requests:
+    memory: "512Mi"
+    cpu: "200m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+
+ingress:
+  hosts:
+    - host: prod.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+database:
+  url: postgresql://rrules:prod@db.prod.svc.cluster.local:5432/rrules_prod

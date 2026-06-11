@@ -1,0 +1,22 @@
+# Development environment configuration
+# Minimum resources for local development and testing
+
+replicaCount: 1
+
+image:
+  tag: dev
+
+resources:
+  limits:
+    memory: "256Mi"
+    cpu: "200m"
+
+ingress:
+  hosts:
+    - host: dev.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+database:
+  url: postgresql://rrules:dev@localhost:5432/rrules_dev
