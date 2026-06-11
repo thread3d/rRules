@@ -1,0 +1,102 @@
+//! Main entry point for rRules REST API server
+
+use actix_web::{web, App, HttpServer};
+
+mod metrics;
+
+// Phase 20 modules
+pub mod v1;
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    println!("rRules REST API Server v0.1.0");
+    println!("Starting on http://127.0.0.1:8080");
+
+    // Create engine state for hot reload functionality
+    let engine_state = web::Data::new(v1::execution::EngineState::new());
+
+    // Create metrics broadcast channel for real-time updates (for future WebSocket use)
+    let (metrics_tx, _) = metrics::create_metrics_channel(16);
+
+    // Initialize in-memory stores
+    let rule_store = v1::rules::init_store();
+    let approval_store = v1::approvals::init_store();
+    let audit_store = v1::audit::init_store();
+    let branch_store = v1::branches::init_store();
+    let job_store = v1::execution::init_job_store();
+
+    // Get rules directory from environment
+    let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
+
+    // Start file watcher in background
+    let watch_rules = std::env::var("WATCH_RULES_DIR")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(true);
+
+    if watch_rules {
+        println!("Starting file watcher for rules directory: {}", rules_dir);
+        tokio::spawn(v1::execution::start_file_watcher(rules_dir));
+    }
+
+    let server = HttpServer::new(move || {
+        App::new()
+            .app_data(engine_state.clone())
+            .app_data(web::Data::new(metrics_tx.clone()))
+            .app_data(web::Data::new(rule_store.clone()))
+            .app_data(web::Data::new(approval_store.clone()))
+            .app_data(web::Data::new(audit_store.clone()))
+            .app_data(web::Data::new(branch_store.clone()))
+            .app_data(web::Data::new(job_store.clone()))
+            .service(
+                web::scope("/v1")
+                    // Execution endpoint
+                    .route("/execute", web::post().to(v1::execution::execute_rules))
+                    // Rules CRUD endpoints (Phase 20-01)
+                    .route("/rules", web::get().to(v1::rules::get_rules))
+                    .route("/rules", web::post().to(v1::rules::create_rule))
+                    .route("/rules/{id}", web::get().to(v1::rules::get_rule))
+                    .route("/rules/{id}", web::put().to(v1::rules::update_rule))
+                    .route("/rules/{id}", web::patch().to(v1::rules::update_rule))
+                    .route("/rules/{id}/undelete", web::post().to(v1::rules::undelete_rule))
+                    // Soft delete (marks as archived)
+                    .route("/rules/{id}", web::delete().to(v1::rules::delete_rule))
+                    // Hot reload endpoint for updating rules without restart
+                    .route("/rules/reload", web::post().to(v1::execution::reload_rules))
+                    // Approval workflow endpoints (Phase 20-03)
+                    .route("/rules/{id}/submit", web::post().to(v1::approvals::submit_for_approval))
+                    .route("/approvals/pending", web::get().to(v1::approvals::list_pending_approvals))
+                    .route("/approvals/{id}/approve", web::post().to(v1::approvals::approve_request))
+                    .route("/approvals/{id}/reject", web::post().to(v1::approvals::reject_request))
+                    // Category endpoints (Phase 20-02)
+                    .route("/categories", web::get().to(v1::categories::list_categories))
+                    .route("/categories", web::post().to(v1::categories::create_category))
+                    .route("/categories/{id}", web::get().to(v1::categories::get_category))
+                    .route("/categories/{id}", web::put().to(v1::categories::update_category))
+                    .route("/categories/{id}", web::patch().to(v1::categories::update_category))
+                    .route("/categories/{id}", web::delete().to(v1::categories::delete_category))
+                    // Tag endpoints (Phase 20-02)
+                    .route("/tags", web::get().to(v1::tags::list_tags))
+                    .route("/tags", web::post().to(v1::tags::create_tag))
+                    .route("/tags/{name}", web::get().to(v1::tags::get_tag))
+                    .route("/tags/{name}", web::put().to(v1::tags::update_tag))
+                    .route("/tags/{name}", web::delete().to(v1::tags::delete_tag))
+                    .route("/rules/{id}/tags", web::post().to(v1::tags::assign_tag_to_rule))
+                    .route("/rules/{id}/tags/{tag_name}", web::delete().to(v1::tags::remove_tag_from_rule))
+                    // Branch endpoints (Phase 20-05)
+                    .route("/branches", web::get().to(v1::branches::list_branches))
+                    .route("/branches", web::post().to(v1::branches::create_branch))
+                    .route("/branches/{name}", web::get().to(v1::branches::get_branch))
+                    .route("/branches/{name}", web::delete().to(v1::branches::delete_branch))
+                    .route("/branches/{name}/merge", web::post().to(v1::branches::merge_branch))
+                    // Audit trail endpoints (Phase 20-04)
+                    .route("/audit", web::get().to(v1::audit::query_audit_events))
+                    .route("/audit/export", web::get().to(v1::audit::export_audit_log)),
+            )
+            .configure(metrics::configure_metrics)
+    })
+    .bind("127.0.0.1:8080")?;
+
+    println!("Server running at http://127.0.0.1:8080");
+    println!("Metrics endpoint available at /metrics");
+    server.run().await
+}

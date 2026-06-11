@@ -29,6 +29,12 @@ pub mod governance {
     pub mod versioning;
 }
 
+// Coverage tracking module (Phase 19)
+pub mod coverage;
+
+// Engine metrics module (Phase 19)
+pub mod metrics;
+
 // Monitoring modules (Phase 19)
 pub mod monitoring {
     pub mod detection;

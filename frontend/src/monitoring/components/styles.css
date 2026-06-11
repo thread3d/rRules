@@ -1,0 +1,434 @@
+/* Monitor Components Styles */
+
+/* ===================== Chart Styles ===================== */
+.chart-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.simple-svg-chart rect {
+  transition: fill-opacity 0.2s ease;
+}
+
+.simple-svg-chart rect:hover {
+  opacity: 0.8;
+}
+
+/* ===================== Panel Styles ===================== */
+.panel {
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.panel.collapsed .panel-content {
+  display: none;
+}
+
+/* Panel Header */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background-color: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+  cursor: pointer;
+}
+
+.panel-header:hover {
+  background-color: #ececec;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.panel-toggle {
+  transition: transform 0.2s ease;
+  color: #666;
+}
+
+.panel-toggle.expanded {
+  transform: rotate(180deg);
+}
+
+/* Panel Body */
+.panel-body {
+  padding: 16px;
+}
+
+.panel-body.no-padding {
+  padding: 0;
+}
+
+.panel-content {
+  animation: fadeIn 0.2s ease;
+}
+
+.panel-content.hidden {
+  display: none;
+}
+
+/* Panel Footer */
+.panel-footer {
+  padding: 12px 16px;
+  background-color: #fafafa;
+  border-top: 1px solid #e0e0e0;
+  text-align: right;
+}
+
+/* Loading State */
+.panel-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100px;
+  color: #666;
+}
+
+/* Status Panels */
+.status-panel {
+  background-color: white;
+}
+
+.status-panel.success {
+  border-left-color: #4caf50;
+  background-color: #f1f8e9;
+}
+
+.status-panel.warning {
+  border-left-color: #ff9800;
+  background-color: #fff3e0;
+}
+
+.status-panel.error {
+  border-left-color: #f44336;
+  background-color: #ffebee;
+}
+
+.status-panel.info {
+  border-left-color: #2196f3;
+  background-color: #e3f2fd;
+}
+
+.panel-status-message {
+  font-size: 12px;
+  color: #666;
+  margin-left: 8px;
+}
+
+/* Panel Grid */
+.panel-grid {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+}
+
+.panel-grid-item {
+  min-height: 150px;
+}
+
+/* Stat Panel */
+.stat-panel .panel-label {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.stat-panel .panel-stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #333;
+  margin: 8px 0;
+}
+
+.stat-panel .panel-stat-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.panel-trend.up::before {
+  content: '▲ ';
+}
+
+.panel-trend.down::before {
+  content: '▼ ';
+}
+
+.panel-trend-neutral {
+  color: #9e9e9e;
+}
+
+/* Action Panel */
+.action-panel .panel-actions-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.panel-primary-action,
+.panel-secondary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.panel-secondary-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Card Panel */
+.card-panel .card-title {
+  margin: 0;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  background-color: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.card-panel .card-content {
+  padding: 16px;
+}
+
+/* ===================== Status Indicator Styles ===================== */
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.status-indicator-small .status-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.status-indicator-medium .status-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.status-indicator-large .status-dot {
+  width: 12px;
+  height: 12px;
+}
+
+.status-dot {
+  border-radius: 50%;
+  display: inline-block;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Health Status */
+.health-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.health-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.health-score {
+  font-size: 20px;
+  font-weight: 700;
+  color: #333;
+}
+
+.health-bar-container {
+  width: 100%;
+  height: 8px;
+  background-color: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.health-bar {
+  height: 100%;
+  transition: width 0.5s ease;
+  border-radius: 4px;
+}
+
+/* Connection Status */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.connection-latency,
+.connection-updated {
+  color: #666;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+/* Aggregated Status */
+.aggregated-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.aggregated-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.status-counts {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.count.online::before {
+  content: '●';
+  color: #4caf50;
+}
+
+.count.warning::before {
+  content: '●';
+  color: #ff9800;
+}
+
+.count.error::before {
+  content: '●';
+  color: #f44336;
+}
+
+.count.offline::before {
+  content: '●';
+  color: #9e9e9e;
+}
+
+.aggregated-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-item,
+.status-remaining {
+  font-size: 12px;
+}
+
+/* Status Badge */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background-color: #f5f5f5;
+  font-size: 12px;
+}
+
+.badge-dot {
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* Loading Indicator */
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #666;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+  border: 2px solid #e0e0e0;
+  border-top-color: #333;
+  border-radius: 50%;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  font-size: 13px;
+}
+
+/* Error Indicator */
+.error-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f44336;
+}
+
+.error-indicator button {
+  padding: 4px 8px;
+  background-color: #ffebee;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.error-indicator button:hover {
+  background-color: #ffcdd2;
+}
+
+/* Fade In Animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

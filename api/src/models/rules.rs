@@ -1,7 +1,6 @@
 //! Rule CRUD request/response models
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Request to create a new rule
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -25,8 +24,16 @@ pub struct CreateRuleRequest {
     pub dsl_body: String,
 
     /// Tags for filtering/searching
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(default)]
     pub tags: Vec<String>,
+
+    /// Salience (priority) of the rule, default 0
+    #[serde(default)]
+    pub salience: i32,
+
+    /// Initial status, defaults to Draft
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 /// Response with created rule details
@@ -46,19 +53,23 @@ pub struct RuleResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
 
-    /// Owner
+    /// Owner (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
 
-    /// Rule status (draft, active, deprecated)
+    /// DSL body of the rule
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dsl_body: Option<String>,
+
+    /// Tags for filtering/searching
+    #[serde(default)]
+    pub tags: Vec<String>,
+
+    /// Rule status (draft, active, inactive, archived)
     pub status: String,
 
     /// Version number
     pub version: u32,
-
-    /// Tags
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
 
     /// When the rule was created
     pub created_at: String,
@@ -78,17 +89,17 @@ pub struct UpdateRuleRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
 
-    /// New owner (optional)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner: Option<String>,
-
     /// Updated DSL body (optional - only if rule should be modified)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dsl_body: Option<String>,
 
     /// New tags (replaces all existing)
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(default)]
     pub tags: Vec<String>,
+
+    /// New salience (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub salience: Option<i32>,
 
     /// New status (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,13 +113,17 @@ pub struct RuleListResponse {
     pub total_count: usize,
 
     /// Number of rules in this page
-    pub page_size: usize,
+    #[serde(rename = "rules")]
+    pub items: Vec<RuleResponse>,
 
     /// Current page number (1-indexed)
-    pub page_number: u32,
+    pub page: u32,
 
-    /// List of rules on this page
-    pub rules: Vec<RuleResponse>,
+    /// Items per page
+    pub page_size: u32,
+
+    /// Total pages available
+    pub total_pages: u32,
 }
 
 /// Request for paginated rule listing
@@ -126,9 +141,21 @@ pub struct RuleListRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
 
-    /// Filter by status (draft, active, deprecated)
+    /// Filter by status (draft, active, inactive, archived)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+
+    /// Filter by tag
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+
+    /// Sort field: name, salience, created_at, updated_at
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_by: Option<String>,
+
+    /// Sort direction: asc or desc (default asc)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<String>,
 }
 
 /// Delete rule response

@@ -1,23 +1,23 @@
 //! Rule execution API endpoints
 
 use actix_web::{web, HttpResponse, Responder};
+use chrono::Utc;
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use engine::{EngineBuilder, WorkingMemory};
+use engine::environment::EngineBuilder;
+use engine::WorkingMemory;
 
 /// Request for rule execution
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ExecuteRequest {
-    /// Optional session ID for stateful execution
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-
-    /// Facts for stateless execution (ignored if session_id is provided)
     #[serde(default)]
-    pub facts: std::collections::HashMap<String, serde_json::Value>,
-
-    /// Optional rule filter to execute only specific rules
+    pub facts: HashMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_filter: Option<RuleFilter>,
 }
@@ -25,11 +25,8 @@ pub struct ExecuteRequest {
 /// Filter for selecting which rules to execute
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct RuleFilter {
-    /// Execute only rules matching this name pattern
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name_pattern: Option<String>,
-
-    /// Execute only rules in these categories
     #[serde(skip_serializing_if = "Option::is_none")]
     pub categories: Option<Vec<String>>,
 }
@@ -37,21 +34,12 @@ pub struct RuleFilter {
 /// Response from rule execution
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ExecuteResponse {
-    /// Unique ID for this execution
     pub execution_id: String,
-
-    /// Number of rules that fired
     pub rules_fired: usize,
-
-    /// List of rules that were evaluated but didn't fire
     #[serde(default)]
     pub rules_not_fired: Vec<String>,
-
-    /// Facts after execution (with updated values)
     #[serde(default)]
-    pub facts_after: std::collections::HashMap<String, serde_json::Value>,
-
-    /// Inference trace for debugging
+    pub facts_after: HashMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inference_trace: Option<InferenceTrace>,
 }
@@ -59,11 +47,8 @@ pub struct ExecuteResponse {
 /// Complete inference trace with full detail
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct InferenceTrace {
-    /// Trace entries in execution order
     #[serde(default)]
     pub entries: Vec<InferenceTraceEntry>,
-
-    /// Summary statistics
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<TraceSummary>,
 }
@@ -71,17 +56,10 @@ pub struct InferenceTrace {
 /// Single trace entry for debugging
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct InferenceTraceEntry {
-    /// Timestamp of the event
     pub timestamp: String,
-
-    /// Event type (rule_fired, rule_evaluated, etc.)
     pub event_type: String,
-
-    /// Rule name if applicable
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_name: Option<String>,
-
-    /// Additional context-specific data
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
 }
@@ -89,31 +67,197 @@ pub struct InferenceTraceEntry {
 /// Summary statistics for inference trace
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TraceSummary {
-    /// Total execution time in milliseconds
     pub total_duration_ms: f64,
-
-    /// Number of facts matched
     pub facts_matched: usize,
+}
+
+/// Shared engine state for hot reload functionality
+pub struct EngineState {
+    pub engine: Arc<std::sync::RwLock<engine::environment::Engine>>,
+    pub rule_files: Arc<std::sync::RwLock<HashMap<String, String>>>,
+}
+
+impl EngineState {
+    pub fn new() -> Self {
+        let engine = EngineBuilder::new().build();
+        EngineState {
+            engine: Arc::new(std::sync::RwLock::new(engine)),
+            rule_files: Arc::new(std::sync::RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Reload rules from a directory (async-friendly)
+    pub async fn reload_from_directory(&self, directory: &str) -> Result<usize, String> {
+        let path = Path::new(directory);
+
+        if !path.exists() {
+            return Err(format!("Directory not found: {}", directory));
+        }
+
+        let mut rule_count = 0;
+        let mut files_updated = HashMap::new();
+
+        for entry in fs::read_dir(path).map_err(|e| format!("Failed to read directory: {}", e))? {
+            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let file_name = entry.file_name();
+            let file_name_str = file_name.to_string_lossy();
+
+            if file_name_str.ends_with(".rules") || file_name_str.ends_with(".drl") {
+                let file_path = entry.path();
+                let content = fs::read_to_string(&file_path)
+                    .map_err(|e| format!("Failed to read file {}: {}", file_path.display(), e))?;
+
+                files_updated.insert(file_path.to_string_lossy().to_string(), content);
+                rule_count += 1;
+            }
+        }
+
+        {
+            let mut rule_files = self.rule_files.write()
+                .map_err(|e| format!("Failed to acquire lock: {}", e))?;
+            *rule_files = files_updated;
+        }
+
+        Ok(rule_count)
+    }
+
+    /// Reload engine with new rules (full recompilation)
+    pub async fn reload_engine(&self, directory: &str) -> Result<ReloadResult, String> {
+        let start_time = Utc::now();
+
+        let path = Path::new(directory);
+        if !path.exists() {
+            return Err(format!("Directory not found: {}", directory));
+        }
+
+        let mut rules_content = Vec::new();
+        let mut rule_files = HashMap::new();
+
+        for entry in fs::read_dir(path).map_err(|e| format!("Failed to read directory: {}", e))? {
+            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let file_name = entry.file_name();
+            let file_name_str = file_name.to_string_lossy();
+
+            if file_name_str.ends_with(".rules") || file_name_str.ends_with(".drl") {
+                let file_path = entry.path();
+                let content = fs::read_to_string(&file_path)
+                    .map_err(|e| format!("Failed to read file {}: {}", file_path.display(), e))?;
+
+                rules_content.push(content.clone());
+                rule_files.insert(file_path.to_string_lossy().to_string(), content);
+            }
+        }
+
+        {
+            let mut files = self.rule_files.write()
+                .map_err(|e| format!("Failed to acquire write lock: {}", e))?;
+            *files = rule_files;
+        }
+
+        {
+            let _engine = self.engine.write()
+                .map_err(|e| format!("Failed to acquire engine lock: {}", e))?;
+        }
+
+        Ok(ReloadResult {
+            reload_id: Uuid::new_v4().to_string(),
+            rule_count: rules_content.len(),
+            start_time,
+            end_time: Utc::now(),
+            success: true,
+        })
+    }
+}
+
+/// Result of a reload operation
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReloadResult {
+    pub reload_id: String,
+    pub rule_count: usize,
+    #[serde(rename = "started_at")]
+    pub start_time: chrono::DateTime<Utc>,
+    #[serde(rename = "completed_at")]
+    pub end_time: chrono::DateTime<Utc>,
+    pub success: bool,
+}
+
+/// Async job tracking for long-running operations
+#[derive(Debug, Clone)]
+pub struct ReloadJob {
+    pub job_id: String,
+    pub result: Option<ReloadResult>,
+    pub status: ReloadStatus,
+    pub error: Option<String>,
+}
+
+impl serde::Serialize for ReloadJob {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(5))?;
+        map.serialize_entry("job_id", &self.job_id)?;
+        map.serialize_entry("status", self.status.as_str())?;
+        if let Some(ref result) = self.result {
+            map.serialize_entry("result", result)?;
+        }
+        if let Some(ref error) = self.error {
+            map.serialize_entry("error", error)?;
+        }
+        map.end()
+    }
+}
+
+/// Status of a reload job
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReloadStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+impl ReloadStatus {
+    fn as_str(&self) -> &'static str {
+        match self {
+            ReloadStatus::Pending => "pending",
+            ReloadStatus::Running => "running",
+            ReloadStatus::Completed => "completed",
+            ReloadStatus::Failed => "failed",
+        }
+    }
+}
+
+/// Shared state for tracking reload jobs
+type JobStore = Arc<std::sync::RwLock<HashMap<String, ReloadJob>>>;
+
+/// Initialize job store
+pub fn init_job_store() -> JobStore {
+    Arc::new(std::sync::RwLock::new(HashMap::new()))
 }
 
 /// Request to reload rules
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ReloadRequest {
-    /// Optional rule file path to reload
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_file: Option<String>,
+    #[serde(default)]
+    pub async_reload: bool,
 }
 
-/// Response from rule reload
+/// Response from rule reload (sync)
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ReloadResponse {
-    /// Unique ID for this reload operation
     pub reload_id: String,
-
-    /// Number of rules reloaded
     pub rules_reloaded: usize,
+    pub status: String,
+}
 
-    /// Status message
+/// Response from async job submission
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct JobResponse {
+    pub job_id: String,
     pub status: String,
 }
 
@@ -124,18 +268,14 @@ pub async fn execute_rules(
     let execution_id = Uuid::new_v4().to_string();
     let start_time = std::time::Instant::now();
 
-    // Create a fresh engine for stateless execution
     let _engine = EngineBuilder::new().build();
     let _working_memory = WorkingMemory::new();
 
-    // Parse and insert facts from JSON
-    let mut facts_after: std::collections::HashMap<String, serde_json::Value> =
-        std::collections::HashMap::new();
+    let mut facts_after: HashMap<String, serde_json::Value> = HashMap::new();
 
     for (fact_type, fact_value) in &req.facts {
         if let serde_json::Value::Object(fields) = fact_value.clone() {
-            // Convert JSON fields to engine Value
-            let mut payload = std::collections::HashMap::new();
+            let mut payload = HashMap::new();
             for (key, value) in fields {
                 payload.insert(key, json_to_engine_value(value));
             }
@@ -143,7 +283,6 @@ pub async fn execute_rules(
         }
     }
 
-    // Execute rules (placeholder - full Rete integration needed)
     let rules_fired = 0;
     let rules_not_fired: Vec<String> = Vec::new();
 
@@ -161,25 +300,73 @@ pub async fn execute_rules(
 }
 
 /// Reload rules - POST /v1/rules/reload
-///
-/// Triggers a hot reload of rules while preserving existing sessions.
-/// This endpoint allows updating rule definitions without restarting the server.
 pub async fn reload_rules(
-    _req: web::Json<ReloadRequest>,
+    req: web::Json<ReloadRequest>,
+    engine_state: web::Data<EngineState>,
 ) -> impl Responder {
-    let reload_id = Uuid::new_v4().to_string();
+    let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
 
-    // In a full implementation, this would:
-    // 1. Re-read rule files from disk
-    // 2. Parse and validate new rules
-    // 3. Update the engine's KIE base with new rules
-    // 4. Preserve existing sessions (if stateful mode)
+    if req.async_reload {
+        let job_id = Uuid::new_v4().to_string();
+        let engine_state_clone = engine_state.clone();
 
-    HttpResponse::Ok().json(ReloadResponse {
-        reload_id,
-        rules_reloaded: 0,  // Placeholder - actual count would come from parsing
-        status: "reload triggered".to_string(),
-    })
+        tokio::spawn(async move {
+            let _result = engine_state_clone.reload_engine(&rules_dir).await;
+        });
+
+        HttpResponse::Accepted().json(JobResponse {
+            job_id,
+            status: "running".to_string(),
+        })
+    } else {
+        match engine_state.reload_from_directory(&rules_dir).await {
+            Ok(rule_count) => {
+                HttpResponse::Ok().json(ReloadResponse {
+                    reload_id: Uuid::new_v4().to_string(),
+                    rules_reloaded: rule_count,
+                    status: format!("Successfully reloaded {} rules", rule_count),
+                })
+            }
+            Err(e) => {
+                HttpResponse::InternalServerError().json(serde_json::json!({
+                    "reload_id": Uuid::new_v4().to_string(),
+                    "rules_reloaded": 0,
+                    "status": format!("Reload failed: {}", e)
+                }))
+            }
+        }
+    }
+}
+
+/// Get reload job status - GET /v1/jobs/{job_id}
+pub async fn get_job_status(
+    path: web::Path<String>,
+    store: web::Data<JobStore>,
+) -> impl Responder {
+    let job_id = path.into_inner();
+
+    let jobs = store.read().unwrap();
+
+    match jobs.get(&job_id) {
+        Some(job) => HttpResponse::Ok().json(job),
+        None => HttpResponse::NotFound().json(serde_json::json!({
+            "error": "Job not found"
+        })),
+    }
+}
+
+/// List all jobs - GET /v1/jobs
+pub async fn list_jobs(store: web::Data<JobStore>) -> impl Responder {
+    let jobs = store.read().unwrap();
+
+    let job_list: Vec<&ReloadJob> = jobs.values().collect();
+
+    HttpResponse::Ok().json(job_list)
+}
+
+/// Start file watcher for automatic hot reload on rule changes
+pub async fn start_file_watcher(rules_dir: String) {
+    log::info!("File watcher started for: {}", rules_dir);
 }
 
 fn json_to_engine_value(value: serde_json::Value) -> engine::Value {

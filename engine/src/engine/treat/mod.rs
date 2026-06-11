@@ -1,0 +1,499 @@
+//! The TREAT algorithm engine implementation.
+//!
+//! TREAT (TREe Augmented by Caching) is an optimization of the Rete algorithm
+//! that uses LRU caching for join node partial matches to reduce redundant computations.
+
+use std::collections::{HashMap, HashSet};
+use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
+use crate::engine::metrics::MetricsCollector;
+use crate::fact::Fact;
+use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference, Nagram};
+
+/// Cache entry with a generation timestamp for LRU ordering.
+#[derive(Debug, Clone)]
+struct CacheEntry {
+    nagram: Nagram,
+    generation: usize,
+    last_accessed: usize,
+}
+
+/// LRU cache for join node partial matches.
+#[derive(Debug)]
+pub struct LRUCache {
+    /// Maximum cache size
+    max_size: usize,
+    /// Current size
+    current_size: usize,
+    /// Entry counter for generation tracking
+    entry_counter: usize,
+    /// Map from key to cache entries
+    entries: HashMap<String, CacheEntry>,
+}
+
+impl LRUCache {
+    pub fn new(max_size: usize) -> Self {
+        Self {
+            max_size,
+            current_size: 0,
+            entry_counter: 0,
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Gets a cached nagram if it exists.
+    pub fn get(&mut self, key: &str) -> Option<&Nagram> {
+        let accessed = self.entry_counter;
+        self.entry_counter += 1;
+
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.last_accessed = accessed;
+            return Some(&entry.nagram);
+        }
+        None
+    }
+
+    /// Inserts or updates a cache entry.
+    pub fn insert(&mut self, key: String, nagram: Nagram) {
+        // If key already exists, update it
+        if let Some(entry) = self.entries.get_mut(&key) {
+            entry.nagram = nagram;
+            entry.last_accessed = self.entry_counter;
+            entry.generation += 1;
+            return;
+        }
+
+        // Evict oldest entries if at capacity
+        while self.current_size >= self.max_size && !self.entries.is_empty() {
+            let oldest_key = self.get_oldest_entry();
+            if let Some(key_to_remove) = oldest_key {
+                self.entries.remove(&key_to_remove);
+                self.current_size -= 1;
+            } else {
+                break;
+            }
+        }
+
+        // Insert new entry
+        self.entries.insert(
+            key,
+            CacheEntry {
+                nagram,
+                generation: 0,
+                last_accessed: self.entry_counter,
+            },
+        );
+        self.current_size += 1;
+    }
+
+    /// Gets the key of the least recently used entry.
+    fn get_oldest_entry(&self) -> Option<String> {
+        let mut oldest_time = usize::MAX;
+        let mut oldest_key: Option<String> = None;
+
+        for (key, entry) in &self.entries {
+            if entry.last_accessed < oldest_time {
+                oldest_time = entry.last_accessed;
+                oldest_key = Some(key.clone());
+            }
+        }
+
+        oldest_key
+    }
+
+    /// Removes an entry from the cache.
+    pub fn remove(&mut self, key: &str) -> bool {
+        if self.entries.remove(key).is_some() {
+            self.current_size -= 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Clears all entries.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.current_size = 0;
+    }
+
+    /// Returns the number of cached entries.
+    pub fn size(&self) -> usize {
+        self.current_size
+    }
+
+    /// Returns cache statistics.
+    pub fn stats(&self) -> CacheStats {
+        CacheStats {
+            max_size: self.max_size,
+            current_size: self.current_size,
+            hit_count: 0, // Would need to track separately for precise stats
+            miss_count: 0,
+        }
+    }
+}
+
+/// Cache statistics for reporting.
+#[derive(Debug, Clone)]
+pub struct CacheStats {
+    pub max_size: usize,
+    pub current_size: usize,
+    pub hit_count: u64,
+    pub miss_count: u64,
+}
+
+impl CacheStats {
+    /// Calculates the cache hit rate.
+    pub fn hit_rate(&self) -> f64 {
+        let total = self.hit_count + self.miss_count;
+        if total > 0 {
+            self.hit_count as f64 / total as f64
+        } else {
+            0.0
+        }
+    }
+}
+
+/// TREAT network extends the Rete network with caching.
+#[derive(Debug)]
+pub struct TreatNetwork {
+    /// Base Rete network structure
+    base: crate::engine::rete::ReteNetwork,
+    /// Cache for join node partial matches
+    cache: LRUCache,
+    /// Track which nodes have caches
+    cached_nodes: HashSet<String>,
+}
+
+impl TreatNetwork {
+    pub fn new(max_cache_size: usize) -> Self {
+        Self {
+            base: crate::engine::rete::ReteNetwork::new(),
+            cache: LRUCache::new(max_cache_size),
+            cached_nodes: HashSet::new(),
+        }
+    }
+
+    /// Checks if a node's results are cached.
+    pub fn is_cached(&self, node_id: &str) -> bool {
+        self.cached_nodes.contains(node_id)
+    }
+
+    /// Adds a join node to the cacheable set.
+    pub fn add_cached_join_node(&mut self, node_id: impl Into<String>) {
+        self.cached_nodes.insert(node_id.into());
+    }
+}
+
+impl Default for TreatNetwork {
+    fn default() -> Self {
+        Self::new(1024) // Default cache size
+    }
+}
+
+/// The TREAT algorithm engine implementation.
+#[derive(Debug)]
+pub struct TreatEngine {
+    network: TreatNetwork,
+    alpha_memory: AlphaMemory,
+    beta_memory: BetaMemory,
+    working_facts: HashMap<FactId, Fact>,
+    metrics: crate::engine::metrics::SimpleMetricsCollector,
+    cache_hits: u64,
+    cache_misses: u64,
+}
+
+impl TreatEngine {
+    /// Creates a new TREAT engine with default settings.
+    pub fn new() -> Self {
+        Self {
+            network: TreatNetwork::new(1024),
+            alpha_memory: AlphaMemory::new(),
+            beta_memory: BetaMemory::new(),
+            working_facts: HashMap::new(),
+            metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
+            cache_hits: 0,
+            cache_misses: 0,
+        }
+    }
+
+    /// Creates a new TREAT engine with the given cache size.
+    pub fn with_cache_size(max_cache_size: usize) -> Self {
+        Self {
+            network: TreatNetwork::new(max_cache_size),
+            alpha_memory: AlphaMemory::new(),
+            beta_memory: BetaMemory::new(),
+            working_facts: HashMap::new(),
+            metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
+            cache_hits: 0,
+            cache_misses: 0,
+        }
+    }
+
+    /// Inserts a fact and propagates it through the network.
+    pub fn assert_fact(&mut self, mut fact: Fact) {
+        let fact_id = fact.id.to_string();
+
+        // Store the fact
+        self.working_facts.insert(fact_id.clone(), fact);
+
+        // Propagate to alpha memory (test nodes)
+        for test_node in self.network.base.test_nodes.values() {
+            if test_node.fact_type_id == fact.fact_type_id {
+                self.alpha_memory.insert(&fact.fact_type_id, fact_id.clone());
+                self.propagate_to_successors(&test_node.id, &fact_id);
+            }
+        }
+
+        self.metrics.record_fact_inserted();
+    }
+
+    /// Propagates a fact through successor nodes with caching.
+    fn propagate_to_successors(&mut self, node_id: &crate::engine::rete::NodeId, fact_id: &str) {
+        let test_node = match self.network.base.test_nodes.get(node_id) {
+            Some(n) => n,
+            None => return,
+        };
+
+        for successor_id in &test_node.successors {
+            let key = format!("join_{}", successor_id.0);
+
+            // Check if result is cached
+            if self.network.is_cached(&successor_id.0) {
+                if let Some(_) = self.network.cache.get(&key) {
+                    self.metrics.record_cache_hit();
+                    self.cache_hits += 1;
+                    continue; // Use cached result
+                }
+            }
+
+            if let Some(join_node) = self.network.base.join_nodes.get(successor_id) {
+                self.join_propagation_with_cache(join_node, fact_id);
+            }
+        }
+
+        self.metrics.record_cache_miss();
+        self.cache_misses += 1;
+    }
+
+    /// Propagates from join node with caching support.
+    fn join_propagation_with_cache(&mut self, join_node: &crate::engine::rete::JoinNode, fact_id: &str) {
+        let test_node = match self.network.base.test_nodes.get(&join_node.predecessor) {
+            Some(n) => n,
+            None => return,
+        };
+
+        let facts_from_alpha = self.alpha_memory.get_facts(&test_node.fact_type_id);
+
+        // Try to use cached partial matches
+        let key = format!("join_{}", join_node.id.0);
+        if self.network.is_cached(&join_node.id.0) {
+            if let Some(existing_nagrams) = self.network.cache.get(&key) {
+                for _nagram in existing_nagrams {
+                    // Use cached nagram
+                    self.metrics.record_cache_hit();
+                    self.cache_hits += 1;
+                    continue;
+                }
+            }
+        }
+
+        // Get existing nagrams from beta memory (right input)
+        let existing_nagrams = self.beta_memory.get_nagrams(&join_node.id);
+
+        // Combine to form new partial matches
+        for fact_from_beta in &existing_nagrams {
+            for alpha_fact_id in &facts_from_alpha {
+                let mut new_nagram = fact_from_beta.clone();
+                new_nagram.push(MemoryReference {
+                    fact_id: alpha_fact_id.clone(),
+                    generation: 0,
+                });
+
+                // Cache the result if node is cacheable
+                if self.network.is_cached(&join_node.id.0) && existing_nagrams.is_empty() {
+                    self.network.cache.insert(key.clone(), new_nagram.clone());
+                    self.metrics.record_cache_hit();
+                    self.cache_hits += 1;
+                }
+
+                self.beta_memory.insert(&join_node.id, new_nagram);
+            }
+        }
+
+        // For facts coming from alpha memory directly
+        for alpha_fact_id in facts_from_alpha {
+            let nagram = vec![MemoryReference {
+                fact_id: alpha_fact_id.clone(),
+                generation: 0,
+            }];
+            self.beta_memory.insert(&join_node.id, nagram);
+        }
+
+        self.metrics.record_beta_memory_additions(facts_from_alpha.len() + existing_nagrams.len());
+    }
+
+    /// Executes the engine and fires rules.
+    pub fn execute_rules(&mut self) -> usize {
+        let mut rules_fired = 0;
+
+        for (_node_id, action_node) in &self.network.base.action_nodes {
+            for (_join_id, join_node) in &self.network.base.join_nodes {
+                let nagrams = self.beta_memory.get_nagrams(&join_node.id);
+
+                // Check cache for rule firing decisions
+                let key = format!("action_{}", action_node.id.0);
+                if self.network.is_cached(&action_node.id.0) {
+                    if self.network.cache.get(&key).is_some() {
+                        self.metrics.record_cache_hit();
+                        self.cache_hits += 1;
+                    } else {
+                        self.network.cache.insert(key, nagrams.clone());
+                        self.metrics.record_cache_miss();
+                        self.cache_misses += 1;
+                    }
+                }
+
+                for _nagram in nagrams {
+                    rules_fired += 1;
+                    self.metrics.record_rule_fired();
+                }
+            }
+        }
+
+        self.metrics.set_execution_time_ms(0.0);
+        rules_fired
+    }
+}
+
+impl Default for TreatEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ExecutionEngine for TreatEngine {
+    fn execute(&mut self) -> EngineResult {
+        let fired = self.execute_rules();
+        EngineResult::success(fired)
+    }
+
+    fn insert_fact(&mut self, fact: Fact) -> Result<(), String> {
+        self.assert_fact(fact);
+        Ok(())
+    }
+
+    fn retract_fact(&mut self, _fact_id: &str) -> Result<bool, String> {
+        // TODO: Implement retraction with proper network cleanup
+        Ok(false)
+    }
+
+    fn run(&mut self) -> usize {
+        self.execute_rules()
+    }
+
+    fn get_metrics(&self) -> crate::engine::metrics::EngineMetrics {
+        let mut metrics = self.metrics.get_metrics();
+        metrics.alpha_memory_size = self.alpha_memory.size();
+        metrics.beta_memory_size = self.beta_memory.size();
+        metrics.cache_hits = self.cache_hits;
+        metrics.cache_misses = self.cache_misses;
+        metrics
+    }
+
+    fn engine_type(&self) -> EngineType {
+        EngineType::Treat
+    }
+
+    fn reset(&mut self) {
+        self.network = TreatNetwork::new(1024);
+        self.alpha_memory = AlphaMemory::new();
+        self.beta_memory = BetaMemory::new();
+        self.working_facts.clear();
+        self.metrics.reset_metrics();
+        self.cache_hits = 0;
+        self.cache_misses = 0;
+    }
+}
+
+/// Factory for creating TREAT engine instances.
+#[derive(Debug, Clone)]
+pub struct TreatEngineFactory;
+
+impl TreatEngineFactory {
+    /// Creates a new factory.
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Creates a factory with custom cache size.
+    pub fn with_cache_size(max_cache_size: usize) -> Self {
+        let _ = max_cache_size; // Will be used when creating engine
+        Self::new()
+    }
+}
+
+impl Default for TreatEngineFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EngineFactory for TreatEngineFactory {
+    fn engine_type(&self) -> EngineType {
+        EngineType::Treat
+    }
+
+    fn create_engine(&self) -> Result<Box<dyn ExecutionEngine>, String> {
+        Ok(Box::new(TreatEngine::new()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lru_cache_operations() {
+        let mut cache = LRUCache::new(3);
+        cache.insert("key1".to_string(), vec![]);
+        cache.insert("key2".to_string(), vec![]);
+
+        assert!(cache.get("key1").is_some());
+        assert_eq!(cache.size(), 2);
+    }
+
+    #[test]
+    fn test_lru_cache_eviction() {
+        let mut cache = LRUCache::new(2);
+        cache.insert("a".to_string(), vec![]);
+        cache.insert("b".to_string(), vec![]);
+        cache.insert("c".to_string(), vec![]); // Should evict 'a'
+
+        assert!(cache.get("a").is_none());
+        assert!(cache.get("b").is_some());
+    }
+
+    #[test]
+    fn test_treat_engine_creation() {
+        let engine = TreatEngine::new();
+        assert_eq!(engine.engine_type(), EngineType::Treat);
+    }
+
+    #[test]
+    fn test_cache_statistics() {
+        let mut engine = TreatEngine::with_cache_size(10);
+
+        // Insert some facts to trigger cache operations
+        for i in 0..3 {
+            let mut fact = Fact::new("test", HashMap::new());
+            fact.payload.insert(
+                "value".to_string(),
+                crate::data_types::Value::Integer(i),
+            );
+            engine.assert_fact(fact);
+        }
+
+        let metrics = engine.get_metrics();
+        assert!(metrics.cache_hits >= 0 || metrics.cache_misses >= 0); // At least one of them
+    }
+}

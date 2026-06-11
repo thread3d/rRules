@@ -16,6 +16,8 @@ tokio = { version = "1.35", features = ["full"] }
 thiserror = "1.0"
 anyhow = "1.0"
 uuid = { version = "1.0", features = ["v4", "serde", "fast-rng"] }
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
 
 [dev-dependencies]
 criterion = "0.5"

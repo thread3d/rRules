@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rrules-config
+  namespace: default
+data:
+  # Server configuration
+  RUST_LOG: "info"
+  APP_ENV: "production"
+
+  # Rule storage configuration
+  RULE_STORAGE_PATH: "/app/rules"
+  RULE_STORAGE_TYPE: "file"
+
+  # API configuration
+  SERVER_HOST: "0.0.0.0"
+  SERVER_PORT: "8080"
+
+  # Hot reload configuration
+  WATCH_RULES_DIR: "true"
+  RELOAD_INTERVAL_MS: "5000"

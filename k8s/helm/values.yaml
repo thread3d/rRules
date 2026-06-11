@@ -1,0 +1,44 @@
+replicaCount: 2
+
+image:
+  repository: rrules/server
+  tag: v0.1.0
+  pullPolicy: IfNotPresent
+
+containerPort: 8080
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "200m"
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: rrules.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5

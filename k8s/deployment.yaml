@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rrules-deployment
+  namespace: default
+  labels:
+    app: rrules
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rrules
+  template:
+    metadata:
+      labels:
+        app: rrules
+    spec:
+      serviceAccountName: rrules-service-account
+      securityContext:
+        runAsUser: 65534
+        runAsNonRoot: true
+      containers:
+        - name: rrules
+          image: rrules:latest
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: rrules-config
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: rule-storage
+              mountPath: /app/rules
+              readOnly: true
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+      volumes:
+        - name: rule-storage
+          configMap:
+            name: rrules-config
+        - name: config
+          configMap:
+            name: rrules-config

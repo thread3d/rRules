@@ -1,0 +1,17 @@
+# Production configuration for rRules server
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+logging:
+  level: "info"
+  format: "json"
+
+engine:
+  max_iterations: 1000
+  enable_debug_trace: false
+
+health:
+  live_endpoint: "/health/live"
+  ready_endpoint: "/health/ready"
