@@ -64,3 +64,47 @@ export interface RegisterRequest {
 }
 
 export interface RegisterResponse extends LoginResponse {}
+
+// Approval types
+
+export interface ApprovalState {
+  Draft: string
+  Submitted: { submitted_at: string }
+  InReview: { started_at: string, current_tier: number }
+  Approved: { approved_by: string[], completed_at: string }
+  Rejected: { rejected_by: string, reason?: string, completed_at: string }
+  Escalated: { escalated_to_tier: number, escalated_at: string }
+}
+
+export interface ApprovalRequest {
+  id: string
+  rule_id: string
+  workflow_id: string
+  maker_id: string
+  state: string
+  reviewers: string[]
+  required_approvals: number
+  approved_by: string[]
+  created_at: string
+}
+
+export interface SubmitApprovalRequest {
+  workflow_id?: string
+  maker_id?: string
+}
+
+export interface ApprovalActionRequest {
+  approver_id?: string
+  reason?: string
+}
+
+export interface ApprovalsResponse {
+  total_count: number
+  approvals: Array<{
+    id: string
+    rule_id: string
+    maker_id: string
+    state: string
+    created_at: string
+  }>
+}

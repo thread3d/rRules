@@ -4,4 +4,6 @@
 //! and governance features.
 
 pub mod models;
+pub mod metrics;
 pub mod v1;
+pub mod websocket;

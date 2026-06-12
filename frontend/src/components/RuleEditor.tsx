@@ -26,25 +26,27 @@ export function RuleEditor({
   }, [value])
 
   return (
-    <CodeMirror
-      value={cmValue}
-      height={height}
-      theme={oneDark}
-      extensions={[
-        javascript({ typescript: true }),
-        EditorState.readOnly.of(readOnly),
-      ]}
-      onChange={(val) => {
-        setCmValue(val)
-        onChange(val)
-      }}
-      basicSetup={{
-        lineNumbers: true,
-        foldGutter: true,
-        highlightActiveLine: true,
-        tabSize: 2,
-      }}
-    />
+    <div className="flex flex-col gap-2">
+      <CodeMirror
+        value={cmValue}
+        height={height}
+        theme={oneDark}
+        extensions={[
+          javascript({ typescript: true }),
+          EditorState.readOnly.of(readOnly),
+        ]}
+        onChange={(val) => {
+          setCmValue(val)
+          onChange(val as string)
+        }}
+        basicSetup={{
+          lineNumbers: true,
+          foldGutter: true,
+          highlightActiveLine: true,
+          tabSize: 2,
+        }}
+      />
+    </div>
   )
 }
 

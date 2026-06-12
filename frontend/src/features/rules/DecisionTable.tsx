@@ -8,12 +8,17 @@ import {
 import type { HitPolicyId, DecisionTableColumn, DecisionTableRow } from './types'
 import { RuleEditor } from '@/components/RuleEditor'
 import { Button } from '@/components/ui/button'
+import { ValidationDisplay } from '@/components/validation/ValidationDisplay'
+import type { ValidationError, ValidationWarning } from '@/components/validation/ValidationDisplay'
 
 export interface DecisionTableProps {
   hitPolicy: HitPolicyId
   columns: DecisionTableColumn[]
   rows: DecisionTableRow[]
   onHitPolicyChange?: (policy: HitPolicyId) => void
+  // Optional validation state for the entire table
+  validationErrors?: ValidationError[]
+  validationWarnings?: ValidationWarning[]
 }
 
 const HIT_POLICY_OPTIONS = [
@@ -33,6 +38,8 @@ export function DecisionTable({
   columns,
   rows,
   onHitPolicyChange,
+  validationErrors = [],
+  validationWarnings = [],
 }: DecisionTableProps) {
   const table = useReactTable({
     data: rows,
@@ -42,6 +49,14 @@ export function DecisionTable({
 
   return (
     <div className="space-y-4">
+      {/* Validation Messages */}
+      {validationErrors.length > 0 || validationWarnings.length > 0 ? (
+        <ValidationDisplay
+          errors={validationErrors}
+          warnings={validationWarnings}
+        />
+      ) : null}
+
       {/* Hit Policy Selector */}
       <div className="flex items-center gap-2">
         <label className="font-medium">Hit Policy:</label>
@@ -111,7 +126,7 @@ function CellEditor({ cell }: { cell: any }) {
     return (
       <RuleEditor
         value={JSON.stringify(value, null, 2)}
-        onChange={(val) => cell.row.original[cell.column.id] = JSON.parse(val)}
+        onChange={(val) => cell.row.original[cell.column.id] = JSON.parse(val as string)}
         height="150px"
       />
     )

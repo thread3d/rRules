@@ -11,3 +11,9 @@ pub mod tags;
 
 // Export common types for use in main.rs
 pub use execution::{ReloadRequest, ReloadResponse};
+
+// Re-export route modules
+#[allow(unused)]
+pub mod routes {
+    pub mod monitoring;
+}

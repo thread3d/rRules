@@ -10,6 +10,7 @@ pub mod v1;
 
 // Import execution endpoints for hot reload job tracking
 use crate::v1::execution::{get_job_status, list_jobs};
+use crate::v1::routes::monitoring::configure_monitoring;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -24,6 +25,8 @@ async fn main() -> std::io::Result<()> {
 
     // Initialize in-memory stores
     let rule_store = v1::rules::init_store();
+    let category_store = v1::categories::init_store();
+    let (tag_store, rule_tag_store) = v1::tags::init_stores();
     let approval_store = v1::approvals::init_store();
     let audit_store = v1::audit::init_store();
     let branch_store = v1::branches::init_store();
@@ -47,6 +50,9 @@ async fn main() -> std::io::Result<()> {
             .app_data(engine_state.clone())
             .app_data(web::Data::new(metrics_tx.clone()))
             .app_data(web::Data::new(rule_store.clone()))
+            .app_data(web::Data::new(category_store.clone()))
+            .app_data(web::Data::new(tag_store.clone()))
+            .app_data(web::Data::new(rule_tag_store.clone()))
             .app_data(web::Data::new(approval_store.clone()))
             .app_data(web::Data::new(audit_store.clone()))
             .app_data(web::Data::new(branch_store.clone()))
@@ -100,7 +106,9 @@ async fn main() -> std::io::Result<()> {
                     .route("/branches/{name}/merge", web::post().to(v1::branches::merge_branch))
                     // Audit trail endpoints (Phase 20-04)
                     .route("/audit", web::get().to(v1::audit::query_audit_events))
-                    .route("/audit/export", web::get().to(v1::audit::export_audit_log)),
+                    .route("/audit/export", web::get().to(v1::audit::export_audit_log))
+                    // Monitoring endpoints (Phase 19)
+                    .configure(configure_monitoring),
             )
             .configure(metrics::configure_metrics)
     })

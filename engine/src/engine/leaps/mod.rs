@@ -43,8 +43,8 @@ impl AggregationOp {
         match self {
             AggregationOp::Sum => Some(values.iter().sum()),
             AggregationOp::Count => Some(values.len() as f64),
-            AggregationOp::Max => Some(*values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))),
-            AggregationOp::Min => Some(*values.iter().fold(f64::INFINITY, |a, &b| a.min(b))),
+            AggregationOp::Max => Some(values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))),
+            AggregationOp::Min => Some(values.iter().fold(f64::INFINITY, |a, &b| a.min(b))),
         }
     }
 
@@ -72,8 +72,8 @@ impl AggregationOp {
         match self {
             AggregationOp::Sum => Some(values.iter().sum()),
             AggregationOp::Count => Some(values.len() as f64),
-            AggregationOp::Max => Some(*values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))),
-            AggregationOp::Min => Some(*values.iter().fold(f64::INFINITY, |a, &b| a.min(b))),
+            AggregationOp::Max => Some(values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))),
+            AggregationOp::Min => Some(values.iter().fold(f64::INFINITY, |a, &b| a.min(b))),
         }
     }
 }
@@ -241,16 +241,23 @@ impl LeapsEngine {
     /// Inserts a fact and propagates it through the network.
     pub fn assert_fact(&mut self, mut fact: Fact) {
         let fact_id = fact.id.to_string();
+        // Clone before moving fact
+        let fact_type = fact.fact_type_id.clone();
 
-        // Store the fact
+        // Store the fact (we can use fact again since we only moved fact_type by cloning)
         self.working_facts.insert(fact_id.clone(), fact);
 
-        // Propagate to alpha memory (test nodes)
-        for test_node in self.network.base.test_nodes.values() {
-            if test_node.fact_type_id == fact.fact_type_id {
-                self.alpha_memory.insert(&fact.fact_type_id, fact_id.clone());
-                self.propagate_to_successors(&test_node.id, &fact_id);
-            }
+        // Propagate to alpha memory (test nodes) - collect node IDs first
+        let node_ids: Vec<_> = {
+            self.network.base.test_nodes.values()
+                .filter(|n| n.fact_type_id == fact_type)
+                .map(|n| n.id.clone())
+                .collect()
+        };
+
+        for node_id in node_ids {
+            self.alpha_memory.insert(&fact_type, fact_id.clone());
+            self.propagate_to_successors(&node_id, &fact_id);
         }
 
         // Check aggregation nodes
@@ -265,55 +272,68 @@ impl LeapsEngine {
 
     /// Propagates a fact through successor nodes.
     fn propagate_to_successors(&mut self, node_id: &crate::engine::rete::NodeId, fact_id: &str) {
-        let test_node = match self.network.base.test_nodes.get(node_id) {
-            Some(n) => n,
-            None => return,
+        // Collect all successor data first (before any mutable borrow)
+        let successors_data: Vec<_> = {
+            let test_node = match self.network.base.test_nodes.get(node_id) {
+                Some(n) => n,
+                None => return,
+            };
+
+            test_node.successors.iter()
+                .filter_map(|s| {
+                    if let Some(join_node) = self.network.base.join_nodes.get(s) {
+                        Some((join_node.id.clone(), join_node.predecessor.clone(), s.0.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
         };
 
-        for successor_id in &test_node.successors {
-            if let Some(join_node) = self.network.base.join_nodes.get(successor_id) {
-                // Track aggregation for join nodes
-                if self.network.aggregated_join_nodes.contains(&successor_id.0) {
-                    self.metrics.record_rule_fired();
-                }
-                self.join_propagation(join_node, fact_id);
+        for (join_id, predecessor_id, successor_key) in successors_data {
+            // Track aggregation for join nodes
+            if self.network.aggregated_join_nodes.contains(&successor_key) {
+                self.metrics.record_rule_fired();
             }
+            self.join_propagation_with_predecessor(&join_id, &predecessor_id, fact_id);
         }
     }
 
-    /// Propagates from join node to action nodes.
-    fn join_propagation(&mut self, join_node: &crate::engine::rete::JoinNode, fact_id: &str) {
-        let test_node = match self.network.base.test_nodes.get(&join_node.predecessor) {
-            Some(n) => n,
-            None => return,
+    /// Propagates from join node with predecessor info.
+    fn join_propagation_with_predecessor(
+        &mut self,
+        join_node_id: &crate::engine::rete::NodeId,
+        predecessor_id: &crate::engine::rete::NodeId,
+        fact_id: &str,
+    ) {
+        // Get all data before mutation
+        let (test_facts_from_alpha, existing_nagrams) = {
+            let facts_from_alpha = self.alpha_memory.get_facts(&predecessor_id.0);
+            let existing_nagrams = self.beta_memory.get_nagrams(join_node_id);
+            (facts_from_alpha, existing_nagrams)
         };
-
-        let facts_from_alpha = self.alpha_memory.get_facts(&test_node.fact_type_id);
-
-        // Get existing nagrams from beta memory
-        let existing_nagrams = self.beta_memory.get_nagrams(&join_node.id);
 
         // Combine to form new partial matches
         for fact_from_beta in &existing_nagrams {
-            for alpha_fact_id in &facts_from_alpha {
+            for alpha_fact_id in &test_facts_from_alpha {
                 let mut new_nagram = fact_from_beta.clone();
                 new_nagram.push(MemoryReference {
                     fact_id: alpha_fact_id.clone(),
                     generation: 0,
                 });
-                self.beta_memory.insert(&join_node.id, new_nagram);
+                self.beta_memory.insert(join_node_id, new_nagram);
             }
         }
 
-        for alpha_fact_id in facts_from_alpha {
+        for alpha_fact_id in &test_facts_from_alpha {
             let nagram = vec![MemoryReference {
                 fact_id: alpha_fact_id.clone(),
                 generation: 0,
             }];
-            self.beta_memory.insert(&join_node.id, nagram);
+            self.beta_memory.insert(join_node_id, nagram);
         }
 
-        self.metrics.record_beta_memory_additions(facts_from_alpha.len() + existing_nagrams.len());
+        self.metrics.record_beta_memory_additions(test_facts_from_alpha.len() + existing_nagrams.len());
     }
 
     /// Executes aggregation for all nodes.
@@ -336,19 +356,29 @@ impl LeapsEngine {
     pub fn execute_rules(&mut self) -> usize {
         let mut rules_fired = 0;
 
-        for (_node_id, action_node) in &self.network.base.action_nodes {
-            for (_join_id, join_node) in &self.network.base.join_nodes {
-                let nagrams = self.beta_memory.get_nagrams(&join_node.id);
+        // Collect all join nodes and nagrams first (before any mutable borrow)
+        let nagram_data: Vec<_> = {
+            let mut temp_nagrams = vec![];
+            for join_node in self.network.base.join_nodes.values() {
+                temp_nagrams.push(join_node.id.clone());
+            }
+            temp_nagrams
+        };
 
-                // Apply aggregation if this join has aggregations
-                if self.network.aggregated_join_nodes.contains(&join_node.id.0) {
+        // Get nagrams in a separate loop to avoid borrow conflicts
+        for join_id in &nagram_data {
+            let nagrams = self.beta_memory.get_nagrams(join_id);
+
+            // Apply aggregation if this join has aggregations (separate borrow scope)
+            {
+                if self.network.aggregated_join_nodes.contains(&join_id.0) {
                     self.execute_aggregations();
                 }
+            }
 
-                for _nagram in nagrams {
-                    rules_fired += 1;
-                    self.metrics.record_rule_fired();
-                }
+            for _nagram in &nagrams {
+                rules_fired += 1;
+                self.metrics.record_rule_fired();
             }
         }
 

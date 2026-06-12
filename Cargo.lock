@@ -257,6 +257,7 @@ dependencies = [
  "chrono",
  "criterion",
  "engine",
+ "futures-util",
  "log",
  "serde",
  "serde_json",

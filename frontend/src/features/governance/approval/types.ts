@@ -4,20 +4,25 @@ export type ApprovalState = 'draft' | 'submitted' | 'in_review' | 'approved' | '
 
 export interface ApprovalRequest {
   id: string
-  workflowId: number
-  ruleId: string
-  makerId: string
-  makerName?: string
-  state: ApprovalState
-  currentState: ApprovalStateDetails
-  currentTier: number
-  reviewers: Approver[]
-  requiredApprovals: number
-  approvedBy: string[]
-  submittedAt?: string
-  startedAt?: string
-  completedAt?: string
-  rejectionReason?: string
+  rule_id: string
+  workflow_id: string
+  maker_id: string
+  state: string
+  reviewers?: string[]
+  required_approvals?: number
+  approved_by?: string[]
+  created_at: string
+}
+
+export interface ApprovalsResponse {
+  total_count: number
+  approvals: Array<{
+    id: string
+    rule_id: string
+    maker_id: string
+    state: string
+    created_at: string
+  }>
 }
 
 export interface ApprovalStateDetails {

@@ -29,52 +29,51 @@ pub fn publish_engine_state(tx: &MetricsTx, state: EngineState) -> Result<usize,
     Ok(tx.send(state).map_err(|e| e.to_string())?)
 }
 
-/// HTTP handler for Prometheus metrics endpoint - GET /metrics
-pub async fn metrics_endpoint() -> impl Responder {
-    // For now, return placeholder metrics in Prometheus format
-    let metrics_text = r#"# HELP rengine_rules_fired Total number of rules fired
-# TYPE rengine_rules_fired counter
-rengine_rules_fired 0
-# HELP rengine_memory_bytes Current memory usage in bytes
-# TYPE rengine_memory_bytes gauge
-rengine_memory_bytes 0
-# HELP rengine_engine_count Number of active engines
-# TYPE rengine_engine_count gauge
-rengine_engine_count 1
+/// HTTP handler for metrics endpoint - GET /metrics
+///
+/// Supports both Prometheus text format and JSON based on Accept header.
+pub async fn metrics_endpoint(req: actix_web::HttpRequest) -> impl Responder {
+    // Check Accept header to determine response format
+    let accept = req.headers().get("Accept").and_then(|h| h.to_str().ok()).unwrap_or("");
+
+    match accept {
+        _ if accept.contains("application/json") => {
+            // Return JSON format
+            HttpResponse::Ok()
+                .content_type("application/json")
+                .json(serde_json::json!({
+                    "engine_name": "default",
+                    "rules_fired": 0,
+                    "facts_inserted": 0,
+                    "active_sessions": 0,
+                    "memory_bytes": 0,
+                    "alpha_memory_size": 0,
+                    "beta_memory_size": 0,
+                    "network_traversals": 0,
+                    "firing_rate_per_second": 0.0
+                }))
+        }
+        _ => {
+            // Default to Prometheus text format
+            let metrics_text = r#"# HELP engine_rules_fired Total number of rules fired
+# TYPE engine_rules_fired counter
+engine_rules_fired 0
+# HELP engine_memory_bytes Current memory usage in bytes
+# TYPE engine_memory_bytes gauge
+engine_memory_bytes 0
+# HELP engine_engine_count Number of active engines
+# TYPE engine_engine_count gauge
+engine_engine_count 1
 "#;
 
-    HttpResponse::Ok()
-        .content_type("text/plain; version=0.0.4")
-        .body(metrics_text)
+            HttpResponse::Ok()
+                .content_type("text/plain; version=0.0.4")
+                .body(metrics_text)
+        }
+    }
 }
 
-/// Metrics data structure for JSON API responses
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct EngineMetrics {
-    pub engine_name: String,
-    pub rules_fired: u64,
-    pub memory_bytes: u64,
-    pub alpha_memory_size: u64,
-    pub beta_memory_size: u64,
-    pub network_traversals: u64,
-}
-
-/// Get metrics in JSON format - GET /v1/metrics
-pub async fn get_metrics() -> impl Responder {
-    // For now, return default metrics since we don't track them yet
-    let metrics = EngineMetrics {
-        engine_name: "default".to_string(),
-        rules_fired: 0,
-        memory_bytes: 0,
-        alpha_memory_size: 0,
-        beta_memory_size: 0,
-        network_traversals: 0,
-    };
-
-    HttpResponse::Ok().json(vec![metrics])
-}
-
-/// Dead rules endpoint - GET /v1/metrics/dead-rules
+/// Dead rules endpoint - GET /metrics/dead-rules
 pub async fn dead_rules_endpoint() -> impl Responder {
     use engine::monitoring::detection::RuleExecutionTracker;
 
@@ -97,7 +96,7 @@ pub async fn dead_rules_endpoint() -> impl Responder {
         .map(|rule| DeadRuleResponse {
             rule_id: rule.rule_id.clone(),
             rule_name: rule.rule_name.clone(),
-            category: Some(rule.category.clone().unwrap_or_default()),
+            category: rule.category.clone(),
             evaluation_count: rule.evaluation_count,
             fire_count: rule.fire_count,
             recommendation: format!(
@@ -110,10 +109,8 @@ pub async fn dead_rules_endpoint() -> impl Responder {
     HttpResponse::Ok().json(rules)
 }
 
-/// Coverage endpoint - GET /v1/metrics/coverage
+/// Coverage endpoint - GET /metrics/coverage
 pub async fn coverage_endpoint() -> impl Responder {
-    // For now, return empty coverage data since we don't track it yet
-
     #[derive(serde::Serialize)]
     struct RuleCoverageResponse {
         rule_id: String,

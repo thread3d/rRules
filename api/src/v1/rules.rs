@@ -315,10 +315,13 @@ pub async fn create_rule(
     };
 
     // Check for duplicate name within same category
-    let store_guard = store.lock().unwrap();
-    let has_duplicate = store_guard.values().any(|r| {
-        r.rule_name == req.name && r.category == req.category.clone().unwrap_or_default()
-    });
+    let has_duplicate = {
+        let store_guard = store.lock().unwrap();
+        let cats = req.category.clone().unwrap_or_default();
+        store_guard.values().any(|r| {
+            r.rule_name == req.name && r.category == cats
+        })
+    };
 
     if has_duplicate {
         return HttpResponse::Conflict().json(serde_json::json!({
@@ -342,10 +345,12 @@ pub async fn create_rule(
         updated_by: None,
     };
 
-    let mut store_guard = store.lock().unwrap();
-    store_guard.insert(rule_id, rule);
+    {
+        let mut store_guard = store.lock().unwrap();
+        store_guard.insert(rule_id, rule);
+    }
 
-    HttpResponse::Created().json(RuleResponse::from(store_guard.get(&rule_id).unwrap()))
+    HttpResponse::Created().json(RuleResponse::from(store.lock().unwrap().get(&rule_id).unwrap()))
 }
 
 /// Get paginated list of rules - GET /v1/rules

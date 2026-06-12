@@ -7,7 +7,65 @@ use std::collections::{HashMap, HashSet};
 use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
-use crate::engine::rete::{AlphaMemory, BetaMemory, FactId};
+use crate::engine::rete::NodeId;
+
+/// Nagram type (sequence of memory references forming a partial match)
+pub type Nagram = Vec<MemoryReference>;
+
+/// Type for fact IDs
+pub type FactId = String;
+
+/// Alpha memory stores fact type activations.
+#[derive(Debug, Clone, Default)]
+pub struct AlphaMemory {
+    entries: HashMap<String, HashSet<String>>,
+}
+
+impl AlphaMemory {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, fact_type_id: &str, fact_id: String) {
+        self.entries.entry(fact_type_id.to_string()).or_default().insert(fact_id);
+    }
+
+    pub fn get_facts(&self, fact_type_id: &str) -> Vec<String> {
+        self.entries.get(fact_type_id).map(|s| s.iter().cloned().collect()).unwrap_or_default()
+    }
+
+    pub fn size(&self) -> usize {
+        self.entries.values().map(|v| v.len()).sum()
+    }
+}
+
+/// Beta memory stores partial matches (nagrams).
+#[derive(Debug, Clone, Default)]
+pub struct BetaMemory {
+    entries: HashMap<String, Vec<Nagram>>,
+}
+
+impl BetaMemory {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, join_node_id: impl Into<String>, nagram: Nagram) {
+        self.entries.entry(join_node_id.into()).or_default().push(nagram);
+    }
+
+    pub fn get_nagrams(&self, join_node_id: impl Into<String>) -> Vec<Nagram> {
+        self.entries.get(&join_node_id.into()).cloned().unwrap_or_default()
+    }
+
+    pub fn size(&self) -> usize {
+        self.entries.values().map(|v| v.len()).sum()
+    }
+}
 
 /// A unique identifier for a justification.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -17,12 +75,44 @@ impl JustificationId {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
+
+    /// Get the inner string reference
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<JustificationId> for String {
+    fn from(jid: JustificationId) -> Self {
+        jid.0
+    }
+}
+
+// For backwards compatibility with &str and String conversion
+impl From<String> for JustificationId {
+    fn from(s: String) -> Self {
+        JustificationId(s)
+    }
 }
 
 impl std::fmt::Display for JustificationId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+/// NodeId from rete module - implement Into<String> for convenience
+impl From<&NodeId> for String {
+    fn from(node_id: &NodeId) -> Self {
+        node_id.0.clone()
+    }
+}
+
+/// Reference to a fact stored in beta memory (nagram).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryReference {
+    pub fact_id: String,
+    pub generation: usize,
 }
 
 /// A justification represents how a fact was derived.
@@ -145,10 +235,17 @@ impl DependencyGraph {
             result.insert(current.clone());
 
             // Find justifications that depend on this fact
-            for (just_id, premises) in &self.dependents {
+            for (just_id_str, premises) in &self.dependents {
                 if premises.contains(&current) {
-                    for conclusion in &self.producers[just_id].iter() {
-                        stack.push(conclusion.clone());
+                    // Convert JustificationId to String - clone first since just_id_str is &String
+                    let just_id_val = JustificationId::new(just_id_str.clone());
+                    let just_id_str_val: String = just_id_val.into();
+                    if let Some(producers) = self.producers.get(&just_id_str_val) {
+                        for conclusion in producers.iter() {
+                            // Convert JustificationId to String for the stack
+                            let concl_id: String = conclusion.clone().into();
+                            stack.push(concl_id);
+                        }
                     }
                 }
             }
@@ -343,16 +440,23 @@ impl PhreakEngine {
     /// Inserts a fact and propagates it through the network.
     pub fn assert_fact(&mut self, mut fact: Fact) {
         let fact_id = fact.id.to_string();
+        // Clone before moving fact
+        let fact_type = fact.fact_type_id.clone();
 
         // Store the fact
         self.working_facts.insert(fact_id.clone(), fact);
 
-        // Propagate to alpha memory (test nodes)
-        for test_node in self.network.base.test_nodes.values() {
-            if test_node.fact_type_id == fact.fact_type_id {
-                self.alpha_memory.insert(&fact.fact_type_id, fact_id.clone());
-                self.propagate_to_successors(&test_node.id, &fact_id);
-            }
+        // Collect test nodes that need propagation first (before mutable borrow)
+        let node_ids: Vec<_> = {
+            self.network.base.test_nodes.values()
+                .filter(|n| n.fact_type_id == fact_type)
+                .map(|n| n.id.clone())
+                .collect()
+        };
+
+        for node_id in node_ids {
+            self.alpha_memory.insert(&fact_type, fact_id.clone());
+            self.propagate_to_successors(&node_id, &fact_id);
         }
 
         // Support the fact in TMS
@@ -363,82 +467,108 @@ impl PhreakEngine {
 
     /// Propagates a fact through successor nodes.
     fn propagate_to_successors(&mut self, node_id: &crate::engine::rete::NodeId, fact_id: &str) {
-        let test_node = match self.network.base.test_nodes.get(node_id) {
-            Some(n) => n,
-            None => return,
+        // Collect all join_nodes first (before mutable borrow)
+        let join_nodes: Vec<_> = {
+            let test_node = match self.network.base.test_nodes.get(node_id) {
+                Some(n) => n,
+                None => return,
+            };
+
+            test_node.successors.iter()
+                .filter_map(|s| self.network.base.join_nodes.get(s))
+                .cloned()
+                .collect()
         };
 
-        for successor_id in &test_node.successors {
+        for join_node in join_nodes {
             self.trace.record_traversal();
-            if let Some(join_node) = self.network.base.join_nodes.get(successor_id) {
-                self.join_propagation(join_node, fact_id);
-            }
+            self.join_propagation(&join_node, fact_id);
         }
     }
 
     /// Propagates from join node to action nodes.
     fn join_propagation(&mut self, join_node: &crate::engine::rete::JoinNode, fact_id: &str) {
-        let test_node = match self.network.base.test_nodes.get(&join_node.predecessor) {
-            Some(n) => n,
-            None => return,
+        // Collect all data before any mutation - get test_facts and existing_nagrams in one scope
+        let (test_facts_from_alpha, existing_nagrams, predecessor_facts_for_beta): (
+            Vec<String>,
+            Vec<Nagram>,
+            Vec<String>,
+        ) = {
+            let join_node_id = &join_node.id.0;
+
+            // Get test node info first
+            let test_node = match self.network.base.test_nodes.get(&join_node.predecessor) {
+                Some(n) => n,
+                None => return,
+            };
+
+            // Collect all data needed
+            let facts_from_alpha = self.alpha_memory.get_facts(&test_node.fact_type_id);
+            let existing_nagrams = self.beta_memory.get_nagrams(join_node_id);
+
+            // Clone the alpha facts since we need them for both iteration and insertion
+            (facts_from_alpha.clone(), existing_nagrams, facts_from_alpha)
         };
 
-        let facts_from_alpha = self.alpha_memory.get_facts(&test_node.fact_type_id);
-
-        // Get existing nagrams from beta memory
-        let existing_nagrams = self.beta_memory.get_nagrams(&join_node.id);
-
+        // Now process with mutable borrows allowed
         // Combine to form new partial matches
         for fact_from_beta in &existing_nagrams {
-            for alpha_fact_id in &facts_from_alpha {
+            for alpha_fact_id in &test_facts_from_alpha {
                 let mut new_nagram = fact_from_beta.clone();
                 new_nagram.push(MemoryReference {
                     fact_id: alpha_fact_id.clone(),
                     generation: 0,
                 });
-                self.beta_memory.insert(&join_node.id, new_nagram);
+                self.beta_memory.insert(&join_node.id.0, new_nagram);
             }
         }
 
-        for alpha_fact_id in facts_from_alpha {
+        for alpha_fact_id in predecessor_facts_for_beta {
             let nagram = vec![MemoryReference {
                 fact_id: alpha_fact_id.clone(),
                 generation: 0,
             }];
-            self.beta_memory.insert(&join_node.id, nagram);
+            self.beta_memory.insert(&join_node.id.0, nagram);
         }
 
-        self.metrics.record_beta_memory_additions(facts_from_alpha.len() + existing_nagrams.len());
+        self.metrics.record_beta_memory_additions(test_facts_from_alpha.len() + existing_nagrams.len());
     }
 
     /// Executes the engine and fires rules with truth maintenance.
     pub fn execute_rules(&mut self) -> usize {
         let mut rules_fired = 0;
 
-        for (_node_id, action_node) in &self.network.base.action_nodes {
-            for (_join_id, join_node) in &self.network.base.join_nodes {
-                let nagrams = self.beta_memory.get_nagrams(&join_node.id);
+        // Collect all data first (before any mutable borrow)
+        let nagram_data: Vec<_> = {
+            let mut temp = vec![];
+            for join_node in self.network.base.join_nodes.values() {
+                let nagrams = self.beta_memory.get_nagrams(&join_node.id.0);
+                temp.push((join_node.id.0.clone(), nagrams));
+            }
+            temp
+        };
 
-                // For each partial match, create a justification
-                for (i, _nagram) in nagrams.iter().enumerate() {
-                    let just_id = JustificationId::new(format!(
-                        "{}_{}_{}",
-                        action_node.id.0, join_node.id.0, i
-                    ));
+        // Now process with mutable borrows allowed
+        for (join_id, nagrams) in nagram_data {
+            // For each partial match, create a justification
+            for (i, _nagram) in nagrams.iter().enumerate() {
+                let just_id = JustificationId::new(format!(
+                    "action_{}_{}",
+                    join_id, i
+                ));
 
-                    let justification = Justification::new(
-                        just_id.clone(),
-                        &action_node.rule_id,
-                        vec![], // Would contain premise facts in full implementation
-                        vec![format!("result_{}", rules_fired)],
-                    );
+                let justification = Justification::new(
+                    just_id.clone(),
+                    &format!("rule_for_join_{}", join_id),
+                    vec![], // Would contain premise facts in full implementation
+                    vec![format!("result_{}", rules_fired)],
+                );
 
-                    // Add to TMS
-                    self.network.tms_mut().add_justification(justification);
+                // Add to TMS
+                self.network.tms_mut().add_justification(justification);
 
-                    rules_fired += 1;
-                    self.metrics.record_rule_fired();
-                }
+                rules_fired += 1;
+                self.metrics.record_rule_fired();
             }
         }
 

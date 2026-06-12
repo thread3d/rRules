@@ -1,0 +1,45 @@
+# Cargo build artifacts
+target/
+*.rlib
+*.o
+*.d
+
+# Cargo lock files (use only Cargo.lock for reproducible builds)
+Cargo.*.lock
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Test coverage reports
+coverage/
+.tarpaulin.html
+
+# Documentation generation artifacts
+target/doc/
+
+# Git metadata
+.git/
+.github/
+.gitignore
+
+# Development config (use environment variables in production)
+.env
+.env.*
+config/*.dev.*
+
+# CI/CD files (not needed at runtime)
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Large non-essential directories
+node_modules/
+frontend/node_modules/
+
+# Documentation (README, CHANGELOG, etc.)
+*.md
+!.md

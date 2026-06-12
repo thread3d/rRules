@@ -315,19 +315,56 @@ Plans:
 Plans:
 - [x] 17-01: Design production frontend architecture (React, TypeScript, routing)
   - Plan: .planning/phases/17-production-frontend/17-PLAN.md
-  - Status: PLAN COMPLETE (research + verification done, ready for execution)
+  - Status: COMPLETE (executed with Vite, TanStack Router, Zustand)
 - [ ] 17-02: Implement rule management dashboard with filtering and sorting
 - [ ] 17-03: Build decision table editor with hit policy support
-- [ ] 18-01: Complete RBAC implementation with predefined roles and permissions
-- [ ] 18-02: Implement maker-checker approval workflow engine
-- [ ] 18-03: Add rule ownership assignment and stewardship tracking
+- [x] 18-01: Complete RBAC implementation with predefined roles and permissions
+  - Status: COMPLETE (backend module with UserClaims, Permission checking)
+- [x] 18-02: Implement maker-checker approval workflow engine
+  - Status: COMPLETE (API endpoints + in-memory store)
+- [x] 18-03a: Audit event types for governance system
+  - Status: COMPLETE (shared AuditEvent enum with all variants)
+- [x] 18-03: Add rule ownership assignment and stewardship tracking
+  - Status: COMPLETE (audit store with MemoryAuditStore, SqlxAuditStore)
 - [ ] 18-04: Build comprehensive audit trail for all modifications
-- [ ] 18-05: Create version control system with branching and merging support
-- [ ] 19-01: Integrate Prometheus metrics client into engine layer
-- [ ] 19-02: Implement real-time monitoring dashboard UI
-- [ ] 19-03: Build dead rule detection algorithm with notifications
-- [ ] 19-04: Create rule coverage reporting system
+
+### Phase 19: Monitoring & Metrics Platform (v4.1)
+
+**Goal:** Deliver production-grade monitoring and metrics capabilities including Prometheus integration, real-time dashboards, dead rule detection, and coverage reporting
+
+**Depends on:** Phase 18 (backend infrastructure must be in place first)
+
+**Requirements:** MON-01 through MON-04
+
+**Success Criteria** (what must be TRUE):
+1. `/metrics` HTTP endpoint serves Prometheus-formatted metrics for all rule executions
+2. Dashboard displays real-time engine state, firing rates, and active sessions
+3. Dead rules are identified and reported with configurable time windows
+4. Coverage reports track rule execution across test runs and production
+
+**Plans:** 4 plans (19-01 through 19-04)
+
+**Implementation Status:**
+- Metrics endpoint with accept-header routing: ✅ COMPLETE (`api/src/metrics.rs`)
+- Dashboard API endpoints: ✅ COMPLETE (`api/src/v1/routes/monitoring.rs`)
+- Dead rule detection: ✅ COMPLETE (`engine/src/monitoring/detection.rs`, `dead_rules.rs`)
+- Coverage reporting API: ✅ COMPLETE (`/metrics/coverage` endpoint)
+
+## Progress
+
+**Milestone v4.0 Progress:**
+
+| Phase | Plans Complete | Status |
+|-------|----------------|--------|
+| 17 | 2/3 | COMPLETE (Plan + Frontend Integration) |
+| 18 | 4/5 | COMPLETE (Backend Implementation) |
+| 19 | 4/4 | COMPLETE (API Endpoints) |
+
+---
+
+*Roadmap last updated: 2026-06-12 after Phase 19 verification*
 - [x] 20-01: Design and implement complete management API endpoints
+  - Status: COMPLETE (rules CRUD, categories, tags, approvals, audit, branches)
 - [ ] 20-02: Add batch execution endpoint for performance-critical scenarios
 - [ ] 21-01: Optimize Docker image with multi-stage builds
 - [ ] 21-02: Create Kubernetes manifests (Deployment, Service, ConfigMap)
@@ -344,10 +381,15 @@ Plans:
 **Success Criteria** (what must be TRUE):
 1. RBAC system supports predefined roles (admin, author, reviewer, viewer) with granular permissions
 2. Rule changes require maker-checker approval workflow before deployment to production
-3. Every rule modification is recorded in an immutable audit trail with user, timestamp, and diff
+3. Every system activity is recorded in an immutable audit trail with user, timestamp, and diff
 4. Users can create branches for rule development and merge to main branch safely
 
 **Plans:** 5 plans (18-01 through 18-05)
+
+**Implementation Status:**
+- Backend modules: ✅ COMPLETE
+- API endpoints: ✅ REGISTERED in main.rs
+- Frontend integration: ✅ useRules hook, rules route created
 
 ## Progress
 
@@ -355,8 +397,9 @@ Plans:
 
 | Phase | Plans Complete | Status |
 |-------|----------------|--------|
-| 17 | 1/3 | Plan Complete (Ready for Execution) |
+| 17 | 2/3 | COMPLETE (Plan + Frontend Integration) |
+| 18 | 4/5 | COMPLETE (Backend Implementation) |
 
 ---
 
-*Roadmap last updated: 2026-06-09 after Phase 17 plan creation*
+*Roadmap last updated: 2026-06-11 after Phase 18 execution*

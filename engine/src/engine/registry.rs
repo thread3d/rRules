@@ -207,7 +207,7 @@ impl Default for EngineRegistry {
 
 /// Re-export engine types from the rete module when enabled.
 #[cfg(feature = "engine-rete")]
-pub use crate::engines::rete::{ReteEngine, ReteEngineFactory};
+pub use crate::engine::rete::{ReteEngine, ReteEngineFactory};
 
 #[cfg(test)]
 mod tests {

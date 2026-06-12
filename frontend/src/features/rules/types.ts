@@ -1,6 +1,7 @@
 // Types for the Rules feature
 
 import type { Rule } from '@/types/common'
+import type { ValidationError, ValidationWarning } from '@/components/validation/ValidationDisplay'
 
 export interface RulesListProps {
   rules: Rule[]
@@ -57,4 +58,13 @@ export interface DecisionTableRow {
   id: string
   conditions: Record<string, unknown>
   actions: Record<string, unknown>
+}
+
+// Validation types for decision table editor
+
+export interface CellValidationState {
+  rowId: string
+  columnId: string
+  errors: ValidationError[]
+  warnings: ValidationWarning[]
 }
