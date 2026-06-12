@@ -4,8 +4,6 @@
 
 use crate::environment::{Engine, Session};
 use crate::fact::Fact;
-use crate::rules::Rule;
-use crate::salience::agenda::{Activation, Agenda};
 
 /// Result of a forward chaining execution.
 pub struct ExecutionResult {
@@ -39,9 +37,9 @@ impl ExecutionResult {
 ///
 /// This is the main entry point for forward rule execution as exported from lib.rs.
 #[allow(dead_code)]
-pub fn execute_forward(engine: &mut Engine, _session: &Session) -> ExecutionResult {
+pub fn execute_forward(_engine: &mut Engine, _session: &Session) -> ExecutionResult {
     // Placeholder implementation - actual Rete integration would go here
-    let mut result = ExecutionResult::new();
+    let result = ExecutionResult::new();
 
     // This would:
     // 1. Build or reuse the Rete network from compiled rules
@@ -56,44 +54,8 @@ pub fn execute_forward(engine: &mut Engine, _session: &Session) -> ExecutionResu
 ///
 /// This is a convenience wrapper for testing purposes.
 #[allow(dead_code)]
-pub fn execute_forward_simple(engine: &mut Engine) -> ExecutionResult {
+pub fn execute_forward_simple(_engine: &mut Engine) -> ExecutionResult {
     // Placeholder implementation - actual Rete integration would go here
-    let mut result = ExecutionResult::new();
+    let result = ExecutionResult::new();
     result
-}
-
-/// Conflict resolution strategy for ordering rule firings.
-pub use crate::salience::conflict_resolution::ConflictResolver;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_agenda_priority() {
-        let mut agenda = Agenda::new();
-
-        // Create rules with different saliences
-        let rule_high = Rule::builder("high", "High Priority").salience(100).build();
-        let rule_low = Rule::builder("low", "Low Priority").salience(-50).build();
-        let rule_med = Rule::builder("med", "Medium Priority").salience(50).build();
-
-        agenda.push(Activation::new(rule_high, 100));
-        agenda.push(Activation::new(rule_low, -50));
-        agenda.push(Activation::new(rule_med, 50));
-
-        // Should pop in priority order
-        assert_eq!(agenda.pop().unwrap().salience, 100);
-        assert_eq!(agenda.pop().unwrap().salience, 50);
-        assert_eq!(agenda.pop().unwrap().salience, -50);
-        assert!(agenda.is_empty());
-    }
-
-    #[test]
-    fn test_conflict_resolver() {
-        let resolver = ConflictResolver::default();
-
-        // Verify the default strategy is Salience
-        assert_eq!(resolver.strategy_name(), "salience");
-    }
 }

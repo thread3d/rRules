@@ -1,5 +1,6 @@
 //! Main entry point for rRules REST API server
 
+use actix_files as fs;
 use actix_web::{web, App, HttpServer};
 
 mod health;
@@ -35,6 +36,12 @@ async fn main() -> std::io::Result<()> {
     // Get rules directory from environment
     let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
 
+    // Get frontend dist path from environment or use default
+    let frontend_dist = std::env::var("FRONTEND_DIST")
+        .unwrap_or_else(|_| "../frontend/dist".to_string());
+
+    println!("Frontend dist path: {}", frontend_dist);
+
     // Start file watcher in background
     let watch_rules = std::env::var("WATCH_RULES_DIR")
         .map(|v| v == "true" || v == "1")
@@ -57,6 +64,12 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(audit_store.clone()))
             .app_data(web::Data::new(branch_store.clone()))
             .app_data(web::Data::new(job_store.clone()))
+            // Serve frontend static files at root path
+            .service(
+                fs::Files::new("/", &frontend_dist)
+                    .index_file("index.html")
+                    .show_files_listing(),
+            )
             // Health check endpoints (must be before /v1 to avoid prefix conflict)
             .configure(health::configure_health)
             // API v1 endpoints

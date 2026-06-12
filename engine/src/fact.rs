@@ -3,7 +3,7 @@
 //! This module implements the Fact struct and WorkingMemory for pattern matching
 //! and fact storage/retrieval.
 
-use crate::data_types::{FactType, Value};
+use crate::data_types::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
@@ -163,7 +163,7 @@ impl WorkingMemory {
     }
 
     /// Inserts a fact into working memory.
-    pub fn insert_fact(&mut self, mut fact: Fact) -> Result<(), WorkingMemoryError> {
+    pub fn insert_fact(&mut self, fact: Fact) -> Result<(), WorkingMemoryError> {
         // Validate that fact has required fields
         if fact.payload.is_empty() && fact.fact_type_id != "generic" {
             return Err(WorkingMemoryError::EmptyPayload);
@@ -315,5 +315,66 @@ mod tests {
             wm.insert_fact(fact2),
             Err(WorkingMemoryError::DuplicateId(_))
         ));
+    }
+
+    #[test]
+    fn test_empty_payload_rejected() {
+        let mut wm = WorkingMemory::new();
+
+        // Empty payload should be rejected for non-generic types
+        let fact_non_generic = Fact::new("non_generic_type".to_string(), HashMap::new());
+        assert!(matches!(
+            wm.insert_fact(fact_non_generic),
+            Err(WorkingMemoryError::EmptyPayload)
+        ));
+    }
+
+    #[test]
+    fn test_get_all_facts() {
+        let mut wm = WorkingMemory::new();
+
+        // Use non-empty payload since empty payloads are rejected
+        for i in 0..3 {
+            let mut payload = HashMap::new();
+            payload.insert("key".to_string(), Value::Integer(i as i64));
+            wm.insert_fact(Fact::new("type1".to_string(), payload)).unwrap();
+        }
+
+        let all_facts = wm.get_all_facts();
+        assert_eq!(all_facts.len(), 3);
+    }
+
+    #[test]
+    fn test_retract_nonexistent() {
+        let mut wm = WorkingMemory::new();
+        let nonexistent_id = Uuid::new_v4();
+
+        // Retract should return None for non-existent facts
+        let result = wm.retract_fact(nonexistent_id).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_facts_by_type_multiple() {
+        let mut wm = WorkingMemory::new();
+
+        // Use non-empty payloads since empty payloads are rejected
+        for _ in 0..5 {
+            let mut payload = HashMap::new();
+            payload.insert("key".to_string(), Value::Integer(1));
+            wm.insert_fact(Fact::new("same_type".to_string(), payload)).unwrap();
+        }
+
+        let facts = wm.get_facts_by_type("same_type");
+        assert_eq!(facts.len(), 5);
+    }
+
+    #[test]
+    fn test_get_facts_by_type_none() {
+        let wm = WorkingMemory::new();
+
+        // No facts of this type
+        let facts = wm.get_facts_by_type("nonexistent");
+        assert!(facts.is_empty());
     }
 }

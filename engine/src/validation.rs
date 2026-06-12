@@ -2,7 +2,7 @@
 //!
 //! This module provides validators that catch errors early with clear messages.
 
-use crate::data_types::{Value, ValueType};
+use crate::data_types::Value;
 use crate::rules::{Condition, Rule};
 use std::collections::HashMap;
 
@@ -281,24 +281,22 @@ impl<'a> SemanticValidator<'a> {
     /// Validates that a field value matches the expected type.
     fn validate_field_value(
         &self,
-        fact_type: &str,
-        field: &str,
+        _fact_type: &str,
+        _field: &str,
         value: &Value,
-        result: &mut ValidationResult,
+        _result: &mut ValidationResult,
     ) {
-        if let Some(fields) = self.fact_types.get(fact_type) {
-            // This is a simplified check - full implementation would
-            // look up the actual type of the field and compare with value
-            match value {
-                Value::Bool(_) => {}
-                Value::Integer(_) => {}
-                Value::Float(_) => {}
-                Value::String(_) => {}
-                Value::Object(_) => {}
-                Value::Array(_) => {}
-                Value::Null => {}
-                _ => {}
-            }
+        // This is a simplified check - full implementation would
+        // look up the actual type of the field and compare with value
+        match value {
+            Value::Bool(_) => {}
+            Value::Integer(_) => {}
+            Value::Float(_) => {}
+            Value::String(_) => {}
+            Value::Object(_) => {}
+            Value::Array(_) => {}
+            Value::Null => {}
+            _ => {}
         }
     }
 

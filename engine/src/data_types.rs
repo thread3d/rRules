@@ -263,4 +263,111 @@ mod tests {
             assert_eq!(v, parsed);
         }
     }
+
+    #[test]
+    fn test_value_from_json_with_all_types() {
+        // Verify that Value can be serialized and deserialized correctly for all types
+        let values = vec![
+            Value::Bool(true),
+            Value::Integer(42),
+            Value::Float(3.14),
+            Value::String("hello".to_string()),
+            Value::Null,
+        ];
+
+        for v in values {
+            let json = v.to_json().unwrap();
+            assert!(!json.is_empty());
+            let parsed = Value::from_json(&json).unwrap();
+            assert_eq!(v, parsed);
+        }
+    }
+
+    #[test]
+    fn test_value_nan_comparisons() {
+        // Test NaN handling - NaN != NaN per IEEE 754
+        let nan1 = Value::Float(f64::NAN);
+        let nan2 = Value::Float(f64::NAN);
+
+        // With f64's default PartialEq, NaN is not equal to itself
+        assert_ne!(nan1, nan2);
+    }
+
+    #[test]
+    fn test_value_object_nested() {
+        let mut inner_obj = std::collections::HashMap::new();
+        inner_obj.insert("inner".to_string(), Value::Integer(99));
+
+        let mut outer_obj = std::collections::HashMap::new();
+        outer_obj.insert("outer".to_string(), Value::Object(inner_obj));
+
+        let value = Value::Object(outer_obj);
+        let json = value.to_json().unwrap();
+
+        // Verify nested object roundtrip
+        let parsed = Value::from_json(&json).unwrap();
+        assert_eq!(value, parsed);
+    }
+
+    #[test]
+    fn test_value_array_nested() {
+        let inner_array = vec![Value::Integer(1), Value::Integer(2)];
+        let outer_array = vec![Value::Array(inner_array)];
+
+        let value = Value::Array(outer_array);
+        let json = value.to_json().unwrap();
+
+        // Verify nested array roundtrip
+        let parsed = Value::from_json(&json).unwrap();
+        assert_eq!(value, parsed);
+    }
+
+    #[test]
+    fn test_dynamic_cast_errors() {
+        // Test that incompatible casts return None
+        let string_val = Value::String("hello".to_string());
+        assert_eq!(string_val.as_bool(), None);
+        assert_eq!(string_val.as_integer(), None);
+        assert_eq!(string_val.as_float(), None);
+
+        let int_val = Value::Integer(42);
+        assert_eq!(int_val.as_bool(), None);
+        assert_eq!(int_val.as_string(), None);
+    }
+
+    #[test]
+    fn test_value_type_class() {
+        // Test type class identification
+        assert!(Value::Bool(true).is_compatible_with(&TypeInfo {
+            name: "bool".to_string(),
+            type_class: TypeClass::Scalar,
+        }));
+
+        assert!(Value::Integer(42).is_compatible_with(&TypeInfo {
+            name: "integer".to_string(),
+            type_class: TypeClass::Scalar,
+        }));
+
+        assert!(Value::Object(std::collections::HashMap::new()).is_compatible_with(&TypeInfo {
+            name: "object".to_string(),
+            type_class: TypeClass::Object,
+        }));
+
+        assert!(!Value::String("test".to_string()).is_compatible_with(&TypeInfo {
+            name: "bool".to_string(),
+            type_class: TypeClass::Scalar,
+        }));
+    }
+
+    #[test]
+    fn test_value_datetime_roundtrip() {
+        let dt = chrono::NaiveDateTime::from_timestamp_opt(1234567890, 0).unwrap();
+        let value = Value::DateTime(dt);
+        let json = value.to_json().unwrap();
+
+        // DateTime is serialized as a formatted string
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // The parser may or may not preserve the type, just verify it's valid JSON
+        assert!(parsed.is_string() || parsed.is_object());
+    }
 }

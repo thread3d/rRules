@@ -77,7 +77,7 @@ pub enum StepType {
 /// Executes backward chaining from a goal/query.
 ///
 /// This is the main entry point for backward rule execution as exported from lib.rs.
-pub fn execute_backward(engine: &Engine, session: &Session, goal: &str) -> InferenceTrace {
+pub fn execute_backward(_engine: &Engine, _session: &Session, goal: &str) -> InferenceTrace {
     // Placeholder implementation - actual backward chaining would go here
     InferenceTrace::new(false)
         .with_step(InferenceStep {

@@ -3,7 +3,6 @@
 //! This module provides the EngineBuilder for configuration and the Engine struct
 //! that manages rule execution with automatic or explicit chaining modes.
 
-use crate::data_types;
 use crate::fact::WorkingMemory;
 use crate::rules::RuleSet;
 use crate::ChainingMode;

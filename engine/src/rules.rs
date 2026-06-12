@@ -3,7 +3,7 @@
 //! This module implements the Rule AST with conditions and actions,
 //! along with RuleSet for managing collections of rules.
 
-use crate::data_types::{DynamicCast, TypeClass, TypeInfo, Value};
+use crate::data_types::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -266,7 +266,7 @@ impl RuleSet {
     /// Validates all rules in the set.
     pub fn validate_all(&self) -> Result<Vec<String>, RuleValidationResult> {
         let mut errors = Vec::new();
-        let mut warnings = Vec::new();
+        let warnings = Vec::new();
 
         for rule in &self.rules {
             if let Err(e) = rule.validate() {
@@ -416,5 +416,79 @@ mod tests {
             set.add_rule(duplicate),
             Err(RuleSetError::DuplicateRuleId(_))
         ));
+    }
+
+    #[test]
+    fn test_rule_set_add_multiple_rules() {
+        let mut set = RuleSet::new();
+
+        let rules: Vec<Rule> = (0..10)
+            .map(|i| Rule::new(format!("r{}", i), format!("Rule {}", i)))
+            .collect();
+
+        set.add_rules(rules).unwrap();
+        assert_eq!(set.rules.len(), 10);
+    }
+
+    #[test]
+    fn test_rule_set_validation_empty() {
+        let set = RuleSet::new();
+        // Empty rule set should validate successfully
+        assert!(set.validate_all().is_ok());
+    }
+
+    #[test]
+    fn test_rule_builder_default_values() {
+        let rule = Rule::builder("test", "Test Rule").build();
+
+        assert_eq!(rule.salience, 0);
+        assert!(!rule.no_loop);
+        assert!(!rule.lock_on_active);
+    }
+
+    #[test]
+    fn test_rule_all_config_options() {
+        let rule = Rule::builder("test", "Test Rule")
+            .salience(100)
+            .no_loop(true)
+            .lock_on_active(true)
+            .build();
+
+        assert_eq!(rule.salience, 100);
+        assert!(rule.no_loop);
+        assert!(rule.lock_on_active);
+    }
+
+    #[test]
+    fn test_condition_evaluate_true_false() {
+        let true_cond = Condition::True;
+        let false_cond = Condition::False;
+
+        // Facts are not used in True/False evaluation, pass empty slice
+        assert!(true_cond.evaluate(&[]));
+        assert!(!false_cond.evaluate(&[]));
+    }
+
+    #[test]
+    fn test_condition_evaluate_and_or() {
+        // Use cloned values to avoid moved value issues since Condition doesn't implement Copy
+        let true_cond = Condition::True;
+        let false_cond = Condition::False;
+
+        // Test AND with all true conditions
+        let and_true = Condition::And(vec![true_cond.clone(), true_cond.clone()]);
+        assert!(and_true.evaluate(&[]));
+
+        // Test OR with at least one true condition
+        let or_with_true = Condition::Or(vec![false_cond, true_cond]);
+        assert!(or_with_true.evaluate(&[]));
+    }
+
+    #[test]
+    fn test_condition_evaluate_not() {
+        // For Not, we use different values to avoid moved value issues
+        let not_true = Condition::Not(Box::new(Condition::True));
+
+        assert!(!not_true.evaluate(&[]));
     }
 }

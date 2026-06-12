@@ -3,7 +3,7 @@
 //! This module implements the Agenda struct that maintains activations (pending rule firings)
 //! and returns them in salience-based priority order.
 
-use crate::rules::{Condition, Rule};
+use crate::rules::Rule;
 use std::cmp::Reverse;
 use std::time::SystemTime;
 

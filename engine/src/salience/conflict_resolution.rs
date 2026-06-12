@@ -4,6 +4,7 @@
 //! for determining which activation should fire next when multiple rules are activated.
 
 use crate::salience::agenda::Activation;
+use std::cmp::Reverse;
 
 /// Conflict resolution strategy for ordering rule activations.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -59,7 +60,7 @@ impl ConflictResolver {
             }
             ConflictStrategy::BreadthFirst => {
                 // More matched facts first (wider propagation)
-                result.sort_by_key(|a| std::cmp::Reverse(a.fact_matches.len()));
+                result.sort_by_key(|a| Reverse(a.fact_matches.len()));
             }
             ConflictStrategy::Recency => {
                 // Most recent activation wins
@@ -88,7 +89,7 @@ impl ConflictResolver {
                 activations.sort_by_key(|a| a.fact_matches.len());
             }
             ConflictStrategy::BreadthFirst => {
-                activations.sort_by_key(|a| std::cmp::Reverse(a.fact_matches.len()));
+                activations.sort_by_key(|a| Reverse(a.fact_matches.len()));
             }
             ConflictStrategy::Recency => {
                 activations.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));

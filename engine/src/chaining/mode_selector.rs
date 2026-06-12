@@ -3,7 +3,6 @@
 //! This module implements ChainingSelector that automatically determines whether
 //! forward or backward chaining is optimal for a given set of rules.
 
-use crate::data_types::Value;
 use crate::rules::{Condition, Rule};
 
 /// Result of analyzing rule structure for inference pattern classification.
@@ -200,7 +199,8 @@ pub struct ActivationWithJustification {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::{ComparisonOp, RuleBuilder};
+    use crate::rules::{Condition, RuleBuilder};
+    use crate::Value;
 
     #[test]
     fn test_analyze_data_driven_rule() {
