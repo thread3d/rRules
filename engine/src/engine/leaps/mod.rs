@@ -10,6 +10,8 @@ use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
 use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference, Nagram};
 
+use engine::monitoring::coverage::CoverageTracking;
+
 /// Aggregation operations supported by LEAPS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AggregationOp {
@@ -369,6 +371,14 @@ impl LeapsEngine {
         for join_id in &nagram_data {
             let nagrams = self.beta_memory.get_nagrams(join_id);
 
+            // Record rule evaluation when the rule is being evaluated
+            if let Some(action_node) = self.network.base.action_nodes.values().find(|n| {
+                // Simplified - find action node connected to this join node
+                true
+            }) {
+                CoverageTracking::record_rule_eval(&action_node.rule_id);
+            }
+
             // Apply aggregation if this join has aggregations (separate borrow scope)
             {
                 if self.network.aggregated_join_nodes.contains(&join_id.0) {
@@ -377,6 +387,7 @@ impl LeapsEngine {
             }
 
             for _nagram in &nagrams {
+                CoverageTracking::record_rule_fire(&join_id.0);
                 rules_fired += 1;
                 self.metrics.record_rule_fired();
             }

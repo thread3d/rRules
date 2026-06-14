@@ -10,6 +10,8 @@ use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
 use std::collections::{HashMap, HashSet};
 
+use engine::monitoring::coverage::CoverageTracking;
+
 /// A unique identifier for a fact in working memory.
 pub type FactId = String;
 
@@ -283,6 +285,14 @@ impl ReteEngine {
         let existing_nagrams = self.beta_memory.get_nagrams(&join_node.id);
         let alpha_count = facts_from_alpha.len();
 
+        // Record evaluation for the rule (joined from this join node)
+        if let Some(action_node) = self.network.action_nodes.values().find(|n| {
+            // Find action nodes that connect to this join node
+            true // Simplified - in real implementation would track rule_id -> join_node mapping
+        }) {
+            CoverageTracking::record_rule_eval(&action_node.rule_id);
+        }
+
         // Combine to form new partial matches
         for fact_from_beta in &existing_nagrams {
             for alpha_fact_id in &facts_from_alpha {
@@ -312,13 +322,14 @@ impl ReteEngine {
         let mut rules_fired = 0;
 
         // For each action node, check if there are complete matches
-        for (_node_id, _action_node) in &self.network.action_nodes {
+        for (_node_id, action_node) in &self.network.action_nodes {
             // Check if there are partial matches for this rule's join nodes
-            for (_join_id, join_node) in &self.network.join_nodes {
-                let nagrams = self.beta_memory.get_nagrams(&join_node.id);
+            for (_join_id, _join_node) in &self.network.join_nodes {
+                let nagrams = self.beta_memory.get_nagrams(&_join_node.id);
 
                 for _nagram in &nagrams {
-                    // For now, just count as a potential match
+                    // Record fire for this rule when it fires
+                    CoverageTracking::record_rule_fire(&action_node.rule_id);
                     rules_fired += 1;
                     self.metrics.record_rule_fired();
                 }

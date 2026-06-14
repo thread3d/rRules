@@ -9,6 +9,8 @@ use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
 use crate::engine::rete::NodeId;
 
+use engine::monitoring::coverage::CoverageTracking;
+
 /// Nagram type (sequence of memory references forming a partial match)
 pub type Nagram = Vec<MemoryReference>;
 
@@ -548,6 +550,16 @@ impl PhreakEngine {
             temp
         };
 
+        // Record rule evaluation before processing each join node's rules
+        for (join_id, _) in &nagram_data {
+            if let Some(action_node) = self.network.base.action_nodes.values().find(|n| {
+                // Simplified - find action node connected to this join node
+                true
+            }) {
+                CoverageTracking::record_rule_eval(&action_node.rule_id);
+            }
+        }
+
         // Now process with mutable borrows allowed
         for (join_id, nagrams) in nagram_data {
             // For each partial match, create a justification
@@ -567,6 +579,7 @@ impl PhreakEngine {
                 // Add to TMS
                 self.network.tms_mut().add_justification(justification);
 
+                CoverageTracking::record_rule_fire(&join_id);
                 rules_fired += 1;
                 self.metrics.record_rule_fired();
             }

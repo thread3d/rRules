@@ -9,6 +9,8 @@ use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
 use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference, Nagram};
 
+use engine::monitoring::coverage::CoverageTracking;
+
 /// Cache entry with a generation timestamp for LRU ordering.
 #[derive(Debug, Clone)]
 struct CacheEntry {
@@ -359,6 +361,9 @@ impl TreatEngine {
             // Cache key based on action node
             let cache_key = format!("action_{}", action_node.id.0);
 
+            // Record rule evaluation when the rule is being evaluated
+            CoverageTracking::record_rule_eval(&action_node.rule_id);
+
             // Check if action results are cached (cached entire execution result)
             let cached_result = if self.network.is_cached(&cache_key) {
                 self.network.cache.get(&cache_key).cloned()
@@ -387,6 +392,7 @@ impl TreatEngine {
                 }
 
                 for _nagram in &nagrams {
+                    CoverageTracking::record_rule_fire(&action_node.rule_id);
                     rules_fired += 1;
                     self.metrics.record_rule_fired();
                 }
