@@ -125,3 +125,93 @@ impl MetricsCollector for SimpleMetricsCollector {
 // Re-export Prometheus exporter for use in API
 #[cfg(feature = "metrics")]
 pub mod prometheus;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_metrics_collector_firing_rate_zero_time() {
+        let collector = SimpleMetricsCollector::new();
+        // When execution time is 0, should return 0.0
+        assert_eq!(collector.firing_rate(), 0.0);
+    }
+
+    #[test]
+    fn test_metrics_collector_firing_rate_with_time() {
+        let mut collector = SimpleMetricsCollector::new();
+        collector.record_rule_fired();
+        collector.record_rule_fired();
+        collector.set_execution_time_ms(1000.0); // 1 second
+        // 2 rules fired in 1 second = 2.0 rules/second
+        assert_eq!(collector.firing_rate(), 2.0);
+    }
+
+    #[test]
+    fn test_metrics_collector_memory_bytes() {
+        let mut collector = SimpleMetricsCollector::new();
+        collector.alpha_memory_size = 10;
+        collector.beta_memory_size = 5;
+        // (10 + 5) * 8 = 120 bytes
+        assert_eq!(collector.memory_bytes(), 120);
+    }
+
+    #[test]
+    fn test_metrics_collector_alpha_memory_size() {
+        let mut collector = SimpleMetricsCollector::new();
+        collector.alpha_memory_size = 42;
+        assert_eq!(collector.alpha_memory_size(), 42);
+    }
+
+    #[test]
+    fn test_metrics_collector_beta_memory_size() {
+        let mut collector = SimpleMetricsCollector::new();
+        collector.beta_memory_size = 17;
+        assert_eq!(collector.beta_memory_size(), 17);
+    }
+
+    #[test]
+    fn test_metrics_collector_network_traversals() {
+        let mut collector = SimpleMetricsCollector::new();
+        collector.network_traversals = 999;
+        assert_eq!(collector.network_traversals(), 999);
+    }
+
+    #[test]
+    fn test_metrics_collector_cache_hits() {
+        let mut collector = SimpleMetricsCollector::new();
+        collector.cache_hits = 123;
+        assert_eq!(collector.cache_hits(), 123);
+    }
+
+    #[test]
+    fn test_metrics_collector_cache_misses() {
+        let mut collector = SimpleMetricsCollector::new();
+        collector.cache_misses = 456;
+        assert_eq!(collector.cache_misses(), 456);
+    }
+
+    #[test]
+    fn test_simple_metrics_collector_recorders() {
+        let mut collector = SimpleMetricsCollector::new();
+
+        collector.record_rule_fired();
+        collector.record_fact_inserted();
+        collector.record_fact_retracted();
+        collector.record_alpha_memory_additions(5);
+        collector.record_beta_memory_additions(3);
+        collector.record_network_traversal();
+        collector.record_cache_hit();
+        collector.record_cache_miss();
+        collector.set_execution_time_ms(100.0);
+
+        assert_eq!(collector.rules_fired, 1);
+        assert_eq!(collector.facts_inserted, 1);
+        assert_eq!(collector.facts_retracted, 1);
+        assert_eq!(collector.alpha_memory_size, 5);
+        assert_eq!(collector.beta_memory_size, 3);
+        assert_eq!(collector.network_traversals, 1);
+        assert_eq!(collector.cache_hits, 1);
+        assert_eq!(collector.cache_misses, 1);
+    }
+}

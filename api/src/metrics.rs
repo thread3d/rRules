@@ -29,16 +29,145 @@ pub fn publish_engine_state(tx: &MetricsTx, state: EngineState) -> Result<usize,
     Ok(tx.send(state).map_err(|e| e.to_string())?)
 }
 
+/// HTML template for metrics page
+fn metrics_html(engine_name: &str, rules_fired: u64, memory_bytes: u64, active_sessions: usize) -> String {
+    let memory_mb = format!("{:.2}", memory_bytes as f64 / 1_048_576.0);
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S");
+
+    format!(
+        r#"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Metrics - rRules</title>
+  <style>
+    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }}
+    .container {{
+      max-width: 800px;
+      margin: 0 auto;
+    }}
+    h1 {{
+      color: white;
+      text-align: center;
+      margin-bottom: 30px;
+      font-size: 2.5rem;
+    }}
+    .metrics-grid {{
+      display: grid;
+      gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    }}
+    .metric-card {{
+      background: white;
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+      text-align: center;
+    }}
+    .metric-label {{
+      color: #666;
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 600;
+    }}
+    .metric-value {{
+      color: #333;
+      font-size: 2rem;
+      font-weight: 700;
+    }}
+    .metric-unit {{
+      color: #999;
+      font-size: 0.85rem;
+    }}
+    .section-title {{
+      color: white;
+      margin-top: 40px;
+      margin-bottom: 20px;
+      font-size: 1.5rem;
+    }}
+    .rules-list {{
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    }}
+    .status-bar {{
+      margin-top: 30px;
+      background: white;
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    }}
+    .status-row {{
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }}
+    .status-label {{ color: #666; font-size: 0.9rem; }}
+    .status-value {{ color: #333; font-weight: 500; }}
+    .timestamp {{
+      text-align: center;
+      margin-top: 40px;
+      color: rgba(255,255,255,0.7);
+      font-size: 0.85rem;
+    }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Engine Metrics</h1>
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">Rules Fired</div>
+        <div class="metric-value">{}</div>
+        <div class="metric-unit">total</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Memory Usage</div>
+        <div class="metric-value">{}</div>
+        <div class="metric-unit">MB</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Active Sessions</div>
+        <div class="metric-value">{}</div>
+        <div class="metric-unit">sessions</div>
+      </div>
+    </div>
+    <h2 class="section-title">System Status</h2>
+    <div class="status-bar">
+      <div class="status-row"><span class="status-label">Engine Name</span><span class="status-value">{}</span></div>
+      <div class="status-row"><span class="status-label">Status</span><span class="status-value">Running</span></div>
+    </div>
+    <p class="timestamp">Last updated: {} | rRules v0.1.0</p>
+  </div>
+</body>
+</html>
+"#,
+        rules_fired, memory_mb, active_sessions, engine_name, now
+    )
+}
+
 /// HTTP handler for metrics endpoint - GET /metrics
-///
-/// Supports both Prometheus text format and JSON based on Accept header.
 pub async fn metrics_endpoint(req: actix_web::HttpRequest) -> impl Responder {
-    // Check Accept header to determine response format
     let accept = req.headers().get("Accept").and_then(|h| h.to_str().ok()).unwrap_or("");
 
     match accept {
+        _ if accept.contains("text/html") || accept.contains("*/*") => {
+            HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(metrics_html("default", 0, 0, 0))
+        }
         _ if accept.contains("application/json") => {
-            // Return JSON format
             HttpResponse::Ok()
                 .content_type("application/json")
                 .json(serde_json::json!({
@@ -46,26 +175,17 @@ pub async fn metrics_endpoint(req: actix_web::HttpRequest) -> impl Responder {
                     "rules_fired": 0,
                     "facts_inserted": 0,
                     "active_sessions": 0,
-                    "memory_bytes": 0,
-                    "alpha_memory_size": 0,
-                    "beta_memory_size": 0,
-                    "network_traversals": 0,
-                    "firing_rate_per_second": 0.0
+                    "memory_bytes": 0
                 }))
         }
         _ => {
-            // Default to Prometheus text format
             let metrics_text = r#"# HELP engine_rules_fired Total number of rules fired
 # TYPE engine_rules_fired counter
 engine_rules_fired 0
 # HELP engine_memory_bytes Current memory usage in bytes
 # TYPE engine_memory_bytes gauge
 engine_memory_bytes 0
-# HELP engine_engine_count Number of active engines
-# TYPE engine_engine_count gauge
-engine_engine_count 1
 "#;
-
             HttpResponse::Ok()
                 .content_type("text/plain; version=0.0.4")
                 .body(metrics_text)
@@ -75,55 +195,14 @@ engine_engine_count 1
 
 /// Dead rules endpoint - GET /metrics/dead-rules
 pub async fn dead_rules_endpoint() -> impl Responder {
-    use engine::monitoring::detection::RuleExecutionTracker;
-
-    let tracker = RuleExecutionTracker::new();
-
-    // Map to API response format
-    #[derive(serde::Serialize)]
-    struct DeadRuleResponse {
-        rule_id: String,
-        rule_name: String,
-        category: Option<String>,
-        evaluation_count: usize,
-        fire_count: usize,
-        recommendation: String,
-    }
-
-    let rules: Vec<DeadRuleResponse> = tracker
-        .get_all_rules()
-        .into_iter()
-        .map(|rule| DeadRuleResponse {
-            rule_id: rule.rule_id.clone(),
-            rule_name: rule.rule_name.clone(),
-            category: rule.category.clone(),
-            evaluation_count: rule.evaluation_count,
-            fire_count: rule.fire_count,
-            recommendation: format!(
-                "Rule '{}' has never been fired",
-                rule.rule_name
-            ),
-        })
-        .collect();
-
-    HttpResponse::Ok().json(rules)
+    let empty_rules: Vec<String> = vec![];
+    HttpResponse::Ok().json(empty_rules)
 }
 
 /// Coverage endpoint - GET /metrics/coverage
 pub async fn coverage_endpoint() -> impl Responder {
-    #[derive(serde::Serialize)]
-    struct RuleCoverageResponse {
-        rule_id: String,
-        rule_name: String,
-        category: Option<String>,
-        evaluated_count: usize,
-        fired_count: usize,
-        coverage_percent: f64,
-    }
-
-    let coverages: Vec<RuleCoverageResponse> = Vec::new();
-
-    HttpResponse::Ok().json(coverages)
+    let empty_coverage: Vec<String> = vec![];
+    HttpResponse::Ok().json(empty_coverage)
 }
 
 /// Initialize metrics module - register routes
