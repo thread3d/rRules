@@ -37,6 +37,8 @@ pub mod metrics;
 
 // Monitoring modules (Phase 19)
 pub mod monitoring {
+    pub mod coverage;
+    pub mod dead_rules;
     pub mod detection;
 }
 
