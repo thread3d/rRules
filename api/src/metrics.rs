@@ -27,10 +27,6 @@ pub fn create_metrics_channel(capacity: usize) -> (MetricsTx, tokio::sync::broad
     (Arc::new(tx), rx)
 }
 
-/// Publish engine state to all subscribers
-pub fn publish_engine_state(tx: &MetricsTx, state: EngineState) -> Result<usize, String> {
-    Ok(tx.send(state).map_err(|e| e.to_string())?)
-}
 
 /// HTML template for metrics page
 fn metrics_html(engine_name: &str, rules_fired: u64, memory_bytes: u64, active_sessions: usize) -> String {

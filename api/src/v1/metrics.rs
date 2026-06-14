@@ -1,6 +1,6 @@
 //! Metrics and monitoring endpoints
 
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder};
 
 /// Get engine metrics summary - GET /v1/metrics/engine
 pub async fn get_engine_metrics() -> impl Responder {
