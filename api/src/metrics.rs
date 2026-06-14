@@ -4,6 +4,9 @@ use std::sync::Arc;
 use actix_web::{web, HttpResponse, Responder};
 use serde::Serialize;
 
+use engine::monitoring::detection::RuleExecutionTracker;
+use engine::monitoring::coverage::CoverageTracking;
+
 /// Engine state for real-time monitoring
 #[derive(Debug, Clone, Serialize)]
 pub struct EngineState {
@@ -195,14 +198,24 @@ engine_memory_bytes 0
 
 /// Dead rules endpoint - GET /metrics/dead-rules
 pub async fn dead_rules_endpoint() -> impl Responder {
-    let empty_rules: Vec<String> = vec![];
-    HttpResponse::Ok().json(empty_rules)
+    // Create a tracker instance and get dead rules
+    let tracker = RuleExecutionTracker::new();
+    let dead_rules = tracker.find_dead_rules();
+
+    // Map to Vec<String> of rule IDs
+    let rule_ids: Vec<String> = dead_rules.into_iter().map(|info| info.rule_id.clone()).collect();
+    HttpResponse::Ok().json(rule_ids)
 }
 
 /// Coverage endpoint - GET /metrics/coverage
 pub async fn coverage_endpoint() -> impl Responder {
-    let empty_coverage: Vec<String> = vec![];
-    HttpResponse::Ok().json(empty_coverage)
+    // Get the singleton instance and serialize coverage data to JSON
+    let tracker = CoverageTracking;
+    let json_data = tracker.to_json();
+
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .body(json_data)
 }
 
 /// Initialize metrics module - register routes
