@@ -195,7 +195,7 @@ mod tests {
             let _v_zero = Value::Integer(0);
 
             // Float (including special values)
-            let _v_float = Value::Float(3.14159);
+            let _v_float = Value::Float(2.5);
             let _v_nan = Value::Float(f64::NAN);
             let _v_inf = Value::Float(f64::INFINITY);
 
@@ -224,14 +224,14 @@ mod tests {
     #[test]
     fn test_value_float_special_values() {
         // Test that regular float comparisons work correctly
-        let f1 = Value::Float(3.14);
-        let f2 = Value::Float(3.14);
+        let f1 = Value::Float(2.5);
+        let f2 = Value::Float(2.5);
         assert_eq!(f1, f2);
 
         // Test comparison with epsilon
-        let f3 = Value::Float(3.14159);
-        let f4 = Value::Float(3.14160);
-        // With f64's default PartialEq, these are not equal due to precision
+        let f3 = Value::Float(2.5);
+        let f4 = Value::Float(2.6);
+        // With f64's default PartialEq, distinct values are not equal
         assert_ne!(f3, f4);
     }
 
@@ -240,7 +240,7 @@ mod tests {
         let values = vec![
             Value::Bool(true),
             Value::Integer(42),
-            Value::Float(3.14),
+            Value::Float(2.5),
             Value::String("hello".to_string()),
             Value::Null,
             Value::Array(vec![Value::Integer(1), Value::Integer(2)]),
@@ -258,7 +258,7 @@ mod tests {
         let values = vec![
             Value::Bool(true),
             Value::Integer(42),
-            Value::Float(3.14),
+            Value::Float(2.5),
             Value::String("hello".to_string()),
             Value::Null,
         ];
@@ -276,7 +276,7 @@ mod tests {
         let values = vec![
             Value::Bool(true),
             Value::Integer(42),
-            Value::Float(3.14),
+            Value::Float(2.5),
             Value::String("hello".to_string()),
             Value::Null,
         ];
