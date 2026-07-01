@@ -1,22 +1,23 @@
 {
   "version": "1.0",
-  "timestamp": "2026-07-01T10:50:27.417Z",
+  "timestamp": "2026-07-01T11:05:00.000Z",
   "phase": "19",
   "phase_name": "Monitoring & Metrics Platform (v4.0 hardening + closure)",
   "phase_dir": ".planning/phases/19-monitoring-metrics",
   "plan": "milestone-v4.0-hardening (approved plan, not a GSD phase plan)",
   "plan_file": "/home/threaded/.claude/plans/eager-whistling-reddy.md",
-  "task": 1,
+  "task": 5,
   "total_tasks": 9,
   "status": "paused",
   "completed_tasks": [
-    {"id": "A1", "name": "Fix 7 approx_constant clippy errors in engine/src/data_types.rs", "status": "done", "commit": "5a1e2adc7"}
+    {"id": "A1", "name": "Fix 7 approx_constant clippy errors in engine/src/data_types.rs", "status": "done", "commit": "5a1e2adc7"},
+    {"id": "A2", "name": "Clear all clippy warnings", "status": "done", "commit": "179c7ca10"},
+    {"id": "A4", "name": "Implement POST /v1/rules/batch-execute (refactor execute_single + JoinSet/Semaphore + route before /rules/{id})", "status": "done", "commit": "74374c5a0"},
+    {"id": "A5", "name": "Add integration tests (metrics, simulation, batch) in api/tests/", "status": "done", "commit": "cc22329eb", "note": "12 tests pass; clippy clean. NOTE: simulation route is /v1/simulation (not /run) — plan said /run but actual registration is scope /simulation with '' + '/'."},
+    {"id": "A6a", "name": "Write manual API reference docs/API.md", "status": "done", "commit": "8e9119295", "note": "519 lines; all registered endpoints documented with real paths (v1/simulation not /run; /v1/metrics dead-not-registered)."}
   ],
   "remaining_tasks": [
-    {"id": "A2", "name": "Clear all clippy warnings", "status": "not_started"},
-    {"id": "A4", "name": "Implement POST /v1/rules/batch-execute (refactor execute_single + JoinSet/Semaphore + route before /rules/{id})", "status": "not_started"},
-    {"id": "A5", "name": "Add integration tests (metrics, simulation, batch) in api/tests/", "status": "not_started"},
-    {"id": "A6a", "name": "Write manual API reference docs/API.md", "status": "not_started"},
+    {"id": "A6b", "name": "Add utoipa OpenAPI spec + Swagger UI", "status": "not_started"},
     {"id": "A6b", "name": "Add utoipa OpenAPI spec + Swagger UI", "status": "not_started"},
     {"id": "A7", "name": "Hardening verification gate (clippy/test/check all green)", "status": "not_started"},
     {"id": "B1", "name": "Re-verify Phase 19 VERIFICATION.md honestly (GAPS_FOUND -> passed w/ deferred-tech-debt note)", "status": "not_started"},
@@ -37,6 +38,9 @@
     {"decision": "Phase 19 gap closure is structural not functional", "rationale": "Endpoints read from trackers (not hardcoded []); coverage_endpoint uses singleton CAN return data; dead_rules_endpoint uses fresh tracker always []; nothing populates them since execute_rules is a stub", "phase": "19"}
   ],
   "uncommitted_files": [],
-  "next_action": "Run A2: fix clippy warnings. Remove `mut` at engine/src/testing/snapshot.rs:327,376,425 + engine/tests/snapshot_integration.rs:67,206,237,270; single_match engine/src/simulation/types.rs:277 -> if let; useless_vec engine/src/governance/audit/types.rs:185 -> array literal; needless_borrows engine/src/monitoring/detection.rs:336 (drop both &format!); #[allow(clippy::too_many_arguments)] on api/src/v1/audit.rs:272 record_audit_event; remove assert!(true) engine/src/testing/mod.rs:697; #[allow(clippy::should_implement_trait)] on engine/src/backward_chaining.rs:114 next. Optional: delete orphaned engine/src/tests/ dir. Verify: cargo clippy --workspace --all-targets exits 0 with 0 warnings. Commit.",
-  "context_notes": "Cross-cutting milestone v4.0 hardening driven by approved plan (not a GSD phase task). Autonomous workflow found all GSD phases complete; user chose harden-first. Full plan + verification + critical files at /home/threaded/.claude/plans/eager-whistling-reddy.md. Read that plan file first when resuming. Build is GREEN; clippy --all-targets now compiles (was exit 101 before A1)."
+  "next_action": "Run A6b: add utoipa OpenAPI spec + Swagger UI. (1) Add deps to api/Cargo.toml: utoipa v4 (features actix_extras) + utoipa-swagger-ui v7 (features actix-web). (2) Add #[derive(utoipa::ToSchema)] to request/response types (ExecuteRequest/ExecuteResponse, BatchExecuteRequest/BatchExecuteResponse/BatchItemResult, CreateRuleRequest/RuleResponse/UpdateRuleRequest, SimulationRunRequest/SimulationRunResponse, CreateCategoryRequest/CategoryResponse, CreateTagRequest/TagResponse, SubmitApprovalRequest/ApprovalActionRequest, CreateBranchRequest/BranchResponse/GitLogResponse, AuditQuery/AuditListResponse/AuditEvent, EngineStateResponse, etc.). (3) Annotate handlers with #[utoipa::path(...)] across api/src/v1/{rules,execution,simulation,approvals,audit,branches,categories,tags,metrics}.rs + api/src/metrics.rs + api/src/health.rs + api/src/v1/routes/monitoring.rs. (4) Create api/src/openapi.rs with #[derive(OpenApi)] #[openapi(paths(...), components(schemas(...)))]. (5) Serve in main.rs root-level (outside /v1): SwaggerUi::new(\"/swagger-ui/{_:.*}\") + web::scope(\"/api-docs\").route(\"/openapi.json\", ...). Verify: cargo check -p api; start server, curl /api-docs/openapi.json returns valid OpenAPI 3 JSON; /swagger-ui renders. Use REAL paths from docs/API.md. NOTE: /v1/metrics is dead code — do NOT annotate it. Large mechanical task across ~40 routes. Per-test minimal App::new() via actix_web::test::init_service + TestRequest, #[actix_web::test], no app_data (handlers take only web::Json/HttpRequest). batch_execution: POST /v1/rules/batch-execute with 2 requests -> succeeded==2/failed==0/results.len()==2 each w/ response.rules_fired; empty requests -> empty results; max_concurrency:2 -> all succeed no deadlock; also POST /v1/execute to confirm refactor. simulation: POST /v1/simulation/run valid -> 200 name+non-empty test_cases+summary.total_fact_sets==1; empty fact_sets -> 400; one proposed_changes -> summary.total_variants==2. metrics: GET /metrics Accept text/plain -> 200 Prometheus # HELP; Accept application/json -> 200 JSON engine state; GET /metrics/dead-rules -> 200 valid JSON array ([] expected, fresh tracker); GET /metrics/coverage -> pre-populate via engine::monitoring::coverage::CoverageTracking::record_rule_eval(unique_id) then assert 200 + contains that rule. Verify: cargo test -p api --test metrics_integration --test simulation_integration --test batch_execution_integration. (1) Refactor execute_rules body into `pub async fn execute_single(req: ExecuteRequest) -> ExecuteResponse` (pure extraction); execute_rules becomes a thin wrapper `HttpResponse::Ok().json(execute_single(req.into_inner()).await)`. (2) Add types BatchExecuteRequest { requests: Vec<ExecuteRequest>, max_concurrency: Option<usize> }, BatchItemResult { success, error?, response? }, BatchExecuteResponse { results, total_fired, succeeded, failed }. (3) Handler batch_execute_rules: concurrent via tokio::task::JoinSet + tokio::sync::Semaphore (default max_concurrency.unwrap_or(8).max(1)); spawn one task per request, each acquires a permit + calls execute_single; collect via join_next().await; Ok(resp)->success, Err(JoinError)->failure w/ error string; one failure doesn't fail the batch. (4) Route in api/src/main.rs /v1 scope: insert .route(\"/rules/batch-execute\", web::post().to(v1::execution::batch_execute_rules)) BEFORE /rules/{id}; also move /rules/reload before /rules/{id}. Verify: cargo check -p api; cargo clippy -p api --all-targets; A5 integration test.",
+  "context_notes": "Cross-cutting milestone v4.0 hardening driven by approved plan (not a GSD phase task). Autonomous workflow found all GSD phases complete; user chose harden-first. Full plan + verification + critical files at /home/threaded/.claude/plans/eager-whistling-reddy.md. Read that plan file first when resuming. Build is GREEN; clippy --workspace --all-targets exits 0 with 0 warnings; 12 new api integration tests pass (A1-A5 done: 4 of 9 tasks). Route facts verified for API.md/A6b: /v1/rules/batch-execute, /v1/execute, /v1/simulation (NOT /v1/simulation/run), root /metrics + /metrics/dead-rules + /metrics/coverage. Optional cleanup still pending: delete orphaned engine/src/tests/ dir (never compiled, invisible to clippy) as its own commit — not blocking.",
+  "optional_remaining": [
+    "Delete orphaned engine/src/tests/ directory (never compiled; its assert!(true) is invisible to clippy). Own commit. Not blocking."
+  ]
 }
