@@ -1,0 +1,111 @@
+//! Integration tests for the root `/metrics` endpoints (v4.0 hardening task A5).
+//!
+//! The metrics handlers take no `app_data`, so the test App only needs
+//! `configure_metrics` registered. The coverage test pre-populates the global
+//! `CoverageTracking` singleton before the request to prove the endpoint reads
+//! real tracked data — this is the functional proof that Phase 19's coverage
+//! gap closure works end-to-end (the endpoint reads from the tracker rather
+//! than a hardcoded empty array).
+
+use actix_web::{body::BoxBody, test, App};
+use serde_json::Value;
+
+use api::metrics::configure_metrics;
+use engine::monitoring::coverage::CoverageTracking;
+
+/// Unique rule id for the coverage test. The `CoverageTracking` singleton
+/// persists across tests in one process, so a unique id avoids cross-test
+/// interference.
+const COVERAGE_TEST_RULE: &str = "coverage-int-test-rule-9F2A";
+
+async fn json_body(resp: actix_web::dev::ServiceResponse<BoxBody>) -> Value {
+    assert!(
+        resp.status().is_success(),
+        "expected success, got {}",
+        resp.status()
+    );
+    let bytes = test::read_body(resp).await;
+    serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+        panic!(
+            "invalid JSON body: {e}; body={}",
+            String::from_utf8_lossy(&bytes)
+        )
+    })
+}
+
+#[actix_web::test]
+async fn metrics_prometheus_text_format() {
+    let app = test::init_service(App::new().configure(configure_metrics)).await;
+
+    let req = test::TestRequest::get()
+        .uri("/metrics")
+        .insert_header(("Accept", "text/plain"))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "status: {}", resp.status());
+    let bytes = test::read_body(resp).await;
+    let text = String::from_utf8_lossy(&bytes);
+    assert!(
+        text.contains("# HELP"),
+        "expected Prometheus exposition format; got: {text}"
+    );
+    assert!(
+        text.contains("engine_rules_fired"),
+        "expected the engine_rules_fired metric; got: {text}"
+    );
+}
+
+#[actix_web::test]
+async fn metrics_json_engine_state() {
+    let app = test::init_service(App::new().configure(configure_metrics)).await;
+
+    let req = test::TestRequest::get()
+        .uri("/metrics")
+        .insert_header(("Accept", "application/json"))
+        .to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    assert_eq!(body["engine_name"], "default");
+    assert!(body["rules_fired"].is_number(), "rules_fired numeric: {body}");
+    assert!(body["memory_bytes"].is_number(), "memory_bytes numeric: {body}");
+}
+
+#[actix_web::test]
+async fn dead_rules_returns_valid_json_array() {
+    // dead_rules_endpoint builds a fresh RuleExecutionTracker per request, so it
+    // always returns [] until execution tracking is wired into execute_rules
+    // (a stub). We assert valid structure, not non-emptiness — the empty result
+    // is honest deferred tech debt, not a v4.0 blocker.
+    let app = test::init_service(App::new().configure(configure_metrics)).await;
+
+    let req = test::TestRequest::get().uri("/metrics/dead-rules").to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    assert!(body.is_array(), "expected a JSON array; got: {body}");
+}
+
+#[actix_web::test]
+async fn coverage_endpoint_reads_tracked_data() {
+    // Pre-populate the global singleton BEFORE the request. The coverage
+    // endpoint reads the same singleton, so the recorded rule must surface in
+    // the response — proving the endpoint reads real tracked data.
+    CoverageTracking::record_rule_eval(COVERAGE_TEST_RULE);
+
+    let app = test::init_service(App::new().configure(configure_metrics)).await;
+    let req = test::TestRequest::get().uri("/metrics/coverage").to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    let rules = body["rules"].as_array().expect("rules is an array");
+    let found = rules
+        .iter()
+        .any(|r| r["rule_id"] == COVERAGE_TEST_RULE && r["evaluated"] == true);
+    assert!(
+        found,
+        "coverage endpoint must surface the recorded rule {COVERAGE_TEST_RULE}; body: {body}"
+    );
+    // The summary must reflect at least one evaluated rule.
+    assert!(
+        body["summary"]["evaluated_count"].as_u64().is_some_and(|c| c >= 1),
+        "summary.evaluated_count must be >= 1; body: {body}"
+    );
+}
