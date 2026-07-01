@@ -4,7 +4,7 @@ milestone: v4.0
 milestone_name: - Production Platform
 status: planning
 stopped_at: context exhaustion at 75% (2026-07-01)
-last_updated: "2026-07-01T09:57:32.979Z"
+last_updated: "2026-07-01T11:39:10.988Z"
 progress:
   total_phases: 2
   completed_phases: 2
@@ -20,7 +20,7 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** Phase 21 — deployment ci cd
+**Current focus:** v4.0 closure — frontend-wiring phase (audit gaps_found; close inline)
 
 ## Current Position
 
@@ -236,10 +236,10 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-**Stopped at:** context exhaustion at 75% (2026-07-01)
+**Stopped at:** v4.0 audit gaps_found (2026-07-01) — frontend-wiring phase next
 
-Last session: 2026-07-01T09:57:32.963Z
-Milestone v4.0 - Phase 21 (Deployment & CI/CD) Complete
+Last session: 2026-07-01 (hardening A1-A7 + audit B1-B2 complete)
+Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13 requirements partial; user chose to close inline via new frontend-wiring phase.
 
 **Completed Phases:**
 

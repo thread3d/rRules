@@ -1,46 +1,43 @@
 {
   "version": "1.0",
-  "timestamp": "2026-07-01T11:05:00.000Z",
-  "phase": "19",
-  "phase_name": "Monitoring & Metrics Platform (v4.0 hardening + closure)",
-  "phase_dir": ".planning/phases/19-monitoring-metrics",
-  "plan": "milestone-v4.0-hardening (approved plan, not a GSD phase plan)",
+  "timestamp": "2026-07-01T12:30:00.000Z",
+  "phase": "v4.0-closure",
+  "phase_name": "v4.0 Production Platform - close frontend integration gaps",
+  "phase_dir": ".planning",
+  "plan": "v4.0 hardening (A1-A7) COMPLETE; milestone audit (B2) gaps_found; user chose to close inline via new frontend-wiring phase",
   "plan_file": "/home/threaded/.claude/plans/eager-whistling-reddy.md",
-  "task": 5,
-  "total_tasks": 9,
-  "status": "paused",
+  "task": "post-audit",
+  "total_tasks": 1,
+  "status": "paused_at_decision",
   "completed_tasks": [
-    {"id": "A1", "name": "Fix 7 approx_constant clippy errors in engine/src/data_types.rs", "status": "done", "commit": "5a1e2adc7"},
-    {"id": "A2", "name": "Clear all clippy warnings", "status": "done", "commit": "179c7ca10"},
-    {"id": "A4", "name": "Implement POST /v1/rules/batch-execute (refactor execute_single + JoinSet/Semaphore + route before /rules/{id})", "status": "done", "commit": "74374c5a0"},
-    {"id": "A5", "name": "Add integration tests (metrics, simulation, batch) in api/tests/", "status": "done", "commit": "cc22329eb", "note": "12 tests pass; clippy clean. NOTE: simulation route is /v1/simulation (not /run) — plan said /run but actual registration is scope /simulation with '' + '/'."},
-    {"id": "A6a", "name": "Write manual API reference docs/API.md", "status": "done", "commit": "8e9119295", "note": "519 lines; all registered endpoints documented with real paths (v1/simulation not /run; /v1/metrics dead-not-registered)."}
+    {"id": "A1-A6a", "status": "done", "commits": "5a1e2adc7,179c7ca10,74374c5a0,cc22329eb,8e9119295"},
+    {"id": "A6b", "name": "utoipa OpenAPI spec + Swagger UI (32 paths, 53 schemas)", "status": "done", "commit": "5e383baf7"},
+    {"id": "A7", "name": "Hardening gate (clippy/test/check workspace green, 232 tests pass)", "status": "done"},
+    {"id": "B1", "name": "Re-verify Phase 19 VERIFICATION.md (GAPS_FOUND -> passed w/ deferred tech-debt note)", "status": "done", "commit": "b951b41ac"},
+    {"id": "B2", "name": "Regenerate v4.0 milestone audit", "status": "done", "commit": "11d01fe8e", "result": "gaps_found - frontend (Phase 17) is a scaffolding skeleton, orphaned from router/backend; 9/13 requirements partial; 4/13 satisfied (MON-01, API-04, DEPLOY-03, DEPLOY-04)"}
   ],
   "remaining_tasks": [
-    {"id": "A6b", "name": "Add utoipa OpenAPI spec + Swagger UI", "status": "not_started"},
-    {"id": "A6b", "name": "Add utoipa OpenAPI spec + Swagger UI", "status": "not_started"},
-    {"id": "A7", "name": "Hardening verification gate (clippy/test/check all green)", "status": "not_started"},
-    {"id": "B1", "name": "Re-verify Phase 19 VERIFICATION.md honestly (GAPS_FOUND -> passed w/ deferred-tech-debt note)", "status": "not_started"},
-    {"id": "B2-B4", "name": "Milestone closure: gsd-audit-milestone -> gsd-complete-milestone v4.0 -> gsd-cleanup", "status": "not_started"}
+    {"id": "C1", "name": "Insert + run new frontend-wiring closure phase (close v4.0 gaps inline)", "status": "not_started", "next_command": "/gsd-phase --insert 22 \"Close v4.0 frontend integration gaps: wire orphaned UI to backend\" then /gsd-discuss-phase 22 /gsd-plan-phase 22 /gsd-execute-phase 22"},
+    {"id": "C2", "name": "Re-audit milestone v4.0 after frontend phase; if passed/tech_debt proceed", "status": "not_started"},
+    {"id": "B3", "name": "gsd-complete-milestone v4.0 - DEFERRED until C1+C2 pass", "status": "not_started", "blocked_by": ["C1", "C2"]},
+    {"id": "B4", "name": "gsd-cleanup (user confirms destructive cleanup) - DEFERRED until B3", "status": "not_started", "blocked_by": ["B3"]}
   ],
   "blockers": [],
   "async_jobs": [],
   "human_actions_pending": [
-    {"action": "Decide on audit result (gaps_found/tech_debt) during B2, and confirm destructive cleanup during B4", "context": "GSD closure flow pauses for user decisions per autonomous workflow CTRL-01", "blocking": false}
+    {"action": "Frontend-wiring phase may warrant its own git branch; decide during plan", "context": "Currently on gsd/phase-19-monitoring-metrics", "blocking": false}
   ],
   "decisions": [
-    {"decision": "Harden first, then close (vs close now / stop)", "rationale": "User chose to finish ~10% remaining work before closing v4.0", "phase": "v4.0"},
-    {"decision": "API documentation: BOTH manual docs/API.md AND utoipa+Swagger UI", "rationale": "User answered 'Both please' to the design fork", "phase": "v4.0"},
-    {"decision": "execute_rules stays a stub; batch-execute is concurrency plumbing only", "rationale": "execute_rules builds engine into let _engine (unused), rules_fired hardcoded 0. Making it fire rules is a separate future milestone — out of scope for 'harden+close'", "phase": "v4.0"},
-    {"decision": "tenant_id already done — no work", "rationale": "rules.rs has full (tenant_id, rule_id) keying + isolation tests; header-based X-Tenant-ID isolation", "phase": "v4.0"},
-    {"decision": "Test harness: per-test minimal App::new() (not shared configure_app)", "rationale": "Target handlers need no app_data; avoids touching main.rs non-reusable server closure", "phase": "v4.0"},
-    {"decision": "too_many_arguments + should_implement_trait -> #[allow] (not refactor)", "rationale": "record_audit_event has 0 callers (dead code); TraceExplorer::next is bidirectional (Iterator semantically wrong)", "phase": "v4.0"},
-    {"decision": "Phase 19 gap closure is structural not functional", "rationale": "Endpoints read from trackers (not hardcoded []); coverage_endpoint uses singleton CAN return data; dead_rules_endpoint uses fresh tracker always []; nothing populates them since execute_rules is a stub", "phase": "19"}
+    {"decision": "Harden first, then close", "rationale": "Prior session decision", "phase": "v4.0"},
+    {"decision": "API docs: BOTH manual docs/API.md AND utoipa+Swagger UI", "rationale": "Done in A6a/A6b", "phase": "v4.0"},
+    {"decision": "execute_rules stays a stub; out of scope for v4.0", "rationale": "Making execution functional is a separate future milestone", "phase": "v4.0"},
+    {"decision": "Close v4.0 gaps inline via new frontend-wiring phase (vs re-scope to v5.0 / accept as tech debt / pause)", "rationale": "User choice 2026-07-01 after audit gaps_found", "phase": "v4.0"},
+    {"decision": "B3/B4 deferred until frontend phase closes gaps and re-audit passes", "rationale": "Cannot complete a milestone with 9/13 partial requirements", "phase": "v4.0"}
   ],
   "uncommitted_files": [],
-  "next_action": "Run A6b: add utoipa OpenAPI spec + Swagger UI. (1) Add deps to api/Cargo.toml: utoipa v4 (features actix_extras) + utoipa-swagger-ui v7 (features actix-web). (2) Add #[derive(utoipa::ToSchema)] to request/response types (ExecuteRequest/ExecuteResponse, BatchExecuteRequest/BatchExecuteResponse/BatchItemResult, CreateRuleRequest/RuleResponse/UpdateRuleRequest, SimulationRunRequest/SimulationRunResponse, CreateCategoryRequest/CategoryResponse, CreateTagRequest/TagResponse, SubmitApprovalRequest/ApprovalActionRequest, CreateBranchRequest/BranchResponse/GitLogResponse, AuditQuery/AuditListResponse/AuditEvent, EngineStateResponse, etc.). (3) Annotate handlers with #[utoipa::path(...)] across api/src/v1/{rules,execution,simulation,approvals,audit,branches,categories,tags,metrics}.rs + api/src/metrics.rs + api/src/health.rs + api/src/v1/routes/monitoring.rs. (4) Create api/src/openapi.rs with #[derive(OpenApi)] #[openapi(paths(...), components(schemas(...)))]. (5) Serve in main.rs root-level (outside /v1): SwaggerUi::new(\"/swagger-ui/{_:.*}\") + web::scope(\"/api-docs\").route(\"/openapi.json\", ...). Verify: cargo check -p api; start server, curl /api-docs/openapi.json returns valid OpenAPI 3 JSON; /swagger-ui renders. Use REAL paths from docs/API.md. NOTE: /v1/metrics is dead code — do NOT annotate it. Large mechanical task across ~40 routes. Per-test minimal App::new() via actix_web::test::init_service + TestRequest, #[actix_web::test], no app_data (handlers take only web::Json/HttpRequest). batch_execution: POST /v1/rules/batch-execute with 2 requests -> succeeded==2/failed==0/results.len()==2 each w/ response.rules_fired; empty requests -> empty results; max_concurrency:2 -> all succeed no deadlock; also POST /v1/execute to confirm refactor. simulation: POST /v1/simulation/run valid -> 200 name+non-empty test_cases+summary.total_fact_sets==1; empty fact_sets -> 400; one proposed_changes -> summary.total_variants==2. metrics: GET /metrics Accept text/plain -> 200 Prometheus # HELP; Accept application/json -> 200 JSON engine state; GET /metrics/dead-rules -> 200 valid JSON array ([] expected, fresh tracker); GET /metrics/coverage -> pre-populate via engine::monitoring::coverage::CoverageTracking::record_rule_eval(unique_id) then assert 200 + contains that rule. Verify: cargo test -p api --test metrics_integration --test simulation_integration --test batch_execution_integration. (1) Refactor execute_rules body into `pub async fn execute_single(req: ExecuteRequest) -> ExecuteResponse` (pure extraction); execute_rules becomes a thin wrapper `HttpResponse::Ok().json(execute_single(req.into_inner()).await)`. (2) Add types BatchExecuteRequest { requests: Vec<ExecuteRequest>, max_concurrency: Option<usize> }, BatchItemResult { success, error?, response? }, BatchExecuteResponse { results, total_fired, succeeded, failed }. (3) Handler batch_execute_rules: concurrent via tokio::task::JoinSet + tokio::sync::Semaphore (default max_concurrency.unwrap_or(8).max(1)); spawn one task per request, each acquires a permit + calls execute_single; collect via join_next().await; Ok(resp)->success, Err(JoinError)->failure w/ error string; one failure doesn't fail the batch. (4) Route in api/src/main.rs /v1 scope: insert .route(\"/rules/batch-execute\", web::post().to(v1::execution::batch_execute_rules)) BEFORE /rules/{id}; also move /rules/reload before /rules/{id}. Verify: cargo check -p api; cargo clippy -p api --all-targets; A5 integration test.",
-  "context_notes": "Cross-cutting milestone v4.0 hardening driven by approved plan (not a GSD phase task). Autonomous workflow found all GSD phases complete; user chose harden-first. Full plan + verification + critical files at /home/threaded/.claude/plans/eager-whistling-reddy.md. Read that plan file first when resuming. Build is GREEN; clippy --workspace --all-targets exits 0 with 0 warnings; 12 new api integration tests pass (A1-A5 done: 4 of 9 tasks). Route facts verified for API.md/A6b: /v1/rules/batch-execute, /v1/execute, /v1/simulation (NOT /v1/simulation/run), root /metrics + /metrics/dead-rules + /metrics/coverage. Optional cleanup still pending: delete orphaned engine/src/tests/ dir (never compiled, invisible to clippy) as its own commit — not blocking.",
+  "next_action": "Run in a fresh context: /gsd-phase --insert 22 \"Close v4.0 frontend integration gaps: wire orphaned UI to backend\" then the standard chain (/gsd-discuss-phase 22, /gsd-plan-phase 22, /gsd-execute-phase 22). Read .planning/v4-MILESTONE-AUDIT.md first for the full gap list with file:line evidence. Build is GREEN; clippy 0 warnings; 232 tests pass.",
+  "context_notes": "Hardening (A1-A7) and audit (B1-B2) complete and committed. Audit found Phase 17 frontend is a scaffolding skeleton (orphaned components, baseURL /api/v1 vs /v1 mismatch, unmounted AuthProvider, incomplete router, stub/mock governance UIs, unregistered WebSocket, unwrapped auth middleware). 9/13 v4.0 requirements partial. User chose to close inline via new phase. Branch gsd/phase-19-monitoring-metrics. Continue-here marker at .planning/.continue-here.md has the gap list + next commands.",
   "optional_remaining": [
-    "Delete orphaned engine/src/tests/ directory (never compiled; its assert!(true) is invisible to clippy). Own commit. Not blocking."
+    "Add formal VERIFICATION.md for phases 20/21 (verification debt - 20-SUMMARY status:complete, 21-UAT 4/4). Optional during closure."
   ]
 }
