@@ -64,7 +64,7 @@ fn test_snapshot_filesystem_roundtrip() {
 #[test]
 fn test_snapshot_manager_update_mode() {
     let temp_dir = create_temp_dir();
-    let mut manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Update);
+    let manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Update);
 
     // Initial snapshot
     let initial_fixture = FixtureBuilder::new()
@@ -203,7 +203,7 @@ fn test_snapshot_mode_parsing() {
 #[test]
 fn test_update_mode_saves_baseline() {
     let temp_dir = create_temp_dir();
-    let mut manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Update);
+    let manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Update);
 
     // Create a snapshot with specific content
     let fixture = FixtureBuilder::new()
@@ -234,7 +234,7 @@ fn test_update_mode_saves_baseline() {
 #[test]
 fn test_snapshot_manager_read_mode_rejects_mismatch() {
     let temp_dir = create_temp_dir();
-    let mut manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Read);
+    let manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Read);
 
     // Initial snapshot
     let initial_fixture = FixtureBuilder::new()
@@ -267,7 +267,7 @@ fn test_snapshot_manager_read_mode_rejects_mismatch() {
 #[test]
 fn test_snapshot_manager_skip_mode_always_succeeds() {
     let temp_dir = create_temp_dir();
-    let mut manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Skip);
+    let manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Skip);
 
     // Even if baseline doesn't exist, Skip mode should succeed
     let fixture = FixtureBuilder::new()

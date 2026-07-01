@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_all_event_types_have_unique_names() {
-        let events = vec![
+        let events = [
             AuditEvent::RoleAssigned {
                 user_id: "1".into(),
                 role_name: "admin".into(),

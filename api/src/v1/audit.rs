@@ -269,6 +269,7 @@ pub async fn export_audit_log(store: web::Data<AuditStore>) -> impl Responder {
 }
 
 /// Record a new audit event
+#[allow(clippy::too_many_arguments)]
 pub fn record_audit_event(
     store: &AuditStore,
     action: AuditAction,

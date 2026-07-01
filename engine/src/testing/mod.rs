@@ -694,7 +694,6 @@ mod tests {
     fn test_fixture_builder_creates_working_memory() {
         // Just verify we can create a working memory
         WorkingMemory::new();
-        assert!(true);
     }
 
     #[test]

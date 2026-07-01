@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn test_snapshot_manager_compares_correctly() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let mut manager = SnapshotManager::new(temp_dir.path());
+        let manager = SnapshotManager::new(temp_dir.path());
 
         // Create and save a baseline
         let baseline_payload = HashMap::from([
@@ -373,7 +373,7 @@ mod tests {
     #[test]
     fn test_snapshot_manager_update_mode() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let mut manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Update);
+        let manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Update);
 
         // Create and save initial baseline
         let initial_payload = HashMap::from([
@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn test_snapshot_manager_skip_mode() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let mut manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Skip);
+        let manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Skip);
 
         // Different content should not fail in Skip mode
         let snapshot = WorkingMemorySnapshot {

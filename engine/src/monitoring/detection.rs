@@ -333,7 +333,7 @@ mod tests {
     fn test_report_generation() {
         let mut tracker = RuleExecutionTracker::new();
         for i in 0..5 {
-            tracker.record_evaluation(&format!("rule{}", i), &format!("Rule {}", i));
+            tracker.record_evaluation(format!("rule{}", i), format!("Rule {}", i));
         }
         // Make rule2 active
         tracker.record_fire("rule2", "Active Rule", "now");

@@ -274,11 +274,8 @@ mod tests {
             let json = serde_json::to_string(&report).expect("serialize");
             assert!(!json.is_empty());
             // Verify we can roundtrip back.
-            match &report {
-                ChangeReport::RuleFiredBeforeButNotAfter { .. } => {
-                    let _: ChangeReport = serde_json::from_str(&json).unwrap();
-                }
-                _ => {}
+            if let ChangeReport::RuleFiredBeforeButNotAfter { .. } = &report {
+                let _: ChangeReport = serde_json::from_str(&json).unwrap();
             }
         }
     }

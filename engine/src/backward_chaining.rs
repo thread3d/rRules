@@ -111,6 +111,7 @@ impl<'a> TraceExplorer<'a> {
     }
 
     /// Moves to the next step in the trace.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&InferenceStep> {
         if self.position < self.trace.path.len() && self.position < self.max_depth {
             let step = &self.trace.path[self.position];
