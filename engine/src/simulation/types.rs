@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// against one or more **modified** copies where `proposed_changes` have been
 /// applied. Each test case is then executed against both sides and the results
 /// are diffed to produce `ChangeReport`s.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct SimulationRequest {
     /// Free-form name for this simulation (used in responses).
     pub name: String,
@@ -37,7 +37,7 @@ pub struct SimulationRequest {
 }
 
 /// A single modification that can be applied to the rule set during simulation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub enum RuleChange {
     /// Add a new condition to an existing rule's LHS.
     AddCondition {
@@ -78,7 +78,7 @@ pub enum RuleChange {
 }
 
 /// A single fact used as input for one test case within a simulation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct TestFact {
     /// Logical name / type identifier for the fact (e.g. `"Customer"`, `"Order"`).
     pub id: String,
@@ -89,7 +89,7 @@ pub struct TestFact {
 }
 
 /// Snapshot of working memory facts used to seed a simulation run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct WorkingMemorySnapshot {
     /// Facts in the snapshot. Each entry has an `id` and a JSON payload.
     #[serde(default)]
@@ -97,7 +97,7 @@ pub struct WorkingMemorySnapshot {
 }
 
 /// A single fact within a working memory snapshot.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct SnapshotFact {
     /// Stable identifier for the fact.
     pub id: String,

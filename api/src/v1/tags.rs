@@ -21,7 +21,7 @@ pub struct StoredTag {
 }
 
 /// Request to create a new tag
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct CreateTagRequest {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,7 +31,7 @@ pub struct CreateTagRequest {
 }
 
 /// Response with tag details
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct TagResponse {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,7 +42,7 @@ pub struct TagResponse {
 }
 
 /// Request to assign/remove tag from a rule
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct RuleTagActionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>, // For removal
@@ -70,6 +70,16 @@ pub fn init_stores() -> (TagStore, RuleTagStore) {
 }
 
 /// Create a tag - POST /v1/tags
+#[utoipa::path(
+    post,
+    path = "/v1/tags",
+    tag = "tags",
+    request_body = CreateTagRequest,
+    responses(
+        (status = 201, description = "Tag created", body = TagResponse),
+        (status = 409, description = "Tag with this name already exists"),
+    ),
+)]
 pub async fn create_tag(
     req: web::Json<CreateTagRequest>,
     store: web::Data<TagStore>,
@@ -99,6 +109,14 @@ pub async fn create_tag(
 }
 
 /// List tags - GET /v1/tags
+#[utoipa::path(
+    get,
+    path = "/v1/tags",
+    tag = "tags",
+    responses(
+        (status = 200, description = "List of tags"),
+    ),
+)]
 pub async fn list_tags(store: web::Data<TagStore>) -> impl Responder {
     let store_guard = store.lock().unwrap();
     let tags: Vec<TagResponse> = store_guard.values().map(TagResponse::from).collect();
@@ -110,6 +128,18 @@ pub async fn list_tags(store: web::Data<TagStore>) -> impl Responder {
 }
 
 /// Get tag by name - GET /v1/tags/{name}
+#[utoipa::path(
+    get,
+    path = "/v1/tags/{name}",
+    tag = "tags",
+    responses(
+        (status = 200, description = "Tag found", body = TagResponse),
+        (status = 404, description = "Tag not found"),
+    ),
+    params(
+        ("name" = String, Path, description = "Tag name"),
+    ),
+)]
 pub async fn get_tag(
     path: web::Path<String>,
     store: web::Data<TagStore>,
@@ -127,6 +157,20 @@ pub async fn get_tag(
 }
 
 /// Update a tag - PUT/PATCH /v1/tags/{name}
+#[utoipa::path(
+    put,
+    path = "/v1/tags/{name}",
+    tag = "tags",
+    request_body = CreateTagRequest,
+    responses(
+        (status = 200, description = "Tag updated", body = TagResponse),
+        (status = 404, description = "Tag not found"),
+        (status = 409, description = "Tag with this name already exists"),
+    ),
+    params(
+        ("name" = String, Path, description = "Tag name"),
+    ),
+)]
 pub async fn update_tag(
     path: web::Path<String>,
     req: web::Json<CreateTagRequest>,
@@ -175,6 +219,18 @@ pub async fn update_tag(
 }
 
 /// Delete a tag - DELETE /v1/tags/{name}
+#[utoipa::path(
+    delete,
+    path = "/v1/tags/{name}",
+    tag = "tags",
+    responses(
+        (status = 204, description = "Tag deleted"),
+        (status = 404, description = "Tag not found"),
+    ),
+    params(
+        ("name" = String, Path, description = "Tag name"),
+    ),
+)]
 pub async fn delete_tag(
     path: web::Path<String>,
     store: web::Data<TagStore>,
@@ -192,6 +248,19 @@ pub async fn delete_tag(
 }
 
 /// Assign a tag to a rule - POST /v1/rules/{id}/tags
+#[utoipa::path(
+    post,
+    path = "/v1/rules/{id}/tags",
+    tag = "tags",
+    request_body = CreateTagRequest,
+    responses(
+        (status = 201, description = "Tag assigned to rule"),
+        (status = 400, description = "Invalid rule ID format"),
+    ),
+    params(
+        ("id" = String, Path, description = "Rule ID (UUID)"),
+    ),
+)]
 pub async fn assign_tag_to_rule(
     path: web::Path<String>,
     req: web::Json<CreateTagRequest>,
@@ -236,6 +305,20 @@ pub async fn assign_tag_to_rule(
 }
 
 /// Remove a tag from a rule - DELETE /v1/rules/{id}/tags/{tag_name}
+#[utoipa::path(
+    delete,
+    path = "/v1/rules/{id}/tags/{tag_name}",
+    tag = "tags",
+    responses(
+        (status = 200, description = "Tag removed from rule"),
+        (status = 400, description = "Invalid rule ID format"),
+        (status = 404, description = "Tag not assigned to rule"),
+    ),
+    params(
+        ("id" = String, Path, description = "Rule ID (UUID)"),
+        ("tag_name" = String, Path, description = "Tag name to remove"),
+    ),
+)]
 pub async fn remove_tag_from_rule(
     path: web::Path<(String, String)>,
     _store: web::Data<TagStore>,

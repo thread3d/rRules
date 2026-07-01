@@ -12,7 +12,7 @@ use engine::environment::EngineBuilder;
 use engine::WorkingMemory;
 
 /// Request for rule execution
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct ExecuteRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
@@ -23,7 +23,7 @@ pub struct ExecuteRequest {
 }
 
 /// Filter for selecting which rules to execute
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct RuleFilter {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name_pattern: Option<String>,
@@ -32,7 +32,7 @@ pub struct RuleFilter {
 }
 
 /// Response from rule execution
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct ExecuteResponse {
     pub execution_id: String,
     pub rules_fired: usize,
@@ -45,7 +45,7 @@ pub struct ExecuteResponse {
 }
 
 /// Complete inference trace with full detail
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct InferenceTrace {
     #[serde(default)]
     pub entries: Vec<InferenceTraceEntry>,
@@ -54,7 +54,7 @@ pub struct InferenceTrace {
 }
 
 /// Single trace entry for debugging
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct InferenceTraceEntry {
     pub timestamp: String,
     pub event_type: String,
@@ -65,7 +65,7 @@ pub struct InferenceTraceEntry {
 }
 
 /// Summary statistics for inference trace
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct TraceSummary {
     pub total_duration_ms: f64,
     pub facts_matched: usize,
@@ -176,7 +176,7 @@ impl EngineState {
 }
 
 /// Result of a reload operation
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct ReloadResult {
     pub reload_id: String,
     pub rule_count: usize,
@@ -188,7 +188,7 @@ pub struct ReloadResult {
 }
 
 /// Async job tracking for long-running operations
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, utoipa::ToSchema)]
 pub struct ReloadJob {
     pub job_id: String,
     pub result: Option<ReloadResult>,
@@ -216,7 +216,7 @@ impl serde::Serialize for ReloadJob {
 }
 
 /// Status of a reload job
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, utoipa::ToSchema)]
 pub enum ReloadStatus {
     Pending,
     Running,
@@ -244,7 +244,7 @@ pub fn init_job_store() -> JobStore {
 }
 
 /// Request to reload rules
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct ReloadRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_file: Option<String>,
@@ -253,7 +253,7 @@ pub struct ReloadRequest {
 }
 
 /// Response from rule reload (sync)
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct ReloadResponse {
     pub reload_id: String,
     pub rules_reloaded: usize,
@@ -261,14 +261,14 @@ pub struct ReloadResponse {
 }
 
 /// Response from async job submission
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct JobResponse {
     pub job_id: String,
     pub status: String,
 }
 
 /// Request to execute multiple rule sets concurrently in one call
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct BatchExecuteRequest {
     /// Individual execution requests to run as a batch
     #[serde(default)]
@@ -279,7 +279,7 @@ pub struct BatchExecuteRequest {
 }
 
 /// Result of a single item within a batch execution
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct BatchItemResult {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -289,7 +289,7 @@ pub struct BatchItemResult {
 }
 
 /// Response from batch rule execution
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct BatchExecuteResponse {
     /// Per-request results, in submission order
     pub results: Vec<BatchItemResult>,
@@ -343,6 +343,15 @@ pub async fn execute_single(req: ExecuteRequest) -> ExecuteResponse {
 }
 
 /// Execute rules - POST /v1/execute
+#[utoipa::path(
+    post,
+    path = "/v1/execute",
+    tag = "execution",
+    request_body = ExecuteRequest,
+    responses(
+        (status = 200, description = "Rules executed successfully", body = ExecuteResponse),
+    ),
+)]
 pub async fn execute_rules(req: web::Json<ExecuteRequest>) -> impl Responder {
     HttpResponse::Ok().json(execute_single(req.into_inner()).await)
 }
@@ -353,6 +362,15 @@ pub async fn execute_rules(req: web::Json<ExecuteRequest>) -> impl Responder {
 /// request does not fail the batch — failures are reported per-item. There are
 /// no shared locks between requests: `execute_single` is self-contained (each
 /// task builds its own engine + working memory).
+#[utoipa::path(
+    post,
+    path = "/v1/rules/batch-execute",
+    tag = "execution",
+    request_body = BatchExecuteRequest,
+    responses(
+        (status = 200, description = "Batch executed successfully", body = BatchExecuteResponse),
+    ),
+)]
 pub async fn batch_execute_rules(req: web::Json<BatchExecuteRequest>) -> impl Responder {
     let inner = req.into_inner();
     let max_concurrency = inner.max_concurrency.unwrap_or(8).max(1);
@@ -412,6 +430,17 @@ pub async fn batch_execute_rules(req: web::Json<BatchExecuteRequest>) -> impl Re
 }
 
 /// Reload rules - POST /v1/rules/reload
+#[utoipa::path(
+    post,
+    path = "/v1/rules/reload",
+    tag = "execution",
+    request_body = ReloadRequest,
+    responses(
+        (status = 200, description = "Rules reloaded synchronously", body = ReloadResponse),
+        (status = 202, description = "Async reload job accepted", body = JobResponse),
+        (status = 500, description = "Reload failed"),
+    ),
+)]
 pub async fn reload_rules(
     req: web::Json<ReloadRequest>,
     engine_state: web::Data<EngineState>,
@@ -451,6 +480,18 @@ pub async fn reload_rules(
 }
 
 /// Get reload job status - GET /v1/jobs/{job_id}
+#[utoipa::path(
+    get,
+    path = "/v1/jobs/{job_id}",
+    tag = "jobs",
+    responses(
+        (status = 200, description = "Job found", body = ReloadJob),
+        (status = 404, description = "Job not found"),
+    ),
+    params(
+        ("job_id" = String, Path, description = "Reload job ID"),
+    ),
+)]
 pub async fn get_job_status(
     path: web::Path<String>,
     store: web::Data<JobStore>,
@@ -468,6 +509,14 @@ pub async fn get_job_status(
 }
 
 /// List all jobs - GET /v1/jobs
+#[utoipa::path(
+    get,
+    path = "/v1/jobs",
+    tag = "jobs",
+    responses(
+        (status = 200, description = "List of reload jobs", body = Vec<ReloadJob>),
+    ),
+)]
 pub async fn list_jobs(store: web::Data<JobStore>) -> impl Responder {
     let jobs = store.read().unwrap();
 

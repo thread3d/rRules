@@ -21,7 +21,7 @@ pub struct StoredCategory {
 }
 
 /// Request to create a new category
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct CreateCategoryRequest {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,7 +31,7 @@ pub struct CreateCategoryRequest {
 }
 
 /// Response with category details
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct CategoryResponse {
     pub id: String,
     pub name: String,
@@ -43,7 +43,7 @@ pub struct CategoryResponse {
 }
 
 /// Paginated list of categories
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct CategoryListResponse {
     pub total_count: usize,
     pub categories: Vec<CategoryResponse>,
@@ -68,6 +68,16 @@ pub fn init_store() -> CategoryStore {
 }
 
 /// Create a category - POST /v1/categories
+#[utoipa::path(
+    post,
+    path = "/v1/categories",
+    tag = "categories",
+    request_body = CreateCategoryRequest,
+    responses(
+        (status = 201, description = "Category created", body = CategoryResponse),
+        (status = 409, description = "Category with this name already exists"),
+    ),
+)]
 pub async fn create_category(
     req: web::Json<CreateCategoryRequest>,
     store: web::Data<CategoryStore>,
@@ -98,6 +108,14 @@ pub async fn create_category(
 }
 
 /// List categories (with hierarchy) - GET /v1/categories
+#[utoipa::path(
+    get,
+    path = "/v1/categories",
+    tag = "categories",
+    responses(
+        (status = 200, description = "List of categories", body = CategoryListResponse),
+    ),
+)]
 pub async fn list_categories(store: web::Data<CategoryStore>) -> impl Responder {
     let store_guard = store.lock().unwrap();
     let categories: Vec<CategoryResponse> = store_guard.values().map(CategoryResponse::from).collect();
@@ -109,6 +127,19 @@ pub async fn list_categories(store: web::Data<CategoryStore>) -> impl Responder 
 }
 
 /// Get category by ID - GET /v1/categories/{id}
+#[utoipa::path(
+    get,
+    path = "/v1/categories/{id}",
+    tag = "categories",
+    responses(
+        (status = 200, description = "Category found", body = CategoryResponse),
+        (status = 400, description = "Invalid category ID format"),
+        (status = 404, description = "Category not found"),
+    ),
+    params(
+        ("id" = String, Path, description = "Category ID (UUID)"),
+    ),
+)]
 pub async fn get_category(
     path: web::Path<String>,
     store: web::Data<CategoryStore>,
@@ -133,6 +164,21 @@ pub async fn get_category(
 }
 
 /// Update a category - PUT/PATCH /v1/categories/{id}
+#[utoipa::path(
+    put,
+    path = "/v1/categories/{id}",
+    tag = "categories",
+    request_body = CreateCategoryRequest,
+    responses(
+        (status = 200, description = "Category updated", body = CategoryResponse),
+        (status = 400, description = "Invalid category ID format"),
+        (status = 404, description = "Category not found"),
+        (status = 409, description = "Category with this name already exists"),
+    ),
+    params(
+        ("id" = String, Path, description = "Category ID (UUID)"),
+    ),
+)]
 pub async fn update_category(
     path: web::Path<String>,
     req: web::Json<CreateCategoryRequest>,
@@ -177,6 +223,20 @@ pub async fn update_category(
 }
 
 /// Delete a category - DELETE /v1/categories/{id}
+#[utoipa::path(
+    delete,
+    path = "/v1/categories/{id}",
+    tag = "categories",
+    responses(
+        (status = 204, description = "Category deleted"),
+        (status = 400, description = "Invalid category ID format"),
+        (status = 404, description = "Category not found"),
+        (status = 409, description = "Cannot delete category with child categories"),
+    ),
+    params(
+        ("id" = String, Path, description = "Category ID (UUID)"),
+    ),
+)]
 pub async fn delete_category(
     path: web::Path<String>,
     store: web::Data<CategoryStore>,

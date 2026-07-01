@@ -10,7 +10,7 @@ use engine::simulation::runner::SimulationRunner;
 use engine::simulation::types::*;
 
 /// Request body for POST /v1/simulation/run
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct SimulationRunRequest {
     /// Free-form name for this simulation (used in responses and logging).
     pub name: String,
@@ -34,7 +34,7 @@ pub struct SimulationRunRequest {
 }
 
 /// Response body for POST /v1/simulation/run
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct SimulationRunResponse {
     /// The `name` field from the original request.
     pub name: String,
@@ -54,7 +54,7 @@ pub struct SimulationRunResponse {
 }
 
 /// Per-test-case response for simulation results.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct SimulationTestCaseResponse {
     /// Zero-based index of the fact set this result corresponds to within the
     /// original `fact_sets` array.
@@ -71,7 +71,7 @@ pub struct SimulationTestCaseResponse {
 }
 
 /// Execution outcome for a single variant (base or modified engine).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct SimulationVariantResponse {
     /// Description of this variant: `"base"` for the unmodified state, otherwise
     /// the `RuleChange` description (e.g. `"AddCondition(rule=discount)"`).
@@ -99,7 +99,7 @@ pub struct SimulationVariantResponse {
 }
 
 /// Summary statistics for a simulation run.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct SimulationSummary {
     /// Total number of variants tested (base + one per proposed change).
     pub total_variants: usize,
@@ -120,6 +120,16 @@ pub struct SimulationSummary {
 /// rule changes to it, and runs both sides against identical test fact sets.
 /// Results are compared to produce a structured diff report showing which rules
 /// fired/didn't fire and what facts changed.
+#[utoipa::path(
+    post,
+    path = "/v1/simulation",
+    tag = "simulation",
+    request_body = SimulationRunRequest,
+    responses(
+        (status = 200, description = "Simulation completed", body = SimulationRunResponse),
+        (status = 400, description = "Invalid request: fact_sets must contain at least one fact group"),
+    ),
+)]
 pub async fn run_simulation(
     request: web::Json<SimulationRunRequest>,
 ) -> impl Responder {

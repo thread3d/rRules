@@ -2,9 +2,14 @@
 
 use actix_files as fs;
 use actix_web::{web, App, HttpServer};
+use utoipa_swagger_ui::SwaggerUi;
+use utoipa::OpenApi;
+
+use crate::openapi::ApiDoc;
 
 mod health;
 mod metrics;
+mod openapi;
 
 // Phase 20 modules
 pub mod v1;
@@ -79,14 +84,13 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(audit_store.clone()))
             .app_data(branch_store.clone())
             .app_data(web::Data::new(job_store.clone()))
-            // Serve frontend static files at root path
-            .service(
-                fs::Files::new("/", &frontend_dist)
-                    .index_file("index.html")
-                    .show_files_listing(),
-            )
             // Health check endpoints (must be before /v1 to avoid prefix conflict)
             .configure(health::configure_health)
+            // OpenAPI spec + Swagger UI (served at root level, outside /v1)
+            .service(
+                SwaggerUi::new("/swagger-ui/{_:.*}")
+                    .url("/api-docs/openapi.json", ApiDoc::openapi()),
+            )
             // API v1 endpoints
             .service(
                 web::scope("/v1")
@@ -147,6 +151,12 @@ async fn main() -> std::io::Result<()> {
                     .configure(v1::configure_v1_simulation),
             )
             .configure(metrics::configure_metrics)
+            // Serve frontend static files at root path (last, so API routes take precedence)
+            .service(
+                fs::Files::new("/", &frontend_dist)
+                    .index_file("index.html")
+                    .show_files_listing(),
+            )
     })
     .bind("127.0.0.1:8080")?;
 

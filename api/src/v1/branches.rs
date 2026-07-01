@@ -19,7 +19,7 @@ use engine::governance::versioning::{Branch, VcsConfig, VersionControlRepo};
 type VcsState = Mutex<VersionControlRepo>;
 
 /// Request to create a new branch
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct CreateBranchRequest {
     /// Source branch to branch off from (defaults to main).
     pub source_branch: Option<String>,
@@ -29,7 +29,7 @@ pub struct CreateBranchRequest {
 }
 
 /// Response with branch details
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct BranchResponse {
     pub name: String,
     pub is_default: bool,
@@ -51,7 +51,7 @@ impl From<&Branch> for BranchResponse {
 }
 
 /// Paginated list of branches
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct BranchListResponse {
     pub total_count: usize,
     pub default_branch: Option<String>,
@@ -63,6 +63,17 @@ pub struct BranchListResponse {
 // ---------------------------------------------------------------------------
 
 /// Create a branch - POST /v1/branches
+#[utoipa::path(
+    post,
+    path = "/v1/branches",
+    tag = "branches",
+    request_body = CreateBranchRequest,
+    responses(
+        (status = 201, description = "Branch created", body = BranchResponse),
+        (status = 409, description = "Branch creation conflict"),
+        (status = 500, description = "Failed to create branch"),
+    ),
+)]
 pub async fn create_branch(
     req: web::Json<CreateBranchRequest>,
     vcs: web::Data<VcsState>,
@@ -128,6 +139,15 @@ async fn create_branch_from_commit(
 }
 
 /// List branches - GET /v1/branches
+#[utoipa::path(
+    get,
+    path = "/v1/branches",
+    tag = "branches",
+    responses(
+        (status = 200, description = "List of branches", body = BranchListResponse),
+        (status = 500, description = "Failed to list branches"),
+    ),
+)]
 pub async fn list_branches(vcs: web::Data<VcsState>) -> impl Responder {
     let vcr = match vcs.lock().await.list_branches() {
         Ok(b) => b,
@@ -149,6 +169,19 @@ pub async fn list_branches(vcs: web::Data<VcsState>) -> impl Responder {
 }
 
 /// Get branch by name - GET /v1/branches/{name}
+#[utoipa::path(
+    get,
+    path = "/v1/branches/{name}",
+    tag = "branches",
+    responses(
+        (status = 200, description = "Branch found", body = BranchResponse),
+        (status = 404, description = "Branch not found"),
+        (status = 500, description = "Failed to list branches"),
+    ),
+    params(
+        ("name" = String, Path, description = "Branch name"),
+    ),
+)]
 pub async fn get_branch(
     path: web::Path<String>,
     vcs: web::Data<VcsState>,
@@ -173,6 +206,20 @@ pub async fn get_branch(
 }
 
 /// Delete a branch - DELETE /v1/branches/{name}
+#[utoipa::path(
+    delete,
+    path = "/v1/branches/{name}",
+    tag = "branches",
+    responses(
+        (status = 204, description = "Branch deleted"),
+        (status = 404, description = "Branch not found"),
+        (status = 409, description = "Branch conflict"),
+        (status = 500, description = "Failed to delete branch"),
+    ),
+    params(
+        ("name" = String, Path, description = "Branch name"),
+    ),
+)]
 pub async fn delete_branch(
     path: web::Path<String>,
     vcs: web::Data<VcsState>,
@@ -199,6 +246,19 @@ pub async fn delete_branch(
 }
 
 /// Merge a branch - POST /v1/branches/{name}/merge
+#[utoipa::path(
+    post,
+    path = "/v1/branches/{name}/merge",
+    tag = "branches",
+    responses(
+        (status = 200, description = "Branch merged successfully"),
+        (status = 409, description = "Merge conflicts detected"),
+        (status = 500, description = "Merge failed"),
+    ),
+    params(
+        ("name" = String, Path, description = "Source branch name to merge"),
+    ),
+)]
 pub async fn merge_branch(
     path: web::Path<String>,
     vcs: web::Data<VcsState>,
@@ -239,7 +299,7 @@ pub async fn merge_branch(
 // ---------------------------------------------------------------------------
 
 /// Request for the git-log endpoint.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct GitLogRequest {
     /// Limit on number of commits to return. Default 50.
     #[serde(default = "default_log_limit")]
@@ -251,7 +311,7 @@ fn default_log_limit() -> usize {
 }
 
 /// Response for the git-log endpoint.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct GitLogResponse {
     pub branch: String,
     pub total_commits: usize,
@@ -259,7 +319,7 @@ pub struct GitLogResponse {
 }
 
 /// A single commit entry in the log response.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct GitCommitEntry {
     pub sha: String,
     pub message: String,
@@ -271,6 +331,19 @@ pub struct GitCommitEntry {
 ///
 /// This endpoint queries the git repository for recent commits and returns
 /// structured JSON with author, timestamp, and diff metadata.
+#[utoipa::path(
+    get,
+    path = "/v1/rules/{id}/git-log",
+    tag = "branches",
+    params(
+        ("id" = String, Path, description = "Rule ID (context for future filtering)"),
+        ("limit" = Option<usize>, Query, description = "Max commits to return (default 50)"),
+    ),
+    responses(
+        (status = 200, description = "Git log entries", body = GitLogResponse),
+        (status = 500, description = "Failed to get git log"),
+    ),
+)]
 pub async fn get_git_log(
     path: web::Path<String>,
     query: web::Query<GitLogRequest>,

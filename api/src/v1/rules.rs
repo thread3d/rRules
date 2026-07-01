@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// A rule with full metadata including tenant isolation.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct StoredRule {
     pub id: Uuid,
     /// Tenant this rule belongs to (multi-tenancy key).
@@ -39,7 +39,7 @@ pub fn extract_tenant_id(headers: &actix_web::HttpRequest) -> String {
 }
 
 /// Rule status enum
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, utoipa::ToSchema)]
 pub enum RuleStatus {
     Draft,
     Active,
@@ -138,7 +138,7 @@ impl From<&&StoredRule> for RuleResponse {
 }
 
 /// Request to create a new rule
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct CreateRuleRequest {
     /// Rule name (unique within category)
     pub name: String,
@@ -168,7 +168,7 @@ pub struct CreateRuleRequest {
 }
 
 /// Response with rule details
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct RuleResponse {
     /// Unique identifier (UUID)
     pub id: String,
@@ -210,7 +210,7 @@ pub struct RuleResponse {
 }
 
 /// Paginated list of rules
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct RuleListResponse {
     /// Total number of rules matching filters
     pub total_count: usize,
@@ -230,7 +230,7 @@ pub struct RuleListResponse {
 }
 
 /// Request for paginated rule listing
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct RuleListRequest {
     /// Page number (1-indexed), default 1
     #[serde(default)]
@@ -262,7 +262,7 @@ pub struct RuleListRequest {
 }
 
 /// Request to update an existing rule
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct UpdateRuleRequest {
     /// New description (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -298,6 +298,17 @@ pub fn init_store() -> RuleStore {
 }
 
 /// Create a rule - POST /v1/rules
+#[utoipa::path(
+    post,
+    path = "/v1/rules",
+    tag = "rules",
+    request_body = CreateRuleRequest,
+    responses(
+        (status = 201, description = "Rule created", body = RuleResponse),
+        (status = 400, description = "Validation error"),
+        (status = 409, description = "Rule with this name already exists in the category"),
+    ),
+)]
 pub async fn create_rule(
     req: web::Json<CreateRuleRequest>,
     headers: actix_web::HttpRequest,
@@ -370,6 +381,24 @@ pub async fn create_rule(
 }
 
 /// Get paginated list of rules - GET /v1/rules
+#[utoipa::path(
+    get,
+    path = "/v1/rules",
+    tag = "rules",
+    params(
+        ("page" = Option<u32>, Query, description = "Page number (1-indexed)"),
+        ("page_size" = Option<u32>, Query, description = "Items per page (max 100)"),
+        ("category" = Option<String>, Query, description = "Filter by category"),
+        ("status" = Option<String>, Query, description = "Filter by status (draft, active, inactive, archived)"),
+        ("tag" = Option<String>, Query, description = "Filter by tag"),
+        ("sort_by" = Option<String>, Query, description = "Sort field: name, salience, created_at, updated_at"),
+        ("sort_order" = Option<String>, Query, description = "Sort direction: asc or desc"),
+    ),
+    responses(
+        (status = 200, description = "Paginated list of rules", body = RuleListResponse),
+        (status = 400, description = "Invalid status filter"),
+    ),
+)]
 pub async fn get_rules(
     query: web::Query<RuleListRequest>,
     headers: actix_web::HttpRequest,
@@ -469,6 +498,19 @@ pub async fn get_rules(
 }
 
 /// Get a specific rule by ID - GET /v1/rules/{id}
+#[utoipa::path(
+    get,
+    path = "/v1/rules/{id}",
+    tag = "rules",
+    responses(
+        (status = 200, description = "Rule found", body = RuleResponse),
+        (status = 400, description = "Invalid rule ID format"),
+        (status = 404, description = "Rule not found"),
+    ),
+    params(
+        ("id" = String, Path, description = "Rule ID (UUID)"),
+    ),
+)]
 pub async fn get_rule(
     path: web::Path<String>,
     headers: actix_web::HttpRequest,
@@ -495,6 +537,21 @@ pub async fn get_rule(
 }
 
 /// Update an existing rule - PUT/PATCH /v1/rules/{id}
+#[utoipa::path(
+    put,
+    path = "/v1/rules/{id}",
+    tag = "rules",
+    request_body = UpdateRuleRequest,
+    responses(
+        (status = 200, description = "Rule updated", body = RuleResponse),
+        (status = 400, description = "Invalid rule ID format or status value"),
+        (status = 404, description = "Rule not found"),
+        (status = 409, description = "Rule with this name already exists in the category"),
+    ),
+    params(
+        ("id" = String, Path, description = "Rule ID (UUID)"),
+    ),
+)]
 pub async fn update_rule(
     path: web::Path<String>,
     req: web::Json<UpdateRuleRequest>,
@@ -589,6 +646,19 @@ pub async fn update_rule(
 }
 
 /// Delete a rule (soft delete) - DELETE /v1/rules/{id}
+#[utoipa::path(
+    delete,
+    path = "/v1/rules/{id}",
+    tag = "rules",
+    responses(
+        (status = 200, description = "Rule soft-deleted (archived)"),
+        (status = 400, description = "Invalid rule ID format"),
+        (status = 404, description = "Rule not found"),
+    ),
+    params(
+        ("id" = String, Path, description = "Rule ID (UUID)"),
+    ),
+)]
 pub async fn delete_rule(
     path: web::Path<String>,
     headers: actix_web::HttpRequest,
@@ -627,6 +697,19 @@ pub async fn delete_rule(
 }
 
 /// Undelete a rule - POST /v1/rules/{id}/undelete
+#[utoipa::path(
+    post,
+    path = "/v1/rules/{id}/undelete",
+    tag = "rules",
+    responses(
+        (status = 200, description = "Rule restored"),
+        (status = 400, description = "Rule is not archived or invalid ID format"),
+        (status = 404, description = "Rule not found"),
+    ),
+    params(
+        ("id" = String, Path, description = "Rule ID (UUID)"),
+    ),
+)]
 pub async fn undelete_rule(
     path: web::Path<String>,
     headers: actix_web::HttpRequest,

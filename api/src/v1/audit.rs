@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// Audit action types
-#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, utoipa::ToSchema)]
 pub enum AuditAction {
     Create,
     Read,
@@ -21,7 +21,7 @@ pub enum AuditAction {
 }
 
 /// Resource types that can be audited
-#[derive(Debug, Clone, serde::Serialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, utoipa::ToSchema)]
 pub enum ResourceType {
     Rule,
     Category,
@@ -31,7 +31,7 @@ pub enum ResourceType {
 }
 
 /// A single audit event
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct AuditEvent {
     pub id: String,
     pub timestamp: String,
@@ -46,7 +46,7 @@ pub struct AuditEvent {
 }
 
 /// Paginated audit event list
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct AuditListResponse {
     pub total_count: usize,
     pub events: Vec<AuditEvent>,
@@ -56,7 +56,7 @@ pub struct AuditListResponse {
 }
 
 /// Query parameters for audit events
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct AuditQuery {
     pub page: Option<u32>,
     pub page_size: Option<u32>,
@@ -125,6 +125,23 @@ pub fn init_store() -> AuditStore {
 }
 
 /// Query audit events - GET /v1/audit
+#[utoipa::path(
+    get,
+    path = "/v1/audit",
+    tag = "audit",
+    params(
+        ("page" = Option<u32>, Query, description = "Page number (1-indexed)"),
+        ("page_size" = Option<u32>, Query, description = "Items per page (max 100)"),
+        ("resource_type" = Option<String>, Query, description = "Filter by resource type (rule, category, tag, user, approval)"),
+        ("action" = Option<String>, Query, description = "Filter by action (create, read, update, delete, approve, reject, execute, export)"),
+        ("user_id" = Option<String>, Query, description = "Filter by user ID"),
+        ("since" = Option<String>, Query, description = "Filter events since timestamp (RFC 3339)"),
+    ),
+    responses(
+        (status = 200, description = "Paginated audit events", body = AuditListResponse),
+        (status = 400, description = "Invalid filter value"),
+    ),
+)]
 pub async fn query_audit_events(
     query: web::Query<AuditQuery>,
     store: web::Data<AuditStore>,
@@ -224,6 +241,14 @@ pub async fn get_audit_event(
 }
 
 /// Export audit log to CSV - GET /v1/audit/export
+#[utoipa::path(
+    get,
+    path = "/v1/audit/export",
+    tag = "audit",
+    responses(
+        (status = 200, description = "Audit log exported as CSV", content_type = "text/csv"),
+    ),
+)]
 pub async fn export_audit_log(store: web::Data<AuditStore>) -> impl Responder {
     let store_guard = store.lock().unwrap();
 

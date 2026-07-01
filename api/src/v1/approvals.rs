@@ -25,7 +25,7 @@ pub struct StoredApproval {
 }
 
 /// Current state of an approval request
-#[derive(Clone, Debug, serde::Serialize, PartialEq)]
+#[derive(Clone, Debug, serde::Serialize, PartialEq, utoipa::ToSchema)]
 pub enum ApprovalState {
     Draft,
     Submitted { submitted_at: String },
@@ -36,14 +36,14 @@ pub enum ApprovalState {
 }
 
 /// Request to submit a rule for approval
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct SubmitApprovalRequest {
     pub workflow_id: Option<Uuid>,
     pub maker_id: Option<String>,
 }
 
 /// Response when submitting an approval
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct SubmitApprovalResponse {
     pub approval_id: String,
     pub rule_id: String,
@@ -51,7 +51,7 @@ pub struct SubmitApprovalResponse {
 }
 
 /// Request to approve/reject an approval request
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct ApprovalActionRequest {
     pub approver_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -73,6 +73,19 @@ pub fn init_store() -> ApprovalStore {
 }
 
 /// Submit a rule for approval - POST /v1/rules/{id}/submit
+#[utoipa::path(
+    post,
+    path = "/v1/rules/{id}/submit",
+    tag = "approvals",
+    request_body = SubmitApprovalRequest,
+    responses(
+        (status = 201, description = "Approval request created", body = SubmitApprovalResponse),
+        (status = 400, description = "Invalid rule ID format"),
+    ),
+    params(
+        ("id" = String, Path, description = "Rule ID (UUID)"),
+    ),
+)]
 pub async fn submit_for_approval(
     path: web::Path<String>,
     req: web::Json<SubmitApprovalRequest>,
@@ -115,6 +128,14 @@ pub async fn submit_for_approval(
 }
 
 /// List pending approvals - GET /v1/approvals/pending
+#[utoipa::path(
+    get,
+    path = "/v1/approvals/pending",
+    tag = "approvals",
+    responses(
+        (status = 200, description = "List of pending approvals"),
+    ),
+)]
 pub async fn list_pending_approvals(
     store: web::Data<ApprovalStore>,
 ) -> impl Responder {
@@ -142,6 +163,20 @@ pub async fn list_pending_approvals(
 }
 
 /// Approve an approval request - POST /v1/approvals/{id}/approve
+#[utoipa::path(
+    post,
+    path = "/v1/approvals/{id}/approve",
+    tag = "approvals",
+    request_body = ApprovalActionRequest,
+    responses(
+        (status = 200, description = "Approval request approved"),
+        (status = 400, description = "Invalid approval ID format"),
+        (status = 404, description = "Approval not found"),
+    ),
+    params(
+        ("id" = String, Path, description = "Approval ID (UUID)"),
+    ),
+)]
 pub async fn approve_request(
     path: web::Path<String>,
     req: web::Json<ApprovalActionRequest>,
@@ -186,6 +221,20 @@ pub async fn approve_request(
 }
 
 /// Reject an approval request - POST /v1/approvals/{id}/reject
+#[utoipa::path(
+    post,
+    path = "/v1/approvals/{id}/reject",
+    tag = "approvals",
+    request_body = ApprovalActionRequest,
+    responses(
+        (status = 200, description = "Approval request rejected"),
+        (status = 400, description = "Invalid approval ID format"),
+        (status = 404, description = "Approval not found"),
+    ),
+    params(
+        ("id" = String, Path, description = "Approval ID (UUID)"),
+    ),
+)]
 pub async fn reject_request(
     path: web::Path<String>,
     req: web::Json<ApprovalActionRequest>,

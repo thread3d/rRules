@@ -4,7 +4,7 @@ use actix_web::{web, HttpResponse, Responder};
 use serde::Serialize;
 
 /// Response struct for engine state
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct EngineStateResponse {
     pub engine_name: String,
     pub rules_fired: u64,
@@ -19,6 +19,14 @@ pub struct EngineStateResponse {
 }
 
 /// Get engine state - GET /v1/monitoring/engine-state
+#[utoipa::path(
+    get,
+    path = "/v1/monitoring/engine-state",
+    tag = "monitoring",
+    responses(
+        (status = 200, description = "Engine state", body = EngineStateResponse),
+    ),
+)]
 pub async fn get_engine_state() -> impl Responder {
     HttpResponse::Ok().json(EngineStateResponse {
         engine_name: "default".to_string(),
@@ -35,6 +43,14 @@ pub async fn get_engine_state() -> impl Responder {
 }
 
 /// Health check for monitoring - GET /v1/monitoring/health
+#[utoipa::path(
+    get,
+    path = "/v1/monitoring/health",
+    tag = "monitoring",
+    responses(
+        (status = 200, description = "Monitoring service healthy"),
+    ),
+)]
 pub async fn monitoring_health() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({
         "status": "healthy",

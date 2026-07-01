@@ -157,6 +157,14 @@ fn metrics_html(engine_name: &str, rules_fired: u64, memory_bytes: u64, active_s
 }
 
 /// HTTP handler for metrics endpoint - GET /metrics
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    tag = "metrics",
+    responses(
+        (status = 200, description = "Metrics page (HTML), JSON, or Prometheus text format depending on Accept header"),
+    ),
+)]
 pub async fn metrics_endpoint(req: actix_web::HttpRequest) -> impl Responder {
     let accept = req.headers().get("Accept").and_then(|h| h.to_str().ok()).unwrap_or("");
 
@@ -193,6 +201,14 @@ engine_memory_bytes 0
 }
 
 /// Dead rules endpoint - GET /metrics/dead-rules
+#[utoipa::path(
+    get,
+    path = "/metrics/dead-rules",
+    tag = "metrics",
+    responses(
+        (status = 200, description = "List of dead rule IDs", body = Vec<String>),
+    ),
+)]
 pub async fn dead_rules_endpoint() -> impl Responder {
     // Create a tracker instance and get dead rules
     let tracker = RuleExecutionTracker::new();
@@ -204,6 +220,14 @@ pub async fn dead_rules_endpoint() -> impl Responder {
 }
 
 /// Coverage endpoint - GET /metrics/coverage
+#[utoipa::path(
+    get,
+    path = "/metrics/coverage",
+    tag = "metrics",
+    responses(
+        (status = 200, description = "Coverage data as JSON"),
+    ),
+)]
 pub async fn coverage_endpoint() -> impl Responder {
     // Get the singleton instance and serialize coverage data to JSON
     let tracker = CoverageTracking;
