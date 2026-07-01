@@ -76,6 +76,7 @@ impl Default for EngineBuilder {
 
 /// The main engine instance managing rules and execution.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Engine {
     /// Working memory for facts
     working_memory: WorkingMemory,
@@ -95,8 +96,8 @@ impl Engine {
     /// Creates a new session from the engine.
     ///
     /// # Arguments
-    /// * `stateful` - If true, creates a long-lived session (days to weeks).
-    ///                If false, creates a stateless session for single-use execution.
+    /// * `stateful` - If true, creates a long-lived session (days to weeks),
+    ///   or false for a stateless session used for single-use execution.
     /// * `session_id` - Optional explicit ID for session lifecycle management.
     pub fn create_session(&self, stateful: bool, session_id: Option<String>) -> Session {
         Session::new(self, stateful, session_id)
@@ -147,6 +148,7 @@ impl Engine {
 }
 
 /// A session manages execution state for a single rule application.
+#[allow(dead_code)]
 pub struct Session {
     /// Reference to the engine
     engine: *const Engine,

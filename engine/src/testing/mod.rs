@@ -39,12 +39,14 @@ pub type TestResult<T> = Result<T, TestError>;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default)]
 pub enum ValueSnapshot {
     Bool(bool),
     Integer(i64),
     Float(f64),
     String(String),
     DateTime(String),
+    #[default]
     Null,
     Array(Vec<ValueSnapshot>),
     Object(std::collections::HashMap<String, ValueSnapshot>),
@@ -101,11 +103,6 @@ impl ValueSnapshot {
     }
 }
 
-impl Default for ValueSnapshot {
-    fn default() -> Self {
-        ValueSnapshot::Null
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkingMemorySnapshot {
@@ -131,7 +128,7 @@ impl WorkingMemorySnapshot {
         let mut diff = SnapshotDiff::new();
 
         // Create a map of fact_type to payload for easier comparison
-        let mut self_map: std::collections::HashMap<String, &std::collections::HashMap<String, ValueSnapshot>> =
+        let self_map: std::collections::HashMap<String, &std::collections::HashMap<String, ValueSnapshot>> =
             self.facts.iter().map(|f| (f.fact_type.clone(), &f.payload)).collect();
         let other_map: std::collections::HashMap<String, &std::collections::HashMap<String, ValueSnapshot>> =
             other.facts.iter().map(|f| (f.fact_type.clone(), &f.payload)).collect();
@@ -174,6 +171,12 @@ pub struct SnapshotDiff {
     pub added: Vec<String>,
     pub removed: Vec<String>,
     pub changed: Vec<SnapshotChange>,
+}
+
+impl Default for SnapshotDiff {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SnapshotDiff {
@@ -260,6 +263,12 @@ pub struct TestSession {
     deterministic_mode: DeterministicMode,
 }
 
+impl Default for TestSession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestSession {
     /// Create a new test session with default (non-deterministic) conflict resolution
     pub fn new() -> Self {
@@ -306,7 +315,7 @@ impl TestSession {
     /// Execute backward chaining from a goal and capture the trace
     pub fn execute_backward_chaining(&self, goal: &str) -> InferenceTrace {
         // Clone engine for execution (Engine implements Clone)
-        let mut temp_engine = self.engine.clone();
+        let temp_engine = self.engine.clone();
         let session = crate::environment::Session::new(&temp_engine, false, None);
 
         // Use the public execute_backward from backward_chaining
@@ -329,6 +338,7 @@ impl TestSession {
 ///     .with_fact("customer", payload)
 ///     .build();
 /// ```
+#[derive(Default)]
 pub struct FixtureBuilder {
     facts: Vec<Fact>,
 }
@@ -371,6 +381,12 @@ pub struct ForwardChainingTester {
     activations: Vec<String>,
 }
 
+impl Default for ForwardChainingTester {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ForwardChainingTester {
     /// Create a new forward chaining tester with an isolated engine instance
     pub fn new() -> Self {
@@ -411,9 +427,9 @@ impl ForwardChainingTester {
         let session = crate::environment::Session::new(&temp_engine, false, None);
 
         // Execute forward using the actual engine method
-        let result = crate::forward_chaining::execute_forward(&mut temp_engine, &session);
+        
 
-        result
+        crate::forward_chaining::execute_forward(&mut temp_engine, &session)
     }
 
     /// Add a rule to the engine's rule set for testing
@@ -554,11 +570,18 @@ impl ForwardChainingTester {
 /// Backward chaining trace capture
 ///
 /// Captures the inference path during backward chaining execution.
+#[allow(dead_code)]
 pub struct BackwardChainingTrace {
     /// Rule applications in order
     rule_applications: Vec<String>,
     /// Missing facts at each step
     missing_facts: Vec<String>,
+}
+
+impl Default for BackwardChainingTrace {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BackwardChainingTrace {
@@ -588,18 +611,15 @@ impl BackwardChainingTrace {
 /// When enabled, rules with equal salience are ordered by name
 /// to ensure deterministic test execution.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub enum DeterministicMode {
     /// Use default conflict resolution (non-deterministic for equal salience)
+    #[default]
     Disabled,
     /// Sort by rule name when salience is equal
     EnabledByName,
 }
 
-impl Default for DeterministicMode {
-    fn default() -> Self {
-        DeterministicMode::Disabled
-    }
-}
 
 pub fn deterministic_conflict_strategy(mut activations: Vec<Activation>) -> Vec<Activation> {
     // Sort by (salience DESC, rule_name ASC) for determinism
@@ -611,8 +631,8 @@ pub fn deterministic_conflict_strategy(mut activations: Vec<Activation>) -> Vec<
     activations
 }
 
-/// Test assertion helpers
-
+/// Test assertion helpers.
+///
 /// Assert that two values are equal, returning a test result
 #[macro_export]
 macro_rules! assert_eq_test {

@@ -19,7 +19,7 @@ use serde_json::Value;
 /// # Returns
 /// A JSON string with deterministic key ordering
 pub fn serialize_deterministic(snapshot: &WorkingMemorySnapshot) -> String {
-    let json_value = serde_json::to_value(snapshot).unwrap_or_else(|_| Value::Null);
+    let json_value = serde_json::to_value(snapshot).unwrap_or(Value::Null);
 
     // Rebuild the value with sorted keys recursively
     let sorted_value = sort_json_keys(json_value);
@@ -46,7 +46,7 @@ pub fn deserialize_working_memory(json: &str) -> Result<WorkingMemorySnapshot, s
 /// # Returns
 /// A JSON string with sorted keys
 pub fn serialize_fact_deterministic(fact: &FactSnapshot) -> String {
-    let json_value = serde_json::to_value(fact).unwrap_or_else(|_| Value::Null);
+    let json_value = serde_json::to_value(fact).unwrap_or(Value::Null);
     let sorted_value = sort_json_keys(json_value);
 
     serde_json::to_string_pretty(&sorted_value).unwrap_or_default()
@@ -60,7 +60,7 @@ pub fn serialize_fact_deterministic(fact: &FactSnapshot) -> String {
 /// # Returns
 /// A JSON string with sorted keys for object types
 pub fn serialize_value_deterministic(value: &ValueSnapshot) -> String {
-    let json_value = serde_json::to_value(value).unwrap_or_else(|_| Value::Null);
+    let json_value = serde_json::to_value(value).unwrap_or(Value::Null);
     let sorted_value = sort_json_keys(json_value);
 
     serde_json::to_string_pretty(&sorted_value).unwrap_or_default()

@@ -112,8 +112,10 @@ impl Agenda {
 
 /// Conflict resolution strategies for ordering rule firings when salience is equal.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub enum ConflictStrategy {
     /// Higher salience fires first (default)
+    #[default]
     Salience,
     /// Fewer matched facts first
     DepthFirst,
@@ -125,11 +127,6 @@ pub enum ConflictStrategy {
     Lexicographic,
 }
 
-impl Default for ConflictStrategy {
-    fn default() -> Self {
-        ConflictStrategy::Salience
-    }
-}
 
 /// Conflict resolver that applies different ordering strategies.
 #[derive(Debug, Clone)]

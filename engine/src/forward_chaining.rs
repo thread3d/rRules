@@ -17,6 +17,12 @@ pub struct ExecutionResult {
     pub errors: Vec<String>,
 }
 
+impl Default for ExecutionResult {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExecutionResult {
     pub fn new() -> Self {
         Self {
@@ -39,7 +45,7 @@ impl ExecutionResult {
 #[allow(dead_code)]
 pub fn execute_forward(_engine: &mut Engine, _session: &Session) -> ExecutionResult {
     // Placeholder implementation - actual Rete integration would go here
-    let result = ExecutionResult::new();
+    
 
     // This would:
     // 1. Build or reuse the Rete network from compiled rules
@@ -47,7 +53,7 @@ pub fn execute_forward(_engine: &mut Engine, _session: &Session) -> ExecutionRes
     // 3. Trigger rule actions when conditions match
     // 4. Handle salience-based agenda ordering
 
-    result
+    ExecutionResult::new()
 }
 
 /// Executes forward chaining using just the engine (no session needed).
@@ -56,6 +62,6 @@ pub fn execute_forward(_engine: &mut Engine, _session: &Session) -> ExecutionRes
 #[allow(dead_code)]
 pub fn execute_forward_simple(_engine: &mut Engine) -> ExecutionResult {
     // Placeholder implementation - actual Rete integration would go here
-    let result = ExecutionResult::new();
-    result
+    
+    ExecutionResult::new()
 }

@@ -263,16 +263,13 @@ impl<'a> SemanticValidator<'a> {
         let mut result = ValidationResult::new();
 
         // Check function calls have known functions
-        match _action {
-            crate::rules::Action::CallFunction { name, .. } => {
-                if !self.known_functions.contains(name) {
-                    result = result.with_warning(ValidationWarning {
-                        message: format!("Unknown function '{}'", name),
-                        location: None,
-                    });
-                }
+        if let crate::rules::Action::CallFunction { name, .. } = _action {
+            if !self.known_functions.contains(name) {
+                result = result.with_warning(ValidationWarning {
+                    message: format!("Unknown function '{}'", name),
+                    location: None,
+                });
             }
-            _ => {}
         }
 
         result
@@ -351,6 +348,7 @@ impl<'a> SemanticValidator<'a> {
 }
 
 /// Full validation pipeline that runs syntax then semantic checks.
+#[allow(dead_code)]
 pub struct ValidationPipeline {
     syntax_validator: SyntaxValidator,
     semantic_validator: Option<SemanticValidator<'static>>,

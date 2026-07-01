@@ -8,8 +8,10 @@ use std::cmp::Reverse;
 
 /// Conflict resolution strategy for ordering rule activations.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub enum ConflictStrategy {
     /// Higher salience fires first (default)
+    #[default]
     Salience,
     /// Fewer matched facts first (depth-first)
     DepthFirst,
@@ -21,11 +23,6 @@ pub enum ConflictStrategy {
     Lexicographic,
 }
 
-impl Default for ConflictStrategy {
-    fn default() -> Self {
-        ConflictStrategy::Salience
-    }
-}
 
 /// Resolves conflicts between activated rules using a specified strategy.
 #[derive(Debug, Clone)]

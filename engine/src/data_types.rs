@@ -188,31 +188,37 @@ mod tests {
         assert_ne!(v, Value::Bool(false));
 
         // Integer (edge cases)
-        let v_min = Value::Integer(i64::MIN);
-        let v_max = Value::Integer(i64::MAX);
-        let v_zero = Value::Integer(0);
+        #[allow(clippy::absurd_extreme_comparisons)]
+        {
+            let _v_min = Value::Integer(i64::MIN);
+            let _v_max = Value::Integer(i64::MAX);
+            let _v_zero = Value::Integer(0);
 
-        // Float (including special values)
-        let v_float = Value::Float(3.14159);
-        let v_nan = Value::Float(f64::NAN);
-        let v_inf = Value::Float(f64::INFINITY);
+            // Float (including special values)
+            let _v_float = Value::Float(3.14159);
+            let _v_nan = Value::Float(f64::NAN);
+            let _v_inf = Value::Float(f64::INFINITY);
 
-        // String with unicode
-        let v_unicode = Value::String("hello 世界 🌍".to_string());
+            // String with unicode
+            let _v_unicode = Value::String("hello 世界 🌍".to_string());
 
-        // DateTime
-        let v_datetime = Value::DateTime(chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
+            // DateTime
+            #[allow(deprecated)]
+            {
+                let _v_datetime = Value::DateTime(chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
+            }
 
-        // Object
-        let mut obj = std::collections::HashMap::new();
-        obj.insert("key".to_string(), Value::Integer(42));
-        let v_object = Value::Object(obj);
+            // Object
+            let mut obj = std::collections::HashMap::new();
+            obj.insert("key".to_string(), Value::Integer(42));
+            let _v_object = Value::Object(obj);
 
-        // Array
-        let v_array = Value::Array(vec![Value::Integer(1), Value::Integer(2)]);
+            // Array
+            let _v_array = Value::Array(vec![Value::Integer(1), Value::Integer(2)]);
 
-        // Null
-        let v_null = Value::Null;
+            // Null
+        }
+        let _v_null = Value::Null;
     }
 
     #[test]
@@ -361,6 +367,7 @@ mod tests {
 
     #[test]
     fn test_value_datetime_roundtrip() {
+        #[allow(deprecated)]
         let dt = chrono::NaiveDateTime::from_timestamp_opt(1234567890, 0).unwrap();
         let value = Value::DateTime(dt);
         let json = value.to_json().unwrap();

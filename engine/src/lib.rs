@@ -69,3 +69,9 @@ pub use forward_chaining::execute_forward;
 
 // Re-export validation types
 pub use validation::{ValidationError, ValidationResult, ValidationWarning};
+
+// Simulation module for What-If analysis (Phase 5)
+pub mod simulation {
+    pub mod runner;
+    pub mod types;
+}

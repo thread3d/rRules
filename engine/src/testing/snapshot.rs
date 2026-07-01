@@ -11,8 +11,10 @@ use std::path::{Path, PathBuf};
 
 /// Snapshot mode for controlling baseline behavior
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub enum SnapshotMode {
     /// Compare against baselines (default)
+    #[default]
     Read,
     /// Update baselines when different
     Update,
@@ -20,11 +22,6 @@ pub enum SnapshotMode {
     Skip,
 }
 
-impl Default for SnapshotMode {
-    fn default() -> Self {
-        SnapshotMode::Read
-    }
-}
 
 /// Error type for snapshot operations
 #[derive(Debug, thiserror::Error)]

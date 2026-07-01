@@ -59,7 +59,7 @@ impl Fact {
 }
 
 /// Index for efficient fact retrieval by type and field values.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FactRetrievalIndex {
     /// Primary index: fact_type_id -> Vec<fact_id>
     primary_index: HashMap<String, HashSet<Uuid>>,
@@ -136,17 +136,20 @@ impl FactRetrievalIndex {
 }
 
 /// Working memory for storing and retrieving facts with pattern matching support.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct WorkingMemory {
     /// Storage of facts by ID
     facts: HashMap<Uuid, Fact>,
     /// Index for efficient retrieval
     index: FactRetrievalIndex,
     /// Track inserted/removed facts for session isolation
+    #[allow(dead_code)]
     changes: Vec<WorkingMemoryChange>,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum WorkingMemoryChange {
     Inserted(Uuid),
     Removed(Uuid),
