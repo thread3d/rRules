@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: - Production Platform
 status: planning
-stopped_at: context exhaustion at 75% (2026-07-01)
-last_updated: "2026-07-01T11:39:10.988Z"
+stopped_at: Phase 22 context gathered
+last_updated: "2026-07-01T17:39:38.623Z"
 progress:
-  total_phases: 2
+  total_phases: 3
   completed_phases: 2
   total_plans: 3
   completed_plans: 6
-  percent: 100
+  percent: 67
 ---
 
 # Project State
@@ -160,6 +160,10 @@ From v2.0 milestone:
 
 ## Accumulated Context
 
+### Roadmap Evolution
+
+- Phase 22 added: Close v4.0 frontend integration gaps: wire orphaned UI to backend
+
 ### Decisions
 
 **Phase 1 Core Engine Foundation:**
@@ -236,9 +240,11 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-**Stopped at:** v4.0 audit gaps_found (2026-07-01) — frontend-wiring phase next
+**Resume file:** .planning/phases/22-close-v4-0-frontend-integration-gaps-wire-orphaned-ui-to-bac/22-CONTEXT.md
 
-Last session: 2026-07-01 (hardening A1-A7 + audit B1-B2 complete)
+**Stopped at:** Phase 22 context gathered
+
+Last session: 2026-07-01T17:39:38.608Z
 Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13 requirements partial; user chose to close inline via new frontend-wiring phase.
 
 **Completed Phases:**
