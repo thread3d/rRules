@@ -109,7 +109,11 @@ impl AuditStoreBackend for SqlxAuditStore {
 
 /// In-memory audit store for testing/dev (no database required)
 pub struct MemoryAuditStore {
-    events: Vec<AuditEvent>,
+    /// Stored events paired with the timestamp recorded at append time.
+    /// The timestamp is captured once, when the event is appended, so the
+    /// log ordering is stable and reflects when each event was recorded
+    /// (rather than re-reading the clock on every query/sort).
+    events: Vec<(DateTime<Utc>, AuditEvent)>,
 }
 
 impl MemoryAuditStore {
@@ -118,8 +122,9 @@ impl MemoryAuditStore {
         Self { events: Vec::new() }
     }
 
-    /// Get all stored events
-    pub fn events(&self) -> &[AuditEvent] {
+    /// Get all stored events paired with their recorded timestamps,
+    /// in append (oldest-first) order.
+    pub fn events(&self) -> &[(DateTime<Utc>, AuditEvent)] {
         &self.events
     }
 
@@ -138,7 +143,7 @@ impl Default for MemoryAuditStore {
 impl AuditStoreBackend for MemoryAuditStore {
     async fn append_event(&mut self, event: &AuditEvent) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let event_id = Uuid::new_v4().to_string();
-        self.events.push(event.clone());
+        self.events.push((Utc::now(), event.clone()));
         Ok(event_id)
     }
 
@@ -150,14 +155,25 @@ impl AuditStoreBackend for MemoryAuditStore {
         _actor_id: Option<i32>,
         limit: i64,
     ) -> Result<Vec<AuditEvent>, Box<dyn std::error::Error + Send + Sync>> {
-        let mut result = self.events.clone();
-        result.sort_by(|a, b| b.occurred_at().cmp(&a.occurred_at()));
+        // Sort by recorded timestamp descending (most recent first).
+        // The append index is used as a deterministic tiebreaker so that
+        // events recorded within the same timestamp always order by
+        // insertion (newest first), independent of clock resolution.
+        let mut result: Vec<(usize, DateTime<Utc>, AuditEvent)> = self
+            .events
+            .iter()
+            .enumerate()
+            .map(|(i, (ts, e))| (i, *ts, e.clone()))
+            .collect();
+        result.sort_by_key(|(i, ts, _)| std::cmp::Reverse((*ts, *i)));
+
+        let mut events: Vec<AuditEvent> = result.into_iter().map(|(_, _, e)| e).collect();
 
         if limit > 0 {
-            result.truncate(limit as usize);
+            events.truncate(limit as usize);
         }
 
-        Ok(result)
+        Ok(events)
     }
 
     async fn export_csv(
@@ -166,14 +182,14 @@ impl AuditStoreBackend for MemoryAuditStore {
         _end_time: DateTime<Utc>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let mut csv = String::from("event_type,actor_id,subject_type,payload_occurred_at\n");
-        for event in &self.events {
+        for (occurred_at, event) in &self.events {
             let _payload = serde_json::to_value(event).unwrap_or_default();
             csv.push_str(&format!(
                 "{},{},{},{}\n",
                 event.event_type(),
                 "N/A",
                 event.subject_type(),
-                event.occurred_at()
+                occurred_at
             ));
         }
         Ok(csv)

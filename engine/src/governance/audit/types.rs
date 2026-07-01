@@ -7,7 +7,6 @@
 //! - Git versioning events (branch creation, merge, conflicts)
 //! - System events (user login/logout)
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -138,11 +137,6 @@ impl AuditEvent {
             AuditEvent::UserLogin { .. } => "user.login",
             AuditEvent::UserLogout { .. } => "user.logout",
         }
-    }
-
-    /// Returns the occurred timestamp (currentlyUtc::now())
-    pub fn occurred_at(&self) -> DateTime<Utc> {
-        Utc::now()
     }
 
     /// Returns the subject ID if this event has one
