@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-07-01T10:50:27.417Z",
+  "phase": "19",
+  "phase_name": "Monitoring & Metrics Platform (v4.0 hardening + closure)",
+  "phase_dir": ".planning/phases/19-monitoring-metrics",
+  "plan": "milestone-v4.0-hardening (approved plan, not a GSD phase plan)",
+  "plan_file": "/home/threaded/.claude/plans/eager-whistling-reddy.md",
+  "task": 1,
+  "total_tasks": 9,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": "A1", "name": "Fix 7 approx_constant clippy errors in engine/src/data_types.rs", "status": "done", "commit": "5a1e2adc7"}
+  ],
+  "remaining_tasks": [
+    {"id": "A2", "name": "Clear all clippy warnings", "status": "not_started"},
+    {"id": "A4", "name": "Implement POST /v1/rules/batch-execute (refactor execute_single + JoinSet/Semaphore + route before /rules/{id})", "status": "not_started"},
+    {"id": "A5", "name": "Add integration tests (metrics, simulation, batch) in api/tests/", "status": "not_started"},
+    {"id": "A6a", "name": "Write manual API reference docs/API.md", "status": "not_started"},
+    {"id": "A6b", "name": "Add utoipa OpenAPI spec + Swagger UI", "status": "not_started"},
+    {"id": "A7", "name": "Hardening verification gate (clippy/test/check all green)", "status": "not_started"},
+    {"id": "B1", "name": "Re-verify Phase 19 VERIFICATION.md honestly (GAPS_FOUND -> passed w/ deferred-tech-debt note)", "status": "not_started"},
+    {"id": "B2-B4", "name": "Milestone closure: gsd-audit-milestone -> gsd-complete-milestone v4.0 -> gsd-cleanup", "status": "not_started"}
+  ],
+  "blockers": [],
+  "async_jobs": [],
+  "human_actions_pending": [
+    {"action": "Decide on audit result (gaps_found/tech_debt) during B2, and confirm destructive cleanup during B4", "context": "GSD closure flow pauses for user decisions per autonomous workflow CTRL-01", "blocking": false}
+  ],
+  "decisions": [
+    {"decision": "Harden first, then close (vs close now / stop)", "rationale": "User chose to finish ~10% remaining work before closing v4.0", "phase": "v4.0"},
+    {"decision": "API documentation: BOTH manual docs/API.md AND utoipa+Swagger UI", "rationale": "User answered 'Both please' to the design fork", "phase": "v4.0"},
+    {"decision": "execute_rules stays a stub; batch-execute is concurrency plumbing only", "rationale": "execute_rules builds engine into let _engine (unused), rules_fired hardcoded 0. Making it fire rules is a separate future milestone — out of scope for 'harden+close'", "phase": "v4.0"},
+    {"decision": "tenant_id already done — no work", "rationale": "rules.rs has full (tenant_id, rule_id) keying + isolation tests; header-based X-Tenant-ID isolation", "phase": "v4.0"},
+    {"decision": "Test harness: per-test minimal App::new() (not shared configure_app)", "rationale": "Target handlers need no app_data; avoids touching main.rs non-reusable server closure", "phase": "v4.0"},
+    {"decision": "too_many_arguments + should_implement_trait -> #[allow] (not refactor)", "rationale": "record_audit_event has 0 callers (dead code); TraceExplorer::next is bidirectional (Iterator semantically wrong)", "phase": "v4.0"},
+    {"decision": "Phase 19 gap closure is structural not functional", "rationale": "Endpoints read from trackers (not hardcoded []); coverage_endpoint uses singleton CAN return data; dead_rules_endpoint uses fresh tracker always []; nothing populates them since execute_rules is a stub", "phase": "19"}
+  ],
+  "uncommitted_files": [],
+  "next_action": "Run A2: fix clippy warnings. Remove `mut` at engine/src/testing/snapshot.rs:327,376,425 + engine/tests/snapshot_integration.rs:67,206,237,270; single_match engine/src/simulation/types.rs:277 -> if let; useless_vec engine/src/governance/audit/types.rs:185 -> array literal; needless_borrows engine/src/monitoring/detection.rs:336 (drop both &format!); #[allow(clippy::too_many_arguments)] on api/src/v1/audit.rs:272 record_audit_event; remove assert!(true) engine/src/testing/mod.rs:697; #[allow(clippy::should_implement_trait)] on engine/src/backward_chaining.rs:114 next. Optional: delete orphaned engine/src/tests/ dir. Verify: cargo clippy --workspace --all-targets exits 0 with 0 warnings. Commit.",
+  "context_notes": "Cross-cutting milestone v4.0 hardening driven by approved plan (not a GSD phase task). Autonomous workflow found all GSD phases complete; user chose harden-first. Full plan + verification + critical files at /home/threaded/.claude/plans/eager-whistling-reddy.md. Read that plan file first when resuming. Build is GREEN; clippy --all-targets now compiles (was exit 101 before A1)."
+}
