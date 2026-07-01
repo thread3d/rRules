@@ -30,11 +30,26 @@ async fn main() -> std::io::Result<()> {
     let (tag_store, rule_tag_store) = v1::tags::init_stores();
     let approval_store = v1::approvals::init_store();
     let audit_store = v1::audit::init_store();
-    let branch_store = v1::branches::init_store();
     let job_store = v1::execution::init_job_store();
 
-    // Get rules directory from environment
+    // Get rules directory from environment and initialize git-backed version control.
     let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
+    std::fs::create_dir_all(&rules_dir)?;
+
+    let vcs_config = engine::governance::versioning::VcsConfig::new(
+        &format!("{}/.git", rules_dir),
+    );
+    let repo_path = vcs_config.repo_path.clone();
+    let branch_store: web::Data<tokio::sync::Mutex<engine::governance::versioning::VersionControlRepo>> = {
+        let repo = engine::governance::versioning::VersionControlRepo::open_or_init(
+            &repo_path,
+            vcs_config,
+        )
+        .map_err(|e| std::io::Error::other(format!("Failed to init VCS: {}", e)))?;
+        web::Data::new(tokio::sync::Mutex::from(repo))
+    };
+
+    tracing::info!(vcs_repo = %branch_store.lock().await.repo().path().display(), "Initialized git-backed version control");
 
     // Get frontend dist path from environment or use default
     let frontend_dist = std::env::var("FRONTEND_DIST")
@@ -62,7 +77,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(rule_tag_store.clone()))
             .app_data(web::Data::new(approval_store.clone()))
             .app_data(web::Data::new(audit_store.clone()))
-            .app_data(web::Data::new(branch_store.clone()))
+            .app_data(branch_store.clone())
             .app_data(web::Data::new(job_store.clone()))
             // Serve frontend static files at root path
             .service(
@@ -117,11 +132,15 @@ async fn main() -> std::io::Result<()> {
                     .route("/branches/{name}", web::get().to(v1::branches::get_branch))
                     .route("/branches/{name}", web::delete().to(v1::branches::delete_branch))
                     .route("/branches/{name}/merge", web::post().to(v1::branches::merge_branch))
+                    // Git log endpoint (Phase 20-05)
+                    .route("/rules/{id}/git-log", web::get().to(v1::branches::get_git_log))
                     // Audit trail endpoints (Phase 20-04)
                     .route("/audit", web::get().to(v1::audit::query_audit_events))
                     .route("/audit/export", web::get().to(v1::audit::export_audit_log))
                     // Monitoring endpoints (Phase 19)
-                    .configure(configure_monitoring),
+                    .configure(configure_monitoring)
+                    // Simulation / What-If analysis endpoints (Phase 5)
+                    .configure(v1::configure_v1_simulation),
             )
             .configure(metrics::configure_metrics)
     })

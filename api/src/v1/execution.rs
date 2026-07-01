@@ -77,6 +77,12 @@ pub struct EngineState {
     pub rule_files: Arc<std::sync::RwLock<HashMap<String, String>>>,
 }
 
+impl Default for EngineState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EngineState {
     pub fn new() -> Self {
         let engine = EngineBuilder::new().build();

@@ -130,7 +130,7 @@ pub async fn query_audit_events(
     store: web::Data<AuditStore>,
 ) -> impl Responder {
     let page = query.page.unwrap_or(1).max(1);
-    let page_size = query.page_size.unwrap_or(50).max(1).min(100);
+    let page_size = query.page_size.unwrap_or(50).clamp(1, 100);
 
     let store_guard = store.lock().unwrap();
 
@@ -176,7 +176,7 @@ pub async fn query_audit_events(
     events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
     let total_count = events.len();
-    let total_pages = ((total_count + page_size as usize - 1) / page_size as usize)
+    let total_pages = total_count.div_ceil(page_size as usize)
         .try_into()
         .unwrap_or(0);
 
