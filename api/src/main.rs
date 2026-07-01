@@ -95,14 +95,18 @@ async fn main() -> std::io::Result<()> {
                     // Rules CRUD endpoints (Phase 20-01)
                     .route("/rules", web::get().to(v1::rules::get_rules))
                     .route("/rules", web::post().to(v1::rules::create_rule))
+                    // Static rule sub-paths MUST be registered before /rules/{id}
+                    // so actix matches the literal segment instead of binding it
+                    // to the {id} wildcard.
+                    .route("/rules/batch-execute", web::post().to(v1::execution::batch_execute_rules))
+                    // Hot reload endpoint for updating rules without restart
+                    .route("/rules/reload", web::post().to(v1::execution::reload_rules))
                     .route("/rules/{id}", web::get().to(v1::rules::get_rule))
                     .route("/rules/{id}", web::put().to(v1::rules::update_rule))
                     .route("/rules/{id}", web::patch().to(v1::rules::update_rule))
                     .route("/rules/{id}/undelete", web::post().to(v1::rules::undelete_rule))
                     // Soft delete (marks as archived)
                     .route("/rules/{id}", web::delete().to(v1::rules::delete_rule))
-                    // Hot reload endpoint for updating rules without restart
-                    .route("/rules/reload", web::post().to(v1::execution::reload_rules))
                     // Reload job status endpoints (Phase 21)
                     .route("/jobs/{job_id}", web::get().to(get_job_status))
                     .route("/jobs", web::get().to(list_jobs))

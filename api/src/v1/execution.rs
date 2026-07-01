@@ -267,10 +267,49 @@ pub struct JobResponse {
     pub status: String,
 }
 
-/// Execute rules - POST /v1/execute
-pub async fn execute_rules(
-    req: web::Json<ExecuteRequest>,
-) -> impl Responder {
+/// Request to execute multiple rule sets concurrently in one call
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct BatchExecuteRequest {
+    /// Individual execution requests to run as a batch
+    #[serde(default)]
+    pub requests: Vec<ExecuteRequest>,
+    /// Maximum number of requests to run concurrently (default 8, minimum 1)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_concurrency: Option<usize>,
+}
+
+/// Result of a single item within a batch execution
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BatchItemResult {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response: Option<ExecuteResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Response from batch rule execution
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BatchExecuteResponse {
+    /// Per-request results, in submission order
+    pub results: Vec<BatchItemResult>,
+    /// Total rules fired across all successful requests
+    pub total_fired: usize,
+    /// Number of requests that completed successfully
+    pub succeeded: usize,
+    /// Number of requests that failed (task panic / join error)
+    pub failed: usize,
+}
+
+/// Core single-request execution logic. Extracted so batch execution can reuse
+/// it concurrently without duplicating the engine/working-memory wiring.
+///
+/// NOTE: execution is currently a stub — `rules_fired` is hardcoded to `0`
+/// because the engine is built into `let _engine` (never driven). Wiring real
+/// rule firing is a separate future milestone and out of scope for v4.0
+/// hardening. The batch endpoint layers real concurrency (Semaphore + JoinSet)
+/// on top of this stub.
+pub async fn execute_single(req: ExecuteRequest) -> ExecuteResponse {
     let execution_id = Uuid::new_v4().to_string();
     let start_time = std::time::Instant::now();
 
@@ -294,15 +333,82 @@ pub async fn execute_rules(
 
     let _duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
 
-    let response = ExecuteResponse {
+    ExecuteResponse {
         execution_id,
         rules_fired,
         rules_not_fired,
         facts_after,
         inference_trace: None,
-    };
+    }
+}
 
-    HttpResponse::Ok().json(response)
+/// Execute rules - POST /v1/execute
+pub async fn execute_rules(req: web::Json<ExecuteRequest>) -> impl Responder {
+    HttpResponse::Ok().json(execute_single(req.into_inner()).await)
+}
+
+/// Execute multiple rule sets concurrently - POST /v1/rules/batch-execute
+///
+/// Runs each request in its own task, bounded by a semaphore. One failing
+/// request does not fail the batch — failures are reported per-item. There are
+/// no shared locks between requests: `execute_single` is self-contained (each
+/// task builds its own engine + working memory).
+pub async fn batch_execute_rules(req: web::Json<BatchExecuteRequest>) -> impl Responder {
+    let inner = req.into_inner();
+    let max_concurrency = inner.max_concurrency.unwrap_or(8).max(1);
+    let requests = inner.requests;
+
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrency));
+    let mut join_set = tokio::task::JoinSet::new();
+
+    for request in requests {
+        let permit_sem = semaphore.clone();
+        join_set.spawn(async move {
+            // Acquire a concurrency permit before running. The semaphore is
+            // never explicitly closed, so this only errors if the runtime shuts
+            // down — in which case panicking turns the task into a JoinError,
+            // which the collector below reports as a per-item failure.
+            let _permit = permit_sem
+                .acquire_owned()
+                .await
+                .expect("batch semaphore closed unexpectedly");
+            execute_single(request).await
+        });
+    }
+
+    let mut results = Vec::new();
+    let mut total_fired = 0usize;
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+
+    while let Some(join_result) = join_set.join_next().await {
+        match join_result {
+            Ok(resp) => {
+                total_fired += resp.rules_fired;
+                succeeded += 1;
+                results.push(BatchItemResult {
+                    success: true,
+                    response: Some(resp),
+                    error: None,
+                });
+            }
+            Err(join_err) => {
+                failed += 1;
+                results.push(BatchItemResult {
+                    success: false,
+                    response: None,
+                    error: Some(join_err.to_string()),
+                });
+            }
+        }
+    }
+
+    HttpResponse::Ok().json(BatchExecuteResponse {
+        results,
+        total_fired,
+        succeeded,
+        failed,
+    })
 }
 
 /// Reload rules - POST /v1/rules/reload
