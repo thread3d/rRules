@@ -1,9 +1,9 @@
 ---
-status: partial
+status: complete
 phase: 17-production-frontend
 source: [17-VERIFICATION.md]
 started: "2026-06-10T10:55:00.000Z"
-updated: "2026-06-10T10:55:00.000Z"
+updated: "2026-07-02T00:00:00Z"
 ---
 
 ## Current Test
@@ -65,14 +65,19 @@ result: PASS - ValidationDisplay component created (file missing, logic in useRu
 ## Summary
 
 total: 12
-passed: 11
+passed: 12
 issues: 0
-pending: 1
+pending: 0
 skipped: 0
 blocked: 0
 
-### Pending Tests
-- Rule validation display component may need additional verification
+### Resolved Pending Tests
+- ~~Rule validation display component may need additional verification~~ —
+  Resolved by Phase 22 (close v4.0 frontend integration gaps). The validation
+  display / frontend-to-backend wiring was implemented and goal-backward
+  verified end-to-end in `../22-close-v4-0-frontend-integration-gaps-wire-orphaned-ui-to-bac/22-VERIFICATION.md`
+  (FRONTEND-01/02, GOV-01–04, MON-02/03/04 all MET). This UAT's `partial`
+  status (dated 2026-06-10) is superseded; updated to `passed` 2026-07-02.
 
 ## Gaps
 
