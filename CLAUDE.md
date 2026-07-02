@@ -8,9 +8,9 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 
 ## Current Phase
 
-Milestone v4.0 (Production Platform) — **complete** (3/3 phases; phase 22 verified PASS, 9/9 requirements MET).
+Milestone v4.0 (Production Platform) — **shipped & tagged** 2026-07-02 (Phases 17–22; phase 22 verified PASS, 9/9 requirements MET). Git tags `v1.0`–`v4.0` all exist.
 
-**Next Step:** The v4.0 milestone is fully delivered. Run `/gsd:ship` to ship the milestone, or `/gsd:new-milestone` to plan the next milestone.
+**Next Step:** v4.0 is closed and tagged. Run `/gsd:new-milestone` to plan the next milestone. Candidate thesis (proposed): **v5.0 Live Execution** — wire the `/v1/execute` API (currently a stub returning `rules_fired: 0`, `api/src/v1/execution.rs:307`) to real engine invocation, auto-populate `RuleExecutionTracker`/`CoverageTracking`, and feed the v4.0 monitoring surfaces (Prometheus, dashboard, dead-rule, coverage) with live data.
 
 ## Project Structure
 
@@ -48,5 +48,5 @@ Milestone v4.0 (Production Platform) — **complete** (3/3 phases; phase 22 veri
 
 ## Next Steps
 
-1. Run `/gsd:ship` to ship the completed v4.0 milestone
-2. Alternatively: `/gsd:new-milestone` to plan the next milestone
+1. Run `/gsd:new-milestone` to plan the next milestone (proposed thesis: **v5.0 Live Execution** — close the `execute_rules` stub gap)
+2. Optionally: add a git remote (`git remote add origin <url>`) and push tags `v1.0`–`v4.0` — currently local-only (no remote configured)
