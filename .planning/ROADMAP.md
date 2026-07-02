@@ -464,9 +464,9 @@ Plans:
 **Plans:** 6 plans
 
 Plans:
-- [ ] 22-01-PLAN.md — API path alignment (Wave 1 foundation): align frontend to /v1, vite proxy, add actix-cors (D-22-04/05); includes D-22-12 branch checkpoint + D-22-03 v5.0 flag
+- [ ] 22-01-PLAN.md — API path alignment (Wave 1 foundation): align frontend to /v1, vite proxy, add actix-cors, split configure_metrics (move MON-03/MON-04 dashboard routes into /v1) (D-22-04/05); includes D-22-12 branch checkpoint + D-22-03 v5.0 flag
 - [ ] 22-02-PLAN.md — Pragmatic auth + JWT (Wave 2): build /v1/auth/* from scratch + upgrade requires_auth to JWT validation + wrap protected routes (D-22-01/02)
-- [ ] 22-03-PLAN.md — Router codegen + mounts + AuthProvider (Wave 2): @tanstack/router-plugin + upgrade react-router + mount all orphaned routes + AuthProvider (D-22-06/07/08/09)
+- [ ] 22-03-PLAN.md — Router codegen + mounts + AuthProvider + dashboard fetch wiring (Wave 2): @tanstack/router-plugin + upgrade react-router + mount all orphaned routes + AuthProvider (D-22-06/07/08/09) + wire MON-03/MON-04 dashboards to /v1/metrics/* with adapters (owns phase-wide P-2)
 - [ ] 22-04-PLAN.md — Metrics WebSocket streaming (Wave 2): rewrite metrics_ws to real ws::start + register + fix useEngineMetrics paths + adapter (D-22-10)
 - [ ] 22-05-PLAN.md — Audit + Approvals UI wiring (Wave 3): AuditLogViewer real fetch + export + adapter (GOV-03); ApprovalQueue /approvals/* wiring (GOV-02)
 - [ ] 22-06-PLAN.md — Branch management + conflict + backend fix (Wave 3): create_branch name fix (Pitfall 3/T-22-04) + BranchManager CRUD + merge conflict UI + side-by-side diff (GOV-04, FRONTEND-01)

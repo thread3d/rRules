@@ -498,19 +498,19 @@ async function handleMerge(branch: Branch) {
 
 **All other claims in this research were verified against the live codebase, ctx7 docs, or the npm/crates registries (tagged `[VERIFIED: source]` inline or in the audit table).**
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **`actix-cors` — add it, or default to same-origin prod?**
+1. **`actix-cors` — add it, or default to same-origin prod?** — RESOLVED: implemented in plan 22-01 Task 3 (add `actix-cors = "0.7"`, register with configurable allowed origins, never `any()` + `allow_credentials(true)`).
    - What we know: `actix-cors` is absent (verified). Phase 21 deploys a single container serving the SPA at root (`fs::Files::new("/")`), so same-origin works in prod by default. D-22-05 wants `VITE_API_URL` to be configurable-absolute for a separate API host.
    - What's unclear: Whether the user's deployment actually splits SPA and API across hosts, or if D-22-05 is future-proofing.
    - Recommendation: Add `actix-cors` (small) so D-22-05's configurability is real. It is the declared locked decision. Flag for planner confirmation.
 
-2. **`create_branch` name field — fix backend or document as tech debt?**
+2. **`create_branch` name field — fix backend or document as tech debt?** — RESOLVED: implemented in plan 22-06 Task 1 (add `name` to `CreateBranchRequest`, pass through to `create_branch`, `sanitize_branch_name` guard, P-5 regression test).
    - What we know: `branches.rs:89` hardcodes `"feature/default"`; `CreateBranchRequest` has no `name`. GOV-04 acceptance criteria include "Create branches for rule development."
    - What's unclear: Whether this is a quick backend fix (add `name` to the request struct + pass through) or a deeper VCS limitation.
    - Recommendation: Treat as an in-scope backend fix in the governance UI plan (cluster 5) — D-22-11 says "calls `/v1/branches` CRUD", and working create is part of CRUD. Small change; don't defer.
 
-3. **Metrics WS endpoint path (`/v1/metrics/ws` vs `/metrics/ws`)**
+3. **Metrics WS endpoint path (`/v1/metrics/ws` vs `/metrics/ws`)** — RESOLVED: implemented in plan 22-04 Task 1 (`configure_metrics_ws` registered inside the `/v1` scope → `/v1/metrics/ws`; frontend `useEngineMetrics` WS path updated to match in Task 2).
    - What's unclear: `websocket.rs` doc says `/v1/metrics/ws` but `configure_metrics_ws` scopes it as `/metrics/ws` (root). If registered inside the `/v1` scope it becomes `/v1/metrics/ws`; if at root, `/metrics/ws`. `useEngineMetrics.ts:26` defaults to `ws://localhost:8080/metrics/ws`.
    - Recommendation (Claude's discretion per CONTEXT): Register inside the `/v1` scope → `/v1/metrics/ws`, and update the frontend default to match. Keeps all API under `/v1` consistently.
 

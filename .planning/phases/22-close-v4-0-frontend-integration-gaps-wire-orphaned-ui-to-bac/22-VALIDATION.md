@@ -2,8 +2,8 @@
 phase: 22
 slug: close-v4-0-frontend-integration-gaps-wire-orphaned-ui-to-bac
 status: draft
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-07-02
 ---
 
@@ -44,17 +44,19 @@ created: 2026-07-02
 
 | Task ID | Plan (cluster) | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|-----------------|------|-------------|------------|------------------|-----------|-------------------|-------------|--------|
-| 22-01-* | 01 API path alignment | 1 | FRONTEND-02, MON-02 | — | N/A | smoke/grep | `(cd frontend && npm run build) && ! grep -rn "/api/v1" frontend/src/` | ❌ W0 (path edits) | ⬜ pending |
-| 22-02-* | 02 Auth + JWT | 2 | GOV-01 | T-22-01 (alg-confusion) | `requires_auth` rejects missing/invalid JWT; accepts valid HS256 | unit | `cargo test -p api --lib auth` | ❌ W0 (auth module) | ⬜ pending |
-| 22-02-* | 02 Auth + JWT | 2 | GOV-01 | T-22-02 (missing auth on mutating routes) | Protected `/v1/*` returns 401 without token | integration | `cargo test -p api --test auth_protection` | ❌ W0 | ⬜ pending |
-| 22-02-* | 02 Auth + JWT | 2 | GOV-01 | — | `/v1/auth/login` returns signed JWT; `/v1/auth/me` resolves user | integration | `cargo test -p api --test auth_endpoints` | ❌ W0 | ⬜ pending |
-| 22-02-* | 02 Auth + JWT | 2 | GOV-01 | T-22-03 (JWT alg-confusion `none`) | Token with `alg:none` / wrong-signature secret is rejected | unit | `cargo test -p api --lib auth -- alg_confusion` | ❌ W0 | ⬜ pending |
-| 22-03-* | 03 Router codegen + mounts | 2 | FRONTEND-01, MON-03/04, GOV-02 | — | N/A | smoke (build) | `(cd frontend && npx tsc --noEmit && npm run build)` | ❌ W0 (route files) | ⬜ pending |
-| 22-04-* | 04 Metrics WS | 2 | MON-02 | — | WS `/v1/metrics/ws` upgrades and streams a frame | integration | `cargo test -p api --test metrics_ws` | ❌ W0 (WS handler) | ⬜ pending |
-| 22-04-* | 04 Metrics WS | 2 | MON-02 | — | `useEngineMetrics` targets `/v1/monitoring/engine-state` (not `/api/v1/metrics`) | smoke/grep | `(cd frontend && npm run build) && ! grep -rn "/api/v1/metrics" frontend/src/` | ❌ W0 | ⬜ pending |
-| 22-05-* | 05 Governance UI | 2 | GOV-02 | — | ApprovalQueue mounted; `/approvals/pending` returns list | integration + smoke | `cargo test -p api --test approvals && (cd frontend && npm run build)` | ✅ existing + ❌ W0 mount | ⬜ pending |
-| 22-05-* | 05 Governance UI | 2 | GOV-03 | — | AuditLogViewer calls `/v1/audit`; export returns CSV/JSON | integration + smoke | `cargo test -p api --test audit && (cd frontend && npm run build)` | ✅ existing + ❌ W0 wiring | ⬜ pending |
-| 22-05-* | 05 Governance UI | 2 | GOV-04 | T-22-04 (branch name injection) | BranchManager creates (with `name`), lists, merges; 409 surfaces `conflicts[]` | integration | `cargo test -p api --test branches` (incl. create-with-name) | ✅ existing + ❌ W0 backend fix | ⬜ pending |
+| 22-01-T2 | 01 API path alignment | 1 | FRONTEND-02, MON-02 | — | N/A | smoke/grep | `(cd frontend && npm run build) && ! grep -rn "/api/v1" frontend/src/api/client.ts frontend/src/lib/auth-context.tsx` | ❌ W0 (path edits) | ⬜ pending |
+| 22-01-T3 | 01 API path alignment | 1 | FRONTEND-02, MON-02, MON-03, MON-04 | — | N/A | build + integration | `cargo build -p api && cargo test -p api --test metrics_integration && grep -n "configure_metrics_dashboards" api/src/main.rs` | ✅ existing (metrics.rs split) | ⬜ pending |
+| 22-02-T1 | 02 Auth + JWT | 2 | GOV-01 | — | `/v1/auth/login` returns signed JWT; `/v1/auth/me` resolves user | integration | `cargo test -p api --test auth_endpoints` | ❌ W0 | ⬜ pending |
+| 22-02-T2 | 02 Auth + JWT | 2 | GOV-01 | T-22-01 (alg-confusion), T-22-02 (missing auth) | `requires_auth` rejects missing/invalid/wrong-secret/alg:none JWT; accepts valid HS256; protected `/v1/*` returns 401 without token | integration | `cargo test -p api --test auth_protection` | ❌ W0 | ⬜ pending |
+| 22-03-T2 | 03 Router codegen + mounts | 2 | FRONTEND-01 | — | N/A | smoke (build) | `(cd frontend && npx tsc --noEmit && npm run build) && grep -n "tanstackRouter\|AuthProvider\|routeTree.gen" frontend/src/main.tsx frontend/vite.config.ts` | ❌ W0 (codegen + route files) | ⬜ pending |
+| 22-03-T3 | 03 Router codegen + mounts | 2 | FRONTEND-01, MON-03/04, GOV-02 | — | N/A | smoke (build + file check) | `(cd frontend && npm run build) && for f in ...; do test -f ... || { echo MISSING; exit 1; }; done && grep -c createFileRoute frontend/src/routeTree.gen.ts` | ❌ W0 (route files) | ⬜ pending |
+| 22-03-T4 | 03 Router codegen + dashboard wiring | 2 | MON-03, MON-04 | — | Dashboards fetch `/v1/metrics/{dead-rules,coverage}` via VITE_API_URL (not `/api/v1`); backend→frontend adapters present | smoke/grep | `(cd frontend && npm run build) && ! grep -rn "/api/v1" frontend/src/features/monitoring/` | ✅ existing (dashboards) | ⬜ pending |
+| 22-04-T1 | 04 Metrics WS | 2 | MON-02 | — | WS `/v1/metrics/ws` upgrades and streams a frame | integration | `cargo test -p api --test metrics_ws` | ❌ W0 (WS handler) | ⬜ pending |
+| 22-04-T2 | 04 Metrics WS | 2 | MON-02 | — | `useEngineMetrics` targets `/v1/monitoring/engine-state` (not `/api/v1/metrics`); single-object→array adapter | smoke/grep | `(cd frontend && npm run build) && ! grep -rn "/api/v1/metrics" frontend/src/` | ❌ W0 | ⬜ pending |
+| 22-05-T1 | 05 Governance UI | 3 | GOV-03 | — | AuditLogViewer calls `/v1/audit`; export returns CSV/JSON; adapter present | integration + smoke | `cargo test -p api --test audit && (cd frontend && npm run build)` | ✅ existing + ❌ W0 wiring | ⬜ pending |
+| 22-05-T2 | 05 Governance UI | 3 | GOV-02 | — | ApprovalQueue mounted; `/approvals/pending` returns list; loading/error/empty | integration + smoke | `cargo test -p api --test approvals && (cd frontend && npm run build)` | ✅ existing + ❌ W0 mount | ⬜ pending |
+| 22-06-T1 | 06 Branch mgmt + backend fix | 3 | GOV-04 | T-22-04 (branch name injection) | BranchManager creates (with `name`), lists, merges; 409 surfaces `conflicts[]`; sanitize guard | integration | `cargo test -p api --test branches` (incl. create-with-name + sanitize) | ✅ existing + ❌ W0 backend fix | ⬜ pending |
+| 22-06-T2 | 06 Branch mgmt + backend fix | 3 | GOV-04, FRONTEND-01 | — | BranchManager CRUD + merge conflict UI + side-by-side diff; adapter present | smoke/grep | `(cd frontend && npm run build) && ! grep -rn "/api/v1" frontend/src/features/versioning/` | ❌ W0 (wiring) | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -81,7 +83,7 @@ created: 2026-07-02
 > These are the property-style / E2E checks the planner must lift into `must_haves.truths` (covered edges) or note as held-out (backstop). They prove the wiring holds as a whole, not per-task.
 
 - [ ] **P-1 Route completeness:** every route in the generated `routeTree.gen.ts` resolves to a mounted component (no orphaned route files, no missing component). *Backstop — needs a build-time / AST check.*
-- [ ] **P-2 Path alignment complete:** `grep -rn "/api/v1" frontend/src/` returns nothing; all axios/fetch paths go through `VITE_API_URL` (default `/v1`). *Covered — grep assertion.*
+- [ ] **P-2 Path alignment complete:** `grep -rn "/api/v1" frontend/src/` returns nothing; all axios/fetch paths go through `VITE_API_URL` (default `/v1`). *Covered — grep assertion. Owned by 22-03 (fixes the last /api/v1 files — the monitoring dashboards); 22-01 fixes client.ts+auth-context.tsx, 22-04 fixes useEngineMetrics.ts. Verified at phase gate after Wave 2.*
 - [ ] **P-3 Auth enforcement:** a request to any protected `/v1/*` route without a JWT returns 401; a JWT with a wrong-signature secret is rejected; a valid JWT is accepted. *Covered — integration tests.*
 - [ ] **P-4 WS liveness:** a client connecting to `/v1/metrics/ws` completes the WS handshake and receives at least one frame broadcast from `metrics_tx`. *Backstop — integration test with a live WS client.*
 - [ ] **P-5 Branch create honors name:** two sequential `POST /v1/branches` with different `name` values create two distinct branches (regression guard for the `create_branch` hardcode). *Covered — integration test.*
@@ -101,11 +103,11 @@ created: 2026-07-02
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies listed
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references (auth tests, metrics_ws test, branches create-name test, route files, router-plugin install)
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 180s full; < 60s quick
-- [ ] `nyquist_compliant: true` set in frontmatter (after planner finalizes task IDs and this map is populated)
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies listed
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (auth tests, metrics_ws test, branches create-name test, route files, router-plugin install)
+- [x] No watch-mode flags
+- [x] Feedback latency < 180s full; < 60s quick
+- [x] `nyquist_compliant: true` set in frontmatter (task IDs finalized and Per-Task Map populated)
 
-**Approval:** pending (planner must align task IDs to this map during planning)
+**Approval:** ready (planner aligned task IDs to this map; blockers 1-3 and warnings 1-3 addressed in revision)
