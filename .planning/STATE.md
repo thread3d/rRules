@@ -2,13 +2,12 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: - Production Platform
-status: planning
-stopped_at: Phase 22 context gathered
-last_updated: "2026-07-01T17:39:38.623Z"
+status: executing
+last_updated: "2026-07-02T08:52:18.461Z"
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 3
+  total_plans: 9
   completed_plans: 6
   percent: 67
 ---
@@ -20,11 +19,13 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** v4.0 closure — frontend-wiring phase (audit gaps_found; close inline)
+**Current focus:** Phase 22 — close-v4-0-frontend-integration-gaps-wire-orphaned-ui-to-bac
 
 ## Current Position
 
-Status: Ready to plan
+Phase: 22 (close-v4-0-frontend-integration-gaps-wire-orphaned-ui-to-bac) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 22
 
 Milestone v4.0 in progress:
 
