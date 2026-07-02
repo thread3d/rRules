@@ -1,9 +1,15 @@
 import axios, { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import type { ApiError } from '@/types/common'
 
-// Create axios instance with default config
+// Create axios instance with default config.
+//
+// baseURL resolves through VITE_API_URL (default '/v1') so the frontend and
+// auth-context share a single source of truth. Dev: relative '/v1' is forwarded
+// by the vite proxy to the backend. Prod: same-origin '/v1' works with the
+// Phase 21 single-container deploy; override VITE_API_URL with an absolute URL
+// (e.g. https://api.rrules.example.com/v1) for a separate API host (D-22-05).
 const apiClient: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1',
+  baseURL: import.meta.env.VITE_API_URL || '/v1',
   headers: {
     'Content-Type': 'application/json',
   },

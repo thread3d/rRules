@@ -5,6 +5,12 @@ import type {
   User,
 } from '@/types/auth'
 
+// Single source of truth for the auth API base URL — mirrors the axios client
+// in `@/api/client.ts` so auth fetch and axios calls resolve through the same
+// VITE_API_URL (D-22-04/D-22-05). Dev: '/v1' via the vite proxy. Prod: same-origin
+// '/v1' (Phase 21 single-container) or an absolute URL override for a separate host.
+const API_URL = import.meta.env.VITE_API_URL || '/v1'
+
 interface AuthContextValue {
   user: User | null
   isAuthenticated: boolean
@@ -40,7 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Fetch user from API
-      const response = await fetch('/api/v1/auth/me', {
+      const response = await fetch(`${API_URL}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       })
 
@@ -65,7 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => ({ ...prev, isLoading: true, error: null }))
 
     try {
-      const response = await fetch('/api/v1/auth/login', {
+      const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(credentials),
