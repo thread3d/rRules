@@ -24,7 +24,7 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 ## Current Position
 
-Phase: 23 (Execute wiring core) — not started
+Phase: 23 (Execute evaluator + wiring) — not started
 Plan: —
 Status: Roadmap defined; ready to plan Phase 23
 Last activity: 2026-07-02 — v5.0 roadmap created (Phases 23–28)
@@ -33,7 +33,7 @@ Last activity: 2026-07-02 — v5.0 roadmap created (Phases 23–28)
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
-| 23 | Execute wiring core | EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05 | not_started |
+| 23 | Execute evaluator + wiring | EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05 | not_started |
 | 24 | Execution counters + metrics broadcast | MON-07 | not_started |
 | 25 | Real reload + JobStore | DEPLOY-05, EXEC-03 | not_started |
 | 26 | RuleExecutionTracker singleton + dead-rule live data | MON-06 | not_started |
@@ -276,4 +276,4 @@ Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13
 
 ## Operator Next Steps
 
-- Plan Phase 23 (Execute wiring core) with `/gsd-plan-phase 23`
+- Plan Phase 23 (Execute evaluator + wiring) with `/gsd-plan-phase 23`

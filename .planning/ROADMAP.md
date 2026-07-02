@@ -12,7 +12,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 - ✅ **v2.0 Testing Framework** — Phases 7–9 (shipped 2026-06-07) — Testing infrastructure, advanced features, enhancements
 - ✅ **v3.0 Pluggable Engines** — Phase 10 (shipped 2026-06-xx) — Rete/TREAT/LEAPS/PHREAK with runtime selection
 - ✅ **v4.0 Production Platform** — Phases 17–22 (shipped 2026-07-02) — Full frontend, governance, monitoring, management API, deployment
-- 📋 **v5.0 Live Execution** — Phases 23–28 (in progress) — Wire the `/v1/execute` stub to real engine invocation; auto-populate trackers + metrics so v4.0 monitoring surfaces read live data
+- 📋 **v5.0 Live Execution** — Phases 23–28 (in progress) — Build a minimal real rule evaluator + wire `/v1/execute` to it; auto-populate trackers + metrics so v4.0 monitoring surfaces read live data *(milestone thesis corrected during Phase 23 research: this is build + wire, not wire-only — the v3.0 engines never compiled and `execute_rules` was a placeholder; see `23-RESEARCH.md`)*
 
 ## Phases
 
@@ -59,7 +59,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 <details>
 <summary>📋 v5.0 Live Execution (Phases 23–28) — IN PROGRESS</summary>
 
-- [ ] **Phase 23: Execute wiring core** — Route `/v1/execute` through the real `EngineRegistry`; factory shared, engine instance per request
+- [ ] **Phase 23: Execute evaluator + wiring** — Fix the v3.0 engine import bug, build a minimal real rule evaluator on `ReteEngine`, and route `/v1/execute` through `EngineRegistry`; factory shared, engine instance per request
 - [ ] **Phase 24: Execution counters + metrics broadcast** — `ExecutionCounters` + Prometheus promote + WS broadcast; dashboards go live
 - [ ] **Phase 25: Real reload + JobStore** — Shared reloadable `RuleSet` snapshot; async reload writes `ReloadJob`; batch inherits real execution
 - [ ] **Phase 26: RuleExecutionTracker singleton + dead-rule live data** — Singleton-ize tracker; dead-rules reads live firings; pin with e2e test
@@ -70,19 +70,22 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 
 ## v5.0 Phase Details
 
-### Phase 23: Execute wiring core
+### Phase 23: Execute evaluator + wiring
 **Goal:** `POST /v1/execute` fires real rules via the v3.0 `EngineRegistry`/`ExecutionEngine` surface and returns truthful `rules_fired`/`rules_not_fired`/`facts_after` — closing the documented stub.
+**Scope note (research correction):** The milestone research framed this phase as "wiring, not building." Phase-23 research against the live code found that is inaccurate — the v3.0 engine modules never compiled (an `engine::` → `crate::` import bug in all four modules; `cargo check -p engine --features engine-rete` fails `E0433`), and `ReteEngine::execute_rules` (`rete/mod.rs:321`) is a placeholder that never evaluates `Rule.condition` or applies `Rule.actions`. This phase therefore *builds* a minimal direct rule evaluator on `ReteEngine` (iterate rules, evaluate condition, apply actions to working memory — full Rete alpha/beta propagation is explicitly out of scope) and *wires* `/v1/execute` through `EngineRegistry`. See `23-RESEARCH.md`.
 **Depends on:** v4.0 (Phase 22) — platform baseline
 **Requirements:** EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05
 **Key deliverables:**
-- Share `Arc<EngineRegistry>` + `EngineSelector` as `web::Data` (built once at startup in `main.rs`)
-- Add `engine: Option<String>` to `ExecuteRequest`; validate against `EngineRegistry.available_engines()` (HTTP 400 on unknown)
-- Config-defined default engine (env `RRULES_DEFAULT_ENGINE`) used when `engine` absent
-- Enable `engine-rete` (and `engine-treat`/`engine-leaps`/`engine-phreak` once factories verified) cargo features on the `api` crate
-- Construct a fresh `Box<dyn ExecutionEngine>` per request via `spawn_blocking`; insert facts; call `engine.execute()`
-- Serialize `facts_after` from post-execution `WorkingMemory` (reverse `engine_value_to_json`), not echoed input JSON
-- `CoverageTracking` auto-populates (free — `ReteEngine` already calls `record_rule_eval`/`record_rule_fire`); record once-per-rule outside the nagram inner loop
-- Prep rename: metrics `EngineState` → `MetricsSnapshot` (Pitfall 10) before adding logic
+- **(build) Fix the engine import bug** in `engine/src/engine/{rete,treat,leaps,phreak}/mod.rs`: `use engine::monitoring::coverage::CoverageTracking;` → `use crate::monitoring::coverage::CoverageTracking;` (the `E0433` that has kept the pluggable engines from ever compiling)
+- **(build) Extend the `ExecutionEngine` trait** with `load_ruleset(&mut self, ...)` + a facts accessor so an engine can accept a `RuleSet` and expose post-execution working memory (the trait currently has neither — see `23-RESEARCH.md` Flag 2)
+- **(build) Implement a minimal direct rule evaluator on `ReteEngine`** — rewrite the placeholder `execute_rules` (`rete/mod.rs:321`) into a direct loop that evaluates each `Rule.condition` against inserted facts and applies matching `Rule.actions` to working memory; record fired rule ids for `rules_not_fired` (full Rete alpha/beta propagation is out of scope)
+- **(wire) Share `Arc<EngineRegistry>` + `EngineSelector` as `web::Data`** (built once at startup in `main.rs`)
+- **(wire) Add `engine: Option<String>` to `ExecuteRequest`**; validate against `EngineRegistry.available_engines()` (HTTP 400 on unknown); config default `RRULES_DEFAULT_ENGINE` when `engine` absent
+- **(wire) Construct a fresh `Box<dyn ExecutionEngine>` per request via `spawn_blocking`**; `load_ruleset`; insert facts; `engine.execute()`
+- **(wire) Serialize `facts_after` from post-execution `WorkingMemory`** (reverse `engine_value_to_json`), not echoed input JSON
+- **(wire) `CoverageTracking` records once-per-rule** outside the nagram inner loop (the current per-nagram `record_rule_fire` at `rete/mod.rs:332` double-counts; the evaluator collects a `HashSet<rule_id>` then records once)
+- **(prep) Rename metrics `EngineState` → `MetricsSnapshot`** (Pitfall 10) before adding logic
+- **(wire) Enable the `engine-rete` cargo feature on the `api` crate** (and `engine-treat`/`engine-leaps`/`engine-phreak` — all four factories are confirmed real per `23-RESEARCH.md` Flag 1)
 **Pitfalls to avoid:**
 - Pitfall 1 (`&mut self` engine-sharing serialization) — factory shared, instance per request; never `engine_state.engine.write()` in the execute path
 - Pitfall 10 (`EngineState` name collision) — prep rename to `MetricsSnapshot`
@@ -90,7 +93,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 - Pitfall 11 (`facts_after` echo bug) — build from post-execution `WorkingMemory`
 - Pitfall 7 (per-request compile cost) — spike; ship engine pool here if >1ms
 - Pitfall 9 (`Engine::clone()` ≠ `ReteEngine` clone) — verify during compile-cost spike
-**Research flags:** Verify the three non-Rete `EngineFactory` impls exist before promising >1 engine; define `RuleSet`→`ExecutionEngine` bridging API (trait has no `load_ruleset`); decide `inference_trace` population source; spike per-request compile cost (pool if >1ms)
+**Research flags (resolved in `23-RESEARCH.md`):** (1) all four `EngineFactory` impls exist and are real, but all four modules have the same import bug → fix + enable all four features; (2) trait has no `load_ruleset` → extend the trait and implement a direct evaluator (not full Rete propagation); (3) `inference_trace` left `None` for Phase 23 (populating it is EXEC-04 / Phase 28); (4) per-request construction is O(1), `ReteEngine: !Clone` → ship per-request construction, no pool.
 **Success criteria (what must be TRUE):**
 1. `POST /v1/execute` against a rule that sets `score := score + 10` returns `rules_fired >= 1` and `facts_after` shows the incremented `score` (not the request input)
 2. `POST /v1/execute` with `engine: "rete"` succeeds; with `engine: "unknown"` returns HTTP 400
@@ -226,7 +229,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 20. Complete Management API | v4.0 | — | Complete | 2026-07-02 |
 | 21. Deployment & CI/CD | v4.0 | — | Complete | 2026-07-02 |
 | 22. Frontend Integration Closure | v4.0 | 6/6 | Complete (verified PASS) | 2026-07-02 |
-| 23. Execute wiring core | v5.0 | 0/? | Not started | - |
+| 23. Execute evaluator + wiring | v5.0 | 0/? | Not started | - |
 | 24. Execution counters + metrics broadcast | v5.0 | 0/? | Not started | - |
 | 25. Real reload + JobStore | v5.0 | 0/? | Not started | - |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 0/? | Not started | - |
