@@ -461,7 +461,7 @@ Plans:
 **Goal:** Wire the orphaned Phase 17 React frontend to the substantially-complete v4.0 backend so the 9 partial requirements (FRONTEND-01/02, GOV-01–04, MON-02/03/04) deliver end-to-end. This is a wiring/closure phase, not new-feature building. The single root cause is a frontend `/api/v1` baseURL vs backend `/v1` scope mismatch; the work is configuration (paths/proxy), composition (mount AuthProvider + codegen routes), and replacing stubs with real fetch — plus the small backend pieces auth (D-22-01), metrics WS (D-22-10), and the `create_branch` name fix (Pitfall 3) require.
 **Requirements:** FRONTEND-01, FRONTEND-02, GOV-01, GOV-02, GOV-03, GOV-04, MON-02, MON-03, MON-04
 **Depends on:** Phase 21
-**Plans:** 4/6 plans executed
+**Plans:** 6/6 plans complete
 
 Plans:
 
@@ -469,8 +469,8 @@ Plans:
 - [x] 22-02-PLAN.md — Pragmatic auth + JWT (Wave 2): build /v1/auth/* from scratch + upgrade requires_auth to JWT validation + wrap protected routes (D-22-01/02)
 - [x] 22-03-PLAN.md — Router codegen + mounts + AuthProvider + dashboard fetch wiring (Wave 2): @tanstack/router-plugin + upgrade react-router + mount all orphaned routes + AuthProvider (D-22-06/07/08/09) + wire MON-03/MON-04 dashboards to /v1/metrics/* with adapters (owns phase-wide P-2)
 - [x] 22-04-PLAN.md — Metrics WebSocket streaming (Wave 2): rewrite metrics_ws to real ws::start + register + fix useEngineMetrics paths + adapter (D-22-10)
-- [ ] 22-05-PLAN.md — Audit + Approvals UI wiring (Wave 3): AuditLogViewer real fetch + export + adapter (GOV-03); ApprovalQueue /approvals/* wiring (GOV-02)
-- [ ] 22-06-PLAN.md — Branch management + conflict + backend fix (Wave 3): create_branch name fix (Pitfall 3/T-22-04) + BranchManager CRUD + merge conflict UI + side-by-side diff (GOV-04, FRONTEND-01)
+- [x] 22-05-PLAN.md — Audit + Approvals UI wiring (Wave 3): AuditLogViewer real fetch + export + adapter (GOV-03); ApprovalQueue /approvals/* wiring (GOV-02)
+- [x] 22-06-PLAN.md — Branch management + conflict + backend fix (Wave 3): create_branch name fix (Pitfall 3/T-22-04) + BranchManager CRUD + merge conflict UI + side-by-side diff (GOV-04, FRONTEND-01)
 
 ---
 
