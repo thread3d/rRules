@@ -1,20 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v4.0
-milestone_name: - Production Platform
-current_phase: 0
-status: Awaiting next milestone
-stopped_at: context exhaustion at 75% (2026-07-02)
-last_updated: "2026-07-02T11:55:20.461Z"
+milestone: v5.0
+milestone_name: Live Execution
+status: planning
+last_updated: "2026-07-02T12:05:40.371Z"
 last_activity: 2026-07-02
-last_activity_desc: Milestone v4.0 completed and archived
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 9
-  completed_plans: 12
-  percent: 100
-current_phase_name: close-v4-0-frontend-integration-gaps-wire-orphaned-ui-to-bac
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -28,10 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 ## Current Position
 
-Phase: Milestone v4.0 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-07-02 — Milestone v4.0 completed and archived
+Status: Defining requirements
+Last activity: 2026-07-02 — Milestone v5.0 started
 
 ### Milestone v4.0 Plans Status
 

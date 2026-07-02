@@ -30,7 +30,7 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 
 ### Active
 
-(None — next milestone not yet defined. Run `/gsd-new-milestone` to define requirements for the next milestone.)
+v5.0 Live Execution — see `## Current Milestone` below and `.planning/REQUIREMENTS.md`. Closes the `execute_rules` stub and wires execution → trackers → live monitoring data.
 
 ### Out of Scope
 
@@ -52,7 +52,7 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 - Deployment: Multi-stage Alpine Docker, Helm chart (dev/staging/prod), hot-reload with async job tracking
 
 **Known tech debt (deferred, not blocking v4.0):**
-- `execute_rules` is still a stub — wiring it to actually fire rules and auto-populate `RuleExecutionTracker`/`CoverageTracking` is a future-milestone item (Phase 19 noted this as out-of-scope downstream work)
+- `execute_rules` is still a stub (api/src/v1/execution.rs:307 returns `rules_fired: 0`) — **being addressed in v5.0 Live Execution**: wiring it to actually fire rules and auto-populate `RuleExecutionTracker`/`CoverageTracking` (Phase 19 noted this as out-of-scope downstream work)
 - Some v1.0 governance/monitoring phases shipped as stubs originally and were promoted to real implementations across v3.0/v4.0
 
 ## Previous Milestones
@@ -61,9 +61,16 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 - **v2.0:** Testing Framework Foundation — Rust testing stack, working memory fixtures, forward/backward chaining verification, snapshot testing, deterministic firing mode
 - **v3.0:** Pluggable Engine Architecture — multiple Rete-family algorithms (Rete, TREAT, LEAPS, PHREAK) with runtime selection and engine-specific metrics
 
-## Next Milestone
+## Current Milestone: v5.0 Live Execution
 
-Not yet planned. Run `/gsd-new-milestone` to start the questioning → research → requirements → roadmap flow.
+**Goal:** Make rule execution real end-to-end so the v4.0 monitoring surfaces read live data — close the `execute_rules` stub (`api/src/v1/execution.rs:307`) and wire execution → trackers → metrics.
+
+**Target features:**
+- Real execution wiring for `POST /v1/execute` (single), `batch-execute`, and async reload (execute against refreshed rules)
+- Pluggable engine selection per request (`engine` param) with a config-defined default, exercising the v3.0 Rete/TREAT/LEAPS/PHREAK selector
+- Stateless one-shot **and** stateful session execution modes
+- Auto-populate `RuleExecutionTracker` + `CoverageTracking` so Prometheus `/metrics`, the monitoring dashboard, dead-rule detection, and coverage reporting show live data
+- Frontend test-runner UI in the rule IDE: run/test a rule, see fired rules, results, and coverage
 
 ## Context
 
@@ -113,4 +120,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-02 after v4.0 milestone*
+*Last updated: 2026-07-02 — started milestone v5.0 Live Execution*
