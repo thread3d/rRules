@@ -11,6 +11,11 @@ mod health;
 mod metrics;
 mod openapi;
 
+// Phase 22 modules
+mod auth;
+mod middleware;
+mod websocket;
+
 // Phase 20 modules
 pub mod v1;
 
@@ -36,6 +41,8 @@ async fn main() -> std::io::Result<()> {
     let approval_store = v1::approvals::init_store();
     let audit_store = v1::audit::init_store();
     let job_store = v1::execution::init_job_store();
+    // Phase 22: in-memory user store seeded with 4 demo roles (D-22-01).
+    let user_store = auth::init_store();
 
     // Get rules directory from environment and initialize git-backed version control.
     let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
@@ -72,8 +79,38 @@ async fn main() -> std::io::Result<()> {
         tokio::spawn(v1::execution::start_file_watcher(rules_dir));
     }
 
+    // CORS allowed origins (D-22-05). Default: the vite dev origin
+    // (http://localhost:5173). Override with `CORS_ALLOWED_ORIGINS` (comma-
+    // separated) to support a separate API host in prod, e.g.
+    // "https://app.rrules.example.com". The Phase 21 single-container deploy
+    // is same-origin and does not need CORS, but D-22-05 keeps VITE_API_URL
+    // configurable-absolute — CORS makes that mode real (RESEARCH Pitfall 2).
+    // NEVER combine `allow_any_origin()` with `allow_credentials(true)` (T-22-05).
+    let cors_allowed_origins: Vec<String> = std::env::var("CORS_ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| "http://localhost:5173".to_string())
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    println!("CORS allowed origins: {:?}", cors_allowed_origins);
+
     let server = HttpServer::new(move || {
+        // Build the CORS middleware per worker from the configured origins.
+        // Origins are pinned (not wildcard), so the Bearer-token auth flow
+        // works without `allow_credentials(true)` — credentials (cookies) are
+        // not used by the JWT auth scheme.
+        let cors = {
+            let mut c = actix_cors::Cors::default()
+                .allowed_methods(["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+                .allowed_headers(["Authorization", "Content-Type", "Accept"])
+                .max_age(3600);
+            for origin in &cors_allowed_origins {
+                c = c.allowed_origin(origin.as_str());
+            }
+            c
+        };
         App::new()
+            .wrap(cors)
             .app_data(engine_state.clone())
             .app_data(web::Data::new(metrics_tx.clone()))
             .app_data(web::Data::new(rule_store.clone()))
@@ -84,6 +121,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(audit_store.clone()))
             .app_data(branch_store.clone())
             .app_data(web::Data::new(job_store.clone()))
+            .app_data(web::Data::new(user_store.clone()))
             // Health check endpoints (must be before /v1 to avoid prefix conflict)
             .configure(health::configure_health)
             // OpenAPI spec + Swagger UI (served at root level, outside /v1)
@@ -94,6 +132,22 @@ async fn main() -> std::io::Result<()> {
             // API v1 endpoints
             .service(
                 web::scope("/v1")
+                    // Phase 22 (Task 2): wrap all `/v1/*` routes with JWT
+                    // validation. The public allowlist (login, /health,
+                    // /swagger-ui, /api-docs, /metrics) is bypassed INSIDE the
+                    // middleware (D-22-02: authenticated-vs-public for v4.0;
+                    // per-route role enforcement deferred to v5.0). T-22-01:
+                    // algorithm pinned to HS256 in `decode_token`, so
+                    // `alg:none`/wrong-secret tokens are rejected.
+                    .wrap(actix_web::middleware::from_fn(
+                        middleware::auth::requires_auth,
+                    ))
+                    // Phase 22 auth endpoints (D-22-01). `/v1/auth/login` is
+                    // public (allowlist bypass); `/me` and `/refresh` require a
+                    // valid Bearer token (enforced by the middleware wrap).
+                    .route("/auth/login", web::post().to(auth::login))
+                    .route("/auth/me", web::get().to(auth::me))
+                    .route("/auth/refresh", web::post().to(auth::refresh))
                     // Execution endpoint
                     .route("/execute", web::post().to(v1::execution::execute_rules))
                     // Rules CRUD endpoints (Phase 20-01)
@@ -147,6 +201,18 @@ async fn main() -> std::io::Result<()> {
                     .route("/audit/export", web::get().to(v1::audit::export_audit_log))
                     // Monitoring endpoints (Phase 19)
                     .configure(configure_monitoring)
+                    // Dashboard metric routes (MON-03/MON-04) — registered inside
+                    // /v1 so they resolve to /v1/metrics/dead-rules and
+                    // /v1/metrics/coverage. The Prometheus /metrics endpoint
+                    // stays at root (configured below).
+                    .configure(metrics::configure_metrics_dashboards)
+                    // Real-time metrics WebSocket (MON-02, Plan 22-04). A real
+                    // WS upgrade at /v1/metrics/ws broadcasting EngineState from
+                    // `metrics_tx` (replaces the prior JSON stub — RESEARCH §
+                    // Pitfall 6). Public via the auth allowlist so a browser
+                    // `new WebSocket()` (which cannot send a Bearer token)
+                    // can connect; the stream is read-only (threat model).
+                    .configure(websocket::configure_metrics_ws)
                     // Simulation / What-If analysis endpoints (Phase 5)
                     .configure(v1::configure_v1_simulation),
             )

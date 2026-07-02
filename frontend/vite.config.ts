@@ -1,8 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { tanstackRouter } from '@tanstack/router-plugin/vite'
 
 export default defineConfig({
-  plugins: [react()],
+  // tanstackRouter MUST come before react() so routeTree.gen.ts is generated
+  // before the React plugin processes imports (RESEARCH § Pattern 1).
+  plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true }), react()],
 
   resolve: {
     alias: {
@@ -13,7 +16,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': {
+      // Dev: forward relative '/v1' requests to the backend (D-22-04). The
+      // backend serves the /v1 scope directly (no /api prefix), so no rewrite
+      // is needed. The browser sees same-origin requests to /v1/*.
+      '/v1': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },

@@ -200,10 +200,10 @@ engine_memory_bytes 0
     }
 }
 
-/// Dead rules endpoint - GET /metrics/dead-rules
+/// Dead rules endpoint - GET /v1/metrics/dead-rules
 #[utoipa::path(
     get,
-    path = "/metrics/dead-rules",
+    path = "/v1/metrics/dead-rules",
     tag = "metrics",
     responses(
         (status = 200, description = "List of dead rule IDs", body = Vec<String>),
@@ -219,10 +219,10 @@ pub async fn dead_rules_endpoint() -> impl Responder {
     HttpResponse::Ok().json(rule_ids)
 }
 
-/// Coverage endpoint - GET /metrics/coverage
+/// Coverage endpoint - GET /v1/metrics/coverage
 #[utoipa::path(
     get,
-    path = "/metrics/coverage",
+    path = "/v1/metrics/coverage",
     tag = "metrics",
     responses(
         (status = 200, description = "Coverage data as JSON"),
@@ -238,12 +238,30 @@ pub async fn coverage_endpoint() -> impl Responder {
         .body(json_data)
 }
 
-/// Initialize metrics module - register routes
+/// Initialize the Prometheus metrics route at root — GET /metrics.
+///
+/// Only the Prometheus `/metrics` endpoint is registered here so it stays at
+/// the root path (REQUIREMENTS.md: "HTTP endpoint `/metrics` serves
+/// Prometheus-formatted metrics"). The dashboard endpoints
+/// (`/metrics/dead-rules`, `/metrics/coverage`) are registered inside the
+/// `/v1` scope by [`configure_metrics_dashboards`], where they resolve to
+/// `/v1/metrics/dead-rules` and `/v1/metrics/coverage` (MON-03/MON-04).
 pub fn configure_metrics(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/metrics")
-            .route("", web::get().to(metrics_endpoint))
-            .route("/dead-rules", web::get().to(dead_rules_endpoint))
-            .route("/coverage", web::get().to(coverage_endpoint)),
+            .route("", web::get().to(metrics_endpoint)),
     );
+}
+
+/// Initialize the dashboard metric routes for the `/v1` scope (MON-03/MON-04).
+///
+/// Registers `/metrics/dead-rules` and `/metrics/coverage`, which resolve to
+/// `/v1/metrics/dead-rules` and `/v1/metrics/coverage` when this config is
+/// registered inside the `web::scope("/v1")` block in `main.rs`. The Prometheus
+/// `/metrics` endpoint is intentionally NOT registered here — it stays at root
+/// via [`configure_metrics`] so the root Prometheus scrape contract and the
+/// `metrics_prometheus_text_format` test keep working unchanged.
+pub fn configure_metrics_dashboards(cfg: &mut web::ServiceConfig) {
+    cfg.route("/metrics/dead-rules", web::get().to(dead_rules_endpoint))
+        .route("/metrics/coverage", web::get().to(coverage_endpoint));
 }

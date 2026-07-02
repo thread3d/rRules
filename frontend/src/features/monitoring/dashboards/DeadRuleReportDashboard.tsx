@@ -9,6 +9,25 @@ interface DeadRuleInfo {
   recommendation: string
 }
 
+// Contract adapter (Pitfall 4): the backend dead_rules_endpoint returns
+// Vec<String> of rule IDs (api/src/metrics.rs), NOT DeadRuleInfo[]. Map each
+// rule ID into the frontend shape. Data is legitimately empty while
+// execute_single is a stub (D-22-03); the adapter handles [] gracefully.
+function adaptDeadRules(payload: unknown): DeadRuleInfo[] {
+  if (!Array.isArray(payload)) return []
+  return payload.map((id) => {
+    const ruleId = typeof id === 'string' ? id : String(id)
+    return {
+      ruleId,
+      ruleName: ruleId,
+      category: 'unknown',
+      evaluationCount: 0,
+      fireCount: 0,
+      recommendation: 'No execution tracking data yet (execution engine is a stub).',
+    }
+  })
+}
+
 export function DeadRuleReportDashboard() {
   const [deadRules, setDeadRules] = useState<DeadRuleInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -19,10 +38,12 @@ export function DeadRuleReportDashboard() {
 
   async function fetchDeadRules() {
     try {
-      const response = await fetch('/api/v1/metrics/dead-rules')
+      // /v1/metrics/dead-rules (route moved into /v1 by 22-01 Task 3).
+      const apiUrl = import.meta.env.VITE_API_URL || '/v1'
+      const response = await fetch(`${apiUrl}/metrics/dead-rules`)
       if (response.ok) {
-        const rules: DeadRuleInfo[] = await response.json()
-        setDeadRules(rules)
+        const payload: unknown = await response.json()
+        setDeadRules(adaptDeadRules(payload))
       }
     } catch (error) {
       console.error('Failed to fetch dead rules:', error)

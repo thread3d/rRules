@@ -10,6 +10,52 @@ interface RuleCoverageData {
   lastFiredAt?: string
 }
 
+// Shape returned by the backend coverage_endpoint (CoverageTracking::to_json in
+// engine/src/monitoring/coverage.rs): { rules: [{rule_id, evaluated, fired,
+// evaluation_count, fire_count, skipped_reason}], summary: {...} }. The
+// frontend expects RuleCoverageData[] (Pitfall 4 contract mismatch).
+interface BackendCoverageRule {
+  rule_id?: string
+  evaluated?: boolean
+  fired?: boolean
+  evaluation_count?: number
+  fire_count?: number
+}
+interface BackendCoveragePayload {
+  rules?: BackendCoverageRule[]
+  summary?: {
+    total_rules?: number
+    evaluated_count?: number
+    fired_count?: number
+    coverage_percent?: number
+  }
+}
+
+// Contract adapter (Pitfall 4): map the backend {rules[],summary} object to
+// the frontend RuleCoverageData[]. coveragePercent per rule = evaluated>0 ?
+// (fired/evaluated)*100 : 0. Data is empty while execute_single is a stub
+// (D-22-03); the adapter handles missing/empty rules gracefully (yields []).
+function adaptCoverage(payload: unknown): RuleCoverageData[] {
+  if (!payload || typeof payload !== 'object') return []
+  const rules = (payload as BackendCoveragePayload).rules
+  if (!Array.isArray(rules)) return []
+  return rules.map((r) => {
+    const ruleId = r.rule_id ?? 'unknown'
+    const evaluatedCount = r.evaluation_count ?? (r.evaluated ? 1 : 0)
+    const firedCount = r.fire_count ?? (r.fired ? 1 : 0)
+    const coveragePercent =
+      evaluatedCount > 0 ? (firedCount / evaluatedCount) * 100 : 0
+    return {
+      ruleId,
+      ruleName: ruleId,
+      category: 'unknown',
+      evaluatedCount,
+      firedCount,
+      coveragePercent,
+    }
+  })
+}
+
 export function RuleCoverageDashboard() {
   const [data, setData] = useState<RuleCoverageData[]>([])
   const [filterCategory, setFilterCategory] = useState<string>('all')
@@ -21,10 +67,12 @@ export function RuleCoverageDashboard() {
 
   async function fetchCoverage() {
     try {
-      const response = await fetch('/api/v1/metrics/coverage')
+      // /v1/metrics/coverage (route moved into /v1 by 22-01 Task 3).
+      const apiUrl = import.meta.env.VITE_API_URL || '/v1'
+      const response = await fetch(`${apiUrl}/metrics/coverage`)
       if (response.ok) {
-        const coverage: RuleCoverageData[] = await response.json()
-        setData(coverage)
+        const payload: unknown = await response.json()
+        setData(adaptCoverage(payload))
       }
     } catch (error) {
       console.error('Failed to fetch coverage:', error)

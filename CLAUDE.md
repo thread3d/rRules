@@ -8,9 +8,9 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 
 ## Current Phase
 
-Phase 1: Core Engine Foundation (Not started)
+Milestone v4.0 (Production Platform) — **complete** (3/3 phases; phase 22 verified PASS, 9/9 requirements MET).
 
-**Next Step:** Run `/gsd:discuss-phase 1` to gather context and clarify approach for building the rule engine.
+**Next Step:** The v4.0 milestone is fully delivered. Run `/gsd:ship` to ship the milestone, or `/gsd:new-milestone` to plan the next milestone.
 
 ## Project Structure
 
@@ -48,5 +48,5 @@ Phase 1: Core Engine Foundation (Not started)
 
 ## Next Steps
 
-1. Run `/gsd:discuss-phase 1` to discuss Phase 1 approach
-2. Alternatively: `/gsd:plan-phase 1` to skip discussion and plan directly
+1. Run `/gsd:ship` to ship the completed v4.0 milestone
+2. Alternatively: `/gsd:new-milestone` to plan the next milestone
