@@ -131,10 +131,19 @@ async fn main() -> std::io::Result<()> {
             // API v1 endpoints
             .service(
                 web::scope("/v1")
+                    // Phase 22 (Task 2): wrap all `/v1/*` routes with JWT
+                    // validation. The public allowlist (login, /health,
+                    // /swagger-ui, /api-docs, /metrics) is bypassed INSIDE the
+                    // middleware (D-22-02: authenticated-vs-public for v4.0;
+                    // per-route role enforcement deferred to v5.0). T-22-01:
+                    // algorithm pinned to HS256 in `decode_token`, so
+                    // `alg:none`/wrong-secret tokens are rejected.
+                    .wrap(actix_web::middleware::from_fn(
+                        middleware::auth::requires_auth,
+                    ))
                     // Phase 22 auth endpoints (D-22-01). `/v1/auth/login` is
-                    // public; `/me` and `/refresh` require a valid Bearer token
-                    // (enforced by the handler itself and, after Task 2, by the
-                    // `requires_auth` middleware wrap with allowlist bypass).
+                    // public (allowlist bypass); `/me` and `/refresh` require a
+                    // valid Bearer token (enforced by the middleware wrap).
                     .route("/auth/login", web::post().to(auth::login))
                     .route("/auth/me", web::get().to(auth::me))
                     .route("/auth/refresh", web::post().to(auth::refresh))

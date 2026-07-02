@@ -8,12 +8,18 @@
 
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use chrono::Utc;
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 
 pub mod store;
 
 pub use store::{find_user, init_store, UserRecord, UserStore};
+
+// `decode_token` lives in `crate::middleware::auth` — the JWT validation
+// concern belongs at the enforcement boundary (per plan 22-02 key_links:
+// `requires_auth → decode::<Claims>(HS256, API_SECRET_KEY)`). The handlers
+// below call it via `crate::middleware::auth::decode_token`.
+use crate::middleware::auth::decode_token;
 
 /// JWT claims. `sub` is the user id (== seeded username), `role` is one of
 /// admin|author|reviewer|viewer, `exp`/`iat` are UTC seconds.
@@ -75,8 +81,10 @@ const TOKEN_TTL_SECONDS: usize = 3600;
 
 /// Read the HMAC signing secret. Falls back to an insecure dev default with a
 /// warning if `API_SECRET_KEY` is unset — reuses the Phase 21 Helm secret
-/// placeholder. Never hand-roll HMAC (V6 cryptography).
-fn secret_key() -> Vec<u8> {
+/// placeholder. Never hand-roll HMAC (V6 cryptography). Public so the
+/// middleware (`crate::middleware::auth`) can reuse the same secret for
+/// `decode_token`.
+pub fn secret_key() -> Vec<u8> {
     match std::env::var("API_SECRET_KEY") {
         Ok(k) if !k.is_empty() => k.into_bytes(),
         _ => {
@@ -96,19 +104,6 @@ pub fn encode_token(claims: &Claims) -> Result<String, jsonwebtoken::errors::Err
         claims,
         &EncodingKey::from_secret(&secret_key()),
     )
-}
-
-/// Validate a JWT and return its claims. **Pins the algorithm to HS256**
-/// (T-22-01): `Validation::new(Algorithm::HS256)` rejects `alg:none` and
-/// wrong-secret tokens and validates `exp` by default. Do NOT use
-/// `Validation::default()` without pinning.
-pub fn decode_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
-    let data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(&secret_key()),
-        &Validation::new(Algorithm::HS256),
-    )?;
-    Ok(data.claims)
 }
 
 fn build_claims(user: &UserRecord) -> Claims {
@@ -264,6 +259,8 @@ pub async fn refresh(req: HttpRequest) -> impl Responder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `decode_token` now lives in the middleware module (enforcement boundary).
+    use crate::middleware::auth::decode_token;
 
     #[test]
     fn roundtrip_token_validates_with_hs256() {
