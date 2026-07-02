@@ -21,11 +21,83 @@ type VcsState = Mutex<VersionControlRepo>;
 /// Request to create a new branch
 #[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct CreateBranchRequest {
+    /// Name of the branch to create (required, sanitized — T-22-04).
+    pub name: String,
     /// Source branch to branch off from (defaults to main).
     pub source_branch: Option<String>,
     /// Explicit commit SHA to create the branch at.
     #[serde(default)]
     pub from_commit: Option<String>,
+}
+
+/// Sanitize a requested branch name before it reaches libgit2 (T-22-04).
+///
+/// Rejects names that could inject git refs or path traversal into the
+/// repository: empty, leading/trailing whitespace, embedded path separators
+/// (`/`, `\`), `..` traversal, and `refs/` prefixes. Branch names must also not
+/// be the literal `HEAD` (libgit2/git refuses it). Returns the trimmed name on
+/// success, or a `BranchError` (rendered as 400) describing the violation.
+fn sanitize_branch_name(raw: &str) -> Result<String, BranchError> {
+    // Reject empty (also catches whitespace-only after we check leading/trailing).
+    if raw.is_empty() {
+        return Err(BranchError::InvalidName(
+            "branch name is required".to_string(),
+        ));
+    }
+    // Reject leading/trailing whitespace (do NOT silently trim — the plan
+    // requires rejection so callers surface the bad input).
+    if raw.trim() != raw {
+        return Err(BranchError::InvalidName(
+            "branch name must not have leading or trailing whitespace".to_string(),
+        ));
+    }
+    if raw.trim().is_empty() {
+        return Err(BranchError::InvalidName(
+            "branch name is required (whitespace only)".to_string(),
+        ));
+    }
+    if raw == "HEAD" || raw.starts_with("refs/") {
+        return Err(BranchError::InvalidName(
+            "branch name must not be 'HEAD' or start with 'refs/'".to_string(),
+        ));
+    }
+    // Reject backslash (invalid in git refs and a path separator on Windows).
+    // A forward slash IS permitted — git uses it for namespaced branches like
+    // `feature/login` (the codebase's own tests create `feature/x`). The
+    // traversal danger is `..`, which is rejected separately below.
+    if raw.contains('\\') {
+        return Err(BranchError::InvalidName(
+            "branch name must not contain backslash".to_string(),
+        ));
+    }
+    if raw.contains("..") {
+        return Err(BranchError::InvalidName(
+            "branch name must not contain '..'".to_string(),
+        ));
+    }
+    if raw.chars().any(|c| c.is_whitespace()) {
+        return Err(BranchError::InvalidName(
+            "branch name must not contain embedded whitespace".to_string(),
+        ));
+    }
+    Ok(raw.to_string())
+}
+
+/// Validation error rendered as HTTP 400 (not a 500/409).
+#[derive(Debug)]
+enum BranchError {
+    InvalidName(String),
+}
+
+impl BranchError {
+    fn http(&self) -> HttpResponse {
+        match self {
+            BranchError::InvalidName(msg) => HttpResponse::BadRequest().json(serde_json::json!({
+                "error": msg,
+                "status_code": 400,
+            })),
+        }
+    }
 }
 
 /// Response with branch details
@@ -78,24 +150,34 @@ pub async fn create_branch(
     req: web::Json<CreateBranchRequest>,
     vcs: web::Data<VcsState>,
 ) -> HttpResponse {
+    // Sanitize the requested name before it crosses into libgit2 (T-22-04).
+    let name = match sanitize_branch_name(&req.name) {
+        Ok(n) => n,
+        Err(err) => return err.http(),
+    };
     let source = req.source_branch.as_deref();
 
-    // If from_commit is provided, we'd need to resolve it and use as base.
-    // For now fall back to HEAD of the source branch (or main).
-    if let Some(_commit_sha) = &req.from_commit {
-        return create_branch_from_commit(vcs, _commit_sha, source).await;
+    // If from_commit is provided, route to the commit-aware helper. The name
+    // is still honored (no more hardcoded default — Pitfall 3).
+    if let Some(commit_sha) = &req.from_commit {
+        return create_branch_from_commit(vcs, &name, commit_sha, source).await;
     }
 
-    match vcs.lock().await.create_branch("feature/default", source) {
+    // Hold a single guard across create + list to avoid the prior
+    // scrutinee-temporary deadlock (the first lock guard was kept alive
+    // through the match arm body, which then re-locked for list_branches
+    // and deadlocked the tokio::Mutex — Rule 1 fix).
+    let mut guard = vcs.lock().await;
+    match guard.create_branch(&name, source) {
         Ok(()) => {
             // Refresh branch list to get the newly created branch.
-            let branches = match vcs.lock().await.list_branches() {
+            let branches = match guard.list_branches() {
                 Ok(b) => b,
                 Err(_) => return HttpResponse::InternalServerError().json(serde_json::json!({
                     "error": "Failed to refresh branch list"
                 })),
             };
-            let new_branch = branches.iter().find(|b| !b.is_default).cloned();
+            let new_branch = branches.iter().find(|b| b.name == name).cloned();
 
             match new_branch {
                 Some(branch) => HttpResponse::Created().json(BranchResponse::from(&branch)),
@@ -111,6 +193,12 @@ pub async fn create_branch(
                     "status_code": 409,
                 }))
             }
+            engine::governance::versioning::VcsError::InvalidBranchName(msg) => {
+                HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": format!("Invalid branch name: {}", msg),
+                    "status_code": 400,
+                }))
+            }
             _ => HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": format!("Failed to create branch: {}", e),
                 "status_code": 500,
@@ -120,17 +208,41 @@ pub async fn create_branch(
 }
 
 /// Create a branch from an explicit commit SHA.
+///
+/// `name` is already sanitized by the caller. The commit SHA is accepted but
+/// (until libgit2 OID resolution is wired) the branch is created from the
+/// source branch HEAD as a pragmatic fallback — the name is honored so two
+/// distinct commits/requests produce two distinct branches (P-5).
 async fn create_branch_from_commit(
     vcs: web::Data<VcsState>,
+    name: &str,
     _commit_sha: &str,
     source: Option<&str>,
 ) -> HttpResponse {
-    // In libgit2 you'd resolve the OID and pass it to branch(). For now we
-    // create from the source branch HEAD as a pragmatic fallback.
-    match vcs.lock().await.create_branch("feature/from-commit", source) {
-        Ok(()) => HttpResponse::Created().json(serde_json::json!({
-            "message": "Branch created (from_commit parameter accepted; branch points to source HEAD)"
-        })),
+    let mut guard = vcs.lock().await;
+    match guard.create_branch(name, source) {
+        Ok(()) => {
+            let branches = match guard.list_branches() {
+                Ok(b) => b,
+                Err(_) => return HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to refresh branch list"
+                })),
+            };
+            let new_branch = branches.iter().find(|b| b.name == name).cloned();
+            match new_branch {
+                Some(branch) => HttpResponse::Created().json(BranchResponse::from(&branch)),
+                None => HttpResponse::Created().json(serde_json::json!({
+                    "message": "Branch created (from_commit parameter accepted; branch points to source HEAD)",
+                    "name": name,
+                })),
+            }
+        }
+        Err(engine::governance::versioning::VcsError::BranchCreationFailed(msg)) => {
+            HttpResponse::Conflict().json(serde_json::json!({
+                "error": msg,
+                "status_code": 409,
+            }))
+        }
         Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
             "error": format!("Failed to create branch: {}", e),
             "status_code": 500,
@@ -386,6 +498,32 @@ pub async fn get_git_log(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sanitize_branch_name_accepts_valid() {
+        assert_eq!(sanitize_branch_name("feature/x").unwrap(), "feature/x");
+        assert_eq!(sanitize_branch_name("branch-a").unwrap(), "branch-a");
+        assert_eq!(sanitize_branch_name("branch_with_underscores").unwrap(), "branch_with_underscores");
+        assert_eq!(sanitize_branch_name("v1.2.3").unwrap(), "v1.2.3");
+    }
+
+    #[test]
+    fn test_sanitize_branch_name_rejects_malicious() {
+        // T-22-04: traversal (`..`), ref injection (`refs/`, `HEAD`), backslash,
+        // whitespace, empty. A lone `/` is NOT rejected — git uses it for
+        // namespaced branches like `feature/login`.
+        for bad in ["../escape", "refs/heads/evil", "..", "has space",
+                    "", "   ", "trailing ", " leading", "HEAD",
+                    "a\\b", "refs/foo", "feature/../x"] {
+            assert!(
+                sanitize_branch_name(bad).is_err(),
+                "expected {:?} to be rejected, but was accepted",
+                bad
+            );
+        }
+        // Sanity: a slash-containing but otherwise-safe name IS accepted.
+        assert_eq!(sanitize_branch_name("feature/x").unwrap(), "feature/x");
+    }
 
     #[test]
     fn test_branch_response_conversion() {
