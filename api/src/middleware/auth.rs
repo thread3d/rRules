@@ -44,11 +44,18 @@ pub fn decode_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> 
 /// `/v1/auth/login` is strictly needed here; the root-level entries are
 /// included for robustness if the middleware is ever applied to a broader
 /// scope.
+///
+/// `/v1/metrics/ws` is public because a browser `new WebSocket()` cannot
+/// attach a Bearer Authorization header (the WS handshake is a plain HTTP
+/// upgrade), and the metrics stream is read-only — the server broadcasts
+/// `EngineState`; no user input is accepted (Plan 22-04 threat model). Without
+/// this entry the `/v1` auth wrap added in Plan 22-02 would 401 the WS upgrade.
 const PUBLIC_PREFIXES: &[&str] = &[
     "/health",
     "/swagger-ui",
     "/api-docs",
     "/v1/auth/login",
+    "/v1/metrics/ws",
     "/metrics",
 ];
 

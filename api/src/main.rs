@@ -14,6 +14,7 @@ mod openapi;
 // Phase 22 modules
 mod auth;
 mod middleware;
+mod websocket;
 
 // Phase 20 modules
 pub mod v1;
@@ -205,6 +206,13 @@ async fn main() -> std::io::Result<()> {
                     // /v1/metrics/coverage. The Prometheus /metrics endpoint
                     // stays at root (configured below).
                     .configure(metrics::configure_metrics_dashboards)
+                    // Real-time metrics WebSocket (MON-02, Plan 22-04). A real
+                    // WS upgrade at /v1/metrics/ws broadcasting EngineState from
+                    // `metrics_tx` (replaces the prior JSON stub — RESEARCH §
+                    // Pitfall 6). Public via the auth allowlist so a browser
+                    // `new WebSocket()` (which cannot send a Bearer token)
+                    // can connect; the stream is read-only (threat model).
+                    .configure(websocket::configure_metrics_ws)
                     // Simulation / What-If analysis endpoints (Phase 5)
                     .configure(v1::configure_v1_simulation),
             )
