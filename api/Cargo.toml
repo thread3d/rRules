@@ -11,6 +11,10 @@ path = "src/main.rs"
 engine = { path = "../engine" }
 actix-web = { version = "4.4", features = ["macros", "ws"] }
 actix-files = "0.6"
+# CORS middleware — required for D-22-05's separate-host prod URL mode (VITE_API_URL
+# absolute) where the browser blocks cross-origin requests without CORS headers.
+# Verified ABSENT at plan time (RESEARCH Pitfall 2); added here so D-22-05 is real.
+actix-cors = "0.7"
 futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

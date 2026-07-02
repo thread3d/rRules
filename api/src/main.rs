@@ -72,8 +72,38 @@ async fn main() -> std::io::Result<()> {
         tokio::spawn(v1::execution::start_file_watcher(rules_dir));
     }
 
+    // CORS allowed origins (D-22-05). Default: the vite dev origin
+    // (http://localhost:5173). Override with `CORS_ALLOWED_ORIGINS` (comma-
+    // separated) to support a separate API host in prod, e.g.
+    // "https://app.rrules.example.com". The Phase 21 single-container deploy
+    // is same-origin and does not need CORS, but D-22-05 keeps VITE_API_URL
+    // configurable-absolute — CORS makes that mode real (RESEARCH Pitfall 2).
+    // NEVER combine `allow_any_origin()` with `allow_credentials(true)` (T-22-05).
+    let cors_allowed_origins: Vec<String> = std::env::var("CORS_ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| "http://localhost:5173".to_string())
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    println!("CORS allowed origins: {:?}", cors_allowed_origins);
+
     let server = HttpServer::new(move || {
+        // Build the CORS middleware per worker from the configured origins.
+        // Origins are pinned (not wildcard), so the Bearer-token auth flow
+        // works without `allow_credentials(true)` — credentials (cookies) are
+        // not used by the JWT auth scheme.
+        let cors = {
+            let mut c = actix_cors::Cors::default()
+                .allowed_methods(["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+                .allowed_headers(["Authorization", "Content-Type", "Accept"])
+                .max_age(3600);
+            for origin in &cors_allowed_origins {
+                c = c.allowed_origin(origin.as_str());
+            }
+            c
+        };
         App::new()
+            .wrap(cors)
             .app_data(engine_state.clone())
             .app_data(web::Data::new(metrics_tx.clone()))
             .app_data(web::Data::new(rule_store.clone()))
@@ -147,6 +177,11 @@ async fn main() -> std::io::Result<()> {
                     .route("/audit/export", web::get().to(v1::audit::export_audit_log))
                     // Monitoring endpoints (Phase 19)
                     .configure(configure_monitoring)
+                    // Dashboard metric routes (MON-03/MON-04) — registered inside
+                    // /v1 so they resolve to /v1/metrics/dead-rules and
+                    // /v1/metrics/coverage. The Prometheus /metrics endpoint
+                    // stays at root (configured below).
+                    .configure(metrics::configure_metrics_dashboards)
                     // Simulation / What-If analysis endpoints (Phase 5)
                     .configure(v1::configure_v1_simulation),
             )

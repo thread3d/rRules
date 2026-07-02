@@ -1,16 +1,22 @@
-//! Integration tests for the root `/metrics` endpoints (v4.0 hardening task A5).
+//! Integration tests for the metrics endpoints (v4.0 hardening task A5).
 //!
-//! The metrics handlers take no `app_data`, so the test App only needs
-//! `configure_metrics` registered. The coverage test pre-populates the global
-//! `CoverageTracking` singleton before the request to prove the endpoint reads
-//! real tracked data — this is the functional proof that Phase 19's coverage
-//! gap closure works end-to-end (the endpoint reads from the tracker rather
-//! than a hardcoded empty array).
+//! The metrics handlers take no `app_data`. The Prometheus `/metrics` endpoint
+//! stays at root (`configure_metrics`); the dashboard endpoints
+//! `/metrics/dead-rules` and `/metrics/coverage` live inside the `/v1` scope
+//! (`configure_metrics_dashboards`), resolving to `/v1/metrics/dead-rules` and
+//! `/v1/metrics/coverage` (MON-03/MON-04). Prometheus tests register only
+//! `configure_metrics` and hit `/metrics`; dashboard tests mirror `main.rs` by
+//! registering both configs (`configure_metrics` at root + `/v1` scope with
+//! `configure_metrics_dashboards`) and hit `/v1/metrics/*`. The coverage test
+//! pre-populates the global `CoverageTracking` singleton before the request to
+//! prove the endpoint reads real tracked data — this is the functional proof
+//! that Phase 19's coverage gap closure works end-to-end (the endpoint reads
+//! from the tracker rather than a hardcoded empty array).
 
-use actix_web::{body::BoxBody, test, App};
+use actix_web::{body::BoxBody, test, web, App};
 use serde_json::Value;
 
-use api::metrics::configure_metrics;
+use api::metrics::{configure_metrics, configure_metrics_dashboards};
 use engine::monitoring::coverage::CoverageTracking;
 
 /// Unique rule id for the coverage test. The `CoverageTracking` singleton
@@ -76,9 +82,21 @@ async fn dead_rules_returns_valid_json_array() {
     // always returns [] until execution tracking is wired into execute_rules
     // (a stub). We assert valid structure, not non-emptiness — the empty result
     // is honest deferred tech debt, not a v4.0 blocker.
-    let app = test::init_service(App::new().configure(configure_metrics)).await;
+    //
+    // The dashboard routes live inside the /v1 scope (configure_metrics_dashboards),
+    // so the test App mirrors main.rs: configure_metrics (root Prometheus) +
+    // /v1 scope with configure_metrics_dashboards. The request URI is therefore
+    // /v1/metrics/dead-rules.
+    let app = test::init_service(
+        App::new()
+            .configure(configure_metrics)
+            .service(web::scope("/v1").configure(configure_metrics_dashboards)),
+    )
+    .await;
 
-    let req = test::TestRequest::get().uri("/metrics/dead-rules").to_request();
+    let req = test::TestRequest::get()
+        .uri("/v1/metrics/dead-rules")
+        .to_request();
     let body = json_body(test::call_service(&app, req).await).await;
 
     assert!(body.is_array(), "expected a JSON array; got: {body}");
@@ -89,10 +107,20 @@ async fn coverage_endpoint_reads_tracked_data() {
     // Pre-populate the global singleton BEFORE the request. The coverage
     // endpoint reads the same singleton, so the recorded rule must surface in
     // the response — proving the endpoint reads real tracked data.
+    //
+    // The coverage route lives inside the /v1 scope (configure_metrics_dashboards),
+    // so the test App mirrors main.rs and the request URI is /v1/metrics/coverage.
     CoverageTracking::record_rule_eval(COVERAGE_TEST_RULE);
 
-    let app = test::init_service(App::new().configure(configure_metrics)).await;
-    let req = test::TestRequest::get().uri("/metrics/coverage").to_request();
+    let app = test::init_service(
+        App::new()
+            .configure(configure_metrics)
+            .service(web::scope("/v1").configure(configure_metrics_dashboards)),
+    )
+    .await;
+    let req = test::TestRequest::get()
+        .uri("/v1/metrics/coverage")
+        .to_request();
     let body = json_body(test::call_service(&app, req).await).await;
 
     let rules = body["rules"].as_array().expect("rules is an array");

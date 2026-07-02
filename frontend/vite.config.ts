@@ -13,7 +13,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': {
+      // Dev: forward relative '/v1' requests to the backend (D-22-04). The
+      // backend serves the /v1 scope directly (no /api prefix), so no rewrite
+      // is needed. The browser sees same-origin requests to /v1/*.
+      '/v1': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
