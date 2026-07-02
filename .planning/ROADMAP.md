@@ -99,7 +99,13 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 2. `POST /v1/execute` with `engine: "rete"` succeeds; with `engine: "unknown"` returns HTTP 400
 3. Omitting `engine` resolves to the config-defined default and executes successfully
 4. `GET /v1/metrics/coverage` shows `fired == true` for a rule fired by a recent `/v1/execute` (auto-populated, no separate record call)
-**Plans:** TBD
+**Plans:**
+- [ ] 23-01-PLAN.md — Engine compile-unblock (L-01 import fix), ExecutionEngine trait bridge (L-02) + EngineResult.fired_rule_ids, register all four factories (D-01), enable all four engine features on the api crate
+- [ ] 23-02-PLAN.md — Rule-model extensions: Expression type (D-06) + Action::UpdateFact computed expressions, full ComparisonOp coverage + real Pattern matching in Condition::evaluate (D-05)
+- [ ] 23-03-PLAN.md — ReteEngine direct-evaluator rewrite (D-04): load_ruleset/get_facts impls, fixpoint-with-cap forward chaining (D-07), once-per-rule coverage (L-06/Pitfall 6), fired_rule_ids in EngineResult
+- [ ] 23-04-PLAN.md — Metrics EngineState → MetricsSnapshot rename (L-05/Pitfall 10) + Wave 0 RED test scaffolds (engine/tests/coverage.rs, api/tests/execute_integration.rs) for all four ROADMAP success criteria
+- [ ] 23-05-PLAN.md — API wiring: rewrite execute_single (per-request engine via spawn_blocking, facts_after from get_facts reverse mapping D-08/Pitfall 11, engine param validation 400/ENGINE-07, default resolution ENGINE-08, rules_not_fired), shared Arc<RwLock<RuleSet>> from RULE_STORAGE_PATH (D-03/D-03a), main.rs web::Data wiring + RRULES_DEFAULT_ENGINE/RRULES_MAX_CHAIN_ITERATIONS env vars
+- [ ] 23-06-PLAN.md — Four-engine rollout (D-01): mirror direct evaluator onto Treat/Leaps/Phreak + per-engine score+10 keystone tests (D-02)
 
 ### Phase 24: Execution counters + metrics broadcast
 **Goal:** Per-execution Prometheus metrics and a WebSocket `EngineState` snapshot make the v4.0 monitoring dashboards display live activity with zero protocol/UI changes.
@@ -229,7 +235,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 20. Complete Management API | v4.0 | — | Complete | 2026-07-02 |
 | 21. Deployment & CI/CD | v4.0 | — | Complete | 2026-07-02 |
 | 22. Frontend Integration Closure | v4.0 | 6/6 | Complete (verified PASS) | 2026-07-02 |
-| 23. Execute evaluator + wiring | v5.0 | 0/? | Not started | - |
+| 23. Execute evaluator + wiring | v5.0 | 0/6 | Not started | - |
 | 24. Execution counters + metrics broadcast | v5.0 | 0/? | Not started | - |
 | 25. Real reload + JobStore | v5.0 | 0/? | Not started | - |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 0/? | Not started | - |
