@@ -78,9 +78,9 @@ export function BranchManager() {
     }
   }
 
-  async function fetchBranches() {
-    // API call would go here
-  }
+  // TODO(22-06): wire real fetch — branches currently use mock state. The
+  // former fetchBranches stub was removed (unused) to keep the build green
+  // until 22-06 lands the conflict-resolution rewrite.
 }
 
 interface Branch {

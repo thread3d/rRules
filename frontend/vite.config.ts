@@ -1,8 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { tanstackRouter } from '@tanstack/router-plugin/vite'
 
 export default defineConfig({
-  plugins: [react()],
+  // tanstackRouter MUST come before react() so routeTree.gen.ts is generated
+  // before the React plugin processes imports (RESEARCH § Pattern 1).
+  plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true }), react()],
 
   resolve: {
     alias: {

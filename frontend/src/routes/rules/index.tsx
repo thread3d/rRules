@@ -1,9 +1,7 @@
-// Rules routes for rRules BRMS
+import { createFileRoute } from '@tanstack/react-router'
+import { RulesList, useRules } from '@/features/rules'
 
-import { RulesList } from '@/features/rules'
-import { useRules } from '@/features/rules'
-
-export function RulesPage() {
+function RulesPage() {
   const { rules, isLoading, error } = useRules()
 
   return (
@@ -18,3 +16,7 @@ export function RulesPage() {
     </div>
   )
 }
+
+export const Route = createFileRoute('/rules/')({
+  component: RulesPage,
+})
