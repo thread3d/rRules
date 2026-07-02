@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: - Production Platform
 current_phase: 22
-status: executing
-stopped_at: context exhaustion at 75% (2026-07-02)
-last_updated: "2026-07-02T11:35:19.575Z"
+status: completed
+stopped_at: null
+last_updated: "2026-07-02T11:38:52.544Z"
 progress:
   total_phases: 3
   completed_phases: 3
@@ -28,7 +28,7 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 Phase: 22
 Plan: Not started
-Status: Executing Phase 22
+Status: Phase 22 shipped — merged to master locally (0c5f37238); v4.0 milestone complete (3/3 phases)
 
 Milestone v4.0 in progress:
 
