@@ -1,38 +1,52 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import apiClient from '@/api/client'
+import { useAuth } from '@/lib/auth-context'
 import type { ApprovalRequest } from './types'
 
 export function ApprovalQueue() {
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [acting, setActing] = useState<string | null>(null)
+  const { user } = useAuth()
 
-  useEffect(() => {
-    fetchPendingApprovals()
-  }, [])
-
-  async function fetchPendingApprovals() {
+  const fetchPendingApprovals = useCallback(async () => {
     try {
       setLoading(true)
-      const response = await apiClient.get<{ approvals: ApprovalRequest[] }>('/approvals/pending')
-      setApprovals(response.data.approvals || [])
       setError(null)
+      // All fetch via shared apiClient (baseURL = VITE_API_URL /v1) — no hardcoded base.
+      const response = await apiClient.get<{ approvals: ApprovalRequest[] }>(
+        '/approvals/pending',
+      )
+      setApprovals(response.data.approvals || [])
     } catch (err) {
       console.error('Failed to fetch approvals:', err)
       setError(err instanceof Error ? err.message : 'Failed to load approvals')
+      setApprovals([])
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    fetchPendingApprovals()
+  }, [fetchPendingApprovals])
 
   async function handleReview(id: string, approve: boolean) {
     try {
+      setActing(id)
+      setError(null)
       const endpoint = approve ? `/approvals/${id}/approve` : `/approvals/${id}/reject`
-      await apiClient.post(endpoint, { approver_id: 'current-user' })
-      setApprovals((prev) => prev.filter((a) => a.id !== id))
+      // Backend ApprovalActionRequest.approver_id — use resolved user id when
+      // available, else 'current-user' for the demo (RESEARCH A4).
+      await apiClient.post(endpoint, { approver_id: user?.id ?? 'current-user' })
+      // Refresh the pending list from the backend after a successful action.
+      await fetchPendingApprovals()
     } catch (err) {
       console.error(`${approve ? 'Approve' : 'Reject'} failed:`, err)
       setError(err instanceof Error ? err.message : `Failed to ${approve ? 'approve' : 'reject'}`)
+    } finally {
+      setActing(null)
     }
   }
 
@@ -43,6 +57,12 @@ export function ApprovalQueue() {
       {error && (
         <div className="mb-4 rounded-md bg-red-50 p-4 dark:bg-red-900/20">
           <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          <button
+            onClick={fetchPendingApprovals}
+            className="mt-2 btn btn-outline btn-sm"
+          >
+            Retry
+          </button>
         </div>
       )}
 
@@ -68,13 +88,15 @@ export function ApprovalQueue() {
                 <div className="flex space-x-2">
                   <button
                     onClick={() => handleReview(approval.id, true)}
-                    className="btn btn-primary"
+                    disabled={acting === approval.id}
+                    className="btn btn-primary disabled:opacity-50"
                   >
                     Approve
                   </button>
                   <button
                     onClick={() => handleReview(approval.id, false)}
-                    className="btn btn-error"
+                    disabled={acting === approval.id}
+                    className="btn btn-error disabled:opacity-50"
                   >
                     Reject
                   </button>
