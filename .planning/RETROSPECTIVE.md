@@ -26,7 +26,7 @@ Living retrospective. A new section is appended per milestone at ship time.
 
 - **Stale tracking records at close:** Phase 17's UAT sat as `partial` (pre-Phase-22) and Phases 18/19 VERIFICATION files used the unnumbered `VERIFICATION.md` form the tooling doesn't recognize — both blocked a clean `verified_closeout` until manually normalized. Verification records should be flipped to terminal status (`complete`/`passed`) and use the numbered `{phase}-VERIFICATION.md` filename at phase close, not at milestone close.
 - **Roadmap drift:** ROADMAP.md accumulated duplicated/stale `## Progress` sections and inconsistent plan counts across milestones — required judgment to collapse cleanly.
-- **No prior tags:** v1.0/v2.0/v3.0 were never tagged, so historical releases aren't recoverable as git refs. v4.0 is the first tagged release.
+- **No prior tags at ship time:** v1.0/v2.0/v3.0 were never tagged when they shipped — v4.0 was the first tag created at ship time. Backfilled retroactively on 2026-07-02: `v1.0`@8440422a9, `v2.0`@0dcfe1199, `v3.0`@e6c975b03. v3.0 is a retroactive label, not a clean release — its pluggable-engine code landed inside the v4.0 timeline (see Cross-Milestone Trends note).
 
 ### Patterns Established
 
@@ -50,10 +50,12 @@ Living retrospective. A new section is appended per milestone at ship time.
 
 | Milestone | Phases | Days | Commits | Closeout | Tagged |
 |-----------|--------|------|---------|----------|-------|
-| v1.0 | 6 | — | — | — | no |
-| v2.0 | 3 | — | — | — | no |
-| v3.0 | 1 | — | — | — | no |
-| v4.0 | 6 | 22 | 89 | verified | yes |
+| v1.0 | 6 | — | — | (retro) | yes (backfilled @8440422a9, 2026-06-01) |
+| v2.0 | 3 | — | — | (retro) | yes (backfilled @0dcfe1199, 2026-06-08) |
+| v3.0 | 1 | — | — | (retro) | yes (backfilled @e6c975b03, 2026-06-11 — retroactive label¹) |
+| v4.0 | 6 | 22 | 89 | verified | yes (@ee4683314a, 2026-07-02) |
+
+¹ v3.0 was never closed as a separate git milestone — STATE.md transitions directly from v2.0/complete to v4.0, and there is no Phase-10 or v3.0 milestone-completion commit. The pluggable-engine code (TREAT/LEAPS/PHREAK/selector/registry, ~2084 LOC) first landed inside the v4.0 timeline at commit `e6c975b03` (a Phase-21 deployment commit). The `v3.0` tag is a backfilled historical ref to where that deliverable materialized, not a clean release commit.
 
 ---
-*Last updated: 2026-07-02 after v4.0 milestone*
+*Last updated: 2026-07-02 after v4.0 milestone + v1.0/v2.0/v3.0 tag backfill*
