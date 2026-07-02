@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Live Execution
 status: planning
-last_updated: "2026-07-02T12:05:40.371Z"
+last_updated: "2026-07-02T12:30:00.000Z"
 last_activity: 2026-07-02
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,14 +20,27 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** Phase 22 — close-v4-0-frontend-integration-gaps-wire-orphaned-ui-to-bac
+**Current focus:** Phase 23 — execute-wiring-core (route /v1/execute through real EngineRegistry)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 23 (Execute wiring core) — not started
 Plan: —
-Status: Defining requirements
-Last activity: 2026-07-02 — Milestone v5.0 started
+Status: Roadmap defined; ready to plan Phase 23
+Last activity: 2026-07-02 — v5.0 roadmap created (Phases 23–28)
+
+### Milestone v5.0 Phases
+
+| Phase | Name | Requirements | Status |
+|-------|------|--------------|--------|
+| 23 | Execute wiring core | EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05 | not_started |
+| 24 | Execution counters + metrics broadcast | MON-07 | not_started |
+| 25 | Real reload + JobStore | DEPLOY-05, EXEC-03 | not_started |
+| 26 | RuleExecutionTracker singleton + dead-rule live data | MON-06 | not_started |
+| 27 | Stateful sessions | SESS-01 | not_started |
+| 28 | Frontend test-runner | FRONTEND-03, FRONTEND-04, EXEC-04 | not_started |
+
+**Coverage:** 13/13 v5.0 requirements mapped, 0 orphans, 6/6 phases with ≥1 requirement.
 
 ### Milestone v4.0 Plans Status
 
@@ -158,6 +171,7 @@ From v2.0 milestone:
 ### Roadmap Evolution
 
 - Phase 22 added: Close v4.0 frontend integration gaps: wire orphaned UI to backend
+- v5.0 milestone added (2026-07-02): Phases 23–28 — Live Execution (wire /v1/execute stub to real engine; auto-populate trackers + metrics)
 
 ### Decisions
 
@@ -262,4 +276,4 @@ Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 23 (Execute wiring core) with `/gsd-plan-phase 23`
