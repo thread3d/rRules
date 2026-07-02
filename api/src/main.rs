@@ -11,6 +11,10 @@ mod health;
 mod metrics;
 mod openapi;
 
+// Phase 22 modules
+mod auth;
+mod middleware;
+
 // Phase 20 modules
 pub mod v1;
 
@@ -36,6 +40,8 @@ async fn main() -> std::io::Result<()> {
     let approval_store = v1::approvals::init_store();
     let audit_store = v1::audit::init_store();
     let job_store = v1::execution::init_job_store();
+    // Phase 22: in-memory user store seeded with 4 demo roles (D-22-01).
+    let user_store = auth::init_store();
 
     // Get rules directory from environment and initialize git-backed version control.
     let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
@@ -114,6 +120,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(audit_store.clone()))
             .app_data(branch_store.clone())
             .app_data(web::Data::new(job_store.clone()))
+            .app_data(web::Data::new(user_store.clone()))
             // Health check endpoints (must be before /v1 to avoid prefix conflict)
             .configure(health::configure_health)
             // OpenAPI spec + Swagger UI (served at root level, outside /v1)
@@ -124,6 +131,13 @@ async fn main() -> std::io::Result<()> {
             // API v1 endpoints
             .service(
                 web::scope("/v1")
+                    // Phase 22 auth endpoints (D-22-01). `/v1/auth/login` is
+                    // public; `/me` and `/refresh` require a valid Bearer token
+                    // (enforced by the handler itself and, after Task 2, by the
+                    // `requires_auth` middleware wrap with allowlist bypass).
+                    .route("/auth/login", web::post().to(auth::login))
+                    .route("/auth/me", web::get().to(auth::me))
+                    .route("/auth/refresh", web::post().to(auth::refresh))
                     // Execution endpoint
                     .route("/execute", web::post().to(v1::execution::execute_rules))
                     // Rules CRUD endpoints (Phase 20-01)

@@ -27,6 +27,11 @@ log = "0.4"
 tracing = "0.1"
 utoipa = { version = "4", features = ["actix_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "7", features = ["actix-web"] }
+# JWT signing/validation (D-22-01). HS256 HMAC with the existing API_SECRET_KEY.
+# Battle-tested standard crate (Keats; RESEARCH §Package Legitimacy: OK).
+# `Validation::new(Algorithm::HS256)` pins the algorithm so `alg:none` is
+# rejected (T-22-01) — never use `Validation::default()` without pinning.
+jsonwebtoken = { version = "10.4", features = ["rust_crypto"] }
 
 [dev-dependencies]
 criterion = "0.5"
