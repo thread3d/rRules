@@ -15,6 +15,13 @@ actix-files = "0.6"
 # absolute) where the browser blocks cross-origin requests without CORS headers.
 # Verified ABSENT at plan time (RESEARCH Pitfall 2); added here so D-22-05 is real.
 actix-cors = "0.7"
+# WebSocket actor support for real-time metrics streaming (Plan 22-04,
+# MON-02). `actix_web_actors::ws::start` performs the WS upgrade and provides
+# `WebsocketContext` for the session actor (RESEARCH § Pattern 3). `actix`
+# is the actor runtime trait (`Actor`/`StreamHandler`) — declared directly so
+# `use actix::Actor;` resolves; it is already a transitive dep of actix-web.
+actix-web-actors = "4"
+actix = "0.13"
 futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -35,3 +42,7 @@ jsonwebtoken = { version = "10.4", features = ["rust_crypto"] }
 
 [dev-dependencies]
 criterion = "0.5"
+# Test server for WS integration tests (Plan 22-04). Binds a random port and
+# returns the SocketAddr so the raw TCP WS client can connect + assert the
+# 101 handshake + a broadcast frame (P-4).
+actix-test = "0.1"
