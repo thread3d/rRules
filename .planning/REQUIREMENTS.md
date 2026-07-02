@@ -11,12 +11,14 @@ This milestone delivers a complete production-ready platform with full web front
 ### Research Summary
 
 **Production BRMS Requirements (from domain research):**
+
 - **Monitoring:** Prometheus metrics endpoint, Grafana dashboards, alerting
 - **RBAC:** Maker-checker workflows, tenant isolation, role-based permissions
 - **API:** RESTful endpoints with batch execution commands
 - **Frontend:** Guided editors, real-time validation, version comparison
 
 **Tech Stack Recommendations:**
+
 - Frontend: React + TypeScript + CodeMirror + ag-Grid
 - Backend: Rust with Prometheus client library
 - Deployment: Docker/Kubernetes with ConfigMap/Secrets
@@ -32,6 +34,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Full-featured web interface for rule creation, editing, and management.
 
 **Acceptance Criteria:**
+
 - Web-based IDE with syntax highlighting for Drools/DRL rules
 - Decision table editor with all hit policies (Unique, Any, Priority, Collect, etc.)
 - Guided rule editor for business users without coding experience
@@ -47,6 +50,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Central dashboard for monitoring and managing all rules.
 
 **Acceptance Criteria:**
+
 - List view of all rules with filtering by category, owner, status
 - Quick access to edit, clone, or delete rules
 - Visual indicators for rule health (zero-hit rules, conflicts)
@@ -61,6 +65,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Full role-based access control with predefined roles and permissions.
 
 **Acceptance Criteria:**
+
 - Admin: Full access to all features and settings
 - Author: Create, edit, and submit rules for approval
 - Reviewer: Approve or reject submitted rule changes
@@ -75,6 +80,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Enforce maker-checker pattern for all rule modifications.
 
 **Acceptance Criteria:**
+
 - Rule changes require submission before deployment
 - Reviewers receive notifications for pending approvals
 - Approved changes can be deployed to production
@@ -89,6 +95,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Complete audit log of all system activities.
 
 **Acceptance Criteria:**
+
 - Track all rule modifications with user, timestamp, and diff
 - Log access events for compliance reporting
 - Exportable audit reports in CSV/JSON formats
@@ -103,6 +110,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Full Git-backed version control with branching and merging.
 
 **Acceptance Criteria:**
+
 - Create branches for rule development without affecting production
 - Merge branches to main with conflict resolution
 - View history of all changes to rules
@@ -117,6 +125,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Export engine metrics in Prometheus format.
 
 **Acceptance Criteria:**
+
 - HTTP endpoint `/metrics` serves Prometheus-formatted metrics
 - Track rule firing rates, match counts, memory usage
 - Engine-specific metrics per algorithm (Rete, TREAT, LEAPS, PHREAK)
@@ -131,6 +140,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Live dashboard showing current engine state and activity.
 
 **Acceptance Criteria:**
+
 - Real-time rule firing visualization
 - Current working memory status (fact count, memory usage)
 - Active sessions and their resource consumption
@@ -145,6 +155,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Identify rules that never fire despite being active.
 
 **Acceptance Criteria:**
+
 - Daily analysis of rule execution logs
 - Report rules with zero hits in configurable time window
 - Optional notification to rule owners
@@ -159,6 +170,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Track which rules execute during test runs and production.
 
 **Acceptance Criteria:**
+
 - Coverage data per test run with pass/fail status
 - Historical coverage trends over time
 - Exportable reports for compliance audits
@@ -172,6 +184,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** REST API endpoints for all engine management operations.
 
 **Acceptance Criteria:**
+
 - CRUD endpoints for rules, categories, and tags
 - Engine management endpoints (select, reload, stats)
 - Approval workflow endpoints (submit, review, approve, reject)
@@ -186,6 +199,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Production-ready container deployment.
 
 **Acceptance Criteria:**
+
 - Multi-stage Dockerfile with layer optimization
 - Kubernetes manifests (Deployment, Service, ConfigMap)
 - Environment variable-based configuration
@@ -200,6 +214,7 @@ This milestone delivers a complete production-ready platform with full web front
 **Description:** Update rules without service restart.
 
 **Acceptance Criteria:**
+
 - Detect file changes in watched directories
 - Rebuild and reload rule sets atomically
 - No dropped executions during reload
@@ -214,12 +229,14 @@ This milestone implements multiple Rete-family rule engine algorithms with a plu
 ### Research Summary
 
 **Algorithm Selection Criteria:**
+
 1. **Rete**: Foundational algorithm, well-documented, party tokens for pattern matching
 2. **TREAT**: Optimized left-memory management, join node caching for efficiency
 3. **LEAPS**: Aggregation node support for SUM/COUNT/MAX/MIN operations
 4. **PHREAK**: Incremental truth maintenance with justification tracking
 
 **Architecture Patterns:**
+
 - Trait-based engine interface for pluggability
 - Factory pattern for engine registration and instantiation
 - Configuration-driven selection (YAML) + API endpoint override
@@ -236,6 +253,7 @@ This milestone implements multiple Rete-family rule engine algorithms with a plu
 **Description:** Rule engine architecture supporting multiple Rete-family algorithms with runtime selection.
 
 **Acceptance Criteria:**
+
 - Engine trait defines core methods: `execute`, `insert_fact`, `remove_fact`, `run`
 - EngineRegistry supports dynamic registration by algorithm name
 - Configuration file specifies engine to use (e.g., `engine = "rete"`)
@@ -249,6 +267,7 @@ This milestone implements multiple Rete-family rule engine algorithms with a plu
 **Description:** Full Rete algorithm implementation with party tokens, alpha/beta memory, and network caching.
 
 **Acceptance Criteria:**
+
 - Party tokens (MemoryReference, Nagrams) for efficient pattern matching
 - Alpha memory network with test nodes and join nodes
 - Beta memory maintained at join nodes for partial matches
@@ -263,6 +282,7 @@ This milestone implements multiple Rete-family rule engine algorithms with a plu
 **Description:** TREAT algorithm implementation with optimized left-memory management.
 
 **Acceptance Criteria:**
+
 - Optimized left-memory management with join node caching
 - Partial matching without full Nagram creation when possible
 - Equivalence with Rete results for same inputs
@@ -276,6 +296,7 @@ This milestone implements multiple Rete-family rule engine algorithms with a plu
 **Description:** LEAPS algorithm implementation with aggregation node support.
 
 **Acceptance Criteria:**
+
 - Aggregation nodes for SUM, COUNT, MAX, MIN operations
 - Efficient partial state updates when base facts change
 - Equivalence with Rete results for same inputs
@@ -289,6 +310,7 @@ This milestone implements multiple Rete-family rule engine algorithms with a plu
 **Description:** PHREAK algorithm implementation with incremental truth maintenance.
 
 **Acceptance Criteria:**
+
 - Incremental truth maintenance with justifications
 - Dependency chains tracked for fact derivation
 - Equivalence with Rete results for same inputs
@@ -302,6 +324,7 @@ This milestone implements multiple Rete-family rule engine algorithms with a plu
 **Description:** Users can select engine via configuration or API endpoint.
 
 **Acceptance Criteria:**
+
 - Configuration file specifies engine name
 - HTTP API endpoint `/engine/select` allows runtime switching
 - Active sessions support graceful engine migration (or error if incompatible)
@@ -315,6 +338,7 @@ This milestone implements multiple Rete-family rule engine algorithms with a plu
 **Description:** Track execution characteristics per algorithm.
 
 **Acceptance Criteria:**
+
 - Rule firing rate measured per engine
 - Memory usage tracked for alpha/beta memory structures
 - Network traversal counts recorded (test node visits, join activations)
@@ -329,6 +353,7 @@ This milestone implements multiple Rete-family rule engine algorithms with a plu
 **Description:** Web dashboard displays algorithm performance characteristics.
 
 **Acceptance Criteria:**
+
 - Real-time engine metrics displayed
 - Historical comparison of algorithm performance available
 - Exportable reports for benchmarking
@@ -342,11 +367,13 @@ This milestone established a comprehensive testing infrastructure for the rule e
 ### Research Summary
 
 **Stack Recommendations:**
+
 - **Core Testing:** criterion (benchmarking), mockall (mocking), serial_test (parallel isolation)
 - **BDD/Gherkin:** cucumber-rs (official Cucumber implementation), gherkin v15 parser
 - **Integration:** assert_cmd (CLI tests), wiremock (HTTP mocks), tempfile (cleanup)
 
 **Critical Pitfalls to Address:**
+
 1. **Infinite Loop Detection** — Implement max 1000 firings limit per test scenario
 2. **State Isolation** — Use per-test engine instances with unique session IDs  
 3. **Non-Deterministic Firing** — Implement deterministic conflict resolution (sort by name as tiebreaker)
@@ -363,6 +390,7 @@ This milestone established a comprehensive testing infrastructure for the rule e
 **Description:** Users can create and manage test fixtures with reproducible working memory state.
 
 **Acceptance Criteria:**
+
 - Tests can create Fact collections as fixtures
 - Each test gets a fresh engine instance with isolated session ID
 - Facts can be inserted via `WorkingMemory::insert_fact()`
@@ -377,6 +405,7 @@ This milestone established a comprehensive testing infrastructure for the rule e
 **Description:** Developers can test individual rules in isolation with known facts.
 
 **Acceptance Criteria:**
+
 - Test framework recognizes `#[test]` macros for rule tests
 - Rules can be compiled and executed individually
 - Assertions can verify expected actions execute
@@ -391,6 +420,7 @@ This milestone established a comprehensive testing infrastructure for the rule e
 **Description:** Tests can verify that asserted facts trigger expected subsequent firings in correct order.
 
 **Acceptance Criteria:**
+
 - Tests can track activation sequence during forward chaining
 - Salience ordering is preserved during execution
 - Firing traces are captured and verifiable
@@ -405,6 +435,7 @@ This milestone established a comprehensive testing infrastructure for the rule e
 **Description:** For query-based inference, tests capture the reasoning path for debugging.
 
 **Acceptance Criteria:**
+
 - InferenceTrace structure is exposed via public API
 - Tests can inspect backward chaining paths
 - Missing facts are tracked and reportable
@@ -419,6 +450,7 @@ This milestone established a comprehensive testing infrastructure for the rule e
 **Description:** Eliminate flaky tests by enforcing deterministic rule firing order.
 
 **Acceptance Criteria:**
+
 - Tests can enable deterministic mode (cfg(test))
 - Conflict resolution sorts equal-salience rules by name
 - Same input always produces same output sequence
@@ -433,6 +465,7 @@ This milestone established a comprehensive testing infrastructure for the rule e
 **Description:** Tests verify that no_loop and lock_on_active flags prevent infinite loops.
 
 **Acceptance Criteria:**
+
 - Rules with `no_loop=true` don't re-fire after actions execute
 - Rules with `lock_on_active=true` don't trigger when already active
 - Tests can assert these constraints are enforced
@@ -447,6 +480,7 @@ This milestone established a comprehensive testing infrastructure for the rule e
 **Description:** Save working memory state as JSON for reproducible tests.
 
 **Acceptance Criteria:**
+
 - WorkingMemory can serialize to JSON format
 - Test snapshots can be loaded as baseline
 - Tests compare against snapshot or allow updates
@@ -461,6 +495,7 @@ This milestone established a comprehensive testing infrastructure for the rule e
 **Description:** Track which conditions were evaluated during test runs.
 
 **Acceptance Criteria:**
+
 - Coverage instrumentation points at rule conditions
 - Execution traces record condition evaluations
 - Reports show coverage percentage per rule
@@ -511,8 +546,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **AUTH-01**: Role-Based Access Control (RBAC) with predefined roles - Stub only
 - [ ] **AUTH-02**: Maker-checker approval workflow for rule changes - Stub only
 - [ ] **AUTH-03**: Rule ownership assignment and stewardship - Stub only
-- [ ] **GOV-01**: Full audit trail of all rule modifications - Stub only
-- [ ] **GOV-02**: Rule version control with branching and merging - Stub only
+- [x] **GOV-01**: Full audit trail of all rule modifications - Stub only
+- [x] **GOV-02**: Rule version control with branching and merging - Stub only
 
 ### Testing & Validation - COMPLETED (Stub Only)
 
@@ -563,6 +598,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DEPLOY-03, DEPLOY-04 | Phase 21: Deployment & CI/CD | Planned |
 
 **Phase 17 Coverage:**
+
 - FRONTEND-01: Production Frontend Architecture (syntax highlighting, decision table editor)
 - FRONTEND-02: Rule Management Dashboard with filtering/sorting
 - GOV-01: RBAC implementation in frontend navigation controls
@@ -594,6 +630,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DMN-01, DMN-02, DMN-03 | Phase 6: DMN Compliance | Completed (stub) |
 
 **Coverage:**
+
 - v1 requirements mapped: 39 total
 - v2 requirements mapped: 8 testing framework requirements  
 - v3 requirements mapped: 8 pluggable engine requirements
