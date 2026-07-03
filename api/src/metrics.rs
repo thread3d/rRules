@@ -1,7 +1,9 @@
 //! Metrics collection and reporting for the rRules API server
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use actix_web::{web, HttpResponse, Responder};
+use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry};
 use serde::Serialize;
 
 use engine::monitoring::detection::RuleExecutionTracker;
@@ -29,6 +31,128 @@ pub type MetricsTx = Arc<tokio::sync::broadcast::Sender<MetricsSnapshot>>;
 pub fn create_metrics_channel(capacity: usize) -> (MetricsTx, tokio::sync::broadcast::Receiver<MetricsSnapshot>) {
     let (tx, rx) = tokio::sync::broadcast::channel(capacity);
     (Arc::new(tx), rx)
+}
+
+/// Phase 24 (Plan 24-02, Deliverable 1 / Open Q4): per-request execution
+/// counters for POST /v1/execute, exposed to Prometheus and the WebSocket
+/// broadcast surface.
+///
+/// Holds three labeled Prometheus metrics (`requests_total`,
+/// `rules_fired_total`, `duration_seconds` — all carrying the `engine`
+/// label) plus three `AtomicU64` "snapshot" mirrors used by the WebSocket
+/// `MetricsSnapshot` path (Plan 24-03). The metrics live on a **dedicated**
+/// `prometheus::Registry::new()` — NOT the process-global
+/// `default_registry()` — so the api layer's metric names cannot collide
+/// with the engine crate's registered metrics (Pitfall 24-A:
+/// `registry.register` panics on duplicate name registration; a separate
+/// registry is the only isolation mechanism the `prometheus` 0.13 crate
+/// provides).
+///
+/// Plan 24-02 scope: the struct is constructed and wired as `web::Data` in
+/// `main.rs`, but no handler reads or increments it yet. Plan 24-03 wires
+/// `execute_single` and `metrics_endpoint` to these counters, turning the
+/// Wave 0 RED tests GREEN.
+#[derive(Debug)]
+pub struct ExecutionCounters {
+    /// `rrules_execute_requests_total{engine=...}` — total POST /v1/execute
+    /// requests (incremented once per request in Plan 24-03).
+    pub requests_total: IntCounterVec,
+    /// `rrules_execute_rules_fired_total{engine=...}` — total rules fired
+    /// by POST /v1/execute (incremented by `engine_result.rules_fired` in
+    /// Plan 24-03).
+    pub rules_fired_total: IntCounterVec,
+    /// `rrules_execute_duration_seconds{engine=...}` — POST /v1/execute
+    /// duration histogram. Buckets: `exponential_buckets(0.001, 2.0, 12)`
+    /// (1ms, 2ms, 4ms ... ~4s) per Open Q1.
+    pub duration_seconds: HistogramVec,
+    /// Snapshot mirror of `requests_total` for the WebSocket
+    /// `MetricsSnapshot` broadcast path (Plan 24-03 / SC-2).
+    pub snapshot_requests: AtomicU64,
+    /// Snapshot mirror of `rules_fired_total` for the WebSocket
+    /// `MetricsSnapshot` broadcast path.
+    pub snapshot_rules_fired: AtomicU64,
+    /// Snapshot mirror of facts inserted (populated in Plan 24-03 from
+    /// `engine_result.facts_inserted` when available).
+    pub snapshot_facts_inserted: AtomicU64,
+    /// Dedicated api-layer Prometheus registry. Pitfall 24-A: must NOT be
+    /// `prometheus::default_registry()` — the engine crate registers its
+    /// own metrics there, and `register()` panics on duplicate names.
+    pub registry: Registry,
+}
+
+impl ExecutionCounters {
+    /// Construct the counters with a dedicated `Registry::new()` and the
+    /// three labeled metrics registered on it.
+    ///
+    /// The counter metric names are exactly `rrules_execute_requests_total`,
+    /// `rrules_execute_rules_fired_total`, `rrules_execute_duration_seconds`
+    /// (matching ROADMAP SC-1 expected strings), built via
+    /// `prometheus::Opts::new(name, help)` — NOT the broken struct-literal
+    /// `Opts { ... }` form at `engine/src/engine/metrics.rs:288` (which
+    /// builds an invalid `Opts` by populating private fields directly). The
+    /// histogram uses `exponential_buckets(0.001, 2.0, 12)` (Open Q1).
+    pub fn new() -> Self {
+        let registry = Registry::new();
+
+        let requests_total = IntCounterVec::new(
+            Opts::new(
+                "rrules_execute_requests_total",
+                "Total number of POST /v1/execute requests",
+            ),
+            &["engine"],
+        )
+        .expect("construct rrules_execute_requests_total counter");
+        registry
+            .register(Box::new(requests_total.clone()))
+            .expect("register rrules_execute_requests_total");
+
+        let rules_fired_total = IntCounterVec::new(
+            Opts::new(
+                "rrules_execute_rules_fired_total",
+                "Total number of rules fired by POST /v1/execute",
+            ),
+            &["engine"],
+        )
+        .expect("construct rrules_execute_rules_fired_total counter");
+        registry
+            .register(Box::new(rules_fired_total.clone()))
+            .expect("register rrules_execute_rules_fired_total");
+
+        let duration_seconds = HistogramVec::new(
+            HistogramOpts::new(
+                "rrules_execute_duration_seconds",
+                "POST /v1/execute duration in seconds",
+            )
+            .buckets(
+                prometheus::exponential_buckets(0.001, 2.0, 12)
+                    .expect("exponential_buckets(0.001, 2.0, 12) must produce 12 bounds"),
+            ),
+            &["engine"],
+        )
+        .expect("construct rrules_execute_duration_seconds histogram");
+        registry
+            .register(Box::new(duration_seconds.clone()))
+            .expect("register rrules_execute_duration_seconds");
+
+        Self {
+            requests_total,
+            rules_fired_total,
+            duration_seconds,
+            snapshot_requests: AtomicU64::new(0),
+            snapshot_rules_fired: AtomicU64::new(0),
+            snapshot_facts_inserted: AtomicU64::new(0),
+            registry,
+        }
+    }
+}
+
+impl Default for ExecutionCounters {
+    /// Delegates to [`ExecutionCounters::new`] so test fixtures can build a
+    /// default instance via `web::Data::new(ExecutionCounters::default())`
+    /// (Open Q7 — test injection).
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 

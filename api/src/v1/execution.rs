@@ -49,6 +49,15 @@ pub struct ExecuteResponse {
     pub facts_after: HashMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inference_trace: Option<InferenceTrace>,
+    /// Engine generation counter (Phase 24 / Open Q6). Always `0` in
+    /// Phase 24 — Phase 25 wires the real per-engine generation counter.
+    /// `#[serde(default)]` keeps existing clients (and the Phase 23 test
+    /// fixtures) parsing correctly: the field serializes as `0` when not
+    /// explicitly set (Pitfall 8). The `response_includes_engine_generation`
+    /// Wave 0 test asserts the field is a u64 — it goes GREEN once this
+    /// field exists, which is expected and documented in Plan 24-02.
+    #[serde(default)]
+    pub engine_generation: u64,
 }
 
 /// Complete inference trace with full detail
@@ -467,6 +476,7 @@ pub async fn execute_single(
         rules_not_fired,
         facts_after,
         inference_trace: None,
+        engine_generation: 0u64,
     })
 }
 
@@ -549,6 +559,7 @@ pub async fn batch_execute_rules(
                     rules_not_fired: Vec::new(),
                     facts_after: HashMap::new(),
                     inference_trace: None,
+                    engine_generation: 0u64,
                 },
             }
         });

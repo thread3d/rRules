@@ -45,6 +45,15 @@ utoipa-swagger-ui = { version = "7", features = ["actix-web"] }
 # `Validation::new(Algorithm::HS256)` pins the algorithm so `alg:none` is
 # rejected (T-22-01) — never use `Validation::default()` without pinning.
 jsonwebtoken = { version = "10.4", features = ["rust_crypto"] }
+# Phase 24 (Plan 24-02, D2 / Open Q4): promote the workspace-pinned
+# `prometheus = { version = "0.13", features = ["process"] }` (Cargo.toml:15)
+# into the api crate so `api::metrics::ExecutionCounters` can build its
+# dedicated `Registry::new()` + labeled IntCounterVec / HistogramVec. NOT
+# `optional` (the api crate always uses it); inherits the `process` feature
+# from the workspace pin (harmless for the api crate). Mirrors
+# engine/Cargo.toml:15 minus the `optional` gate. No new supply-chain surface
+# (T-24-03-W1): the crate is already vetted by the engine.
+prometheus = { workspace = true }
 
 [dev-dependencies]
 criterion = "0.5"

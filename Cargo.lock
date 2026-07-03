@@ -425,6 +425,7 @@ dependencies = [
  "futures-util",
  "jsonwebtoken",
  "log",
+ "prometheus",
  "serde",
  "serde_json",
  "serial_test",
