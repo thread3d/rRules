@@ -203,14 +203,16 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 - Pitfall 3 (stale/empty tracker — `dead_rules_endpoint` instantiates a fresh empty tracker per call) — singleton-ize; remove/deprecate the public `new()` to catch stray local instantiation
 - Pitfall 6 (three-counter drift — `CoverageTracking`, `RuleExecutionTracker.total_fires`, per-engine `metrics.record_rule_fired`) — unify around `CoverageTracking` as canonical; record once-per-rule outside the inner loop
 
-**Research flags:** None — direct mirror of the existing `CoverageTracking` `LazyLock<Mutex<…>>` pattern; call sites already known
+**Research flags:** None — direct mirror of the existing `CoverageTracking` `LazyLock<Mutex<…>>` pattern; call sites already known (C1 correction: recording at BOTH `direct_eval.rs:105-110` AND `rete/mod.rs:393-398` — Rete keeps its own inlined `execute_rules`; see 26-RESEARCH.md)
 **Success criteria:**
 
 1. After `POST /v1/execute` fires rule `r1`, `GET /v1/metrics/dead-rules` does NOT contain `r1` (previously always returned `[]`)
 2. `GET /v1/metrics/coverage` shows `r1.fired == true` and `r1.evaluation_count >= 1` after the run
 3. `/metrics`, `/v1/metrics/coverage`, and `/v1/metrics/dead-rules` agree on the fire count for a rule (no three-counter drift)
 
-**Plans:** TBD
+**Plans:** 2 plans
+- [ ] 26-01-PLAN.md — Convert RuleExecutionTracker to LazyLock<Mutex<TrackerState>> singleton (mirror CoverageTracking); deprecate new(); migrate 6 detection.rs tests to singleton API + #[serial] + clear(); add test_once_per_rule (Wave 0 RED→GREEN)
+- [ ] 26-02-PLAN.md — Wire recording at BOTH evaluator call sites (direct_eval.rs + rete/mod.rs per C1); rewrite dead_rules_endpoint to singleton; add SC-1/SC-2/SC-3 keystone e2e (r1 fires + r2 unfired); fix stale metrics_integration.rs comment (Wave 0 RED→GREEN)
 
 ### Phase 27: Stateful sessions
 
