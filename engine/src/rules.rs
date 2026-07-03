@@ -190,6 +190,73 @@ impl Condition {
     }
 }
 
+/// Expression AST for computed action values (D-06).
+///
+/// Models the right-hand side of `score := score + 10` — a structured
+/// expression language layered on top of the existing `Value` / `ComparisonOp`
+/// primitives. `Expression::evaluate` resolves `FieldRef`s against the
+/// supplied fact slice and computes arithmetic / string / comparison results
+/// without panicking on ill-typed operands or division by zero.
+///
+/// Note: We use PartialEq but not Eq because `Value` contains `Float(f64)`
+/// which doesn't implement `Eq` (due to NaN comparisons).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Expression {
+    /// A literal value leaf.
+    Literal(Value),
+    /// Read a field from the first fact of `fact_type` in working memory.
+    FieldRef { fact_type: String, field: String },
+    /// `left + right` (numeric promotion; Integer+Integer stays Integer).
+    Add(Box<Expression>, Box<Expression>),
+    /// `left - right`.
+    Sub(Box<Expression>, Box<Expression>),
+    /// `left * right`.
+    Mul(Box<Expression>, Box<Expression>),
+    /// `left / right` (division by zero yields `Value::Null`).
+    Div(Box<Expression>, Box<Expression>),
+    /// String concatenation: `left` + `right` via `as_string`.
+    StringConcat(Box<Expression>, Box<Expression>),
+    /// Comparison: applies `op` to the two evaluated operands → `Value::Bool`.
+    Compare {
+        op: ComparisonOp,
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+    /// Call a registered function by name. Stub for Phase 23 — returns
+    /// `Value::Null`; full function dispatch is out of scope (the variant
+    /// exists so the AST is complete).
+    Call {
+        name: String,
+        args: Vec<Expression>,
+    },
+}
+
+impl Expression {
+    /// Evaluates the expression against the supplied fact slice.
+    ///
+    /// `FieldRef` scans `facts` for the first fact whose `fact_type_id ==
+    /// fact_type` and reads `fact.payload.get(field)` (or `Value::Null` if
+    /// absent). Arithmetic variants use the `DynamicCast` helpers so
+    /// Integer-vs-Float promotion is correct; division by zero yields
+    /// `Value::Null` rather than panicking (T-23-03 mitigation). `Compare`
+    /// delegates to the shared `compare_values` helper.
+    pub fn evaluate(&self, _facts: &[&crate::fact::Fact]) -> Value {
+        // RED-phase stub: returns Value::Null so behavior tests fail.
+        Value::Null
+    }
+}
+
+/// Shared comparison helper used by both `Expression::Compare` (D-06) and
+/// `Condition::evaluate` (D-05). Applies `op` to `left` / `right` across the
+/// full `Value` type matrix without panicking on ill-typed operands.
+///
+/// Returns `false` for ordered ops on non-numeric / non-string types rather
+/// than panicking (T-23-03 mitigation).
+pub fn compare_values(_op: ComparisonOp, _left: &Value, _right: &Value) -> bool {
+    // RED-phase stub: returns false so comparison tests fail.
+    false
+}
+
 /// Action for rule RHS execution.
 ///
 /// Note: We use PartialEq but not Eq because Value contains Float(f64) which
@@ -201,10 +268,13 @@ pub enum Action {
         fact_type: String,
         fields: HashMap<String, Value>,
     },
-    /// Update an existing fact
+    /// Update an existing fact with computed expressions (D-06).
+    /// Each field value is an `Expression` evaluated against the working
+    /// facts at action-application time, so `score := score + 10` is
+    /// representable.
     UpdateFact {
         id: String,
-        fields: HashMap<String, Value>,
+        fields: HashMap<String, Expression>,
     },
     /// Remove a fact from working memory
     RetractFact { id: String },
@@ -490,5 +560,197 @@ mod tests {
         let not_true = Condition::Not(Box::new(Condition::True));
 
         assert!(!not_true.evaluate(&[]));
+    }
+
+    mod expression {
+        //! Tests for the `Expression` evaluator (D-06). Filter:
+        //! `cargo test -p engine --lib rules::tests::expression`
+        use super::*;
+        use crate::fact::Fact;
+        use std::collections::HashMap;
+
+        /// Build a scorecard fact with the given integer `score` payload.
+        fn scorecard_fact(score: i64) -> Fact {
+            let mut payload = HashMap::new();
+            payload.insert("score".to_string(), Value::Integer(score));
+            Fact::new("scorecard", payload)
+        }
+
+        #[test]
+        fn literal_yields_literal_value() {
+            let expr = Expression::Literal(Value::Integer(10));
+            assert_eq!(expr.evaluate(&[]), Value::Integer(10));
+        }
+
+        #[test]
+        fn fieldref_reads_fact_payload() {
+            let fact = scorecard_fact(0);
+            let facts: [&Fact; 1] = [&fact];
+            let expr = Expression::FieldRef {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+            };
+            assert_eq!(expr.evaluate(&facts), Value::Integer(0));
+        }
+
+        #[test]
+        fn fieldref_missing_fact_type_yields_null() {
+            let fact = scorecard_fact(0);
+            let facts: [&Fact; 1] = [&fact];
+            let expr = Expression::FieldRef {
+                fact_type: "nonexistent".to_string(),
+                field: "score".to_string(),
+            };
+            assert_eq!(expr.evaluate(&facts), Value::Null);
+        }
+
+        #[test]
+        fn fieldref_missing_field_yields_null() {
+            let fact = scorecard_fact(0);
+            let facts: [&Fact; 1] = [&fact];
+            let expr = Expression::FieldRef {
+                fact_type: "scorecard".to_string(),
+                field: "absent".to_string(),
+            };
+            assert_eq!(expr.evaluate(&facts), Value::Null);
+        }
+
+        #[test]
+        fn add_fieldref_plus_literal() {
+            // score := score + 10 against score=0 → Integer(10)
+            let fact = scorecard_fact(0);
+            let facts: [&Fact; 1] = [&fact];
+            let expr = Expression::Add(
+                Box::new(Expression::FieldRef {
+                    fact_type: "scorecard".to_string(),
+                    field: "score".to_string(),
+                }),
+                Box::new(Expression::Literal(Value::Integer(10))),
+            );
+            assert_eq!(expr.evaluate(&facts), Value::Integer(10));
+        }
+
+        #[test]
+        fn add_integer_plus_integer_stays_integer() {
+            let expr = Expression::Add(
+                Box::new(Expression::Literal(Value::Integer(3))),
+                Box::new(Expression::Literal(Value::Integer(4))),
+            );
+            assert_eq!(expr.evaluate(&[]), Value::Integer(7));
+        }
+
+        #[test]
+        fn add_integer_plus_float_promotes_to_float() {
+            let expr = Expression::Add(
+                Box::new(Expression::Literal(Value::Integer(3))),
+                Box::new(Expression::Literal(Value::Float(0.5))),
+            );
+            assert_eq!(expr.evaluate(&[]), Value::Float(3.5));
+        }
+
+        #[test]
+        fn sub_mul_basic() {
+            assert_eq!(
+                Expression::Sub(
+                    Box::new(Expression::Literal(Value::Integer(10))),
+                    Box::new(Expression::Literal(Value::Integer(4))),
+                )
+                .evaluate(&[]),
+                Value::Integer(6),
+            );
+            assert_eq!(
+                Expression::Mul(
+                    Box::new(Expression::Literal(Value::Integer(3))),
+                    Box::new(Expression::Literal(Value::Integer(7))),
+                )
+                .evaluate(&[]),
+                Value::Integer(21),
+            );
+        }
+
+        #[test]
+        fn div_basic() {
+            assert_eq!(
+                Expression::Div(
+                    Box::new(Expression::Literal(Value::Integer(20))),
+                    Box::new(Expression::Literal(Value::Integer(4))),
+                )
+                .evaluate(&[]),
+                Value::Integer(5),
+            );
+        }
+
+        #[test]
+        fn div_by_zero_yields_null_not_panic() {
+            // T-23-03 mitigation: division by zero must not panic.
+            let result = Expression::Div(
+                Box::new(Expression::Literal(Value::Integer(10))),
+                Box::new(Expression::Literal(Value::Integer(0))),
+            )
+            .evaluate(&[]);
+            assert_eq!(result, Value::Null);
+        }
+
+        #[test]
+        fn string_concat() {
+            let expr = Expression::StringConcat(
+                Box::new(Expression::Literal(Value::String("a".to_string()))),
+                Box::new(Expression::Literal(Value::String("b".to_string()))),
+            );
+            assert_eq!(expr.evaluate(&[]), Value::String("ab".to_string()));
+        }
+
+        #[test]
+        fn compare_gt_yields_bool() {
+            // Gt(score, 5) against score=0 → false; against score=10 → true
+            let expr = Expression::Compare {
+                op: ComparisonOp::Gt,
+                left: Box::new(Expression::FieldRef {
+                    fact_type: "scorecard".to_string(),
+                    field: "score".to_string(),
+                }),
+                right: Box::new(Expression::Literal(Value::Integer(5))),
+            };
+            let fact_low = scorecard_fact(0);
+            let facts_low: [&Fact; 1] = [&fact_low];
+            assert_eq!(expr.evaluate(&facts_low), Value::Bool(false));
+
+            let fact_high = scorecard_fact(10);
+            let facts_high: [&Fact; 1] = [&fact_high];
+            assert_eq!(expr.evaluate(&facts_high), Value::Bool(true));
+        }
+
+        #[test]
+        fn call_stub_returns_null() {
+            // Call is a stub for Phase 23 — returns Null (function dispatch out of scope).
+            let expr = Expression::Call {
+                name: "abs".to_string(),
+                args: vec![Expression::Literal(Value::Integer(-1))],
+            };
+            assert_eq!(expr.evaluate(&[]), Value::Null);
+        }
+
+        #[test]
+        fn updatefact_with_expression_serializes_roundtrip() {
+            // Action::UpdateFact fields now carry Expressions; verify serde round-trip.
+            let mut fields = HashMap::new();
+            fields.insert(
+                "score".to_string(),
+                Expression::Add(
+                    Box::new(Expression::FieldRef {
+                        fact_type: "scorecard".to_string(),
+                        field: "score".to_string(),
+                    }),
+                    Box::new(Expression::Literal(Value::Integer(10))),
+                ),
+            );
+            let action = Action::UpdateFact {
+                id: "f1".to_string(),
+                fields,
+            };
+            let json = serde_json::to_string(&action).expect("serialize");
+            let parsed: Action = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(parsed, action);
+        }
     }
 }
