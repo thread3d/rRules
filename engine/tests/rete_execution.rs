@@ -58,6 +58,15 @@ fn literal_update(id: &str, field: &str, value: Value) -> Action {
     }
 }
 
+/// Every test in this file calls `execute()`, which records into the
+/// process-global `CoverageTracking` singleton. To keep the coverage
+/// regression assertions truthful (Pitfall 6), all tests are marked
+/// `#[serial_test::serial]` so no two run concurrently, and each clears
+/// the singleton at start.
+fn reset_coverage() {
+    CoverageTracking.clear();
+}
+
 // =====================================================================
 // Keystone scenario: score := score + 10
 // =====================================================================
@@ -65,8 +74,10 @@ fn literal_update(id: &str, field: &str, value: Value) -> Action {
 /// The keystone: a rule with a matching Pattern condition and a computed
 /// `UpdateFact` action yields `rules_fired >= 1` and `get_facts()` showing
 /// `score == 10` (ROADMAP success criterion #1).
+#[serial_test::serial]
 #[test]
 fn fires_on_matching_fact() {
+    reset_coverage();
     let mut ruleset = RuleSet::new();
     ruleset.add_rule(score_plus_10_rule()).unwrap();
 
@@ -102,8 +113,10 @@ fn fires_on_matching_fact() {
 
 /// `get_facts()` after `execute()` reflects the action-mutated working memory,
 /// not the request input (Pitfall 11).
+#[serial_test::serial]
 #[test]
 fn get_facts_after_execute_shows_incremented_score() {
+    reset_coverage();
     let mut ruleset = RuleSet::new();
     ruleset.add_rule(score_plus_10_rule()).unwrap();
 
@@ -128,8 +141,10 @@ fn get_facts_after_execute_shows_incremented_score() {
 
 /// A rule whose condition does not match any fact yields `rules_fired == 0`
 /// and does not appear in `fired_rule_ids`.
+#[serial_test::serial]
 #[test]
 fn non_matching_condition_fires_zero() {
+    reset_coverage();
     let mut ruleset = RuleSet::new();
     ruleset.add_rule(score_plus_10_rule()).unwrap();
 
@@ -149,8 +164,10 @@ fn non_matching_condition_fires_zero() {
 
 /// A two-rule chain where rule A's action enables rule B's condition fires
 /// both within a single `execute()` call (fixpoint iteration).
+#[serial_test::serial]
 #[test]
 fn fixpoint_chain_fires_both_rules() {
+    reset_coverage();
     let a = Rule::builder("a", "A: 0 -> 10")
         .condition(Condition::Pattern {
             fact_type: "scorecard".to_string(),
@@ -202,8 +219,10 @@ fn fixpoint_chain_fires_both_rules() {
 /// without panicking. The once-per-rule `fired_set` guard bounds the loop at
 /// one fire per rule; the `RRULES_MAX_CHAIN_ITERATIONS` cap is the ultimate
 /// safety net. The test sets a low cap and asserts the call returns.
+#[serial_test::serial]
 #[test]
 fn cyclic_rule_set_terminates_without_panic() {
+    reset_coverage();
     // Low cap so a runaway loop would finish quickly either way; the
     // once-per-rule guard terminates the loop well before the cap.
     // SAFETY on env var: tests run in a single process; we set a unique
@@ -259,7 +278,7 @@ fn cyclic_rule_set_terminates_without_panic() {
 #[serial_test::serial]
 #[test]
 fn coverage_records_fire_count_one_for_single_fire() {
-    CoverageTracking.clear();
+    reset_coverage();
 
     let mut ruleset = RuleSet::new();
     ruleset.add_rule(score_plus_10_rule()).unwrap();
@@ -295,7 +314,7 @@ fn coverage_records_fire_count_one_for_single_fire() {
 #[serial_test::serial]
 #[test]
 fn coverage_records_eval_but_not_fire_for_non_matching_rule() {
-    CoverageTracking.clear();
+    reset_coverage();
 
     let mut ruleset = RuleSet::new();
     ruleset.add_rule(score_plus_10_rule()).unwrap();

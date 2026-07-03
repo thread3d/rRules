@@ -8,6 +8,7 @@
 use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
+use crate::rules::Action;
 use std::collections::{HashMap, HashSet};
 
 use crate::monitoring::coverage::CoverageTracking;
@@ -292,13 +293,11 @@ impl ReteEngine {
         let existing_nagrams = self.beta_memory.get_nagrams(&join_node.id);
         let alpha_count = facts_from_alpha.len();
 
-        // Record evaluation for the rule (joined from this join node)
-        if let Some(action_node) = self.network.action_nodes.values().find(|n| {
-            // Find action nodes that connect to this join node
-            true // Simplified - in real implementation would track rule_id -> join_node mapping
-        }) {
-            CoverageTracking::record_rule_eval(&action_node.rule_id);
-        }
+        // NOTE: CoverageTracking::record_rule_eval used to be called here
+        // (always against the first action node — a placeholder heuristic).
+        // The direct evaluator (`execute_rules`) now owns once-per-rule
+        // coverage recording after the fixpoint loop (L-06 / Pitfall 6), so
+        // this site no longer records.
 
         // Combine to form new partial matches
         for fact_from_beta in &existing_nagrams {
@@ -324,27 +323,155 @@ impl ReteEngine {
         self.metrics.record_beta_memory_additions(alpha_count + existing_nagrams.len());
     }
 
-    /// Executes the engine and fires rules.
-    pub fn execute_rules(&mut self) -> usize {
-        let mut rules_fired = 0;
+    /// Executes the rules loaded via `load_ruleset` against `working_facts`
+    /// using a direct interpreter (D-04).
+    ///
+    /// This bypasses the placeholder Rete network entirely — it iterates
+    /// `self.rules`, evaluates each `rule.condition` against
+    /// `self.working_facts` via `Condition::evaluate`, applies matching
+    /// `rule.actions` to `working_facts` (evaluating `Expression`s per
+    /// `UpdateFact` field), and chains to fixpoint under the
+    /// `RRULES_MAX_CHAIN_ITERATIONS` cap (D-07). Fired rule ids are
+    /// collected in a `HashSet` and `CoverageTracking::record_rule_fire` is
+    /// called exactly once per fired rule AFTER the loop (not inside any
+    /// inner loop — fixes Pitfall 6). `record_rule_eval` is called once per
+    /// evaluated rule (fired or not). Returns an `EngineResult` with
+    /// `fired_rule_ids` populated.
+    pub fn execute_rules(&mut self) -> EngineResult {
+        let start = std::time::Instant::now();
 
-        // For each action node, check if there are complete matches
-        for (_node_id, action_node) in &self.network.action_nodes {
-            // Check if there are partial matches for this rule's join nodes
-            for (_join_id, _join_node) in &self.network.join_nodes {
-                let nagrams = self.beta_memory.get_nagrams(&_join_node.id);
+        // D-07: fixpoint cap — configurable via env var, default 1000.
+        let max_iter = std::env::var("RRULES_MAX_CHAIN_ITERATIONS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(1000);
 
-                for _nagram in &nagrams {
-                    // Record fire for this rule when it fires
-                    CoverageTracking::record_rule_fire(&action_node.rule_id);
-                    rules_fired += 1;
+        let mut fired_set: HashSet<String> = HashSet::new();
+        let mut evaluated_set: HashSet<String> = HashSet::new();
+
+        // Fixpoint loop: repeat passes until no rule newly fires in a full
+        // pass (D-07). Each rule fires at most once per execute() call
+        // (fired_set guard) — this bounds the loop at |rules| passes and is
+        // the once-per-rule semantic that makes coverage recording truthful
+        // (L-06 / Pitfall 6). The max_iter cap is the ultimate safety net
+        // for pathological rule sets.
+        for _pass in 0..max_iter {
+            let mut newly_fired_this_pass = false;
+            // Index-based iteration so we can mutate `working_facts` while
+            // reading `rules` without conflicting borrows.
+            for rule_idx in 0..self.rules.len() {
+                let rule_id = self.rules[rule_idx].id.clone();
+                if fired_set.contains(&rule_id) {
+                    continue;
+                }
+                // Evaluate the condition against the current working memory.
+                let facts: Vec<&Fact> = self.working_facts.values().collect();
+                evaluated_set.insert(rule_id.clone());
+                let matched = self.rules[rule_idx].condition.evaluate(&facts);
+                if matched {
+                    // Apply actions. Clone the actions Vec so the immutable
+                    // borrow of `self.rules` ends before we mutably borrow
+                    // `self.working_facts`.
+                    let actions = self.rules[rule_idx].actions.clone();
+                    for action in &actions {
+                        apply_action(action, &mut self.working_facts);
+                    }
+                    fired_set.insert(rule_id);
+                    newly_fired_this_pass = true;
                     self.metrics.record_rule_fired();
                 }
             }
+            if !newly_fired_this_pass {
+                break;
+            }
         }
 
-        self.metrics.set_execution_time_ms(0.0);
-        rules_fired
+        // L-06 / Pitfall 6: record coverage ONCE per rule OUTSIDE the inner
+        // loop. `record_rule_eval` once per evaluated rule (fired or not);
+        // `record_rule_fire` once per fired rule. This replaces the old
+        // per-nagram double-count at the placeholder site.
+        for id in &evaluated_set {
+            CoverageTracking::record_rule_eval(id);
+        }
+        for id in &fired_set {
+            CoverageTracking::record_rule_fire(id);
+        }
+
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        self.metrics.set_execution_time_ms(elapsed_ms);
+
+        let mut result = EngineResult::success(fired_set.len());
+        result.fired_rule_ids = fired_set.iter().cloned().collect();
+        result
+    }
+}
+
+/// Apply a single `Action` to the engine's working memory (D-04). Mirrors
+/// `WorkingMemory::insert_fact`/`update_fact`/`retract_fact` (fact.rs:169-216)
+/// but operates on the Rete engine's `HashMap<FactId, Fact>` keyed by
+/// `fact.id.to_string()`.
+///
+/// For `Action::UpdateFact { id, fields }`: the target fact is located by
+/// exact `FactId` key first, then by the first fact whose `fact_type_id`
+/// matches `id` (the keystone scenario uses `id: "scorecard"`, a fact type).
+/// Each field's `Expression` is evaluated against the current working memory
+/// snapshot and written into the fact's payload. `Action::CallFunction` and
+/// `Action::LogMessage` are no-ops in Phase 23 (function dispatch and logging
+/// are out of scope for the direct evaluator).
+fn apply_action(action: &Action, working_facts: &mut HashMap<FactId, Fact>) {
+    match action {
+        Action::UpdateFact { id, fields } => {
+            // Snapshot the facts for Expression evaluation (FieldRef reads).
+            // Cloning is O(facts) and acceptable per action application.
+            let facts_snapshot: Vec<Fact> = working_facts.values().cloned().collect();
+            let facts_refs: Vec<&Fact> = facts_snapshot.iter().collect();
+
+            // Locate the target fact: exact FactId key first, else first
+            // fact of the named fact_type_id.
+            let key_opt = if working_facts.contains_key(id) {
+                Some(id.clone())
+            } else {
+                working_facts
+                    .iter()
+                    .find(|(_, f)| f.fact_type_id == *id)
+                    .map(|(k, _)| k.clone())
+            };
+            let key = match key_opt {
+                Some(k) => k,
+                None => return,
+            };
+            let fact = match working_facts.get_mut(&key) {
+                Some(f) => f,
+                None => return,
+            };
+            for (field, expr) in fields {
+                let value = expr.evaluate(&facts_refs);
+                fact.payload.insert(field.clone(), value);
+            }
+        }
+        Action::InsertFact { fact_type, fields } => {
+            let fact = Fact::new(fact_type.clone(), fields.clone());
+            working_facts.insert(fact.id.to_string(), fact);
+        }
+        Action::RetractFact { id } => {
+            if working_facts.contains_key(id) {
+                working_facts.remove(id);
+            } else {
+                let key_opt = working_facts
+                    .iter()
+                    .find(|(_, f)| f.fact_type_id == *id)
+                    .map(|(k, _)| k.clone());
+                if let Some(k) = key_opt {
+                    working_facts.remove(&k);
+                }
+            }
+        }
+        Action::CallFunction { .. } => {
+            // No-op in Phase 23 — function dispatch is out of scope (D-06).
+        }
+        Action::LogMessage { .. } => {
+            // No-op — logging is not wired in the direct evaluator.
+        }
     }
 }
 
@@ -356,8 +483,7 @@ impl Default for ReteEngine {
 
 impl ExecutionEngine for ReteEngine {
     fn execute(&mut self) -> EngineResult {
-        let fired = self.execute_rules();
-        EngineResult::success(fired)
+        self.execute_rules()
     }
 
     fn insert_fact(&mut self, fact: Fact) -> Result<(), String> {
@@ -371,7 +497,7 @@ impl ExecutionEngine for ReteEngine {
     }
 
     fn run(&mut self) -> usize {
-        self.execute_rules()
+        self.execute_rules().rules_fired
     }
 
     fn get_metrics(&self) -> crate::engine::metrics::EngineMetrics {
