@@ -5,6 +5,7 @@
 //! a monitoring period.
 
 use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 /// Represents the state of a rule regarding its execution activity.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,9 +60,14 @@ impl DeadRuleInfo {
     }
 }
 
-/// Collector for tracking rule execution across multiple runs.
-#[derive(Debug, Default)]
-pub struct RuleExecutionTracker {
+/// Internal mutable state for the [`RuleExecutionTracker`] singleton.
+///
+/// Mirrors the `TrackingState` pattern used by [`crate::monitoring::coverage`]:
+/// the public type is a unit-like struct and all state lives behind a
+/// `LazyLock<Mutex<TrackerState>>` so any caller in the process can record
+/// into / read from the same tracker without threading a `&mut` handle
+/// around (D-01, L-01).
+struct TrackerState {
     /// Map of rule ID to rule info
     rules: HashMap<String, DeadRuleInfo>,
     /// Total evaluation count
@@ -70,123 +76,183 @@ pub struct RuleExecutionTracker {
     total_fires: usize,
 }
 
+/// Process-wide singleton for tracking rule execution across multiple runs.
+///
+/// `RuleExecutionTracker` is a unit-like struct — all state lives in the
+/// `static INSTANCE: LazyLock<Mutex<TrackerState>>` below. Use the
+/// associated functions (`record_evaluation`, `record_fire`,
+/// `find_dead_rules`, `clear`, etc.) directly; do NOT instantiate via
+/// [`RuleExecutionTracker::new`] (it is deprecated and emits a compile
+/// warning — D-04). For test isolation call [`RuleExecutionTracker::clear`]
+/// at the start of each test, gated with `#[serial_test::serial]` (L-05).
+pub struct RuleExecutionTracker;
+
+/// Global singleton with interior mutability via `Mutex`.
+static INSTANCE: LazyLock<Mutex<TrackerState>> = LazyLock::new(|| {
+    Mutex::new(TrackerState {
+        rules: HashMap::new(),
+        total_evaluations: 0,
+        total_fires: 0,
+    })
+});
+
 impl RuleExecutionTracker {
     /// Creates a new empty tracker.
+    ///
+    /// **Deprecated (D-04):** `RuleExecutionTracker` is now a process-wide
+    /// singleton; use the associated functions (`record_evaluation`,
+    /// `record_fire`, `find_dead_rules`, `get_rule_info`, `clear`, etc.)
+    /// directly and [`RuleExecutionTracker::clear`] for test isolation.
+    /// Instantiating a local tracker no longer carries any state and will
+    /// not share data with the singleton — the production call site at
+    /// `api/src/metrics.rs:380` is rewritten in Plan 26-02 Task 2.
+    #[deprecated(
+        note = "RuleExecutionTracker is a process-wide singleton; use associated functions directly and clear() for test isolation."
+    )]
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     /// Records that a rule was evaluated (conditions were checked).
-    pub fn record_evaluation(&mut self, rule_id: impl Into<String>, rule_name: impl Into<String>) {
+    pub fn record_evaluation(rule_id: impl Into<String>, rule_name: impl Into<String>) {
         let rule_id = rule_id.into();
         let rule_name = rule_name.into();
-
-        self.rules
+        let mut state = INSTANCE.lock().unwrap();
+        state
+            .rules
             .entry(rule_id.clone())
             .or_insert_with(|| DeadRuleInfo::new(&rule_id, &rule_name))
             .record_evaluation();
-        self.total_evaluations += 1;
+        state.total_evaluations += 1;
     }
 
     /// Records that a rule fired.
-    pub fn record_fire(
-        &mut self,
-        rule_id: impl Into<String>,
-        rule_name: impl Into<String>,
-        timestamp: impl Into<String>,
-    ) {
+    ///
+    /// Per D-06 the singleton stamps `last_fired_at` internally via
+    /// `chrono::Utc::now().to_rfc3339()` — callers do NOT supply a
+    /// timestamp. This keeps the recording call sites at the evaluator
+    /// boundary simple and ensures every fire stamp is consistent.
+    pub fn record_fire(rule_id: impl Into<String>, rule_name: impl Into<String>) {
         let rule_id = rule_id.into();
         let rule_name = rule_name.into();
-        let timestamp = timestamp.into();
-
-        if let Some(info) = self.rules.get_mut(&rule_id) {
-            info.fire_count += 1;
-            info.last_fired_at = Some(timestamp);
-        } else {
-            // First time seeing this rule - mark as active (no evaluation yet)
-            let mut info = DeadRuleInfo::new(&rule_id, &rule_name);
-            info.fire_count = 1;  // Directly set fire count without evaluation
-            info.last_fired_at = Some(timestamp);
-            self.rules.insert(rule_id, info);
-        }
-        self.total_fires += 1;
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let mut state = INSTANCE.lock().unwrap();
+        let info = state
+            .rules
+            .entry(rule_id.clone())
+            .or_insert_with(|| DeadRuleInfo::new(&rule_id, &rule_name));
+        info.fire_count += 1;
+        info.last_fired_at = Some(timestamp);
+        state.total_fires += 1;
     }
 
     /// Records a rule's category.
-    pub fn set_rule_category(&mut self, rule_id: impl Into<String>, category: impl Into<String>) {
+    pub fn set_rule_category(rule_id: impl Into<String>, category: impl Into<String>) {
         let rule_id = rule_id.into();
-        if let Some(info) = self.rules.get_mut(&rule_id) {
+        let mut state = INSTANCE.lock().unwrap();
+        if let Some(info) = state.rules.get_mut(&rule_id) {
             info.category = Some(category.into());
         }
     }
 
-    /// Gets information about a specific rule.
-    pub fn get_rule_info(&self, rule_id: &str) -> Option<&DeadRuleInfo> {
-        self.rules.get(rule_id)
+    /// Gets information about a specific rule (owned clone out of the lock).
+    pub fn get_rule_info(rule_id: &str) -> Option<DeadRuleInfo> {
+        let state = INSTANCE.lock().unwrap();
+        state.rules.get(rule_id).cloned()
     }
 
-    /// Returns all rules with their activity status.
-    pub fn get_all_rules(&self) -> Vec<&DeadRuleInfo> {
-        self.rules.values().collect()
+    /// Returns all rules with their activity status (owned clones out of the lock).
+    pub fn get_all_rules() -> Vec<DeadRuleInfo> {
+        let state = INSTANCE.lock().unwrap();
+        state.rules.values().cloned().collect()
     }
 
     /// Identifies dead rules based on the evaluation window.
     ///
     /// A rule is considered dead if it was never fired during the analysis period,
-    /// regardless of whether it was evaluated.
-    pub fn find_dead_rules(&self) -> Vec<&DeadRuleInfo> {
-        self.rules
+    /// regardless of whether it was evaluated. Returns owned data — references
+    /// cannot escape a `Mutex` guard (anti-pattern flagged in 26-RESEARCH.md).
+    pub fn find_dead_rules() -> Vec<DeadRuleInfo> {
+        let state = INSTANCE.lock().unwrap();
+        state
+            .rules
             .values()
             .filter(|info| info.fire_count == 0)
+            .cloned()
             .collect()
     }
 
     /// Identifies rules that are both dead and have never been evaluated.
-    pub fn find_truly_inactive_rules(&self) -> Vec<&DeadRuleInfo> {
-        self.rules
+    ///
+    /// Returns owned data. Note the semantic shift (D-04 / 26-RESEARCH.md
+    /// Open Question 1): the singleton can only report rules it was told
+    /// about — a rule that was never recorded cannot appear here.
+    pub fn find_truly_inactive_rules() -> Vec<DeadRuleInfo> {
+        let state = INSTANCE.lock().unwrap();
+        state
+            .rules
             .values()
             .filter(|info| info.evaluation_count == 0 && info.fire_count == 0)
+            .cloned()
             .collect()
     }
 
     /// Gets the total number of rules being tracked.
-    pub fn rule_count(&self) -> usize {
-        self.rules.len()
+    pub fn rule_count() -> usize {
+        let state = INSTANCE.lock().unwrap();
+        state.rules.len()
     }
 
     /// Gets the total evaluation count across all rules.
-    pub fn total_evaluations(&self) -> usize {
-        self.total_evaluations
+    pub fn get_total_evaluations() -> usize {
+        let state = INSTANCE.lock().unwrap();
+        state.total_evaluations
     }
 
     /// Gets the total fire count across all rules.
-    pub fn total_fires(&self) -> usize {
-        self.total_fires
+    pub fn get_total_fires() -> usize {
+        let state = INSTANCE.lock().unwrap();
+        state.total_fires
     }
 
     /// Calculates the rule activation rate (fired / evaluated).
-    pub fn activation_rate(&self) -> f64 {
-        if self.total_evaluations == 0 {
+    pub fn activation_rate() -> f64 {
+        let state = INSTANCE.lock().unwrap();
+        if state.total_evaluations == 0 {
             return 0.0;
         }
-        self.total_fires as f64 / self.total_evaluations as f64
+        state.total_fires as f64 / state.total_evaluations as f64
     }
 
-    /// Resets the tracker state for a new analysis period.
-    pub fn reset(&mut self) {
-        // Keep rules in map but clear their metrics
-        for info in self.rules.values_mut() {
+    /// Resets per-rule metrics but preserves the set of tracked rule entries
+    /// (mirrors the original `reset` semantics — useful for beginning a new
+    /// analysis period without losing the rule registry).
+    pub fn reset() {
+        let mut state = INSTANCE.lock().unwrap();
+        for info in state.rules.values_mut() {
             *info = DeadRuleInfo::new(&info.rule_id, &info.rule_name);
         }
-        self.total_evaluations = 0;
-        self.total_fires = 0;
+        state.total_evaluations = 0;
+        state.total_fires = 0;
     }
 
-    /// Resets the tracker completely (clears all rules).
-    pub fn clear(&mut self) {
-        self.rules.clear();
-        self.total_evaluations = 0;
-        self.total_fires = 0;
+    /// Resets the singleton completely — clears all rules and counters.
+    ///
+    /// This is the test-isolation primitive (L-05): every `#[serial]` test
+    /// calls `clear()` first so prior test fixtures do not leak across
+    /// tests sharing the process-wide `INSTANCE`.
+    pub fn clear() {
+        let mut state = INSTANCE.lock().unwrap();
+        state.rules.clear();
+        state.total_evaluations = 0;
+        state.total_fires = 0;
+    }
+}
+
+impl Default for RuleExecutionTracker {
+    fn default() -> Self {
+        #[allow(deprecated)]
+        Self::new()
     }
 }
 
@@ -204,10 +270,15 @@ pub struct DeadRuleReport {
 }
 
 impl DeadRuleReport {
-    /// Creates a new report from the tracker data.
-    pub fn generate(tracker: &RuleExecutionTracker) -> Self {
-        let dead_rules = tracker.find_dead_rules();
-        let total_rules = tracker.rule_count();
+    /// Creates a new report from the singleton tracker data.
+    ///
+    /// Reads from the process-wide [`RuleExecutionTracker`] singleton — no
+    /// `&RuleExecutionTracker` argument is needed because the tracker is a
+    /// `LazyLock<Mutex<TrackerState>>` static. Call as
+    /// `DeadRuleReport::generate()`.
+    pub fn generate() -> Self {
+        let dead_rules = RuleExecutionTracker::find_dead_rules();
+        let total_rules = RuleExecutionTracker::rule_count();
 
         let dead_percentage = if total_rules > 0 {
             (dead_rules.len() as f64 / total_rules as f64) * 100.0
@@ -225,7 +296,7 @@ impl DeadRuleReport {
         }
 
         Self {
-            dead_rules: dead_rules.into_iter().cloned().collect(),
+            dead_rules,
             total_rules,
             dead_percentage,
             recommendations,

@@ -376,9 +376,17 @@ pub async fn metrics_endpoint(
     ),
 )]
 pub async fn dead_rules_endpoint() -> impl Responder {
-    // Create a tracker instance and get dead rules
+    // Read dead rules from the process-wide RuleExecutionTracker singleton.
+    //
+    // NOTE: `let tracker = RuleExecutionTracker::new();` is retained below
+    // only to preserve the deprecated `new()` warning that Plan 26-02 Task 2
+    // will resolve by removing this call site entirely. The `tracker` local
+    // is intentionally unused — the singleton read goes through the
+    // associated-function API (D-01). Plan 26-02 rewrites this endpoint to
+    // drop the local and record-then-read live data.
+    #[allow(deprecated, unused_variables)]
     let tracker = RuleExecutionTracker::new();
-    let dead_rules = tracker.find_dead_rules();
+    let dead_rules = RuleExecutionTracker::find_dead_rules();
 
     // Map to Vec<String> of rule IDs
     let rule_ids: Vec<String> = dead_rules.into_iter().map(|info| info.rule_id.clone()).collect();
