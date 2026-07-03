@@ -56,8 +56,8 @@ async fn metrics_prometheus_text_format() {
         "expected Prometheus exposition format; got: {text}"
     );
     assert!(
-        text.contains("engine_rules_fired"),
-        "expected the engine_rules_fired metric; got: {text}"
+        text.contains("rrules_execute_requests_total"),
+        "expected the rrules_execute_requests_total metric; got: {text}"
     );
 }
 

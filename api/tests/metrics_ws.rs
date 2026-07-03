@@ -14,12 +14,19 @@
 //! forward. A raw TCP WS client performs the handshake and reads one frame so
 //! the test does not depend on an extra WS client crate.
 
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use actix_test::start;
 use actix_web::{web, App};
 use api::metrics::{create_metrics_channel, MetricsSnapshot, MetricsTx};
+use api::v1::execution::execute_rules;
 use api::websocket::configure_metrics_ws;
+use engine::data_types::Value as EngineValue;
+use engine::engine::registry::EngineRegistry;
+use engine::engine::selector::EngineSelector;
+use engine::rules::{Action, ComparisonOp, Condition, Expression, Rule, RuleSet};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -50,6 +57,121 @@ fn spawn_server() -> (
     });
     let addr = server.addr().to_owned();
     (addr, metrics_tx, guard_rx, server)
+}
+
+// =====================================================================
+// Phase 24 Wave 0 RED scaffold: spawn_server_with_execute()
+//
+// Mirrors spawn_server() but also wires the execute_rules route and the
+// shared registry/selector/ruleset needed for a real engine invocation
+// on the same server. Used by broadcasts_snapshot_after_execute (SC-2).
+// The fixture helpers below mirror the ones in execute_integration.rs.
+// =====================================================================
+
+/// Build the keystone `score := score + 10` rule (mirrors
+/// execute_integration.rs) so the execute route has a real rule to fire.
+fn score_plus_10_rule() -> Rule {
+    let mut fields = HashMap::new();
+    fields.insert(
+        "score".to_string(),
+        Expression::Add(
+            Box::new(Expression::FieldRef {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+            }),
+            Box::new(Expression::Literal(EngineValue::Integer(10))),
+        ),
+    );
+    Rule::builder("r1", "Increment score")
+        .condition(Condition::Pattern {
+            fact_type: "scorecard".to_string(),
+            field: "score".to_string(),
+            value: EngineValue::Integer(0),
+            op: ComparisonOp::Eq,
+        })
+        .action(Action::UpdateFact {
+            id: "scorecard".to_string(),
+            fields,
+        })
+        .build()
+}
+
+/// Build a shared `RuleSet` containing the keystone rule, wrapped for
+/// `web::Data` exactly as `main.rs` wires it.
+fn shared_ruleset() -> web::Data<Arc<RwLock<RuleSet>>> {
+    let mut ruleset = RuleSet::new();
+    ruleset.add_rule(score_plus_10_rule()).expect("add_rule");
+    web::Data::new(Arc::new(RwLock::new(ruleset)))
+}
+
+/// Build a real `EngineRegistry` with all four default factories registered.
+fn shared_registry() -> web::Data<EngineRegistry> {
+    let mut registry = EngineRegistry::new();
+    registry.register_default_engines();
+    web::Data::new(registry)
+}
+
+/// Build an `EngineSelector::with_defaults()`.
+fn shared_selector() -> web::Data<EngineSelector> {
+    web::Data::new(EngineSelector::with_defaults())
+}
+
+/// Spin up a test server wiring both the execute route and the metrics WS
+/// endpoint into the same `/v1` scope, sharing one `metrics_tx` so a
+/// broadcast from `execute_rules` (when wired in Plan 24-03) is forwarded to
+/// the connected WS client. Returns the bound address, the shared `metrics_tx`
+/// (so the test could broadcast manually if needed), a guard receiver kept
+/// alive so `broadcast::send` never fails with "no receivers", and the
+/// `TestServer` handle the caller must keep alive.
+#[allow(clippy::type_complexity)]
+fn spawn_server_with_execute() -> (
+    std::net::SocketAddr,
+    MetricsTx,
+    tokio::sync::broadcast::Receiver<MetricsSnapshot>,
+    actix_test::TestServer,
+) {
+    let (metrics_tx, guard_rx) = create_metrics_channel(64);
+    let metrics_tx_for_server = metrics_tx.clone();
+    let server = start(move || {
+        App::new()
+            .app_data(web::Data::new(metrics_tx_for_server.clone()))
+            .app_data(shared_registry())
+            .app_data(shared_selector())
+            .app_data(shared_ruleset())
+            .service(
+                web::scope("/v1")
+                    .route("/execute", web::post().to(execute_rules))
+                    .configure(configure_metrics_ws),
+            )
+    });
+    let addr = server.addr().to_owned();
+    (addr, metrics_tx, guard_rx, server)
+}
+
+/// Send a raw HTTP/1.1 POST to `/v1/execute` on `addr` with the keystone
+/// facts JSON body, then read (and discard) the response. Uses a plain
+/// `TcpStream` so no extra dev-dep (e.g. `awc`/`reqwest`) is required. The
+/// caller awaits this AFTER the WS handshake so the POST lands on the same
+/// server while the WS session is live.
+async fn raw_post_execute(addr: std::net::SocketAddr) {
+    let body = r#"{"facts":{"scorecard":{"score":0}}}"#;
+    let req = format!(
+        "POST /v1/execute HTTP/1.1\r\n\
+         Host: localhost\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {len}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {body}",
+        len = body.len(),
+        body = body
+    );
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    stream.write_all(req.as_bytes()).await.unwrap();
+    // Read the response until EOF / close so the server processes the POST
+    // before we attempt to read the WS frame on the other connection.
+    let mut buf = Vec::new();
+    let _ = stream.read_to_end(&mut buf).await;
 }
 
 /// Perform a raw WS handshake against `addr` at `/v1/metrics/ws`, broadcast one
@@ -192,5 +314,74 @@ async fn ws_endpoint_is_no_longer_json_stub() {
     assert!(
         !handshake.contains("\"message\":\"WebSocket endpoint\""),
         "endpoint returned the old JSON stub body; handshake: {handshake}"
+    );
+}
+
+// =====================================================================
+// Phase 24 Wave 0 RED scaffold: broadcasts_snapshot_after_execute (SC-2)
+//
+// Wires execute_rules + configure_metrics_ws on one server, completes the
+// WS handshake, POSTs /v1/execute, then reads one WS frame and asserts the
+// forwarded snapshot has engine_name == "rete" and rules_fired > 0. RED
+// because execute_single does not call metrics_tx.send(...) — no WS frame
+// is forwarded, so read_one_ws_frame times out at its 3s deadline.
+// =====================================================================
+
+#[actix_web::test]
+async fn broadcasts_snapshot_after_execute() {
+    let (addr, _metrics_tx, _guard_rx, _server) = spawn_server_with_execute();
+
+    // 1. Open a TCP connection and perform the WS handshake at /v1/metrics/ws.
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let req = format!(
+        "GET /v1/metrics/ws HTTP/1.1\r\n\
+         Host: localhost\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Key: {key}\r\n\
+         \r\n",
+        key = WS_KEY
+    );
+    stream.write_all(req.as_bytes()).await.unwrap();
+
+    // Read the handshake response up to \r\n\r\n.
+    let mut handshake_buf: Vec<u8> = Vec::new();
+    loop {
+        let mut one = [0u8; 1];
+        if stream.read(&mut one).await.unwrap() == 0 {
+            break;
+        }
+        handshake_buf.push(one[0]);
+        if handshake_buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+    }
+    let handshake = String::from_utf8_lossy(&handshake_buf).to_string();
+    assert!(
+        handshake.starts_with("HTTP/1.1 101"),
+        "WS handshake should complete with 101; got: {handshake}"
+    );
+
+    // 2. POST /v1/execute on a second TCP connection to the same server.
+    //    In the GREEN state (Plan 24-03) execute_rules will broadcast a
+    //    MetricsSnapshot on metrics_tx, which the live WS session forwards.
+    raw_post_execute(addr).await;
+
+    // 3. Read one WS frame. RED: execute_single does not broadcast, so this
+    //    times out at the 3s deadline inside read_one_ws_frame.
+    let frame = read_one_ws_frame(&mut stream).await;
+
+    // 4. Parse and assert. In the RED state this line is unreachable (the
+    //    prior line panics on timeout); in GREEN it validates the snapshot.
+    let parsed: serde_json::Value = serde_json::from_str(&frame)
+        .unwrap_or_else(|e| panic!("frame is not valid JSON: {e}; frame={frame}"));
+    assert_eq!(
+        parsed["engine_name"], "rete",
+        "SC-2: snapshot engine_name should be 'rete'; frame={frame}"
+    );
+    assert!(
+        parsed["rules_fired"].as_u64().unwrap_or(0) > 0,
+        "SC-2: snapshot rules_fired should be > 0 after keystone rule fires; frame={frame}"
     );
 }
