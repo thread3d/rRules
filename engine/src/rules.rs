@@ -240,9 +240,89 @@ impl Expression {
     /// Integer-vs-Float promotion is correct; division by zero yields
     /// `Value::Null` rather than panicking (T-23-03 mitigation). `Compare`
     /// delegates to the shared `compare_values` helper.
-    pub fn evaluate(&self, _facts: &[&crate::fact::Fact]) -> Value {
-        // RED-phase stub: returns Value::Null so behavior tests fail.
-        Value::Null
+    pub fn evaluate(&self, facts: &[&crate::fact::Fact]) -> Value {
+        use crate::data_types::DynamicCast;
+        match self {
+            Expression::Literal(v) => v.clone(),
+            Expression::FieldRef { fact_type, field } => {
+                // Scan for the first fact of the requested type, read the field.
+                facts
+                    .iter()
+                    .find(|f| f.fact_type_id == *fact_type)
+                    .and_then(|f| f.payload.get(field))
+                    .cloned()
+                    .unwrap_or(Value::Null)
+            }
+            Expression::Add(l, r) => {
+                let lv = l.evaluate(facts);
+                let rv = r.evaluate(facts);
+                numeric_op(&lv, &rv, |a, b| a + b, |a, b| a + b)
+            }
+            Expression::Sub(l, r) => {
+                let lv = l.evaluate(facts);
+                let rv = r.evaluate(facts);
+                numeric_op(&lv, &rv, |a, b| a - b, |a, b| a - b)
+            }
+            Expression::Mul(l, r) => {
+                let lv = l.evaluate(facts);
+                let rv = r.evaluate(facts);
+                numeric_op(&lv, &rv, |a, b| a * b, |a, b| a * b)
+            }
+            Expression::Div(l, r) => {
+                let lv = l.evaluate(facts);
+                let rv = r.evaluate(facts);
+                // Division by zero yields Null (T-23-03 mitigation — do not panic).
+                match (&lv, &rv) {
+                    (Value::Integer(a), Value::Integer(b)) if *b != 0 => Value::Integer(a / b),
+                    _ if lv.as_float().is_some() && rv.as_float().is_some() => {
+                        let a = lv.as_float().unwrap();
+                        let b = rv.as_float().unwrap();
+                        if b == 0.0 || b.is_nan() {
+                            Value::Null
+                        } else {
+                            Value::Float(a / b)
+                        }
+                    }
+                    _ => Value::Null,
+                }
+            }
+            Expression::StringConcat(l, r) => {
+                let lv = l.evaluate(facts);
+                let rv = r.evaluate(facts);
+                match (lv.as_string(), rv.as_string()) {
+                    (Some(ls), Some(rs)) => Value::String(format!("{}{}", ls, rs)),
+                    _ => Value::Null,
+                }
+            }
+            Expression::Compare { op, left, right } => {
+                let lv = left.evaluate(facts);
+                let rv = right.evaluate(facts);
+                Value::Bool(compare_values(*op, &lv, &rv))
+            }
+            Expression::Call { .. } => {
+                // Stub for Phase 23 — full function dispatch is out of scope.
+                Value::Null
+            }
+        }
+    }
+}
+
+/// Apply a binary numeric op to two `Value`s with Integer-preserving
+/// promotion: `Integer + Integer` stays `Integer`; any `Float` operand
+/// promotes both sides to `f64`. Non-numeric operands yield `Value::Null`.
+fn numeric_op(
+    left: &Value,
+    right: &Value,
+    int_op: impl Fn(i64, i64) -> i64,
+    float_op: impl Fn(f64, f64) -> f64,
+) -> Value {
+    use crate::data_types::DynamicCast;
+    match (left, right) {
+        (Value::Integer(l), Value::Integer(r)) => Value::Integer(int_op(*l, *r)),
+        _ if left.as_float().is_some() && right.as_float().is_some() => {
+            Value::Float(float_op(left.as_float().unwrap(), right.as_float().unwrap()))
+        }
+        _ => Value::Null,
     }
 }
 
@@ -250,11 +330,57 @@ impl Expression {
 /// `Condition::evaluate` (D-05). Applies `op` to `left` / `right` across the
 /// full `Value` type matrix without panicking on ill-typed operands.
 ///
-/// Returns `false` for ordered ops on non-numeric / non-string types rather
-/// than panicking (T-23-03 mitigation).
-pub fn compare_values(_op: ComparisonOp, _left: &Value, _right: &Value) -> bool {
-    // RED-phase stub: returns false so comparison tests fail.
-    false
+/// Semantics:
+/// - `Eq` / `Ne`: structural equality (`PartialEq`) — handles Integer, Float,
+///   String, Boolean, Null, Array, Object.
+/// - `Lt`/`Le`/`Gt`/`Ge` on numerics: `Integer`+`Integer` compare as `i64`;
+///   any `Float` operand promotes both to `f64` via `as_float`.
+/// - Ordered ops on `String`: lexicographic via `as_string`.
+/// - Ordered ops on `Boolean` / `Null` / `Array` / `Object`: return `false`
+///   (T-23-03 mitigation — never panic).
+pub fn compare_values(op: ComparisonOp, left: &Value, right: &Value) -> bool {
+    use crate::data_types::DynamicCast;
+    match op {
+        ComparisonOp::Eq => left == right,
+        ComparisonOp::Ne => left != right,
+        ComparisonOp::Lt | ComparisonOp::Le | ComparisonOp::Gt | ComparisonOp::Ge => {
+            // Integer + Integer: stay integral (avoid f64 precision loss).
+            match (left, right) {
+                (Value::Integer(l), Value::Integer(r)) => return match op {
+                    ComparisonOp::Lt => l < r,
+                    ComparisonOp::Le => l <= r,
+                    ComparisonOp::Gt => l > r,
+                    ComparisonOp::Ge => l >= r,
+                    _ => unreachable!(),
+                },
+                _ => {}
+            }
+            // Any Float operand: promote both to f64.
+            if left.as_float().is_some() && right.as_float().is_some() {
+                let l = left.as_float().unwrap();
+                let r = right.as_float().unwrap();
+                return match op {
+                    ComparisonOp::Lt => l < r,
+                    ComparisonOp::Le => l <= r,
+                    ComparisonOp::Gt => l > r,
+                    ComparisonOp::Ge => l >= r,
+                    _ => unreachable!(),
+                };
+            }
+            // String: lexicographic.
+            if let (Some(l), Some(r)) = (left.as_string(), right.as_string()) {
+                return match op {
+                    ComparisonOp::Lt => l < r,
+                    ComparisonOp::Le => l <= r,
+                    ComparisonOp::Gt => l > r,
+                    ComparisonOp::Ge => l >= r,
+                    _ => unreachable!(),
+                };
+            }
+            // Boolean / Null / Array / Object: ordered ops return false (no panic).
+            false
+        }
+    }
 }
 
 /// Action for rule RHS execution.
