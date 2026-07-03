@@ -3,7 +3,7 @@
 //! This module implements ChainingSelector that automatically determines whether
 //! forward or backward chaining is optimal for a given set of rules.
 
-use crate::rules::{Condition, Rule};
+use crate::rules::{Condition, ComparisonOp, Rule};
 
 /// Result of analyzing rule structure for inference pattern classification.
 #[derive(Debug, Clone, PartialEq)]
@@ -210,6 +210,7 @@ mod tests {
                 fact_type: "transaction".to_string(),
                 field: "amount".to_string(),
                 value: Value::Integer(100),
+                op: ComparisonOp::Eq,
             })
             .build();
 
@@ -227,6 +228,7 @@ mod tests {
                 fact_type: "query_customer_eligibility".to_string(),
                 field: "type".to_string(),
                 value: Value::String("premium".to_string()),
+                op: ComparisonOp::Eq,
             })
             .build();
 
@@ -268,6 +270,7 @@ mod tests {
                 fact_type: "transaction".to_string(),
                 field: "amount".to_string(),
                 value: Value::Integer(100),
+                op: ComparisonOp::Eq,
             })
             .build();
 

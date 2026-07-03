@@ -3,7 +3,7 @@
 //! This module provides validators that catch errors early with clear messages.
 
 use crate::data_types::Value;
-use crate::rules::{Condition, Rule};
+use crate::rules::{Condition, ComparisonOp, Rule};
 use std::collections::HashMap;
 
 /// Result of validation with separate error and warning collections.
@@ -228,6 +228,7 @@ impl<'a> SemanticValidator<'a> {
                 fact_type,
                 field,
                 value,
+                ..
             } => {
                 // Check if fact type exists
                 if !self.fact_types.contains_key(fact_type) {
@@ -450,6 +451,7 @@ mod tests {
             fact_type: "unknown".to_string(),
             field: "field".to_string(),
             value: Value::Integer(42),
+            op: ComparisonOp::Eq,
         });
         assert!(!result.is_valid);
     }

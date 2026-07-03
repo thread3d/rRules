@@ -619,6 +619,7 @@ mod condition_combinations_tests {
                 fact_type: "customer".to_string(),
                 field: "status".to_string(),
                 value: Value::String("premium".to_string()),
+                op: crate::rules::ComparisonOp::Eq,
             },
             Condition::True,
         ]);
@@ -893,12 +894,14 @@ mod real_world_examples_tests {
                     fact_type: "customer".to_string(),
                     field: "tier".to_string(),
                     value: Value::String("premium".to_string()),
+                    op: crate::rules::ComparisonOp::Eq,
                 },
                 Condition::Compare {
                     left: Box::new(Condition::Pattern {
                         fact_type: "order".to_string(),
                         field: "amount".to_string(),
                         value: Value::Integer(50),
+                        op: crate::rules::ComparisonOp::Eq,
                     }),
                     op: crate::rules::ComparisonOp::Ge,
                     right: Box::new(Condition::True),
@@ -926,11 +929,13 @@ mod real_world_examples_tests {
                     fact_type: "time".to_string(),
                     field: "hour".to_string(),
                     value: Value::Integer(8),
+                    op: crate::rules::ComparisonOp::Eq,
                 },
                 Condition::Pattern {
                     fact_type: "time".to_string(),
                     field: "hour".to_string(),
                     value: Value::Integer(18),
+                    op: crate::rules::ComparisonOp::Eq,
                 },
             ]))
             .action(crate::Action::InsertFact {
@@ -954,6 +959,7 @@ mod real_world_examples_tests {
                     fact_type: "transaction".to_string(),
                     field: "amount".to_string(),
                     value: Value::Integer(10000),
+                    op: crate::rules::ComparisonOp::Eq,
                 }),
                 op: crate::rules::ComparisonOp::Gt,
                 right: Box::new(Condition::True),

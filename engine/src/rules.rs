@@ -136,6 +136,10 @@ pub enum Condition {
         fact_type: String,
         field: String,
         value: Value,
+        /// Comparison operator applied between the fact's field value and
+        /// `value` (D-05). Defaults to `Eq` at construction sites that do
+        /// not specify an operator.
+        op: ComparisonOp,
     },
 }
 
@@ -877,6 +881,283 @@ mod tests {
             let json = serde_json::to_string(&action).expect("serialize");
             let parsed: Action = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(parsed, action);
+        }
+    }
+
+    mod condition {
+        //! Tests for the rewritten `Condition::evaluate` (D-05) — full
+        //! `ComparisonOp` matrix + real `Pattern` matching. Filter:
+        //! `cargo test -p engine --lib rules::tests::condition`
+        use super::*;
+        use crate::fact::Fact;
+        use std::collections::HashMap;
+
+        /// Build a scorecard fact with the given integer `score` payload.
+        fn scorecard_fact(score: i64) -> Fact {
+            let mut payload = HashMap::new();
+            payload.insert("score".to_string(), Value::Integer(score));
+            Fact::new("scorecard", payload)
+        }
+
+        // ---- Compare: Integer matrix ----
+
+        #[test]
+        fn pattern_eq_integer_match() {
+            // Pattern { scorecard, score, value: 10, op: Eq } against score=10 → true.
+            let fact = scorecard_fact(10);
+            let facts: [&Fact; 1] = [&fact];
+            let cond = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+                value: Value::Integer(10),
+                op: ComparisonOp::Eq,
+            };
+            assert!(cond.evaluate(&facts));
+        }
+
+        #[test]
+        fn compare_integer_ne() {
+            // 10 Ne 5 → true; 10 Ne 10 → false (modeled as direct Compare on True-leaf
+            // is awkward; instead test compare_values directly via Pattern matching.)
+            // Here we verify Pattern with op Ne against scorecard facts.
+            let cond = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+                value: Value::Integer(5),
+                op: ComparisonOp::Ne,
+            };
+            let fact = scorecard_fact(10);
+            let facts: [&Fact; 1] = [&fact];
+            assert!(cond.evaluate(&facts), "10 Ne 5 should be true");
+        }
+
+        #[test]
+        fn compare_integer_lt_le_gt_ge() {
+            // Use Pattern with each op against a scorecard score=10.
+            let fact = scorecard_fact(10);
+            let facts: [&Fact; 1] = [&fact];
+
+            let lt_cond = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+                value: Value::Integer(20),
+                op: ComparisonOp::Lt,
+            };
+            assert!(lt_cond.evaluate(&facts), "10 Lt 20 should be true");
+
+            let le_cond = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+                value: Value::Integer(10),
+                op: ComparisonOp::Le,
+            };
+            assert!(le_cond.evaluate(&facts), "10 Le 10 should be true");
+
+            let gt_cond = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+                value: Value::Integer(5),
+                op: ComparisonOp::Gt,
+            };
+            assert!(gt_cond.evaluate(&facts), "10 Gt 5 should be true");
+
+            let ge_cond = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+                value: Value::Integer(10),
+                op: ComparisonOp::Ge,
+            };
+            assert!(ge_cond.evaluate(&facts), "10 Ge 10 should be true");
+        }
+
+        #[test]
+        fn compare_integer_false_cases() {
+            let fact = scorecard_fact(10);
+            let facts: [&Fact; 1] = [&fact];
+
+            let not_lt = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+                value: Value::Integer(5),
+                op: ComparisonOp::Lt,
+            };
+            assert!(!not_lt.evaluate(&facts), "10 Lt 5 should be false");
+
+            let not_gt = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+                value: Value::Integer(20),
+                op: ComparisonOp::Gt,
+            };
+            assert!(!not_gt.evaluate(&facts), "10 Gt 20 should be false");
+        }
+
+        // ---- Compare: Float + cross-type promotion ----
+
+        #[test]
+        fn compare_float_lt() {
+            // 1.5 Lt 2.5 → true. Use Pattern with Float value.
+            let mut payload = HashMap::new();
+            payload.insert("rate".to_string(), Value::Float(1.5));
+            let fact = Fact::new("metric", payload);
+            let facts: [&Fact; 1] = [&fact];
+
+            let cond = Condition::Pattern {
+                fact_type: "metric".to_string(),
+                field: "rate".to_string(),
+                value: Value::Float(2.5),
+                op: ComparisonOp::Lt,
+            };
+            assert!(cond.evaluate(&facts), "1.5 Lt 2.5 should be true");
+        }
+
+        #[test]
+        fn compare_cross_type_integer_lt_float() {
+            // Integer field (10) Lt Float value (10.5) → true via promotion.
+            let fact = scorecard_fact(10);
+            let facts: [&Fact; 1] = [&fact];
+
+            let cond = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+                value: Value::Float(10.5),
+                op: ComparisonOp::Lt,
+            };
+            assert!(cond.evaluate(&facts), "10 Lt 10.5 should be true (cross-type)");
+        }
+
+        // ---- Compare: String ----
+
+        #[test]
+        fn compare_string_eq_ne() {
+            let mut payload = HashMap::new();
+            payload.insert("status".to_string(), Value::String("premium".to_string()));
+            let fact = Fact::new("customer", payload);
+            let facts: [&Fact; 1] = [&fact];
+
+            let eq_cond = Condition::Pattern {
+                fact_type: "customer".to_string(),
+                field: "status".to_string(),
+                value: Value::String("premium".to_string()),
+                op: ComparisonOp::Eq,
+            };
+            assert!(eq_cond.evaluate(&facts), "premium Eq premium → true");
+
+            let ne_cond = Condition::Pattern {
+                fact_type: "customer".to_string(),
+                field: "status".to_string(),
+                value: Value::String("basic".to_string()),
+                op: ComparisonOp::Ne,
+            };
+            assert!(ne_cond.evaluate(&facts), "premium Ne basic → true");
+        }
+
+        #[test]
+        fn compare_string_lexicographic() {
+            let mut payload = HashMap::new();
+            payload.insert("name".to_string(), Value::String("apple".to_string()));
+            let fact = Fact::new("item", payload);
+            let facts: [&Fact; 1] = [&fact];
+
+            let lt_cond = Condition::Pattern {
+                fact_type: "item".to_string(),
+                field: "name".to_string(),
+                value: Value::String("banana".to_string()),
+                op: ComparisonOp::Lt,
+            };
+            assert!(lt_cond.evaluate(&facts), "apple Lt banana → true");
+
+            let gt_cond = Condition::Pattern {
+                fact_type: "item".to_string(),
+                field: "name".to_string(),
+                value: Value::String("almond".to_string()),
+                op: ComparisonOp::Gt,
+            };
+            assert!(gt_cond.evaluate(&facts), "apple Gt almond → true");
+        }
+
+        // ---- Compare: Boolean ----
+
+        #[test]
+        fn compare_boolean_eq_ne() {
+            let mut payload = HashMap::new();
+            payload.insert("active".to_string(), Value::Bool(true));
+            let fact = Fact::new("account", payload);
+            let facts: [&Fact; 1] = [&fact];
+
+            let eq_cond = Condition::Pattern {
+                fact_type: "account".to_string(),
+                field: "active".to_string(),
+                value: Value::Bool(true),
+                op: ComparisonOp::Eq,
+            };
+            assert!(eq_cond.evaluate(&facts), "true Eq true → true");
+
+            let ne_cond = Condition::Pattern {
+                fact_type: "account".to_string(),
+                field: "active".to_string(),
+                value: Value::Bool(false),
+                op: ComparisonOp::Ne,
+            };
+            assert!(ne_cond.evaluate(&facts), "true Ne false → true");
+        }
+
+        // ---- Pattern: real matching ----
+
+        #[test]
+        fn pattern_match_score_zero_eq_yields_true() {
+            // Pattern { scorecard, score, value: 0, op: Eq } against score=0 → true
+            let fact = scorecard_fact(0);
+            let facts: [&Fact; 1] = [&fact];
+            let cond = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+                value: Value::Integer(0),
+                op: ComparisonOp::Eq,
+            };
+            assert!(cond.evaluate(&facts));
+        }
+
+        #[test]
+        fn pattern_match_score_ten_against_value_zero_yields_false() {
+            // Pattern { scorecard, score, value: 0, op: Eq } against score=10 → false
+            let fact = scorecard_fact(10);
+            let facts: [&Fact; 1] = [&fact];
+            let cond = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+                value: Value::Integer(0),
+                op: ComparisonOp::Eq,
+            };
+            assert!(!cond.evaluate(&facts), "score=10 Eq 0 should be false");
+        }
+
+        #[test]
+        fn pattern_no_matching_fact_type_yields_false() {
+            // No fact of type "nonexistent" → false (not unconditionally true).
+            let fact = scorecard_fact(0);
+            let facts: [&Fact; 1] = [&fact];
+            let cond = Condition::Pattern {
+                fact_type: "nonexistent".to_string(),
+                field: "score".to_string(),
+                value: Value::Integer(0),
+                op: ComparisonOp::Eq,
+            };
+            assert!(!cond.evaluate(&facts), "no matching fact_type should be false");
+        }
+
+        #[test]
+        fn pattern_missing_field_yields_false() {
+            // Fact of correct type but missing the field → false (Null Eq 0 is false).
+            let fact = scorecard_fact(0);
+            let facts: [&Fact; 1] = [&fact];
+            let cond = Condition::Pattern {
+                fact_type: "scorecard".to_string(),
+                field: "absent".to_string(),
+                value: Value::Integer(0),
+                op: ComparisonOp::Eq,
+            };
+            assert!(!cond.evaluate(&facts), "missing field should be false");
         }
     }
 }
