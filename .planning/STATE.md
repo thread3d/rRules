@@ -18,7 +18,7 @@ stopped_at: Phase 26 complete (2/2) — ready to discuss Phase 27
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-06-09)
+See: `.planning/PROJECT.md` (updated 2026-07-03)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
 **Current focus:** Phase 27 — stateful sessions
@@ -237,6 +237,8 @@ From v2.0 milestone:
 - [Phase ?]: Phase 23-05: build_ruleset_from_dir returns empty RuleSet + warning on missing/empty dir (D-03a); live rule-file parsing deferred to Phase 25. All five Plan 23-04 RED scaffolds now GREEN — all four ROADMAP success criteria pass.
 - [Phase ?]: .planning/phases/23-execute-evaluator-wiring/23-06-SUMMARY.md
 - [Phase ?]: .planning/phases/23-execute-evaluator-wiring/23-06-SUMMARY.md
+- [Phase 26]: Phase 26-01: RuleExecutionTracker converted to `LazyLock<Mutex<TrackerState>>` singleton mirroring CoverageTracking; `new()` marked `#[deprecated]` (D-04) to catch stray local instantiation; `clear()` for `#[serial]` test isolation; internal `chrono::Utc::now().to_rfc3339()` timestamp (D-06).
+- [Phase 26]: Phase 26-02: `record_evaluation`/`record_fire` wired at BOTH post-fixpoint evaluator sites (`direct_eval.rs` for Treat/Leaps/Phreak + `rete/mod.rs` for Rete's inlined `execute_rules` — C1); `dead_rules_endpoint` reads `RuleExecutionTracker::find_dead_rules()` singleton (no `new()` per call); `engine/src/engine/metrics.rs` untouched (C4 — CoverageTracking remains canonical fire source, no three-counter drift).
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -264,12 +266,11 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-**Resume file:** .planning/phases/26-ruleexecutiontracker-singleton-dead-rule-live-data/26-02-PLAN.md
+**Resume file:** None
 
-**Stopped at:** Phase 26 planning complete — 2 plans verified PASS, ready to execute
+**Stopped at:** Phase 26 complete (MON-06 verified PASS, 10/10 must-haves), ready to plan Phase 27 (stateful sessions)
 
-Last session: 2026-07-03T15:19:38.780Z
-Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13 requirements partial; user chose to close inline via new frontend-wiring phase.
+Last session: 2026-07-03 — Phase 26 executed (2/2 plans, waves 1+2), regression gate clean, verified PASS, transitioned to Phase 27 (ready_to_plan).
 
 **Completed Phases:**
 
