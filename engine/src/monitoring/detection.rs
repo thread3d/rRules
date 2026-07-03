@@ -272,34 +272,46 @@ mod tests {
     use super::*;
 
     #[test]
+    #[serial_test::serial]
     fn test_tracker_records_evaluations() {
-        let mut tracker = RuleExecutionTracker::new();
-        tracker.record_evaluation("rule1", "Test Rule");
-        tracker.record_evaluation("rule2", "Another Rule");
+        RuleExecutionTracker::clear();
+        RuleExecutionTracker::record_evaluation("rule1", "Test Rule");
+        RuleExecutionTracker::record_evaluation("rule2", "Another Rule");
 
-        assert_eq!(tracker.total_evaluations(), 2);
-        assert_eq!(tracker.get_rule_info("rule1").unwrap().evaluation_count, 1);
+        assert_eq!(RuleExecutionTracker::get_total_evaluations(), 2);
+        let info = RuleExecutionTracker::get_rule_info("rule1")
+            .expect("rule1 should be tracked after record_evaluation");
+        assert_eq!(info.evaluation_count, 1);
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_tracker_records_fires() {
-        let mut tracker = RuleExecutionTracker::new();
-        tracker.record_fire("rule1", "Test Rule", "2024-01-01T00:00:00Z".to_string());
-        tracker.record_fire("rule2", "Another Rule", "2024-01-01T00:00:01Z".to_string());
+        // Per D-06 the singleton stamps `last_fired_at` internally via
+        // `chrono::Utc::now().to_rfc3339()`. The test therefore asserts only
+        // `is_some()` — the singleton owns the timestamp, not the caller.
+        RuleExecutionTracker::clear();
+        RuleExecutionTracker::record_fire("rule1", "Test Rule");
+        RuleExecutionTracker::record_fire("rule2", "Another Rule");
 
-        assert_eq!(tracker.total_fires(), 2);
-        let info = tracker.get_rule_info("rule1").unwrap();
-        assert_eq!(&info.last_fired_at, &Some("2024-01-01T00:00:00Z".to_string()));
+        assert_eq!(RuleExecutionTracker::get_total_fires(), 2);
+        let info = RuleExecutionTracker::get_rule_info("rule1")
+            .expect("rule1 should be tracked after record_fire");
+        assert!(
+            info.last_fired_at.is_some(),
+            "last_fired_at must be stamped internally by the singleton (D-06)"
+        );
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_find_dead_rules() {
-        let mut tracker = RuleExecutionTracker::new();
-        tracker.record_fire("rule1", "Active Rule", "now");
-        tracker.record_evaluation("rule2", "Dead Rule");
-        tracker.record_evaluation("rule3", "Also Dead");
+        RuleExecutionTracker::clear();
+        RuleExecutionTracker::record_fire("rule1", "Active Rule");
+        RuleExecutionTracker::record_evaluation("rule2", "Dead Rule");
+        RuleExecutionTracker::record_evaluation("rule3", "Also Dead");
 
-        let dead = tracker.find_dead_rules();
+        let dead = RuleExecutionTracker::find_dead_rules();
         assert_eq!(dead.len(), 2);
         let rule_ids: Vec<&str> = dead.iter().map(|r| r.rule_id.as_str()).collect();
         assert!(rule_ids.contains(&"rule2"));
@@ -307,38 +319,40 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_find_truly_inactive_rules() {
-        let mut tracker = RuleExecutionTracker::new();
-        // Add a rule with 0 evaluations and 0 fires by directly manipulating internal state
-        tracker.rules.insert(
-            "rule1".to_string(),
-            DeadRuleInfo {
-                rule_id: "rule1".to_string(),
-                rule_name: "Evaluated Only".to_string(),
-                last_fired_at: None,
-                evaluation_count: 0,
-                fire_count: 0,
-                category: None,
-            },
-        );
-        // Fire rule2 which also records an evaluation (fire implies evaluation)
-        tracker.record_fire("rule2", "Active", "now");
+        // Semantic shift per D-04 / 26-RESEARCH.md Open Question 1: the old
+        // test inserted directly into the private `rules` HashMap to fabricate
+        // a "known but never evaluated, never fired" rule. Against a
+        // process-wide singleton, private-field manipulation is impossible —
+        // and a singleton cannot know about a rule it was never told about.
+        // "Truly inactive" therefore now means "recorded by the tracker but
+        // with evaluation_count == 0 AND fire_count == 0". In this fixture
+        // rule1 is recorded via record_evaluation (so evaluation_count == 1)
+        // and rule2 is recorded via record_fire (so fire_count == 1) —
+        // neither qualifies as truly inactive, so the result is empty.
+        RuleExecutionTracker::clear();
+        RuleExecutionTracker::record_evaluation("rule1", "Evaluated Only");
+        RuleExecutionTracker::record_fire("rule2", "Active");
 
-        let inactive = tracker.find_truly_inactive_rules();
-        assert_eq!(inactive.len(), 1);
-        assert_eq!(inactive[0].rule_id, "rule1");
+        let inactive = RuleExecutionTracker::find_truly_inactive_rules();
+        assert!(
+            inactive.is_empty(),
+            "no recorded rule should be truly inactive in this fixture (D-04 semantic shift)"
+        );
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_report_generation() {
-        let mut tracker = RuleExecutionTracker::new();
+        RuleExecutionTracker::clear();
         for i in 0..5 {
-            tracker.record_evaluation(format!("rule{}", i), format!("Rule {}", i));
+            RuleExecutionTracker::record_evaluation(format!("rule{}", i), format!("Rule {}", i));
         }
         // Make rule2 active
-        tracker.record_fire("rule2", "Active Rule", "now");
+        RuleExecutionTracker::record_fire("rule2", "Active Rule");
 
-        let report = DeadRuleReport::generate(&tracker);
+        let report = DeadRuleReport::generate();
 
         assert_eq!(report.total_rules, 5);
         assert_eq!(report.dead_rules.len(), 4);
@@ -346,10 +360,32 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_report_summary() {
-        let tracker = RuleExecutionTracker::new();
-        let report = DeadRuleReport::generate(&tracker);
+        RuleExecutionTracker::clear();
+        let report = DeadRuleReport::generate();
 
         assert!(report.summary().contains("No dead rules"));
+    }
+
+    /// Regression guard for Pitfall 6 / L-04: recording must happen once per
+    /// rule per execute call (from `evaluated_set`/`fired_set` outside the
+    /// inner nagram loop), NOT once per inner-loop iteration. Calling
+    /// `record_evaluation` twice with the same id simulates two execute
+    /// calls over the same rule — the singleton must yield
+    /// `evaluation_count == 2`, not the per-nagram inner-loop count.
+    #[test]
+    #[serial_test::serial]
+    fn test_once_per_rule() {
+        RuleExecutionTracker::clear();
+        RuleExecutionTracker::record_evaluation("r1", "R1");
+        RuleExecutionTracker::record_evaluation("r1", "R1");
+
+        let info = RuleExecutionTracker::get_rule_info("r1")
+            .expect("r1 should be tracked after two record_evaluation calls");
+        assert_eq!(
+            info.evaluation_count, 2,
+            "evaluation_count must reflect one record per execute call, not per inner-loop iteration (L-04 / Pitfall 6)"
+        );
     }
 }
