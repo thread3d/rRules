@@ -10,7 +10,7 @@ use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
 use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference, Nagram};
 
-use engine::monitoring::coverage::CoverageTracking;
+use crate::monitoring::coverage::CoverageTracking;
 
 /// Aggregation operations supported by LEAPS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

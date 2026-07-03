@@ -87,6 +87,24 @@ pub trait ExecutionEngine: Send + Sync + std::fmt::Debug {
     fn set_config(&mut self, _key: &str, _value: &str) -> Result<(), String> {
         Ok(())
     }
+
+    /// Loads a ruleset into the engine so `execute` can fire rules against
+    /// working memory. Default impl returns `Err` — engines that support
+    /// real evaluation override this (Plan 03 wires `ReteEngine`, Plan 06
+    /// wires the other three). This is the `RuleSet → engine` bridge (L-02,
+    /// Option (b)) that lets `POST /v1/execute` run a user's authored rules
+    /// instead of an empty network.
+    fn load_ruleset(&mut self, _rules: &crate::rules::RuleSet) -> Result<(), String> {
+        Err("load_ruleset not supported by this engine".into())
+    }
+
+    /// Returns the post-execution facts (working memory) so the API layer
+    /// can serialize `facts_after` from real engine state rather than
+    /// echoing the request input (Pitfall 11). Default impl returns an
+    /// empty `Vec` — engines that expose working memory override this.
+    fn get_facts(&self) -> Vec<crate::fact::Fact> {
+        Vec::new()
+    }
 }
 
 /// Result of engine execution.
@@ -98,6 +116,14 @@ pub struct EngineResult {
     pub rules_fired: usize,
     /// Execution message or error details
     pub message: String,
+    /// IDs of the rules that fired during this execution. Engines populate
+    /// this via field mutation after `EngineResult::success` constructs the
+    /// base value (the trait returns `EngineResult` by value and the engine
+    /// owns the mutation before returning). The API layer derives
+    /// `rules_not_fired` as the ruleset's rule ids minus this set. Empty for
+    /// the failure constructor and for the default `success` constructor
+    /// when the engine does not track ids yet.
+    pub fired_rule_ids: Vec<String>,
 }
 
 impl EngineResult {
@@ -107,6 +133,7 @@ impl EngineResult {
             success: true,
             rules_fired,
             message: format!("Executed {} rules", rules_fired),
+            fired_rule_ids: Vec::new(),
         }
     }
 
@@ -116,6 +143,7 @@ impl EngineResult {
             success: false,
             rules_fired: 0,
             message: message.into(),
+            fired_rule_ids: Vec::new(),
         }
     }
 

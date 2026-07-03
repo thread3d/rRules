@@ -9,7 +9,7 @@ use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
 use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference, Nagram};
 
-use engine::monitoring::coverage::CoverageTracking;
+use crate::monitoring::coverage::CoverageTracking;
 
 /// Cache entry with a generation timestamp for LRU ordering.
 #[derive(Debug, Clone)]

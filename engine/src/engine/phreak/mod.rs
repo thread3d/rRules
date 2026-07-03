@@ -9,7 +9,7 @@ use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
 use crate::engine::rete::NodeId;
 
-use engine::monitoring::coverage::CoverageTracking;
+use crate::monitoring::coverage::CoverageTracking;
 
 /// Nagram type (sequence of memory references forming a partial match)
 pub type Nagram = Vec<MemoryReference>;

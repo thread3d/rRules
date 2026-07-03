@@ -10,7 +10,7 @@ use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
 use std::collections::{HashMap, HashSet};
 
-use engine::monitoring::coverage::CoverageTracking;
+use crate::monitoring::coverage::CoverageTracking;
 
 /// A unique identifier for a fact in working memory.
 pub type FactId = String;
