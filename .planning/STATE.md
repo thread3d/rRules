@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Phase Details
 status: executing
-last_updated: "2026-07-03T08:50:32.000Z"
-last_activity: 2026-07-03 -- Phase 24 Wave 1 (24-02 ExecutionCounters foundation) complete
+last_updated: "2026-07-03T09:01:55.000Z"
+last_activity: 2026-07-03 -- Phase 24 Wave 2 (24-03 instrumentation) complete; Nyquist closure, all 3 plans done — verifying
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
   percent: 17
 ---
 
@@ -24,18 +24,18 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 ## Current Position
 
-Phase: 24 (execution-counters-metrics-broadcast) — EXECUTING
-Plan: 3 of 3 (24-01, 24-02 complete; 24-03 next)
-Plans: 6 (23-01..23-06) + 24-01 + 24-02 complete; 24-03 (Wave 2 instrumentation) next — turns the 4 remaining RED tests GREEN
-Status: Executing Phase 24 — Wave 1 complete
-Last activity: 2026-07-03 -- Phase 24 Wave 1 (24-02 ExecutionCounters foundation) complete; cargo check exit 0, 4 RED remain (response_includes_engine_generation flipped GREEN), 0 regressions, merged d8b31c469
+Phase: 24 (execution-counters-metrics-broadcast) — VERIFYING (all 3 plans complete)
+Plan: 3 of 3 (24-01, 24-02, 24-03 complete)
+Plans: 6 (23-01..23-06) + 24-01 + 24-02 + 24-03 complete — Phase 24 Nyquist closure achieved
+Status: Executing Phase 24 — Wave 2 complete; verification pending
+Last activity: 2026-07-03 -- Phase 24 Wave 2 (24-03 instrumentation) complete; Nyquist RED→GREEN closure (4 RED tests now GREEN), api 96/0, engine 241/0, merged 8833f5202; all 3 ROADMAP SC pass — gsd-verifier next
 
 ### Milestone v5.0 Phases
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
 | 23 | Execute evaluator + wiring | EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05 | complete |
-| 24 | Execution counters + metrics broadcast | MON-07 | not_started |
+| 24 | Execution counters + metrics broadcast | MON-07 | verifying |
 | 25 | Real reload + JobStore | DEPLOY-05, EXEC-03 | not_started |
 | 26 | RuleExecutionTracker singleton + dead-rule live data | MON-06 | not_started |
 | 27 | Stateful sessions | SESS-01 | not_started |
