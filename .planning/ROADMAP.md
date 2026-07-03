@@ -60,7 +60,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 <summary>📋 v5.0 Live Execution (Phases 23–28) — IN PROGRESS</summary>
 
 - [x] **Phase 23: Execute evaluator + wiring** — Fix the v3.0 engine import bug, build a minimal real rule evaluator on `ReteEngine`, and route `/v1/execute` through `EngineRegistry`; factory shared, engine instance per request (completed 2026-07-03)
-- [ ] **Phase 24: Execution counters + metrics broadcast** — `ExecutionCounters` + Prometheus promote + WS broadcast; dashboards go live
+- [x] **Phase 24: Execution counters + metrics broadcast** — `ExecutionCounters` + Prometheus promote + WS broadcast; dashboards go live (completed 2026-07-03)
 - [ ] **Phase 25: Real reload + JobStore** — Shared reloadable `RuleSet` snapshot; async reload writes `ReloadJob`; batch inherits real execution
 - [ ] **Phase 26: RuleExecutionTracker singleton + dead-rule live data** — Singleton-ize tracker; dead-rules reads live firings; pin with e2e test
 - [ ] **Phase 27: Stateful sessions** — `SessionManager` (DashMap, TTL, LRU, sweep); stateful `/v1/execute/session/{id}` endpoints
@@ -147,7 +147,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 2. The WebSocket monitoring channel emits an `EngineState` snapshot reflecting the most-recent execute (non-zero counters after a run)
 3. The existing frontend Engine/Coverage/DeadRule dashboards render live (non-hardcoded) numbers after a run with no frontend code changes
 
-**Plans:** 3 plans
+**Plans:** 3/3 plans complete
 **Wave 1**
 
 - [x] 24-01-PLAN.md — Wave 0 RED test scaffolds: counters_exposed_in_metrics, counters_increment_per_request, response_includes_engine_generation (execute_integration.rs); broadcasts_snapshot_after_execute (metrics_ws.rs); metrics_prometheus_text_format assertion update (metrics_integration.rs) — COMPLETE 2026-07-03 (5 expected RED failures, build green, merged cd433b08a)
@@ -294,7 +294,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 21. Deployment & CI/CD | v4.0 | — | Complete | 2026-07-02 |
 | 22. Frontend Integration Closure | v4.0 | 6/6 | Complete (verified PASS) | 2026-07-02 |
 | 23. Execute evaluator + wiring | v5.0 | 6/6 | Complete    | 2026-07-03 |
-| 24. Execution counters + metrics broadcast | v5.0 | 3/3 | Verifying | - |
+| 24. Execution counters + metrics broadcast | v5.0 | 3/3 | Complete    | 2026-07-03 |
 | 25. Real reload + JobStore | v5.0 | 0/? | Not started | - |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 0/? | Not started | - |
 | 27. Stateful sessions | v5.0 | 0/? | Not started | - |

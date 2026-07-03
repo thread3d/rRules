@@ -2,15 +2,19 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Phase Details
+current_phase: 25
+current_phase_name: Real reload + JobStore
 status: executing
-last_updated: "2026-07-03T09:01:55.000Z"
-last_activity: 2026-07-03 -- Phase 24 Wave 2 (24-03 instrumentation) complete; Nyquist closure, all 3 plans done — verifying
+stopped_at: Completed 23-04-PLAN.md (MetricsSnapshot rename + Wave 0 RED scaffolds)
+last_updated: "2026-07-03T09:07:50.601Z"
+last_activity: 2026-07-03
+last_activity_desc: Phase 24 complete, transitioned to Phase 25
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
   completed_plans: 9
-  percent: 17
+  percent: 33
 ---
 
 # Project State
@@ -20,22 +24,22 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** Phase 24 — execution-counters-metrics-broadcast
+**Current focus:** Phase 25 — Real reload + JobStore (Phase 24 complete & verified 2026-07-03)
 
 ## Current Position
 
-Phase: 24 (execution-counters-metrics-broadcast) — VERIFYING (all 3 plans complete)
-Plan: 3 of 3 (24-01, 24-02, 24-03 complete)
-Plans: 6 (23-01..23-06) + 24-01 + 24-02 + 24-03 complete — Phase 24 Nyquist closure achieved
-Status: Executing Phase 24 — Wave 2 complete; verification pending
-Last activity: 2026-07-03 -- Phase 24 Wave 2 (24-03 instrumentation) complete; Nyquist RED→GREEN closure (4 RED tests now GREEN), api 96/0, engine 241/0, merged 8833f5202; all 3 ROADMAP SC pass — gsd-verifier next
+Phase: 25 — Real reload + JobStore
+Plan: Not started (next: /gsd-discuss-phase 25 or /gsd-plan-phase 25)
+Plans: 6 (23-01..23-06) + 24-01 + 24-02 + 24-03 complete — Phase 24 Nyquist closure achieved (verified PASS)
+Status: Phase 24 complete (verified PASS 2026-07-03, MON-07 met, SC-1/SC-2/SC-3 pass); Phase 25 not started
+Last activity: 2026-07-03 — Phase 24 complete, transitioned to Phase 25
 
 ### Milestone v5.0 Phases
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
 | 23 | Execute evaluator + wiring | EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05 | complete |
-| 24 | Execution counters + metrics broadcast | MON-07 | verifying |
+| 24 | Execution counters + metrics broadcast | MON-07 | complete |
 | 25 | Real reload + JobStore | DEPLOY-05, EXEC-03 | not_started |
 | 26 | RuleExecutionTracker singleton + dead-rule live data | MON-06 | not_started |
 | 27 | Stateful sessions | SESS-01 | not_started |

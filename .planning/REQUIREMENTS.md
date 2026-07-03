@@ -14,7 +14,7 @@ Populated during roadmap creation. Each requirement maps to exactly one phase (P
 | DEPLOY-05 | Phase 25 | Pending |
 | MON-05 | Phase 23 | Complete |
 | MON-06 | Phase 26 | Pending |
-| MON-07 | Phase 24 | Pending |
+| MON-07 | Phase 24 | Complete |
 | FRONTEND-03 | Phase 28 | Pending |
 | FRONTEND-04 | Phase 28 | Pending |
 
