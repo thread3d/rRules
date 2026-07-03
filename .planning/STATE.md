@@ -25,9 +25,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 ## Current Position
 
 Phase: 26
-Plan: Not started
-Plans: 6 (23-01..23-06) + 24-01 + 24-02 + 24-03 complete — Phase 24 Nyquist closure achieved (verified PASS)
-Status: Ready to plan
+Plan: 26-01, 26-02 (2 plans — verified PASS by gsd-plan-checker after -x blocker fix)
+Plans: 26-01 (singleton + unit tests, Wave 1) + 26-02 (recording at both evaluator sites + endpoint rewrite + e2e keystone, Wave 2) — MON-06 covered, C1/C4 honored
+Status: Ready to execute
 Last activity: 2026-07-03
 
 ### Milestone v5.0 Phases
@@ -37,7 +37,7 @@ Last activity: 2026-07-03
 | 23 | Execute evaluator + wiring | EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05 | complete |
 | 24 | Execution counters + metrics broadcast | MON-07 | complete |
 | 25 | Real reload + JobStore | DEPLOY-05, EXEC-03 | not_started |
-| 26 | RuleExecutionTracker singleton + dead-rule live data | MON-06 | not_started |
+| 26 | RuleExecutionTracker singleton + dead-rule live data | MON-06 | planned |
 | 27 | Stateful sessions | SESS-01 | not_started |
 | 28 | Frontend test-runner | FRONTEND-03, FRONTEND-04, EXEC-04 | not_started |
 
@@ -263,9 +263,9 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-**Resume file:** .planning/phases/26-ruleexecutiontracker-singleton-dead-rule-live-data/26-CONTEXT.md
+**Resume file:** .planning/phases/26-ruleexecutiontracker-singleton-dead-rule-live-data/26-02-PLAN.md
 
-**Stopped at:** Phase 26 context gathered
+**Stopped at:** Phase 26 planning complete — 2 plans verified PASS, ready to execute
 
 Last session: 2026-07-03T15:19:38.780Z
 Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13 requirements partial; user chose to close inline via new frontend-wiring phase.

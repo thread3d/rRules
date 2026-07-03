@@ -396,10 +396,10 @@ All three derive from `fired_set`. `CoverageTracking` is the canonical record (D
 
 All other claims are `[VERIFIED: live code]` with file:line evidence.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **`find_truly_inactive_rules` test migration** — the existing test (`detection.rs:311`) directly manipulates the private `rules` field, which is impossible against a singleton. Planner must decide: rewrite to public API (`record_evaluation` only, no `record_fire`), or add a `#[cfg(test)]` test-only constructor that exposes field manipulation. Recommendation: rewrite to public API — the test's intent (a rule with 0 evals + 0 fires is "truly inactive") is expressible as "never call `record_evaluation` or `record_fire` for that id, then call `find_truly_inactive_rules`" — but the singleton only knows about rules it has been told about, so this test may need to assert behavior for a rule that was never recorded. Planner should clarify whether `find_truly_inactive_rules` is still meaningful under the singleton model (it can only find rules that were `record_evaluation`-ed but never `record_fire`-d).
-2. **`set_rule_category` wiring** — `detection.rs:116` has a `set_rule_category` method but no call site feeds it. Phase 26 does not need to wire it (the keystone doesn't assert on `category`), but the planner should decide whether to keep it on the singleton API or mark it unused.
+1. **`find_truly_inactive_rules` test migration** — RESOLVED: Plan 26-01 Task 1 rewrites the test to the public API under the singleton model (record_evaluation only, no private-field manipulation). — the existing test (`detection.rs:311`) directly manipulates the private `rules` field, which is impossible against a singleton. Planner must decide: rewrite to public API (`record_evaluation` only, no `record_fire`), or add a `#[cfg(test)]` test-only constructor that exposes field manipulation. Recommendation: rewrite to public API — the test's intent (a rule with 0 evals + 0 fires is "truly inactive") is expressible as "never call `record_evaluation` or `record_fire` for that id, then call `find_truly_inactive_rules`" — but the singleton only knows about rules it has been told about, so this test may need to assert behavior for a rule that was never recorded. Planner should clarify whether `find_truly_inactive_rules` is still meaningful under the singleton model (it can only find rules that were `record_evaluation`-ed but never `record_fire`-d).
+2. **`set_rule_category` wiring** — `detection.rs:116` has a `set_rule_category` method but no call site feeds it. RESOLVED: Plan 26-01 Task 2 keeps `set_rule_category` on the singleton API (retained, unused — the keystone does not assert on `category`).
 
 ## Environment Availability
 
