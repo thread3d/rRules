@@ -5,16 +5,16 @@ milestone_name: Phase Details
 current_phase: 23
 current_phase_name: execute-evaluator-wiring
 status: executing
-stopped_at: Completed 23-02-PLAN.md (Expression AST + full Condition matching)
-last_updated: "2026-07-03T06:35:28.043Z"
+stopped_at: Completed 23-03-PLAN.md (ReteEngine direct evaluator keystone)
+last_updated: "2026-07-03T06:51:19.580Z"
 last_activity: 2026-07-03
-last_activity_desc: Phase 23 plan 02 complete
+last_activity_desc: Phase 23 plan 03 complete
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 6
-  completed_plans: 2
-  percent: 33
+  completed_plans: 3
+  percent: 50
 ---
 
 # Project State
@@ -229,6 +229,9 @@ From v2.0 milestone:
 - [Phase ?]: Phase 23-01: Extended EngineResult with pub fired_rule_ids: Vec<String> field (RESEARCH Open Q#5) rather than a trait method.
 - [Phase ?]: Phase 23-01: Registered all four engine factories under static cfg gates (D-01) — available_engines() truthfully returns rete/treat/leaps/phreak. load_ruleset/get_facts default impls return Err/empty; engines override in Plan 03 (Rete) and Plan 06 (others).
 - [Phase ?]: Phase 23-02: Built Expression AST (D-06) + rewrote Condition::evaluate (D-05) with shared compare_values helper; Action::UpdateFact.fields now HashMap<String, Expression>; Condition::Pattern gained op field with real matching.
+- [Phase ?]: Phase 23-03: Rewrote ReteEngine::execute_rules into a real direct evaluator (D-04) with fixpoint cap (D-07); keystone score+10 scenario passes at engine level.
+- [Phase ?]: Phase 23-03: Pitfall 6 fixed — fired/evaluated ids in HashSet, record_rule_fire/record_rule_eval once per rule after the fixpoint loop; stale per-nagram record removed.
+- [Phase ?]: Phase 23-03: Action::UpdateFact.id matched as fact_type_id with exact-key fast path; each rule fires at most once per execute() (fired_set guard).
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -256,11 +259,11 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-**Resume file:** .planning/phases/23-execute-evaluator-wiring/23-03-PLAN.md
+**Resume file:** .planning/phases/23-execute-evaluator-wiring/23-04-PLAN.md
 
-**Stopped at:** Completed 23-02-PLAN.md (Expression AST + full Condition matching)
+**Stopped at:** Completed 23-03-PLAN.md (ReteEngine direct evaluator keystone)
 
-Last session: 2026-07-03T06:34:26.610Z
+Last session: 2026-07-03T06:51:19.568Z
 Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13 requirements partial; user chose to close inline via new frontend-wiring phase.
 
 **Completed Phases:**
@@ -291,3 +294,4 @@ Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13
 |-------|------|----------|-------|
 | Phase 23 P01 | 4min | 2 tasks | 6 files |
 | Phase 23 P02 | 10min | 2 tasks | 4 files |
+| Phase 23 P03 | 7min | 2 tasks | 2 files |
