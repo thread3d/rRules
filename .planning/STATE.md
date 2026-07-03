@@ -4,9 +4,9 @@ milestone: v5.0
 milestone_name: Phase Details
 current_phase: 24
 current_phase_name: Execution counters + metrics broadcast
-status: verifying
+status: executing
 stopped_at: Completed 23-04-PLAN.md (MetricsSnapshot rename + Wave 0 RED scaffolds)
-last_updated: "2026-07-03T07:53:25.186Z"
+last_updated: "2026-07-03T08:17:52.276Z"
 last_activity: 2026-07-03
 last_activity_desc: Phase 23 complete, transitioned to Phase 24
 progress:
@@ -30,7 +30,7 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 Phase: 24 — Execution counters + metrics broadcast
 Plans: 6 (23-01..23-06) across 3 waves — all complete
-Status: Phase 23 complete — ready for verifier
+Status: Ready to execute
 Last activity: 2026-07-03 — Phase 23 complete, transitioned to Phase 24
 
 ### Milestone v5.0 Phases

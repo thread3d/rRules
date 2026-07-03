@@ -148,9 +148,13 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 3. The existing frontend Engine/Coverage/DeadRule dashboards render live (non-hardcoded) numbers after a run with no frontend code changes
 
 **Plans:** 3 plans
+**Wave 1**
 
 - [ ] 24-01-PLAN.md — Wave 0 RED test scaffolds: counters_exposed_in_metrics, counters_increment_per_request, response_includes_engine_generation (execute_integration.rs); broadcasts_snapshot_after_execute (metrics_ws.rs); metrics_prometheus_text_format assertion update (metrics_integration.rs)
 - [ ] 24-02-PLAN.md — Wave 1 Foundation: ExecutionCounters struct + dedicated prometheus Registry + labeled counters/histogram (exponential_buckets 0.001..4s) + Default impl; prometheus = { workspace = true } in api/Cargo.toml; ExecuteResponse.engine_generation: u64 (#[serde(default)], 0); main.rs web::Data wiring
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 24-03-PLAN.md — Wave 2 Instrumentation: execute_single timing + counter increment + MetricsSnapshot broadcast after web::block (Pitfall 24-B/C); metrics_endpoint TextEncoder rewrite; handler signature changes + test app_data injection; turns all Wave 0 RED tests GREEN
 
 ### Phase 25: Real reload + JobStore

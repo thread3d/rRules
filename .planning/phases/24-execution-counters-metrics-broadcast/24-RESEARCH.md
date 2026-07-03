@@ -309,15 +309,22 @@ Each ROADMAP success criterion maps to one observable check. The Nyquist dimensi
 ### Validation Notes
 - **SC-3 (frontend, no changes):** This is structurally provable without a browser test. The proof is: (1) `frontend/src/hooks/useEngineMetrics.ts:4-11` `EngineState` interface field set = {engine_name, rules_fired, facts_inserted, active_sessions, memory_bytes, last_updated}; (2) `api/src/metrics.rs:16-23` `MetricsSnapshot` struct field set = the same six; (3) the WS `onmessage` handler at `useEngineMetrics.ts:135-150` reads those fields by name. Therefore broadcasting a populated `MetricsSnapshot` renders live numbers with no frontend change. The planner should record this structural proof in the plan and treat the manual "open the dashboard" check as a single verify-phase observation, not a Wave 0 test.
 
-## Open Questions / Flags
+## Open Questions (RESOLVED)
 
 1. **Histogram bucket boundaries.** Proposed: `prometheus::exponential_buckets(0.001, 2.0, 12)` → 1ms, 2ms, 4ms … ~4s. The ReteEngine direct evaluator is sub-millisecond for small rulesets, so the first bucket captures the common case; the upper bound covers pathological fixpoint runs. Planner to confirm or tune.
+   **RESOLVED:** `exponential_buckets(0.001, 2.0, 12)` adopted — confirmed in 24-02 T1 action + acceptance-criteria grep.
 2. **`metrics_prometheus_text_format` test fate.** Does Phase 24 (a) keep a fallback `engine_rules_fired 0` line appended after the `TextEncoder` output so the existing assertion stays GREEN untouched, or (b) update the test to assert `rrules_execute_requests_total`? Recommend (b) — it's the Phase 24 keystone metric and the test exists to prove exposition format, not a specific metric name. Planner to pick.
+   **RESOLVED:** Option (b) — 24-01 T2 updates the assertion to `rrules_execute_requests_total`; 24-03 T2 removes the hardcoded `engine_rules_fired` text.
 3. **`MetricsSnapshot.active_sessions` / `memory_bytes`.** Phase 24 sets both to `0` (Phase 27 populates `active_sessions` from the `SessionManager`; `memory_bytes` is out-of-scope for v5.0). The frontend already tolerates `0` for both (verified at `useEngineMetrics.ts:148` — `executionTimeMs: 0` is the analogous "not provided" case). Confirm `0` is acceptable for the WS snapshot in Phase 24.
+   **RESOLVED:** Both ship as `0` in Phase 24 — confirmed in 24-03 T1 (`active_sessions: 0, memory_bytes: 0`); Phase 27 populates `active_sessions`.
 4. **Dedicated `Registry` vs default.** Recommend a dedicated `prometheus::Registry::new()` for the api-layer counters (Pitfall 24-A). The cost is the `metrics_endpoint` must `gather()` from that specific registry, not the default. Planner to confirm.
+   **RESOLVED:** Dedicated `prometheus::Registry::new()` — confirmed in 24-02 T1 action + acceptance criteria (Pitfall 24-A mitigation).
 5. **Where to increment counters relative to `spawn_blocking`.** Researched recommendation: increment AFTER `web::block` returns, in the async context (not inside the closure) — see Implementation Approach D3. Planner to confirm this is the chosen shape.
+   **RESOLVED:** Increment AFTER `web::block` returns (async context) — confirmed in 24-03 T1 (Pitfall 24-B mitigation).
 6. **`engine_generation` source for Phase 24.** Phase 24 ships the field as `0` always. The real generation counter is Phase 25's scope (D-25 on the shared `Arc<RwLock<RuleSet>>`). `ReteEngine.generation` exists at `engine/src/engine/rete/mod.rs:23` but is never incremented and is per-engine-instance (not shared), so it is NOT the source for Phase 24. Confirm `0` is the Phase 24 value.
+   **RESOLVED:** `engine_generation: 0` always in Phase 24 — confirmed in 24-02 T1 (`#[serde(default)] engine_generation: u64`, both response sites set `0u64`); Phase 25 wires the real counter.
 7. **`metrics_endpoint` signature change.** Adding `counters: web::Data<ExecutionCounters>` to the `metrics_endpoint` handler (`api/src/metrics.rs:172`) means every test that calls `/metrics` must inject the counters app_data. The existing `metrics_integration.rs:44` test (`test::init_service(App::new().configure(configure_metrics))`) does NOT inject counters — it will fail to extract. Planner must update those tests to inject `ExecutionCounters` (or provide a `Default` impl + `web::Data::default()`). Flag for the plan.
+   **RESOLVED:** `Default` impl provided + tests inject `ExecutionCounters::default()` app_data — confirmed in 24-02 T1 (`Default` impl) and 24-03 T3 (all test Apps inject counters).
 
 ## File Impact
 
