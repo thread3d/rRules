@@ -8,8 +8,9 @@ use std::path::Path;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use engine::engine::{EngineRegistry, EngineSelector};
 use engine::environment::EngineBuilder;
-use engine::WorkingMemory;
+use engine::rules::RuleSet;
 
 /// Request for rule execution
 #[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
@@ -20,6 +21,12 @@ pub struct ExecuteRequest {
     pub facts: HashMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_filter: Option<RuleFilter>,
+    /// Engine name override (ENGINE-07/08). When omitted, resolves to
+    /// `RRULES_DEFAULT_ENGINE` (default `"rete"`). Unknown names return
+    /// HTTP 400. Validation uses `EngineRegistry::available_engines()` —
+    /// NOT `EngineSelector::select_engine` (which takes `&mut self`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
 }
 
 /// Filter for selecting which rules to execute
@@ -301,45 +308,166 @@ pub struct BatchExecuteResponse {
     pub failed: usize,
 }
 
-/// Core single-request execution logic. Extracted so batch execution can reuse
-/// it concurrently without duplicating the engine/working-memory wiring.
+/// Core single-request execution logic (Plan 23-05 rewrite). Extracted so
+/// batch execution can reuse it concurrently without duplicating the
+/// engine/working-memory wiring.
 ///
-/// NOTE: execution is currently a stub — `rules_fired` is hardcoded to `0`
-/// because the engine is built into `let _engine` (never driven). Wiring real
-/// rule firing is a separate future milestone and out of scope for v4.0
-/// hardening. The batch endpoint layers real concurrency (Semaphore + JoinSet)
-/// on top of this stub.
-pub async fn execute_single(req: ExecuteRequest) -> ExecuteResponse {
+/// Per-request isolation (Pitfall 1 / Pitfall 9): a fresh `Box<dyn
+/// ExecutionEngine>` is constructed from the shared `EngineRegistry` for EACH
+/// call and moved into `web::block`. No `&mut` engine crosses a request
+/// boundary — the shared `EngineState.engine` write lock is NEVER taken in
+/// this path. The shared `Arc<RwLock<RuleSet>>` is acquired read-only to load
+/// the ruleset snapshot, then released before execution.
+///
+/// `facts_after` is serialized from post-execution working memory via
+/// `engine.get_facts()` + the reverse `engine_value_to_json` mapping (D-08 /
+/// Pitfall 11) — NEVER by echoing the request input JSON. `rules_not_fired`
+/// is the shared ruleset's rule ids minus `EngineResult.fired_rule_ids`.
+/// `inference_trace` remains `None` (L-04 — Phase 28 populates it).
+pub async fn execute_single(
+    req: ExecuteRequest,
+    registry: web::Data<EngineRegistry>,
+    selector: web::Data<EngineSelector>,
+    ruleset: web::Data<Arc<std::sync::RwLock<RuleSet>>>,
+) -> Result<ExecuteResponse, HttpResponse> {
     let execution_id = Uuid::new_v4().to_string();
-    let start_time = std::time::Instant::now();
 
-    let _engine = EngineBuilder::new().build();
-    let _working_memory = WorkingMemory::new();
+    // 1. Resolve engine name: request override > RRULES_DEFAULT_ENGINE env >
+    //    selector.current_engine() (set once at startup). The env var is the
+    //    source of truth for per-request default resolution when the request
+    //    omits the engine field (ENGINE-08).
+    let engine_name = req.engine.clone().unwrap_or_else(|| {
+        std::env::var("RRULES_DEFAULT_ENGINE")
+            .unwrap_or_else(|_| selector.current_engine().to_string())
+    });
 
-    let mut facts_after: HashMap<String, serde_json::Value> = HashMap::new();
+    // 2. Validate the engine param against registered factories (ENGINE-07).
+    //    Do NOT call selector.select_engine (it takes &mut self).
+    let available = registry.available_engines();
+    if !available.iter().any(|name| *name == engine_name.as_str()) {
+        return Err(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": format!("unknown engine: {}", engine_name)
+        })));
+    }
 
+    // 3. Build a fresh per-request engine (Pitfall 1 / Pitfall 9: ReteEngine
+    //    is not Clone; construct a new Box<dyn ExecutionEngine> per request).
+    let mut engine = match registry.create_engine_by_name(&engine_name) {
+        Some(Ok(engine)) => engine,
+        Some(Err(e)) => {
+            return Err(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("engine creation failed: {}", e)
+            })))
+        }
+        None => {
+            return Err(HttpResponse::BadRequest().json(serde_json::json!({
+                "error": format!("unknown engine: {}", engine_name)
+            })))
+        }
+    };
+
+    // 4. Load the shared ruleset (read-only guard) and collect rule ids for
+    //    rules_not_fired computation. The guard is dropped before execution
+    //    so no lock spans the CPU-bound engine.execute() call.
+    let all_rule_ids: Vec<String> = {
+        let guard = ruleset.read().map_err(|e| {
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("ruleset lock poisoned: {}", e)
+            }))
+        })?;
+        engine
+            .load_ruleset(&guard)
+            .map_err(|e| {
+                HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": format!("load_ruleset failed: {}", e)
+                }))
+            })?;
+        guard.rules.iter().map(|r| r.id.clone()).collect()
+    };
+
+    // 5. Insert request facts (convert JSON → engine::Value → Fact). Only
+    //    JSON object facts carry a field payload (matches the keystone
+    //    `{scorecard: {score: 0}}` shape); non-object values are skipped.
     for (fact_type, fact_value) in &req.facts {
         if let serde_json::Value::Object(fields) = fact_value.clone() {
             let mut payload = HashMap::new();
             for (key, value) in fields {
                 payload.insert(key, json_to_engine_value(value));
             }
-            facts_after.insert(fact_type.clone(), fact_value.clone());
+            let fact = engine::fact::Fact::new(fact_type.clone(), payload);
+            engine.insert_fact(fact).map_err(|e| {
+                HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": format!("insert_fact failed: {}", e)
+                }))
+            })?;
         }
     }
 
-    let rules_fired = 0;
-    let rules_not_fired: Vec<String> = Vec::new();
+    // 6. Execute inside web::block (CPU-bound — Pitfall 1 / per-request
+    //    isolation). The engine is moved into the closure so no shared &mut
+    //    exists across requests. Return both the EngineResult and the
+    //    post-execution facts so facts_after is serialized from real working
+    //    memory (Pitfall 11) — NOT from the echoed request input.
+    let (engine_result, post_facts) = match web::block(move || {
+        let result = engine.execute();
+        let facts = engine.get_facts();
+        (result, facts)
+    })
+    .await
+    {
+        Ok(pair) => pair,
+        Err(e) => {
+            return Err(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("engine execution panicked: {}", e)
+            })))
+        }
+    };
 
-    let _duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+    // 7. Serialize facts_after from post-execution working memory via the
+    //    reverse engine_value_to_json mapping (D-08 / Pitfall 11). Group by
+    //    fact_type_id; if multiple facts share a type, merge payloads into
+    //    one object (matches the existing { fact_type: json_value } shape).
+    let mut facts_after: HashMap<String, serde_json::Value> = HashMap::new();
+    for fact in post_facts {
+        let obj: serde_json::Map<String, serde_json::Value> = fact
+            .payload
+            .into_iter()
+            .map(|(k, v)| (k, engine_value_to_json(v)))
+            .collect();
+        let fact_json = serde_json::Value::Object(obj);
+        facts_after
+            .entry(fact.fact_type_id)
+            .and_modify(|existing| {
+                if let serde_json::Value::Object(existing_map) = existing {
+                    if let serde_json::Value::Object(new_map) = &fact_json {
+                        for (k, v) in new_map {
+                            existing_map.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+            })
+            .or_insert(fact_json);
+    }
 
-    ExecuteResponse {
+    // 8. Compute rules_not_fired = shared ruleset rule ids - fired_rule_ids.
+    let fired_set: std::collections::HashSet<String> = engine_result
+        .fired_rule_ids
+        .iter()
+        .cloned()
+        .collect();
+    let rules_not_fired: Vec<String> = all_rule_ids
+        .iter()
+        .filter(|id| !fired_set.contains(*id))
+        .cloned()
+        .collect();
+
+    Ok(ExecuteResponse {
         execution_id,
-        rules_fired,
+        rules_fired: engine_result.rules_fired,
         rules_not_fired,
         facts_after,
         inference_trace: None,
-    }
+    })
 }
 
 /// Execute rules - POST /v1/execute
@@ -350,18 +478,30 @@ pub async fn execute_single(req: ExecuteRequest) -> ExecuteResponse {
     request_body = ExecuteRequest,
     responses(
         (status = 200, description = "Rules executed successfully", body = ExecuteResponse),
+        (status = 400, description = "Unknown engine name"),
     ),
 )]
-pub async fn execute_rules(req: web::Json<ExecuteRequest>) -> impl Responder {
-    HttpResponse::Ok().json(execute_single(req.into_inner()).await)
+pub async fn execute_rules(
+    req: web::Json<ExecuteRequest>,
+    registry: web::Data<EngineRegistry>,
+    selector: web::Data<EngineSelector>,
+    ruleset: web::Data<Arc<std::sync::RwLock<RuleSet>>>,
+) -> impl Responder {
+    match execute_single(req.into_inner(), registry, selector, ruleset).await {
+        Ok(resp) => HttpResponse::Ok().json(resp),
+        Err(err) => err,
+    }
 }
 
 /// Execute multiple rule sets concurrently - POST /v1/rules/batch-execute
 ///
 /// Runs each request in its own task, bounded by a semaphore. One failing
 /// request does not fail the batch — failures are reported per-item. There are
-/// no shared locks between requests: `execute_single` is self-contained (each
-/// task builds its own engine + working memory).
+/// no shared locks between requests: `execute_single` builds its own engine +
+/// working memory per request (Pitfall 1). The shared `web::Data` handles are
+/// cloned into each task (Arc-under-the-hood, cheap) so every task constructs
+/// an independent engine from the shared registry and reads the shared
+/// ruleset snapshot.
 #[utoipa::path(
     post,
     path = "/v1/rules/batch-execute",
@@ -371,7 +511,12 @@ pub async fn execute_rules(req: web::Json<ExecuteRequest>) -> impl Responder {
         (status = 200, description = "Batch executed successfully", body = BatchExecuteResponse),
     ),
 )]
-pub async fn batch_execute_rules(req: web::Json<BatchExecuteRequest>) -> impl Responder {
+pub async fn batch_execute_rules(
+    req: web::Json<BatchExecuteRequest>,
+    registry: web::Data<EngineRegistry>,
+    selector: web::Data<EngineSelector>,
+    ruleset: web::Data<Arc<std::sync::RwLock<RuleSet>>>,
+) -> impl Responder {
     let inner = req.into_inner();
     let max_concurrency = inner.max_concurrency.unwrap_or(8).max(1);
     let requests = inner.requests;
@@ -381,6 +526,9 @@ pub async fn batch_execute_rules(req: web::Json<BatchExecuteRequest>) -> impl Re
 
     for request in requests {
         let permit_sem = semaphore.clone();
+        let registry = registry.clone();
+        let selector = selector.clone();
+        let ruleset = ruleset.clone();
         join_set.spawn(async move {
             // Acquire a concurrency permit before running. The semaphore is
             // never explicitly closed, so this only errors if the runtime shuts
@@ -390,7 +538,19 @@ pub async fn batch_execute_rules(req: web::Json<BatchExecuteRequest>) -> impl Re
                 .acquire_owned()
                 .await
                 .expect("batch semaphore closed unexpectedly");
-            execute_single(request).await
+            // Each task builds its own engine via execute_single — no shared
+            // &mut engine across requests (Pitfall 1). On error, report a
+            // zero-fired placeholder so the per-item failure is surfaced.
+            match execute_single(request, registry, selector, ruleset).await {
+                Ok(resp) => resp,
+                Err(_) => ExecuteResponse {
+                    execution_id: Uuid::new_v4().to_string(),
+                    rules_fired: 0,
+                    rules_not_fired: Vec::new(),
+                    facts_after: HashMap::new(),
+                    inference_trace: None,
+                },
+            }
         });
     }
 
@@ -553,6 +713,32 @@ fn json_to_engine_value(value: serde_json::Value) -> engine::Value {
                 .map(|(k, v)| (k, json_to_engine_value(v)))
                 .collect();
             engine::Value::Object(map)
+        }
+    }
+}
+
+/// Reverse of `json_to_engine_value` (D-08 / Pitfall 11). Serializes
+/// post-execution `engine::Value`s (read from `engine.get_facts()`) back into
+/// `serde_json::Value` so `facts_after` reflects real working memory rather
+/// than the echoed request input. Inverts arm-by-arm; `DateTime` serializes
+/// to an RFC3339-ish string (no native JSON datetime).
+fn engine_value_to_json(value: engine::Value) -> serde_json::Value {
+    match value {
+        engine::Value::Null => serde_json::Value::Null,
+        engine::Value::Bool(b) => serde_json::Value::Bool(b),
+        engine::Value::Integer(i) => serde_json::json!(i),
+        engine::Value::Float(f) => serde_json::json!(f),
+        engine::Value::String(s) => serde_json::Value::String(s),
+        engine::Value::DateTime(dt) => serde_json::Value::String(dt.to_string()),
+        engine::Value::Array(arr) => serde_json::Value::Array(
+            arr.into_iter().map(engine_value_to_json).collect(),
+        ),
+        engine::Value::Object(map) => {
+            let obj: serde_json::Map<String, serde_json::Value> = map
+                .into_iter()
+                .map(|(k, v)| (k, engine_value_to_json(v)))
+                .collect();
+            serde_json::Value::Object(obj)
         }
     }
 }
