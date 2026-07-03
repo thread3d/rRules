@@ -2,18 +2,14 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Phase Details
-current_phase: 24
-current_phase_name: Execution counters + metrics broadcast
 status: executing
-stopped_at: Completed 23-04-PLAN.md (MetricsSnapshot rename + Wave 0 RED scaffolds)
-last_updated: "2026-07-03T08:17:52.276Z"
-last_activity: 2026-07-03
-last_activity_desc: Phase 23 complete, transitioned to Phase 24
+last_updated: "2026-07-03T08:42:49.000Z"
+last_activity: 2026-07-03 -- Phase 24 Wave 0 (24-01 RED scaffolds) complete
 progress:
   total_phases: 6
   completed_phases: 1
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 9
+  completed_plans: 7
   percent: 17
 ---
 
@@ -24,14 +20,15 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** Phase 23 — execute-evaluator-wiring
+**Current focus:** Phase 24 — execution-counters-metrics-broadcast
 
 ## Current Position
 
-Phase: 24 — Execution counters + metrics broadcast
-Plans: 6 (23-01..23-06) across 3 waves — all complete
-Status: Ready to execute
-Last activity: 2026-07-03 — Phase 23 complete, transitioned to Phase 24
+Phase: 24 (execution-counters-metrics-broadcast) — EXECUTING
+Plan: 2 of 3 (24-01 complete)
+Plans: 6 (23-01..23-06) + 24-01 complete; 24-02 (Wave 1) next; 24-03 (Wave 2) pending
+Status: Executing Phase 24 — Wave 0 complete
+Last activity: 2026-07-03 -- Phase 24 Wave 0 (24-01 RED scaffolds) complete; 5 expected RED failures, build green, merged cd433b08a
 
 ### Milestone v5.0 Phases
 
