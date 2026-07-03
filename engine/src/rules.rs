@@ -155,31 +155,54 @@ pub enum ComparisonOp {
 }
 
 impl Condition {
-    /// Evaluates the condition against facts.
-    pub fn evaluate(&self, _facts: &[&crate::fact::Fact]) -> bool {
+    /// Evaluates the condition against the supplied fact slice.
+    ///
+    /// Full `ComparisonOp` coverage (D-05): `Compare` resolves each side via
+    /// `to_value` and applies the shared `compare_values` helper across the
+    /// Integer/Float/String/Boolean/Null type matrix. `Pattern` performs real
+    /// matching — it filters `facts` by `fact_type_id`, reads the named
+    /// `field` from each matching fact's payload, and returns true if any
+    /// matching fact's field value satisfies `op` against `value`. A `Pattern`
+    /// with no matching fact type returns `false` (T-23-04 mitigation — never
+    /// returns unconditionally true).
+    pub fn evaluate(&self, facts: &[&crate::fact::Fact]) -> bool {
         match self {
             Condition::True => true,
             Condition::False => false,
-            Condition::And(conditions) => conditions.iter().all(|c| c.evaluate(_facts)),
-            Condition::Or(conditions) => conditions.iter().any(|c| c.evaluate(_facts)),
-            Condition::Not(condition) => !condition.evaluate(_facts),
+            Condition::And(conditions) => conditions.iter().all(|c| c.evaluate(facts)),
+            Condition::Or(conditions) => conditions.iter().any(|c| c.evaluate(facts)),
+            Condition::Not(condition) => !condition.evaluate(facts),
             Condition::Compare { left, op, right } => {
-                // Simplified evaluation - full implementation would use working memory
-                let left_val = left.to_value();
-                let right_val = right.to_value();
-
-                match (left_val, right_val, op) {
-                    (Some(Value::Integer(l)), Some(Value::Integer(r)), ComparisonOp::Eq) => l == r,
-                    (Some(Value::Float(l)), Some(Value::Float(r)), ComparisonOp::Eq) => {
-                        (l - r).abs() < f64::EPSILON
-                    }
-                    (Some(Value::String(l)), Some(Value::String(r)), ComparisonOp::Eq) => l == r,
+                // Resolve each side to a Value (True/False → Bool; else None)
+                // and apply the shared comparison helper. Conditions that do
+                // not reduce to a Value (e.g. nested Pattern) compare as
+                // false — the Compare variant is a boolean-comparison leaf,
+                // not a fact-pattern matcher (Pattern handles that).
+                match (left.to_value(), right.to_value()) {
+                    (Some(lv), Some(rv)) => compare_values(*op, &lv, &rv),
                     _ => false,
                 }
             }
-            Condition::Pattern { .. } => {
-                // Full pattern matching implemented in Rete integration
-                true
+            Condition::Pattern {
+                fact_type,
+                field,
+                value,
+                op,
+            } => {
+                // Real pattern matching (D-05 / T-23-04): scan facts of the
+                // requested type, read the field, and return true if any
+                // matching fact's field value satisfies `op` against `value`.
+                // Returns false when no fact of that type exists or the field
+                // is absent (Null compared via compare_values).
+                facts
+                    .iter()
+                    .filter(|f| f.fact_type_id == *fact_type)
+                    .any(|f| {
+                        f.payload
+                            .get(field)
+                            .map(|fv| compare_values(*op, fv, value))
+                            .unwrap_or(false)
+                    })
             }
         }
     }
