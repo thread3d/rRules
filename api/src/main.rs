@@ -26,49 +26,14 @@ use crate::v1::routes::monitoring::configure_monitoring;
 // Phase 23 (D-03 / L-07): real engine registry + selector + shared ruleset
 // wired into the execute path. `EngineRegistry` carries all four factories
 // (Plan 23-01); `EngineSelector` has its default set once at startup
-// (Pitfall 7); the shared `Arc<RwLock<RuleSet>>` is built from
+// (Pitfall 7); the shared `Arc<RwLock<SharedRuleSet>>` is built from
 // `RULE_STORAGE_PATH` and injected read-only (D-03a — empty dir logs a
 // warning and continues with an empty ruleset rather than crashing).
+// Phase 25 (Plan 25-02 / R1 / D-05): `build_ruleset_from_dir` now lives in
+// `api::v1::execution` as a pub fn and is the single source of truth for
+// both startup (here) and reload (`reload_and_swap`) — it parses `.rules`
+// / `.drl` JSON files into `Rule` objects via `serde_json`.
 use engine::engine::{EngineRegistry, EngineSelector};
-use engine::rules::RuleSet;
-
-/// Build a shared read-only `RuleSet` from the rules directory (D-03 / D-03a).
-///
-/// Phase 23 scope: there is no live rule-file parser wired into the server
-/// yet (full reload is Phase 25's scope), so this helper returns an empty
-/// `RuleSet` and logs a warning when the directory is missing or empty.
-/// The integration tests in Plan 23-04 inject their own fixture ruleset via
-/// `app_data`, so the server's default snapshot being empty does not block
-/// the keystone tests. The critical requirement (D-03a) is that the server
-/// COMES UP with an empty rules dir rather than failing.
-fn build_ruleset_from_dir(rules_dir: &str) -> RuleSet {
-    let path = std::path::Path::new(rules_dir);
-    if !path.exists() {
-        tracing::warn!(rules_dir = %rules_dir, "rules directory not found, starting with no rules");
-        return RuleSet::new();
-    }
-    // Count `.rules` / `.drl` files; the live parser is Phase 25's scope.
-    let has_rule_files = std::fs::read_dir(path)
-        .map(|entries| {
-            entries.filter_map(|e| e.ok()).any(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                name.ends_with(".rules") || name.ends_with(".drl")
-            })
-        })
-        .unwrap_or(false);
-    if !has_rule_files {
-        tracing::warn!(rules_dir = %rules_dir, "rules directory empty, starting with no rules");
-        return RuleSet::new();
-    }
-    // Live rule-file parsing is Phase 25's scope; for Phase 23 the server
-    // starts with an empty ruleset and the execute path is exercised via
-    // injected fixture rulesets (Plan 23-04 integration tests).
-    tracing::warn!(
-        rules_dir = %rules_dir,
-        "rule files present but live parsing is Phase 25 scope; starting with no rules"
-    );
-    RuleSet::new()
-}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -122,7 +87,7 @@ async fn main() -> std::io::Result<()> {
     // `ArcSwap` (L-01).
     let rules_dir = std::env::var("RULE_STORAGE_PATH")
         .unwrap_or_else(|_| "./rules".to_string());
-    let ruleset = SharedRuleSet::new(build_ruleset_from_dir(&rules_dir));
+    let ruleset = SharedRuleSet::new(v1::execution::build_ruleset_from_dir(&rules_dir));
     let ruleset = web::Data::new(std::sync::Arc::new(std::sync::RwLock::new(ruleset)));
 
     // Create metrics broadcast channel for real-time updates (for future WebSocket use)

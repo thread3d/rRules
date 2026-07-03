@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use engine::engine::{EngineRegistry, EngineSelector};
 use engine::environment::EngineBuilder;
-use engine::rules::RuleSet;
+use engine::rules::{Rule, RuleSet};
 
 use crate::metrics::{ExecutionCounters, MetricsSnapshot, MetricsTx};
 
@@ -93,6 +93,87 @@ impl SharedRuleSet {
             generation: 0,
         }
     }
+}
+
+/// Build a shared read-only `RuleSet` from a rules directory (R1 / D-05 / D-03a).
+///
+/// Reads each `*.rules` and `*.drl` file in `rules_dir`, parses the JSON
+/// content via `serde_json::from_str` (all rule AST types — `Rule`,
+/// `Condition`, `Action`, `Expression`, `ComparisonOp` — derive
+/// `Serialize, Deserialize`), and collects the rules into a `RuleSet`.
+/// Each file may contain either a single `Rule` JSON object or a JSON array
+/// of `Rule` objects.
+///
+/// This is the single source of truth for both startup (`main.rs`) and
+/// reload (`reload_and_swap` in this module) — D-05: the swapped `RuleSet`
+/// matches what a restart would load.
+///
+/// **D-03a (warn + continue, never crash):** on a missing directory, failed
+/// `read_dir`, unreadable file, unparseable content, or a rule that fails
+/// `RuleSet::add_rule` validation, this function logs a `tracing::warn!` and
+/// skips the offending file/rule. One bad file does not crash startup or
+/// reload. If the resulting ruleset is empty, a warning is logged.
+pub fn build_ruleset_from_dir(rules_dir: &str) -> RuleSet {
+    let path = std::path::Path::new(rules_dir);
+    if !path.exists() {
+        tracing::warn!(
+            rules_dir = %rules_dir,
+            "rules directory not found, starting with no rules"
+        );
+        return RuleSet::new();
+    }
+    let mut ruleset = RuleSet::new();
+    let entries = match std::fs::read_dir(path) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!(
+                rules_dir = %rules_dir,
+                error = %e,
+                "failed to read rules dir, starting with no rules"
+            );
+            return RuleSet::new();
+        }
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !(name.ends_with(".rules") || name.ends_with(".drl")) {
+            continue;
+        }
+        let content = match std::fs::read_to_string(entry.path()) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(file = %name, error = %e, "skipping unreadable rule file");
+                continue;
+            }
+        };
+        // Try single Rule first, then Vec<Rule> (supports both file shapes).
+        let rules: Vec<Rule> = match serde_json::from_str::<Rule>(&content) {
+            Ok(r) => vec![r],
+            Err(_) => match serde_json::from_str::<Vec<Rule>>(&content) {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(
+                        file = %name,
+                        error = %e,
+                        "skipping unparseable rule file"
+                    );
+                    continue;
+                }
+            },
+        };
+        for rule in rules {
+            if let Err(e) = ruleset.add_rule(rule) {
+                tracing::warn!(error = %e, "skipping rule that failed validation");
+            }
+        }
+    }
+    if ruleset.rules.is_empty() {
+        tracing::warn!(
+            rules_dir = %rules_dir,
+            "no parseable rule files found, starting with no rules"
+        );
+    }
+    ruleset
 }
 
 /// Complete inference trace with full detail
