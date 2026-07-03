@@ -52,3 +52,8 @@ criterion = "0.5"
 # returns the SocketAddr so the raw TCP WS client can connect + assert the
 # 101 handshake + a broadcast frame (P-4).
 actix-test = "0.1"
+# Singleton isolation for tests touching the process-global CoverageTracking
+# (Plan 23-04 threat T-23-10): serial tests don't run concurrently with each
+# other, so clear()+record() pairs aren't raced by sibling tests firing the
+# same rule id.
+serial_test = { workspace = true }
