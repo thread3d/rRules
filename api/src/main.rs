@@ -122,6 +122,14 @@ async fn main() -> std::io::Result<()> {
     // Create metrics broadcast channel for real-time updates (for future WebSocket use)
     let (metrics_tx, _) = metrics::create_metrics_channel(16);
 
+    // Phase 24 (Plan 24-02, Deliverable 1 wiring): construct the per-request
+    // ExecutionCounters once at startup and inject as web::Data. The counters
+    // hold a dedicated Prometheus Registry (Pitfall 24-A) and the three
+    // labeled metrics for POST /v1/execute. Inert in Plan 24-02 — no handler
+    // reads them yet; Plan 24-03 wires execute_single and metrics_endpoint to
+    // increment/render them.
+    let counters = web::Data::new(metrics::ExecutionCounters::new());
+
     // Initialize in-memory stores
     let rule_store = v1::rules::init_store();
     let category_store = v1::categories::init_store();
@@ -205,6 +213,9 @@ async fn main() -> std::io::Result<()> {
             .app_data(selector.clone())
             .app_data(ruleset.clone())
             .app_data(web::Data::new(metrics_tx.clone()))
+            // Phase 24 (Plan 24-02): inject ExecutionCounters as web::Data
+            // alongside metrics_tx. Inert until Plan 24-03 wires the handlers.
+            .app_data(counters.clone())
             .app_data(web::Data::new(rule_store.clone()))
             .app_data(web::Data::new(category_store.clone()))
             .app_data(web::Data::new(tag_store.clone()))
