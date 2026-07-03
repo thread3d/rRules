@@ -23,6 +23,53 @@ pub mod v1;
 use crate::v1::execution::{get_job_status, list_jobs};
 use crate::v1::routes::monitoring::configure_monitoring;
 
+// Phase 23 (D-03 / L-07): real engine registry + selector + shared ruleset
+// wired into the execute path. `EngineRegistry` carries all four factories
+// (Plan 23-01); `EngineSelector` has its default set once at startup
+// (Pitfall 7); the shared `Arc<RwLock<RuleSet>>` is built from
+// `RULE_STORAGE_PATH` and injected read-only (D-03a — empty dir logs a
+// warning and continues with an empty ruleset rather than crashing).
+use engine::engine::{EngineRegistry, EngineSelector};
+use engine::rules::RuleSet;
+
+/// Build a shared read-only `RuleSet` from the rules directory (D-03 / D-03a).
+///
+/// Phase 23 scope: there is no live rule-file parser wired into the server
+/// yet (full reload is Phase 25's scope), so this helper returns an empty
+/// `RuleSet` and logs a warning when the directory is missing or empty.
+/// The integration tests in Plan 23-04 inject their own fixture ruleset via
+/// `app_data`, so the server's default snapshot being empty does not block
+/// the keystone tests. The critical requirement (D-03a) is that the server
+/// COMES UP with an empty rules dir rather than failing.
+fn build_ruleset_from_dir(rules_dir: &str) -> RuleSet {
+    let path = std::path::Path::new(rules_dir);
+    if !path.exists() {
+        tracing::warn!(rules_dir = %rules_dir, "rules directory not found, starting with no rules");
+        return RuleSet::new();
+    }
+    // Count `.rules` / `.drl` files; the live parser is Phase 25's scope.
+    let has_rule_files = std::fs::read_dir(path)
+        .map(|entries| {
+            entries.filter_map(|e| e.ok()).any(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.ends_with(".rules") || name.ends_with(".drl")
+            })
+        })
+        .unwrap_or(false);
+    if !has_rule_files {
+        tracing::warn!(rules_dir = %rules_dir, "rules directory empty, starting with no rules");
+        return RuleSet::new();
+    }
+    // Live rule-file parsing is Phase 25's scope; for Phase 23 the server
+    // starts with an empty ruleset and the execute path is exercised via
+    // injected fixture rulesets (Plan 23-04 integration tests).
+    tracing::warn!(
+        rules_dir = %rules_dir,
+        "rule files present but live parsing is Phase 25 scope; starting with no rules"
+    );
+    RuleSet::new()
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!("rRules REST API Server v0.1.0");
@@ -30,6 +77,47 @@ async fn main() -> std::io::Result<()> {
 
     // Create engine state for hot reload functionality
     let engine_state = web::Data::new(v1::execution::EngineState::new());
+
+    // Phase 23 (D-01 / L-07): build the shared engine registry, selector, and
+    // read-only ruleset snapshot. The registry carries all four default
+    // factories; the selector has its default engine set ONCE at startup
+    // (mutably, before wrapping in `web::Data` — Pitfall 7: `select_engine`
+    // takes `&mut self`, so per-request validation uses `available_engines()`
+    // (`&self`) in `execute_single`, NOT `select_engine`).
+    let mut registry = EngineRegistry::new();
+    registry.register_default_engines();
+    let registry = web::Data::new(registry);
+
+    let mut selector = EngineSelector::with_defaults();
+    let default_engine = std::env::var("RRULES_DEFAULT_ENGINE")
+        .unwrap_or_else(|_| "rete".to_string());
+    if selector.select_engine(&default_engine).is_err() {
+        tracing::warn!(
+            engine = %default_engine,
+            "Invalid RRULES_DEFAULT_ENGINE, falling back to rete"
+        );
+        let _ = selector.select_engine("rete");
+    }
+    let selector = web::Data::new(selector);
+
+    // L-07 config: validate `RRULES_MAX_CHAIN_ITERATIONS` is parseable at
+    // startup (warn on failure). The ReteEngine evaluator reads the env var
+    // directly per Plan 23-03, so main.rs only validates — no shared state
+    // passed to handlers for this knob.
+    if let Ok(raw) = std::env::var("RRULES_MAX_CHAIN_ITERATIONS") {
+        if raw.parse::<usize>().is_err() {
+            tracing::warn!(
+                value = %raw,
+                "RRULES_MAX_CHAIN_ITERATIONS not a valid usize, evaluator will fall back to 1000"
+            );
+        }
+    }
+
+    // D-03: shared read-only `Arc<RwLock<RuleSet>>` built once at startup.
+    let rules_dir = std::env::var("RULE_STORAGE_PATH")
+        .unwrap_or_else(|_| "./rules".to_string());
+    let ruleset = build_ruleset_from_dir(&rules_dir);
+    let ruleset = web::Data::new(std::sync::Arc::new(std::sync::RwLock::new(ruleset)));
 
     // Create metrics broadcast channel for real-time updates (for future WebSocket use)
     let (metrics_tx, _) = metrics::create_metrics_channel(16);
@@ -112,6 +200,10 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(cors)
             .app_data(engine_state.clone())
+            // Phase 23 (D-03 / L-07): real engine wiring for POST /v1/execute.
+            .app_data(registry.clone())
+            .app_data(selector.clone())
+            .app_data(ruleset.clone())
             .app_data(web::Data::new(metrics_tx.clone()))
             .app_data(web::Data::new(rule_store.clone()))
             .app_data(web::Data::new(category_store.clone()))
