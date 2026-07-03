@@ -151,7 +151,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 **Wave 1**
 
 - [x] 24-01-PLAN.md — Wave 0 RED test scaffolds: counters_exposed_in_metrics, counters_increment_per_request, response_includes_engine_generation (execute_integration.rs); broadcasts_snapshot_after_execute (metrics_ws.rs); metrics_prometheus_text_format assertion update (metrics_integration.rs) — COMPLETE 2026-07-03 (5 expected RED failures, build green, merged cd433b08a)
-- [ ] 24-02-PLAN.md — Wave 1 Foundation: ExecutionCounters struct + dedicated prometheus Registry + labeled counters/histogram (exponential_buckets 0.001..4s) + Default impl; prometheus = { workspace = true } in api/Cargo.toml; ExecuteResponse.engine_generation: u64 (#[serde(default)], 0); main.rs web::Data wiring
+- [x] 24-02-PLAN.md — Wave 1 Foundation: ExecutionCounters struct + dedicated prometheus Registry + labeled counters/histogram (exponential_buckets 0.001..4s) + Default impl; prometheus = { workspace = true } in api/Cargo.toml; ExecuteResponse.engine_generation: u64 (#[serde(default)], 0); main.rs web::Data wiring — COMPLETE 2026-07-03 (cargo check exit 0; 4 RED remain, response_includes_engine_generation flipped GREEN, 0 regressions, merged d8b31c469)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -294,7 +294,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 21. Deployment & CI/CD | v4.0 | — | Complete | 2026-07-02 |
 | 22. Frontend Integration Closure | v4.0 | 6/6 | Complete (verified PASS) | 2026-07-02 |
 | 23. Execute evaluator + wiring | v5.0 | 6/6 | Complete    | 2026-07-03 |
-| 24. Execution counters + metrics broadcast | v5.0 | 1/3 | In progress | - |
+| 24. Execution counters + metrics broadcast | v5.0 | 2/3 | In progress | - |
 | 25. Real reload + JobStore | v5.0 | 0/? | Not started | - |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 0/? | Not started | - |
 | 27. Stateful sessions | v5.0 | 0/? | Not started | - |

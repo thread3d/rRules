@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Phase Details
 status: executing
-last_updated: "2026-07-03T08:42:49.000Z"
-last_activity: 2026-07-03 -- Phase 24 Wave 0 (24-01 RED scaffolds) complete
+last_updated: "2026-07-03T08:50:32.000Z"
+last_activity: 2026-07-03 -- Phase 24 Wave 1 (24-02 ExecutionCounters foundation) complete
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
   percent: 17
 ---
 
@@ -25,10 +25,10 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 ## Current Position
 
 Phase: 24 (execution-counters-metrics-broadcast) — EXECUTING
-Plan: 2 of 3 (24-01 complete)
-Plans: 6 (23-01..23-06) + 24-01 complete; 24-02 (Wave 1) next; 24-03 (Wave 2) pending
-Status: Executing Phase 24 — Wave 0 complete
-Last activity: 2026-07-03 -- Phase 24 Wave 0 (24-01 RED scaffolds) complete; 5 expected RED failures, build green, merged cd433b08a
+Plan: 3 of 3 (24-01, 24-02 complete; 24-03 next)
+Plans: 6 (23-01..23-06) + 24-01 + 24-02 complete; 24-03 (Wave 2 instrumentation) next — turns the 4 remaining RED tests GREEN
+Status: Executing Phase 24 — Wave 1 complete
+Last activity: 2026-07-03 -- Phase 24 Wave 1 (24-02 ExecutionCounters foundation) complete; cargo check exit 0, 4 RED remain (response_includes_engine_generation flipped GREEN), 0 regressions, merged d8b31c469
 
 ### Milestone v5.0 Phases
 
