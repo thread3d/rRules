@@ -1,9 +1,9 @@
 //! Metrics collection and reporting for the rRules API server
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use actix_web::{web, HttpResponse, Responder};
-use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry};
+use prometheus::{Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder};
 use serde::Serialize;
 
 use engine::monitoring::detection::RuleExecutionTracker;
@@ -293,37 +293,61 @@ fn metrics_html(engine_name: &str, rules_fired: u64, memory_bytes: u64, active_s
         (status = 200, description = "Metrics page (HTML), JSON, or Prometheus text format depending on Accept header"),
     ),
 )]
-pub async fn metrics_endpoint(req: actix_web::HttpRequest) -> impl Responder {
+pub async fn metrics_endpoint(
+    req: actix_web::HttpRequest,
+    counters: web::Data<ExecutionCounters>,
+) -> impl Responder {
     let accept = req.headers().get("Accept").and_then(|h| h.to_str().ok()).unwrap_or("");
 
     match accept {
         _ if accept.contains("text/html") || accept.contains("*/*") => {
+            // Phase 24 (Plan 24-03): read live rules_fired from the AtomicU64
+            // mirror. memory_bytes and active_sessions stay 0 (Open Q3 —
+            // Phase 27 populates active_sessions).
             HttpResponse::Ok()
                 .content_type("text/html; charset=utf-8")
-                .body(metrics_html("default", 0, 0, 0))
+                .body(metrics_html(
+                    "default",
+                    counters.snapshot_rules_fired.load(Ordering::Relaxed),
+                    0,
+                    0,
+                ))
         }
         _ if accept.contains("application/json") => {
+            // Phase 24 (Plan 24-03): read live counter values from the AtomicU64
+            // mirrors. The engine_name stays "default" for the JSON arm (the
+            // per-execute engine_name goes through the WS broadcast, not this
+            // generic scrape). active_sessions and memory_bytes stay 0 (Open Q3).
             HttpResponse::Ok()
                 .content_type("application/json")
                 .json(serde_json::json!({
                     "engine_name": "default",
-                    "rules_fired": 0,
-                    "facts_inserted": 0,
+                    "rules_fired": counters.snapshot_rules_fired.load(Ordering::Relaxed),
+                    "facts_inserted": counters.snapshot_facts_inserted.load(Ordering::Relaxed),
                     "active_sessions": 0,
                     "memory_bytes": 0
                 }))
         }
         _ => {
-            let metrics_text = r#"# HELP engine_rules_fired Total number of rules fired
-# TYPE engine_rules_fired counter
-engine_rules_fired 0
-# HELP engine_memory_bytes Current memory usage in bytes
-# TYPE engine_memory_bytes gauge
-engine_memory_bytes 0
-"#;
+            // Phase 24 (Plan 24-03 / Deliverable 4 / Don't Hand-Roll): encode
+            // the dedicated registry via prometheus::TextEncoder — NOT manual
+            // format!() string-building. Reads from counters.registry (the
+            // dedicated Registry::new()), NOT prometheus::default_registry()
+            // (Pitfall 24-A). The TextEncoder output contains # HELP and # TYPE
+            // lines for each registered metric family
+            // (rrules_execute_requests_total, rrules_execute_rules_fired_total,
+            // rrules_execute_duration_seconds + its _bucket/_sum/_count series),
+            // with the engine="rete" label populated after a POST /v1/execute.
+            let metric_families = counters.registry.gather();
+            let mut buffer = Vec::new();
+            let encoder = TextEncoder::new();
+            encoder
+                .encode(&metric_families, &mut buffer)
+                .expect("prometheus TextEncoder encode is infallible for valid gathered metric families");
+            let text = String::from_utf8(buffer).unwrap_or_default();
             HttpResponse::Ok()
                 .content_type("text/plain; version=0.0.4")
-                .body(metrics_text)
+                .body(text)
         }
     }
 }
