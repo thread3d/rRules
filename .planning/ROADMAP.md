@@ -295,7 +295,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 22. Frontend Integration Closure | v4.0 | 6/6 | Complete (verified PASS) | 2026-07-02 |
 | 23. Execute evaluator + wiring | v5.0 | 6/6 | Complete    | 2026-07-03 |
 | 24. Execution counters + metrics broadcast | v5.0 | 3/3 | Complete    | 2026-07-03 |
-| 25. Real reload + JobStore | v5.0 | 3/3 | Complete   | 2026-07-03 |
+| 25. Real reload + JobStore | v5.0 | 3/3 | Complete    | 2026-07-03 |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 0/? | Not started | - |
 | 27. Stateful sessions | v5.0 | 0/? | Not started | - |
 | 28. Frontend test-runner | v5.0 | 0/? | Not started | - |
