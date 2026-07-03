@@ -376,20 +376,17 @@ pub async fn metrics_endpoint(
     ),
 )]
 pub async fn dead_rules_endpoint() -> impl Responder {
-    // Read dead rules from the process-wide RuleExecutionTracker singleton.
-    //
-    // NOTE: `let tracker = RuleExecutionTracker::new();` is retained below
-    // only to preserve the deprecated `new()` warning that Plan 26-02 Task 2
-    // will resolve by removing this call site entirely. The `tracker` local
-    // is intentionally unused — the singleton read goes through the
-    // associated-function API (D-01). Plan 26-02 rewrites this endpoint to
-    // drop the local and record-then-read live data.
-    #[allow(deprecated, unused_variables)]
-    let tracker = RuleExecutionTracker::new();
+    // Read dead rules from the process-wide RuleExecutionTracker singleton
+    // (Plan 26-02 / D-03, L-03, Pitfall 3). The singleton is populated by
+    // the recording call sites in `direct_eval.rs` (Treat/Leaps/Phreak) and
+    // `rete/mod.rs` (Rete) — `record_evaluation` / `record_fire` are called
+    // adjacent to the existing `CoverageTracking` calls at the post-fixpoint
+    // recording block. `find_dead_rules()` returns owned `Vec<DeadRuleInfo>`
+    // (the rule_ids that were evaluated at least once but never fired).
     let dead_rules = RuleExecutionTracker::find_dead_rules();
 
-    // Map to Vec<String> of rule IDs
-    let rule_ids: Vec<String> = dead_rules.into_iter().map(|info| info.rule_id.clone()).collect();
+    // Map to Vec<String> of rule IDs (move info.rule_id — no clone needed).
+    let rule_ids: Vec<String> = dead_rules.into_iter().map(|info| info.rule_id).collect();
     HttpResponse::Ok().json(rule_ids)
 }
 

@@ -35,6 +35,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::fact::Fact;
 use crate::monitoring::coverage::CoverageTracking;
+use crate::monitoring::detection::RuleExecutionTracker;
 use crate::rules::{Action, Rule};
 
 /// Run the direct rule evaluator (D-04) over `rules` against `working_facts`.
@@ -102,11 +103,22 @@ pub fn direct_execute(
     // loop. `record_rule_eval` once per evaluated rule (fired or not);
     // `record_rule_fire` once per fired rule. This replaces the old
     // per-nagram double-count at the placeholder sites in each engine.
+    //
+    // Plan 26-02: also record into the `RuleExecutionTracker` singleton
+    // (D-03, L-02) at the same call sites so the dead-rules panel and
+    // metadata surface (last_fired_at, rule_name) stay populated. The
+    // id→name lookup is built once before the loops (Pitfall 4 —
+    // evaluated_set/fired_set are HashSet<String> of ids only; Rule.id
+    // and Rule.name are pub at rules.rs:18,20).
+    let id_to_name: HashMap<&String, &String> =
+        rules.iter().map(|r| (&r.id, &r.name)).collect();
     for id in &evaluated_set {
         CoverageTracking::record_rule_eval(id);
+        RuleExecutionTracker::record_evaluation(id, id_to_name[id]);
     }
     for id in &fired_set {
         CoverageTracking::record_rule_fire(id);
+        RuleExecutionTracker::record_fire(id, id_to_name[id]);
     }
 
     (fired_set, evaluated_set)

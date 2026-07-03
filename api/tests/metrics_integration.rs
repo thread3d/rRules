@@ -88,10 +88,13 @@ async fn metrics_json_engine_state() {
 
 #[actix_web::test]
 async fn dead_rules_returns_valid_json_array() {
-    // dead_rules_endpoint builds a fresh RuleExecutionTracker per request, so it
-    // always returns [] until execution tracking is wired into execute_rules
-    // (a stub). We assert valid structure, not non-emptiness — the empty result
-    // is honest deferred tech debt, not a v4.0 blocker.
+    // dead_rules_endpoint reads from the process-wide RuleExecutionTracker
+    // singleton (Plan 26-02 / D-03). The singleton is populated by the
+    // recording call sites in direct_eval.rs and rete/mod.rs; this test does
+    // not execute any rules, so the singleton is empty and the endpoint
+    // returns []. We assert valid structure (a JSON array) — non-emptiness
+    // after an execute is proven by the keystone_dead_rules e2e in
+    // execute_integration.rs (SC-1).
     //
     // The dashboard routes live inside the /v1 scope (configure_metrics_dashboards),
     // so the test App mirrors main.rs: configure_metrics (root Prometheus) +

@@ -12,6 +12,7 @@ use crate::rules::Action;
 use std::collections::{HashMap, HashSet};
 
 use crate::monitoring::coverage::CoverageTracking;
+use crate::monitoring::detection::RuleExecutionTracker;
 
 /// A unique identifier for a fact in working memory.
 pub type FactId = String;
@@ -390,11 +391,21 @@ impl ReteEngine {
         // loop. `record_rule_eval` once per evaluated rule (fired or not);
         // `record_rule_fire` once per fired rule. This replaces the old
         // per-nagram double-count at the placeholder site.
+        //
+        // Plan 26-02 / C1: also record into the `RuleExecutionTracker`
+        // singleton (D-03, L-02) at the same call sites. Rete keeps its
+        // own inlined `execute_rules` (C1 — it does NOT delegate to
+        // `direct_eval.rs`), so this site must be wired independently.
+        // The id→name lookup is built once from `self.rules` (Pitfall 4).
+        let id_to_name: HashMap<&String, &String> =
+            self.rules.iter().map(|r| (&r.id, &r.name)).collect();
         for id in &evaluated_set {
             CoverageTracking::record_rule_eval(id);
+            RuleExecutionTracker::record_evaluation(id, id_to_name[id]);
         }
         for id in &fired_set {
             CoverageTracking::record_rule_fire(id);
+            RuleExecutionTracker::record_fire(id, id_to_name[id]);
         }
 
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
