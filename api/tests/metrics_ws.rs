@@ -4,13 +4,13 @@
 //! Verifies the three behaviors required by the plan's `must_haves`:
 //! - The WS handshake completes (HTTP 101 Switching Protocols).
 //! - A broadcast on `metrics_tx` is delivered to the connected client as a
-//!   serialized `EngineState` WS text frame.
+//!   serialized `MetricsSnapshot` WS text frame.
 //! - The old JSON-stub response (`{"message":"WebSocket endpoint"...}`) is no
 //!   longer returned at `/v1/metrics/ws` (RESEARCH § Pitfall 6).
 //!
 //! The test server mirrors `main.rs`'s `/v1` scope registration of
 //! `configure_metrics_ws` and shares one `metrics_tx` app_data instance with
-//! the test so the test can broadcast an `EngineState` for the session to
+//! the test so the test can broadcast an `MetricsSnapshot` for the session to
 //! forward. A raw TCP WS client performs the handshake and reads one frame so
 //! the test does not depend on an extra WS client crate.
 
@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use actix_test::start;
 use actix_web::{web, App};
-use api::metrics::{create_metrics_channel, EngineState, MetricsTx};
+use api::metrics::{create_metrics_channel, MetricsSnapshot, MetricsTx};
 use api::websocket::configure_metrics_ws;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -38,7 +38,7 @@ const WS_KEY: &str = "dGhlIHNhbXBsZSBub25jZQ==";
 fn spawn_server() -> (
     std::net::SocketAddr,
     MetricsTx,
-    tokio::sync::broadcast::Receiver<EngineState>,
+    tokio::sync::broadcast::Receiver<MetricsSnapshot>,
     actix_test::TestServer,
 ) {
     let (metrics_tx, guard_rx) = create_metrics_channel(64);
@@ -53,7 +53,7 @@ fn spawn_server() -> (
 }
 
 /// Perform a raw WS handshake against `addr` at `/v1/metrics/ws`, broadcast one
-/// `EngineState` on `metrics_tx`, then read a single WS text frame and return
+/// `MetricsSnapshot` on `metrics_tx`, then read a single WS text frame and return
 /// `(handshake_response, frame_payload_json)`. The broadcast is sent AFTER the
 /// handshake so the session (when the upgrade succeeds) has a live receiver.
 async fn handshake_then_broadcast_and_read_frame(
@@ -90,8 +90,8 @@ async fn handshake_then_broadcast_and_read_frame(
     }
     let handshake = String::from_utf8_lossy(&handshake_buf).to_string();
 
-    // Broadcast an EngineState the session should forward as a text frame.
-    let state = EngineState {
+    // Broadcast an MetricsSnapshot the session should forward as a text frame.
+    let state = MetricsSnapshot {
         engine_name: "test-engine".to_string(),
         rules_fired: 42,
         facts_inserted: 7,
