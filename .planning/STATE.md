@@ -2,16 +2,19 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Phase Details
+current_phase: 23
+current_phase_name: execute-evaluator-wiring
 status: executing
-stopped_at: Completed 23-04-PLAN.md (MetricsSnapshot rename + Wave 0 RED scaffolds)
-last_updated: "2026-07-03T06:57:51.877Z"
-last_activity: 2026-07-03 — Phase 23 plan 04 complete
+stopped_at: Completed 23-05-PLAN.md (wire POST /v1/execute through real EngineRegistry — all four ROADMAP success criteria GREEN)
+last_updated: "2026-07-03T07:09:21.915Z"
+last_activity: 2026-07-03
+last_activity_desc: Phase 23 plan 05 complete (execute_single rewritten — all four ROADMAP success criteria GREEN)
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 6
-  completed_plans: 4
-  percent: 67
+  completed_plans: 5
+  percent: 0
 ---
 
 # Project State
@@ -28,7 +31,7 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 Phase: 23 (execute-evaluator-wiring) — EXECUTING
 Plans: 6 (23-01..23-06) across 3 waves
 Status: Executing Phase 23
-Last activity: 2026-07-03 — Phase 23 plan 04 complete (MetricsSnapshot rename + Wave 0 RED scaffolds)
+Last activity: 2026-07-03 — Phase 23 plan 05 complete (execute_single rewritten — all four ROADMAP success criteria GREEN)
 
 ### Milestone v5.0 Phases
 
@@ -230,6 +233,10 @@ From v2.0 milestone:
 - [Phase ?]: Phase 23-03: Pitfall 6 fixed — fired/evaluated ids in HashSet, record_rule_fire/record_rule_eval once per rule after the fixpoint loop; stale per-nagram record removed.
 - [Phase ?]: Phase 23-03: Action::UpdateFact.id matched as fact_type_id with exact-key fast path; each rule fires at most once per execute() (fired_set guard).
 - [Phase ?]: Phase 23-04: Renamed metrics::EngineState -> MetricsSnapshot (L-05 / Pitfall 10) to disambiguate from execution::EngineState before Plan 23-05 adds execute logic; execution.rs::EngineState intentionally untouched. Landed Wave 0 RED scaffolds (engine/tests/coverage.rs record_once_per_rule GREEN; api/tests/execute_integration.rs five RED scaffolds for EXEC-01/02, ENGINE-07/08, MON-05).
+- [Phase ?]: Phase 23-05: execute_single constructs a fresh Box<dyn ExecutionEngine> per request via create_engine_by_name and moves it into web::block — no shared &mut engine in the execute path (Pitfall 1/9 per-request isolation).
+- [Phase ?]: Phase 23-05: facts_after serialized from post-execution engine.get_facts() via reverse engine_value_to_json mapping (D-08 / Pitfall 11) — the request-input echo bug is removed.
+- [Phase ?]: Phase 23-05: Engine param validated via registry.available_engines() (&self) — 400 on unknown (ENGINE-07); omitted resolves to RRULES_DEFAULT_ENGINE env > selector.current_engine() (ENGINE-08). selector.select_engine (&mut self) is NOT called per request (Pitfall 7).
+- [Phase ?]: Phase 23-05: build_ruleset_from_dir returns empty RuleSet + warning on missing/empty dir (D-03a); live rule-file parsing deferred to Phase 25. All five Plan 23-04 RED scaffolds now GREEN — all four ROADMAP success criteria pass.
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -261,7 +268,7 @@ From v3.0 milestone:
 
 **Stopped at:** Completed 23-04-PLAN.md (MetricsSnapshot rename + Wave 0 RED scaffolds)
 
-Last session: 2026-07-03T06:57:51.870Z
+Last session: 2026-07-03T07:09:21.902Z
 Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13 requirements partial; user chose to close inline via new frontend-wiring phase.
 
 **Completed Phases:**

@@ -107,7 +107,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 4. `GET /v1/metrics/coverage` shows `fired == true` for a rule fired by a recent `/v1/execute` (auto-populated, no separate record call)
 
 **Plans:**
-3/6 plans executed
+5/6 plans executed
 
 - [x] 23-01-PLAN.md — Engine compile-unblock (L-01 import fix), ExecutionEngine trait bridge (L-02) + EngineResult.fired_rule_ids, register all four factories (D-01), enable all four engine features on the api crate
 - [x] 23-02-PLAN.md — Rule-model extensions: Expression type (D-06) + Action::UpdateFact computed expressions, full ComparisonOp coverage + real Pattern matching in Condition::evaluate (D-05)
@@ -119,7 +119,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 23-05-PLAN.md — API wiring: rewrite execute_single (per-request engine via spawn_blocking, facts_after from get_facts reverse mapping D-08/Pitfall 11, engine param validation 400/ENGINE-07, default resolution ENGINE-08, rules_not_fired), shared Arc<RwLock<RuleSet>> from RULE_STORAGE_PATH (D-03/D-03a), main.rs web::Data wiring + RRULES_DEFAULT_ENGINE/RRULES_MAX_CHAIN_ITERATIONS env vars
+- [x] 23-05-PLAN.md — API wiring: rewrite execute_single (per-request engine via spawn_blocking, facts_after from get_facts reverse mapping D-08/Pitfall 11, engine param validation 400/ENGINE-07, default resolution ENGINE-08, rules_not_fired), shared Arc<RwLock<RuleSet>> from RULE_STORAGE_PATH (D-03/D-03a), main.rs web::Data wiring + RRULES_DEFAULT_ENGINE/RRULES_MAX_CHAIN_ITERATIONS env vars
 - [ ] 23-06-PLAN.md — Four-engine rollout (D-01): mirror direct evaluator onto Treat/Leaps/Phreak + per-engine score+10 keystone tests (D-02)
 
 ### Phase 24: Execution counters + metrics broadcast
@@ -285,7 +285,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 20. Complete Management API | v4.0 | — | Complete | 2026-07-02 |
 | 21. Deployment & CI/CD | v4.0 | — | Complete | 2026-07-02 |
 | 22. Frontend Integration Closure | v4.0 | 6/6 | Complete (verified PASS) | 2026-07-02 |
-| 23. Execute evaluator + wiring | v5.0 | 4/6 | In Progress|  |
+| 23. Execute evaluator + wiring | v5.0 | 5/6 | In Progress|  |
 | 24. Execution counters + metrics broadcast | v5.0 | 0/? | Not started | - |
 | 25. Real reload + JobStore | v5.0 | 0/? | Not started | - |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 0/? | Not started | - |
