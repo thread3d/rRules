@@ -202,6 +202,11 @@ pub struct ReteEngine {
     alpha_memory: AlphaMemory,
     beta_memory: BetaMemory,
     working_facts: HashMap<FactId, Fact>,
+    /// Rules loaded via `load_ruleset` (L-02). The direct evaluator
+    /// (`execute_rules`, Plan 23-03) iterates this Vec instead of the
+    /// placeholder Rete network. Populated by cloning from a shared
+    /// `RuleSet` snapshot; per-request engines carry their own copy.
+    rules: Vec<crate::rules::Rule>,
     metrics: crate::engine::metrics::SimpleMetricsCollector,
 }
 
@@ -213,6 +218,7 @@ impl ReteEngine {
             alpha_memory: AlphaMemory::new(),
             beta_memory: BetaMemory::new(),
             working_facts: HashMap::new(),
+            rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
         }
     }
@@ -224,6 +230,7 @@ impl ReteEngine {
             alpha_memory: AlphaMemory::new(),
             beta_memory: BetaMemory::new(),
             working_facts: HashMap::new(),
+            rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
         }
     }
@@ -383,7 +390,23 @@ impl ExecutionEngine for ReteEngine {
         self.alpha_memory = AlphaMemory::new();
         self.beta_memory = BetaMemory::new();
         self.working_facts.clear();
+        self.rules.clear();
         self.metrics.reset_metrics();
+    }
+
+    /// Loads a ruleset into the engine by cloning the ruleset's `rules` Vec
+    /// into `self.rules` (L-02). The direct evaluator iterates `self.rules`
+    /// against `self.working_facts`. Per-request engines carry their own
+    /// clone of the shared `RuleSet` snapshot (D-03).
+    fn load_ruleset(&mut self, ruleset: &crate::rules::RuleSet) -> Result<(), String> {
+        self.rules = ruleset.rules.clone();
+        Ok(())
+    }
+
+    /// Returns the post-execution working memory so the API layer can
+    /// serialize `facts_after` from real engine state (Pitfall 11).
+    fn get_facts(&self) -> Vec<crate::fact::Fact> {
+        self.working_facts.values().cloned().collect()
     }
 }
 
@@ -528,5 +551,22 @@ mod tests {
             facts[0].payload.get("score"),
             Some(&crate::data_types::Value::Integer(0))
         );
+    }
+
+    /// `load_ruleset` clones the ruleset's rules into `engine.rules`
+    /// (GREEN: inspects the private field — only compiles after the field
+    /// is added).
+    #[test]
+    fn load_ruleset_stores_rule_into_engine_rules() {
+        use crate::rules::{Rule, RuleSet};
+
+        let mut ruleset = RuleSet::new();
+        let rule = Rule::builder("r1", "Rule 1").build();
+        ruleset.add_rule(rule).unwrap();
+
+        let mut engine = ReteEngine::new();
+        engine.load_ruleset(&ruleset).unwrap();
+        assert_eq!(engine.rules.len(), 1, "load_ruleset should clone one rule");
+        assert_eq!(engine.rules[0].id, "r1");
     }
 }
