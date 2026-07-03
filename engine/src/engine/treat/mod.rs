@@ -9,7 +9,11 @@ use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
 use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference, Nagram};
 
-use crate::monitoring::coverage::CoverageTracking;
+// NOTE: `CoverageTracking` is no longer imported here — the shared direct
+// evaluator (`engine::direct_eval`) owns once-per-rule coverage recording
+// after the fixpoint loop (L-06 / Pitfall 6), so the placeholder per-nagram
+// `record_rule_eval`/`record_rule_fire` calls in the old `execute_rules`
+// are gone.
 
 /// Cache entry with a generation timestamp for LRU ordering.
 #[derive(Debug, Clone)]
@@ -174,6 +178,11 @@ pub struct TreatEngine {
     alpha_memory: AlphaMemory,
     beta_memory: BetaMemory,
     working_facts: HashMap<FactId, Fact>,
+    /// Rules loaded via `load_ruleset` (L-02). The direct evaluator
+    /// (`execute_rules`, Plan 23-06) iterates this Vec instead of the
+    /// placeholder TREAT network. Populated by cloning from a shared
+    /// `RuleSet` snapshot; per-request engines carry their own copy.
+    rules: Vec<crate::rules::Rule>,
     metrics: crate::engine::metrics::SimpleMetricsCollector,
     cache_hits: u64,
     cache_misses: u64,
@@ -187,6 +196,7 @@ impl TreatEngine {
             alpha_memory: AlphaMemory::new(),
             beta_memory: BetaMemory::new(),
             working_facts: HashMap::new(),
+            rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
             cache_hits: 0,
             cache_misses: 0,
@@ -200,6 +210,7 @@ impl TreatEngine {
             alpha_memory: AlphaMemory::new(),
             beta_memory: BetaMemory::new(),
             working_facts: HashMap::new(),
+            rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
             cache_hits: 0,
             cache_misses: 0,
@@ -353,54 +364,34 @@ impl TreatEngine {
         self.metrics.record_beta_memory_additions(new_nagrams_count);
     }
 
-    /// Executes the engine and fires rules.
-    pub fn execute_rules(&mut self) -> usize {
-        let mut rules_fired = 0;
+    /// Executes the rules loaded via `load_ruleset` against `working_facts`
+    /// using the shared direct interpreter (D-04, Plan 23-06).
+    ///
+    /// This bypasses the placeholder TREAT network entirely — it delegates
+    /// to `engine::direct_eval::direct_execute`, which iterates `self.rules`,
+    /// evaluates each `rule.condition` against `self.working_facts` via
+    /// `Condition::evaluate`, applies matching `rule.actions`, and chains to
+    /// fixpoint under the `RRULES_MAX_CHAIN_ITERATIONS` cap (D-07). Coverage
+    /// is recorded once per evaluated/fired rule AFTER the loop (L-06 /
+    /// Pitfall 6 — the per-nagram double-count bug in the placeholder
+    /// implementation is removed). Returns an `EngineResult` with
+    /// `fired_rule_ids` populated.
+    pub fn execute_rules(&mut self) -> EngineResult {
+        let start = std::time::Instant::now();
 
-        for (_node_id, action_node) in &self.network.base.action_nodes {
-            // Cache key based on action node
-            let cache_key = format!("action_{}", action_node.id.0);
+        let (fired_set, _evaluated_set) =
+            crate::engine::direct_eval::direct_execute(&self.rules, &mut self.working_facts);
 
-            // Record rule evaluation when the rule is being evaluated
-            CoverageTracking::record_rule_eval(&action_node.rule_id);
-
-            // Check if action results are cached (cached entire execution result)
-            let cached_result = if self.network.is_cached(&cache_key) {
-                self.network.cache.get(&cache_key).cloned()
-            } else {
-                None
-            };
-
-            for (_join_id, join_node) in &self.network.base.join_nodes {
-                // Get nagrams from beta memory (these are the partial matches)
-                let nagrams = self.beta_memory.get_nagrams(&join_node.id);
-
-                // The cache stores single nagrams, not lists of nagrams.
-                // For action nodes, we don't cache individual rule firings -
-                // instead we could cache a representative nagram for debugging/stats purposes.
-                if self.network.is_cached(&cache_key) {
-                    if cached_result.is_some() {
-                        self.metrics.record_cache_hit();
-                        self.cache_hits += 1;
-                    } else {
-                        // Cache an empty nagram to indicate this action was evaluated
-                        // The cache stores Nagram (Vec<MemoryReference>), not Vec<Nagram>
-                        self.network.cache.insert(cache_key.clone(), vec![]);
-                        self.metrics.record_cache_miss();
-                        self.cache_misses += 1;
-                    }
-                }
-
-                for _nagram in &nagrams {
-                    CoverageTracking::record_rule_fire(&action_node.rule_id);
-                    rules_fired += 1;
-                    self.metrics.record_rule_fired();
-                }
-            }
+        // Record per-fire metrics for parity with the placeholder loop.
+        for _ in &fired_set {
+            self.metrics.record_rule_fired();
         }
+        self.metrics
+            .set_execution_time_ms(start.elapsed().as_secs_f64() * 1000.0);
 
-        self.metrics.set_execution_time_ms(0.0);
-        rules_fired
+        let mut result = EngineResult::success(fired_set.len());
+        result.fired_rule_ids = fired_set.iter().cloned().collect();
+        result
     }
 }
 
@@ -412,8 +403,7 @@ impl Default for TreatEngine {
 
 impl ExecutionEngine for TreatEngine {
     fn execute(&mut self) -> EngineResult {
-        let fired = self.execute_rules();
-        EngineResult::success(fired)
+        self.execute_rules()
     }
 
     fn insert_fact(&mut self, fact: Fact) -> Result<(), String> {
@@ -427,7 +417,7 @@ impl ExecutionEngine for TreatEngine {
     }
 
     fn run(&mut self) -> usize {
-        self.execute_rules()
+        self.execute_rules().rules_fired
     }
 
     fn get_metrics(&self) -> crate::engine::metrics::EngineMetrics {
@@ -448,9 +438,25 @@ impl ExecutionEngine for TreatEngine {
         self.alpha_memory = AlphaMemory::new();
         self.beta_memory = BetaMemory::new();
         self.working_facts.clear();
+        self.rules.clear();
         self.metrics.reset_metrics();
         self.cache_hits = 0;
         self.cache_misses = 0;
+    }
+
+    /// Loads a ruleset into the engine by cloning the ruleset's `rules` Vec
+    /// into `self.rules` (L-02). The direct evaluator iterates `self.rules`
+    /// against `self.working_facts`. Per-request engines carry their own
+    /// clone of the shared `RuleSet` snapshot (D-03).
+    fn load_ruleset(&mut self, ruleset: &crate::rules::RuleSet) -> Result<(), String> {
+        self.rules = ruleset.rules.clone();
+        Ok(())
+    }
+
+    /// Returns the post-execution working memory so the API layer can
+    /// serialize `facts_after` from real engine state (Pitfall 11).
+    fn get_facts(&self) -> Vec<crate::fact::Fact> {
+        self.working_facts.values().cloned().collect()
     }
 }
 

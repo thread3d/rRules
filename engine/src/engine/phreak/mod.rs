@@ -9,7 +9,11 @@ use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
 use crate::engine::rete::NodeId;
 
-use crate::monitoring::coverage::CoverageTracking;
+// NOTE: `CoverageTracking` is no longer imported here — the shared direct
+// evaluator (`engine::direct_eval`) owns once-per-rule coverage recording
+// after the fixpoint loop (L-06 / Pitfall 6), so the placeholder per-nagram
+// `record_rule_eval`/`record_rule_fire` calls in the old `execute_rules`
+// are gone.
 
 /// Nagram type (sequence of memory references forming a partial match)
 pub type Nagram = Vec<MemoryReference>;
@@ -422,6 +426,11 @@ pub struct PhreakEngine {
     alpha_memory: AlphaMemory,
     beta_memory: BetaMemory,
     working_facts: HashMap<FactId, Fact>,
+    /// Rules loaded via `load_ruleset` (L-02). The direct evaluator
+    /// (`execute_rules`, Plan 23-06) iterates this Vec instead of the
+    /// placeholder PHREAK network. Populated by cloning from a shared
+    /// `RuleSet` snapshot; per-request engines carry their own copy.
+    rules: Vec<crate::rules::Rule>,
     trace: ExecutionTrace,
     metrics: crate::engine::metrics::SimpleMetricsCollector,
 }
@@ -434,6 +443,7 @@ impl PhreakEngine {
             alpha_memory: AlphaMemory::new(),
             beta_memory: BetaMemory::new(),
             working_facts: HashMap::new(),
+            rules: Vec::new(),
             trace: ExecutionTrace::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
         }
@@ -536,58 +546,39 @@ impl PhreakEngine {
         self.metrics.record_beta_memory_additions(test_facts_from_alpha.len() + existing_nagrams.len());
     }
 
-    /// Executes the engine and fires rules with truth maintenance.
-    pub fn execute_rules(&mut self) -> usize {
-        let mut rules_fired = 0;
+    /// Executes the rules loaded via `load_ruleset` against `working_facts`
+    /// using the shared direct interpreter (D-04, Plan 23-06).
+    ///
+    /// This bypasses the placeholder PHREAK network entirely — it delegates
+    /// to `engine::direct_eval::direct_execute`, which iterates `self.rules`,
+    /// evaluates each `rule.condition` against `self.working_facts` via
+    /// `Condition::evaluate`, applies matching `rule.actions`, and chains to
+    /// fixpoint under the `RRULES_MAX_CHAIN_ITERATIONS` cap (D-07). Coverage
+    /// is recorded once per evaluated/fired rule AFTER the loop (L-06 /
+    /// Pitfall 6 — the per-nagram double-count bug in the placeholder
+    /// implementation is removed). Returns an `EngineResult` with
+    /// `fired_rule_ids` populated.
+    ///
+    /// The truth-maintenance system (`PhreakNetwork::tms`) is not touched by
+    /// the direct evaluator — placeholder justification tracking was a
+    /// network-propagation heuristic; wiring real TMS support is deferred to
+    /// a future phase (per the v3.0 pluggable-engine deferral).
+    pub fn execute_rules(&mut self) -> EngineResult {
+        let start = std::time::Instant::now();
 
-        // Collect all data first (before any mutable borrow)
-        let nagram_data: Vec<_> = {
-            let mut temp = vec![];
-            for join_node in self.network.base.join_nodes.values() {
-                let nagrams = self.beta_memory.get_nagrams(&join_node.id.0);
-                temp.push((join_node.id.0.clone(), nagrams));
-            }
-            temp
-        };
+        let (fired_set, _evaluated_set) =
+            crate::engine::direct_eval::direct_execute(&self.rules, &mut self.working_facts);
 
-        // Record rule evaluation before processing each join node's rules
-        for (join_id, _) in &nagram_data {
-            if let Some(action_node) = self.network.base.action_nodes.values().find(|n| {
-                // Simplified - find action node connected to this join node
-                true
-            }) {
-                CoverageTracking::record_rule_eval(&action_node.rule_id);
-            }
+        // Record per-fire metrics for parity with the placeholder loop.
+        for _ in &fired_set {
+            self.metrics.record_rule_fired();
         }
+        self.metrics
+            .set_execution_time_ms(start.elapsed().as_secs_f64() * 1000.0);
 
-        // Now process with mutable borrows allowed
-        for (join_id, nagrams) in nagram_data {
-            // For each partial match, create a justification
-            for (i, _nagram) in nagrams.iter().enumerate() {
-                let just_id = JustificationId::new(format!(
-                    "action_{}_{}",
-                    join_id, i
-                ));
-
-                let justification = Justification::new(
-                    just_id.clone(),
-                    &format!("rule_for_join_{}", join_id),
-                    vec![], // Would contain premise facts in full implementation
-                    vec![format!("result_{}", rules_fired)],
-                );
-
-                // Add to TMS
-                self.network.tms_mut().add_justification(justification);
-
-                CoverageTracking::record_rule_fire(&join_id);
-                rules_fired += 1;
-                self.metrics.record_rule_fired();
-            }
-        }
-
-        self.trace.fired_rules.clear(); // In real implementation, record here
-        self.metrics.set_execution_time_ms(0.0);
-        rules_fired
+        let mut result = EngineResult::success(fired_set.len());
+        result.fired_rule_ids = fired_set.iter().cloned().collect();
+        result
     }
 
     /// Gets a trace of execution.
@@ -630,8 +621,7 @@ impl Default for PhreakEngine {
 
 impl ExecutionEngine for PhreakEngine {
     fn execute(&mut self) -> EngineResult {
-        let fired = self.execute_rules();
-        EngineResult::success(fired)
+        self.execute_rules()
     }
 
     fn insert_fact(&mut self, fact: Fact) -> Result<(), String> {
@@ -645,7 +635,7 @@ impl ExecutionEngine for PhreakEngine {
     }
 
     fn run(&mut self) -> usize {
-        self.execute_rules()
+        self.execute_rules().rules_fired
     }
 
     fn get_metrics(&self) -> crate::engine::metrics::EngineMetrics {
@@ -664,8 +654,24 @@ impl ExecutionEngine for PhreakEngine {
         self.alpha_memory = AlphaMemory::new();
         self.beta_memory = BetaMemory::new();
         self.working_facts.clear();
+        self.rules.clear();
         self.trace = ExecutionTrace::new();
         self.metrics.reset_metrics();
+    }
+
+    /// Loads a ruleset into the engine by cloning the ruleset's `rules` Vec
+    /// into `self.rules` (L-02). The direct evaluator iterates `self.rules`
+    /// against `self.working_facts`. Per-request engines carry their own
+    /// clone of the shared `RuleSet` snapshot (D-03).
+    fn load_ruleset(&mut self, ruleset: &crate::rules::RuleSet) -> Result<(), String> {
+        self.rules = ruleset.rules.clone();
+        Ok(())
+    }
+
+    /// Returns the post-execution working memory so the API layer can
+    /// serialize `facts_after` from real engine state (Pitfall 11).
+    fn get_facts(&self) -> Vec<crate::fact::Fact> {
+        self.working_facts.values().cloned().collect()
     }
 }
 
@@ -754,8 +760,8 @@ mod tests {
         }
 
         // Execute and track justifications
-        let fired = engine.execute_rules();
-        assert!(fired >= 0);
+        let result = engine.execute_rules();
+        assert!(result.success);
 
         // Check that justifications were created
         assert_eq!(engine.justification_count(), 0); // Would be > 0 with full implementation

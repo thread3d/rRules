@@ -10,7 +10,11 @@ use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
 use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference, Nagram};
 
-use crate::monitoring::coverage::CoverageTracking;
+// NOTE: `CoverageTracking` is no longer imported here — the shared direct
+// evaluator (`engine::direct_eval`) owns once-per-rule coverage recording
+// after the fixpoint loop (L-06 / Pitfall 6), so the placeholder per-nagram
+// `record_rule_eval`/`record_rule_fire` calls in the old `execute_rules`
+// are gone.
 
 /// Aggregation operations supported by LEAPS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -214,6 +218,11 @@ pub struct LeapsEngine {
     alpha_memory: AlphaMemory,
     beta_memory: BetaMemory,
     working_facts: HashMap<FactId, Fact>,
+    /// Rules loaded via `load_ruleset` (L-02). The direct evaluator
+    /// (`execute_rules`, Plan 23-06) iterates this Vec instead of the
+    /// placeholder LEAPS network. Populated by cloning from a shared
+    /// `RuleSet` snapshot; per-request engines carry their own copy.
+    rules: Vec<crate::rules::Rule>,
     metrics: crate::engine::metrics::SimpleMetricsCollector,
 }
 
@@ -225,6 +234,7 @@ impl LeapsEngine {
             alpha_memory: AlphaMemory::new(),
             beta_memory: BetaMemory::new(),
             working_facts: HashMap::new(),
+            rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
         }
     }
@@ -236,6 +246,7 @@ impl LeapsEngine {
             alpha_memory: AlphaMemory::new(),
             beta_memory: BetaMemory::new(),
             working_facts: HashMap::new(),
+            rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
         }
     }
@@ -354,47 +365,34 @@ impl LeapsEngine {
         }
     }
 
-    /// Executes the engine and fires rules.
-    pub fn execute_rules(&mut self) -> usize {
-        let mut rules_fired = 0;
+    /// Executes the rules loaded via `load_ruleset` against `working_facts`
+    /// using the shared direct interpreter (D-04, Plan 23-06).
+    ///
+    /// This bypasses the placeholder LEAPS network entirely — it delegates
+    /// to `engine::direct_eval::direct_execute`, which iterates `self.rules`,
+    /// evaluates each `rule.condition` against `self.working_facts` via
+    /// `Condition::evaluate`, applies matching `rule.actions`, and chains to
+    /// fixpoint under the `RRULES_MAX_CHAIN_ITERATIONS` cap (D-07). Coverage
+    /// is recorded once per evaluated/fired rule AFTER the loop (L-06 /
+    /// Pitfall 6 — the per-nagram double-count bug in the placeholder
+    /// implementation is removed). Returns an `EngineResult` with
+    /// `fired_rule_ids` populated.
+    pub fn execute_rules(&mut self) -> EngineResult {
+        let start = std::time::Instant::now();
 
-        // Collect all join nodes and nagrams first (before any mutable borrow)
-        let nagram_data: Vec<_> = {
-            let mut temp_nagrams = vec![];
-            for join_node in self.network.base.join_nodes.values() {
-                temp_nagrams.push(join_node.id.clone());
-            }
-            temp_nagrams
-        };
+        let (fired_set, _evaluated_set) =
+            crate::engine::direct_eval::direct_execute(&self.rules, &mut self.working_facts);
 
-        // Get nagrams in a separate loop to avoid borrow conflicts
-        for join_id in &nagram_data {
-            let nagrams = self.beta_memory.get_nagrams(join_id);
-
-            // Record rule evaluation when the rule is being evaluated
-            if let Some(action_node) = self.network.base.action_nodes.values().find(|n| {
-                // Simplified - find action node connected to this join node
-                true
-            }) {
-                CoverageTracking::record_rule_eval(&action_node.rule_id);
-            }
-
-            // Apply aggregation if this join has aggregations (separate borrow scope)
-            {
-                if self.network.aggregated_join_nodes.contains(&join_id.0) {
-                    self.execute_aggregations();
-                }
-            }
-
-            for _nagram in &nagrams {
-                CoverageTracking::record_rule_fire(&join_id.0);
-                rules_fired += 1;
-                self.metrics.record_rule_fired();
-            }
+        // Record per-fire metrics for parity with the placeholder loop.
+        for _ in &fired_set {
+            self.metrics.record_rule_fired();
         }
+        self.metrics
+            .set_execution_time_ms(start.elapsed().as_secs_f64() * 1000.0);
 
-        self.metrics.set_execution_time_ms(0.0);
-        rules_fired
+        let mut result = EngineResult::success(fired_set.len());
+        result.fired_rule_ids = fired_set.iter().cloned().collect();
+        result
     }
 
     /// Gets an aggregation result.
@@ -430,8 +428,7 @@ impl Default for LeapsEngine {
 
 impl ExecutionEngine for LeapsEngine {
     fn execute(&mut self) -> EngineResult {
-        let fired = self.execute_rules();
-        EngineResult::success(fired)
+        self.execute_rules()
     }
 
     fn insert_fact(&mut self, fact: Fact) -> Result<(), String> {
@@ -445,7 +442,7 @@ impl ExecutionEngine for LeapsEngine {
     }
 
     fn run(&mut self) -> usize {
-        self.execute_rules()
+        self.execute_rules().rules_fired
     }
 
     fn get_metrics(&self) -> crate::engine::metrics::EngineMetrics {
@@ -464,7 +461,23 @@ impl ExecutionEngine for LeapsEngine {
         self.alpha_memory = AlphaMemory::new();
         self.beta_memory = BetaMemory::new();
         self.working_facts.clear();
+        self.rules.clear();
         self.metrics.reset_metrics();
+    }
+
+    /// Loads a ruleset into the engine by cloning the ruleset's `rules` Vec
+    /// into `self.rules` (L-02). The direct evaluator iterates `self.rules`
+    /// against `self.working_facts`. Per-request engines carry their own
+    /// clone of the shared `RuleSet` snapshot (D-03).
+    fn load_ruleset(&mut self, ruleset: &crate::rules::RuleSet) -> Result<(), String> {
+        self.rules = ruleset.rules.clone();
+        Ok(())
+    }
+
+    /// Returns the post-execution working memory so the API layer can
+    /// serialize `facts_after` from real engine state (Pitfall 11).
+    fn get_facts(&self) -> Vec<crate::fact::Fact> {
+        self.working_facts.values().cloned().collect()
     }
 }
 

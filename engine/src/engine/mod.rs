@@ -38,6 +38,7 @@ pub mod leaps;
 #[cfg(feature = "engine-phreak")]
 pub mod phreak;
 
+pub mod direct_eval;
 pub mod metrics;
 pub mod registry;
 pub mod selector;
