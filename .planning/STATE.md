@@ -2,19 +2,16 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Phase Details
-current_phase: 23
-current_phase_name: execute-evaluator-wiring
 status: executing
-stopped_at: Completed 23-03-PLAN.md (ReteEngine direct evaluator keystone)
-last_updated: "2026-07-03T06:51:19.580Z"
-last_activity: 2026-07-03
-last_activity_desc: Phase 23 plan 03 complete
+stopped_at: Completed 23-04-PLAN.md (MetricsSnapshot rename + Wave 0 RED scaffolds)
+last_updated: "2026-07-03T06:57:51.877Z"
+last_activity: 2026-07-03 — Phase 23 plan 04 complete
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 6
-  completed_plans: 3
-  percent: 50
+  completed_plans: 4
+  percent: 67
 ---
 
 # Project State
@@ -31,7 +28,7 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 Phase: 23 (execute-evaluator-wiring) — EXECUTING
 Plans: 6 (23-01..23-06) across 3 waves
 Status: Executing Phase 23
-Last activity: 2026-07-03 — Phase 23 execution started
+Last activity: 2026-07-03 — Phase 23 plan 04 complete (MetricsSnapshot rename + Wave 0 RED scaffolds)
 
 ### Milestone v5.0 Phases
 
@@ -232,6 +229,7 @@ From v2.0 milestone:
 - [Phase ?]: Phase 23-03: Rewrote ReteEngine::execute_rules into a real direct evaluator (D-04) with fixpoint cap (D-07); keystone score+10 scenario passes at engine level.
 - [Phase ?]: Phase 23-03: Pitfall 6 fixed — fired/evaluated ids in HashSet, record_rule_fire/record_rule_eval once per rule after the fixpoint loop; stale per-nagram record removed.
 - [Phase ?]: Phase 23-03: Action::UpdateFact.id matched as fact_type_id with exact-key fast path; each rule fires at most once per execute() (fired_set guard).
+- [Phase ?]: Phase 23-04: Renamed metrics::EngineState -> MetricsSnapshot (L-05 / Pitfall 10) to disambiguate from execution::EngineState before Plan 23-05 adds execute logic; execution.rs::EngineState intentionally untouched. Landed Wave 0 RED scaffolds (engine/tests/coverage.rs record_once_per_rule GREEN; api/tests/execute_integration.rs five RED scaffolds for EXEC-01/02, ENGINE-07/08, MON-05).
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -259,11 +257,11 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-**Resume file:** .planning/phases/23-execute-evaluator-wiring/23-04-PLAN.md
+**Resume file:** .planning/phases/23-execute-evaluator-wiring/23-05-PLAN.md
 
-**Stopped at:** Completed 23-03-PLAN.md (ReteEngine direct evaluator keystone)
+**Stopped at:** Completed 23-04-PLAN.md (MetricsSnapshot rename + Wave 0 RED scaffolds)
 
-Last session: 2026-07-03T06:51:19.568Z
+Last session: 2026-07-03T06:57:51.870Z
 Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13 requirements partial; user chose to close inline via new frontend-wiring phase.
 
 **Completed Phases:**
@@ -295,3 +293,4 @@ Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13
 | Phase 23 P01 | 4min | 2 tasks | 6 files |
 | Phase 23 P02 | 10min | 2 tasks | 4 files |
 | Phase 23 P03 | 7min | 2 tasks | 2 files |
+| Phase 23 P04 | 4min | 2 tasks | 8 files |

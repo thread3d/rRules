@@ -115,7 +115,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 23-03-PLAN.md — ReteEngine direct-evaluator rewrite (D-04): load_ruleset/get_facts impls, fixpoint-with-cap forward chaining (D-07), once-per-rule coverage (L-06/Pitfall 6), fired_rule_ids in EngineResult
-- [ ] 23-04-PLAN.md — Metrics EngineState → MetricsSnapshot rename (L-05/Pitfall 10) + Wave 0 RED test scaffolds (engine/tests/coverage.rs, api/tests/execute_integration.rs) for all four ROADMAP success criteria
+- [x] 23-04-PLAN.md — Metrics EngineState → MetricsSnapshot rename (L-05/Pitfall 10) + Wave 0 RED test scaffolds (engine/tests/coverage.rs, api/tests/execute_integration.rs) for all four ROADMAP success criteria
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -285,7 +285,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 20. Complete Management API | v4.0 | — | Complete | 2026-07-02 |
 | 21. Deployment & CI/CD | v4.0 | — | Complete | 2026-07-02 |
 | 22. Frontend Integration Closure | v4.0 | 6/6 | Complete (verified PASS) | 2026-07-02 |
-| 23. Execute evaluator + wiring | v5.0 | 3/6 | In Progress|  |
+| 23. Execute evaluator + wiring | v5.0 | 4/6 | In Progress|  |
 | 24. Execution counters + metrics broadcast | v5.0 | 0/? | Not started | - |
 | 25. Real reload + JobStore | v5.0 | 0/? | Not started | - |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 0/? | Not started | - |
