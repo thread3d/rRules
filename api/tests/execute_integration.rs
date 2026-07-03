@@ -27,6 +27,7 @@
 //! Filter: `cargo test -p api --test execute_integration`
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use actix_web::{body::BoxBody, test, web, App};
@@ -35,7 +36,10 @@ use serde_json::{json, Value};
 use api::metrics::{
     configure_metrics, coverage_endpoint, create_metrics_channel, ExecutionCounters, MetricsTx,
 };
-use api::v1::execution::{execute_rules, SharedRuleSet};
+use api::v1::execution::{
+    batch_execute_rules, execute_rules, get_job_status, init_job_store, list_jobs, reload_rules,
+    EngineState, JobStore, SharedRuleSet,
+};
 use engine::data_types::Value as EngineValue;
 use engine::engine::registry::EngineRegistry;
 use engine::engine::selector::EngineSelector;
@@ -74,6 +78,50 @@ fn score_plus_10_rule() -> Rule {
             fields,
         })
         .build()
+}
+
+/// Build the edited keystone rule: `r1` with condition `score == 0` and action
+/// `score := score + 20` — the +20 variant used by the SC-1 keystone scenario
+/// (edit +10 → +20, reload, execute sees the new delta). Mirrors
+/// `score_plus_10_rule()` with `Literal(Integer(20))`.
+fn score_plus_20_rule() -> Rule {
+    let mut fields = HashMap::new();
+    fields.insert(
+        "score".to_string(),
+        Expression::Add(
+            Box::new(Expression::FieldRef {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+            }),
+            Box::new(Expression::Literal(EngineValue::Integer(20))),
+        ),
+    );
+    Rule::builder("r1", "Increment score")
+        .condition(Condition::Pattern {
+            fact_type: "scorecard".to_string(),
+            field: "score".to_string(),
+            value: EngineValue::Integer(0),
+            op: ComparisonOp::Eq,
+        })
+        .action(Action::UpdateFact {
+            id: "scorecard".to_string(),
+            fields,
+        })
+        .build()
+}
+
+/// Serialize `rule` via `serde_json::to_string_pretty` and write it to
+/// `{dir}/{name}.rules`, returning the path. The `Rule` AST derives
+/// `Serialize` (`engine/src/rules.rs:15`), so this is a one-liner. Used by
+/// the SC-1 keystone test to write r1 (+10) and then overwrite it with +20
+/// before calling `POST /v1/rules/reload`.
+fn write_rule_file(dir: &std::path::Path, name: &str, rule: &Rule) -> PathBuf {
+    let path = dir.join(format!("{name}.rules"));
+    let json = serde_json::to_string_pretty(rule)
+        .expect("serialize rule to JSON");
+    std::fs::write(&path, json)
+        .unwrap_or_else(|e| panic!("write_rule_file: failed to write {}: {e}", path.display()));
+    path
 }
 
 /// Build the shared read-only `SharedRuleSet` containing the keystone rule,
@@ -130,19 +178,47 @@ fn shared_counters() -> web::Data<ExecutionCounters> {
     web::Data::new(ExecutionCounters::default())
 }
 
+/// Build a shared `JobStore` (Plan 25-01 Task 2). `reload_rules` (post-25-03
+/// rewrite) and `get_job_status` / `list_jobs` extract `web::Data<JobStore>`,
+/// so the test App must install it. The current `reload_rules` handler still
+/// extracts `web::Data<EngineState>` (pre-25-03); installing both keeps the
+/// test App forward-compatible so the RED reload tests fail on substantive
+/// assertions (job 404 / no swap / gen 0) rather than on a 500 missing-
+/// extractor error.
+fn shared_job_store() -> web::Data<JobStore> {
+    web::Data::new(init_job_store())
+}
+
+/// Build a shared `EngineState` for the current (pre-25-03) `reload_rules`
+/// handler which extracts `web::Data<EngineState>`. Installing it lets the
+/// reload endpoint return 202/200 so the RED reload tests fail on the
+/// substantive assertion (no swap, no generation bump, job 404) rather than
+/// on a 500 missing-extractor error. Harmless for pre-existing tests (actix
+/// silently ignores unused `app_data`).
+fn shared_engine_state() -> web::Data<EngineState> {
+    web::Data::new(EngineState::new())
+}
+
 // =====================================================================
 // Test App wiring
 // =====================================================================
 
-/// Register the routes Plan 23-05 needs: `POST /v1/execute` (the rewrite
-/// target) and `GET /v1/metrics/coverage` (the MON-05 coverage surface). The
-/// `/v1` scope mirrors `main.rs` so the coverage route resolves to
-/// `/v1/metrics/coverage`.
+/// Register the routes Plan 23-05 + Plan 25-01 need: `POST /v1/execute`,
+/// `GET /v1/metrics/coverage`, `POST /v1/rules/reload`, `POST /v1/rules/
+/// batch-execute`, `GET /v1/jobs/{job_id}`, `GET /v1/jobs`. The `/v1` scope
+/// mirrors `main.rs` so routes resolve to their canonical `/v1/...` paths.
+/// Route ordering mirrors `main.rs`: `/rules/batch-execute` and `/rules/reload`
+/// are registered before any `/rules/{id}` wildcard so the literal paths win.
 fn configure_test_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/v1")
             .route("/execute", web::post().to(execute_rules))
-            .route("/metrics/coverage", web::get().to(coverage_endpoint)),
+            .route("/metrics/coverage", web::get().to(coverage_endpoint))
+            // Phase 25 (Plan 25-01 Task 2): reload + batch + jobs routes.
+            .route("/rules/batch-execute", web::post().to(batch_execute_rules))
+            .route("/rules/reload", web::post().to(reload_rules))
+            .route("/jobs/{job_id}", web::get().to(get_job_status))
+            .route("/jobs", web::get().to(list_jobs)),
     );
 }
 
@@ -176,6 +252,8 @@ macro_rules! init_test_app {
                 .app_data(shared_ruleset())
                 .app_data(shared_counters())
                 .app_data(shared_metrics_tx())
+                .app_data(shared_job_store())
+                .app_data(shared_engine_state())
                 .configure(configure_test_routes)
                 .configure(configure_metrics),
         )
@@ -185,13 +263,16 @@ macro_rules! init_test_app {
 
 /// Reset the `CoverageTracking` singleton and pin `RRULES_DEFAULT_ENGINE=rete`
 /// so `default_engine_resolution` is deterministic. Called at the start of
-/// every serial test.
+/// every serial test. Also resets `RULE_STORAGE_PATH` to the default so
+/// reload tests that mutate it don't leak into siblings.
 fn reset_test_env() {
     CoverageTracking.clear();
-    // SAFETY on env var: tests run serially (#[serial_test::serial]); no
-    // concurrent test reads/writes this var. Plan 23-05's handler reads it
-    // once per request.
+    // SAFETY on env vars: tests run serially (#[serial_test::serial]); no
+    // concurrent test reads/writes these vars. Plan 23-05's handler reads
+    // RRULES_DEFAULT_ENGINE once per request; Plan 25's reload handler reads
+    // RULE_STORAGE_PATH once per reload.
     std::env::set_var("RRULES_DEFAULT_ENGINE", "rete");
+    std::env::set_var("RULE_STORAGE_PATH", "./rules");
 }
 
 // =====================================================================
@@ -470,4 +551,585 @@ async fn response_includes_engine_generation() {
         "response-shape: expected engine_generation to be a u64; got {:?}; body: {body}",
         body["engine_generation"]
     );
+}
+
+// =====================================================================
+// Phase 25 Wave 0 RED scaffolds (Plan 25-01 Task 2)
+//
+// These eight scaffolds encode the Phase 25 success criteria (SC-1 reload-
+// then-execute-against-refreshed, SC-2 batch truthful aggregation, SC-3
+// generation increment) and supporting edge cases (async job transitions,
+// in-flight snapshot isolation, panicking-item isolation, empty-dir
+// graceful handling, sync reload swap). They compile against the final
+// SharedRuleSet shape (Plan 25-01 Task 1) and FAIL on their substantive
+// assertions (RED) because:
+//   - reload_rules is still a no-op (EngineState.reload_engine acquires-
+//     and-drops the write lock, never recompiles/swaps — Pitfall 12 / L-02)
+//   - the async spawned task never writes to the JobStore (Pitfall 14 /
+//     L-03) → GET /v1/jobs/{id} returns 404
+//   - generation never bumps (L-04 — reload_and_swap lands in Plan 25-02)
+//   - batch_execute_rules masks execute_single Err as a zero-fired success
+//     (D-03 — the truthful Err→failed aggregation lands in Plan 25-03)
+//
+// Plans 25-02 (real .rules parser + reload_and_swap) and 25-03 (handler
+// wiring + batch aggregation) turn these GREEN. Mirrors the Phase 23-04 /
+// 24-01 Wave 0 RED→GREEN + Nyquist pattern.
+// =====================================================================
+
+/// Create a unique temp directory for a reload test and return its path.
+/// Uses `uuid::Uuid::new_v4()` so serial tests don't collide. The caller is
+/// responsible for cleanup (best-effort `fs::remove_dir_all` on drop).
+fn create_test_rules_dir() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("rrules-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir)
+        .unwrap_or_else(|e| panic!("create_test_rules_dir: failed to create {}: {e}", dir.display()));
+    dir
+}
+
+// ---------------------------------------------------------------------
+// SC-1 / DEPLOY-05: reload_then_execute_against_refreshed_rules
+// ---------------------------------------------------------------------
+
+/// **SC-1 keystone scenario:** write r1 (+10) to a temp rules dir, execute
+/// sees `score == 10` / `gen == 0`; overwrite r1 (+20); POST
+/// `/v1/rules/reload {async:true}` returns 202 with `job_id`; poll
+/// `GET /v1/jobs/{job_id}` reaches `completed`; the next execute sees
+/// `score == 20` / `gen == 1` (the edited rule + bumped generation).
+///
+/// RED today because `reload_rules` is a no-op (L-02: `reload_engine`
+/// acquires-and-drops the write lock, never recompiles/swaps), the spawned
+/// task never writes to the JobStore (L-03 / Pitfall 14 → job 404), and
+/// generation never bumps (L-04 — `reload_and_swap` lands in Plan 25-02).
+/// Plan 25-02 + 25-03 turn this GREEN.
+#[serial_test::serial]
+#[actix_web::test]
+async fn reload_then_execute_against_refreshed_rules() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+
+    // Write r1 (+10) to the rules dir.
+    write_rule_file(&dir, "r1", &score_plus_10_rule());
+
+    let app = init_test_app!();
+
+    // 1. Execute against the +10 rule → score 10, gen 0.
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "facts": { "scorecard": { "score": 0 } } }))
+        .to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+    let score_before = body["facts_after"]["scorecard"]["score"].as_i64();
+    let gen_before = body["engine_generation"].as_u64();
+    assert_eq!(
+        score_before,
+        Some(10),
+        "SC-1: pre-reload execute should see score 10 (+10 rule); got {:?}; body: {body}",
+        score_before
+    );
+    assert_eq!(
+        gen_before,
+        Some(0),
+        "SC-1 / L-04: pre-reload generation should be 0; got {:?}; body: {body}",
+        gen_before
+    );
+
+    // 2. Overwrite r1 with the +20 rule.
+    write_rule_file(&dir, "r1", &score_plus_20_rule());
+
+    // 3. POST /v1/rules/reload {async:true} → 202 with job_id.
+    let reload_req = test::TestRequest::post()
+        .uri("/v1/rules/reload")
+        .set_json(json!({ "async_reload": true }))
+        .to_request();
+    let reload_resp = test::call_service(&app, reload_req).await;
+    assert_eq!(
+        reload_resp.status().as_u16(),
+        202,
+        "SC-1: async reload should return 202, got {}",
+        reload_resp.status()
+    );
+    let reload_body: Value = json_body(reload_resp).await;
+    let job_id = reload_body["job_id"]
+        .as_str()
+        .expect("SC-1: 202 response should contain job_id")
+        .to_string();
+
+    // 4. Poll GET /v1/jobs/{job_id} until completed (or timeout).
+    let mut observed_statuses: Vec<String> = Vec::new();
+    for _ in 0..50 {
+        let poll_req = test::TestRequest::get()
+            .uri(&format!("/v1/jobs/{job_id}"))
+            .to_request();
+        let poll_resp = test::call_service(&app, poll_req).await;
+        if poll_resp.status() == actix_web::http::StatusCode::NOT_FOUND {
+            observed_statuses.push("not_found".to_string());
+        } else if poll_resp.status().is_success() {
+            let poll_body = json_body(poll_resp).await;
+            if let Some(status) = poll_body["status"].as_str() {
+                observed_statuses.push(status.to_string());
+                if status == "completed" {
+                    break;
+                }
+            }
+        } else {
+            observed_statuses.push(format!("status_{}", poll_resp.status().as_u16()));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        observed_statuses.iter().any(|s| s == "completed"),
+        "SC-1: expected job to reach 'completed'; observed statuses: {:?}",
+        observed_statuses
+    );
+
+    // 5. Execute again → should see score 20 (edited rule) and gen > 0.
+    let req2 = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "facts": { "scorecard": { "score": 0 } } }))
+        .to_request();
+    let body2 = json_body(test::call_service(&app, req2).await).await;
+    let score_after = body2["facts_after"]["scorecard"]["score"].as_i64();
+    let gen_after = body2["engine_generation"].as_u64();
+    assert_eq!(
+        score_after,
+        Some(20),
+        "SC-1: post-reload execute should see score 20 (+20 rule); got {:?}; body: {body2}",
+        score_after
+    );
+    assert!(
+        gen_after.unwrap_or(0) > 0,
+        "SC-1 / L-04: post-reload generation should be > 0; got {:?}; body: {body2}",
+        gen_after
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------
+// SC-1 / DEPLOY-05: async_reload_job_transitions
+// ---------------------------------------------------------------------
+
+/// POST `/v1/rules/reload {async:true}` returns 202; polling
+/// `GET /v1/jobs/{job_id}` observes `pending` or `running` followed by
+/// `completed` (L-03: the spawned reload task writes transitions into the
+/// JobStore). RED today because the spawned task calls
+/// `engine_state.reload_engine` (a no-op) and never writes to the
+/// `JobStore` — `GET /v1/jobs/{id}` returns 404 for every poll
+/// (Pitfall 14). Plan 25-03 wires the spawned task to write
+/// `Pending → Running → Completed` transitions.
+#[serial_test::serial]
+#[actix_web::test]
+async fn async_reload_job_transitions() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+    write_rule_file(&dir, "r1", &score_plus_10_rule());
+
+    let app = init_test_app!();
+
+    let reload_req = test::TestRequest::post()
+        .uri("/v1/rules/reload")
+        .set_json(json!({ "async_reload": true }))
+        .to_request();
+    let reload_resp = test::call_service(&app, reload_req).await;
+    assert_eq!(
+        reload_resp.status().as_u16(),
+        202,
+        "SC-1: async reload should return 202, got {}",
+        reload_resp.status()
+    );
+    let reload_body: Value = json_body(reload_resp).await;
+    let job_id = reload_body["job_id"]
+        .as_str()
+        .expect("SC-1: 202 response should contain job_id")
+        .to_string();
+
+    // Poll for transitions. RED: all polls return 404 (not_found) because
+    // the spawned task never writes to the JobStore.
+    let mut statuses: Vec<String> = Vec::new();
+    for _ in 0..50 {
+        let poll_req = test::TestRequest::get()
+            .uri(&format!("/v1/jobs/{job_id}"))
+            .to_request();
+        let poll_resp = test::call_service(&app, poll_req).await;
+        if poll_resp.status() == actix_web::http::StatusCode::NOT_FOUND {
+            statuses.push("not_found".to_string());
+        } else if poll_resp.status().is_success() {
+            let poll_body = json_body(poll_resp).await;
+            if let Some(status) = poll_body["status"].as_str() {
+                statuses.push(status.to_string());
+                if status == "completed" {
+                    break;
+                }
+            }
+        } else {
+            statuses.push(format!("status_{}", poll_resp.status().as_u16()));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        statuses.iter().any(|s| s == "pending" || s == "running"),
+        "SC-1: expected to observe 'pending' or 'running' transition; got {:?}",
+        statuses
+    );
+    assert!(
+        statuses.iter().any(|s| s == "completed"),
+        "SC-1: expected to observe 'completed' transition; got {:?}",
+        statuses
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------
+// SC-3 / L-04: engine_generation_increments_after_reload
+// ---------------------------------------------------------------------
+
+/// Execute returns `engine_generation == 0`; after a reload, a subsequent
+/// execute returns `engine_generation > 0` (L-04: generation is stamped
+/// from the shared snapshot and incremented on each successful reload).
+/// RED today because `reload_rules` never swaps the `SharedRuleSet`, so
+/// `generation` stays 0. Plan 25-02's `reload_and_swap` increments it
+/// under the write lock.
+#[serial_test::serial]
+#[actix_web::test]
+async fn engine_generation_increments_after_reload() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+    write_rule_file(&dir, "r1", &score_plus_10_rule());
+
+    let app = init_test_app!();
+
+    // Pre-reload execute → gen 0.
+    let req1 = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "facts": { "scorecard": { "score": 0 } } }))
+        .to_request();
+    let body1 = json_body(test::call_service(&app, req1).await).await;
+    let gen_before = body1["engine_generation"].as_u64();
+    assert_eq!(
+        gen_before,
+        Some(0),
+        "SC-3 / L-04: pre-reload generation should be 0; got {:?}; body: {body1}",
+        gen_before
+    );
+
+    // Sync reload.
+    let reload_req = test::TestRequest::post()
+        .uri("/v1/rules/reload")
+        .set_json(json!({ "async_reload": false }))
+        .to_request();
+    let reload_resp = test::call_service(&app, reload_req).await;
+    assert!(
+        reload_resp.status().is_success(),
+        "SC-3: sync reload should return 200, got {}",
+        reload_resp.status()
+    );
+
+    // Post-reload execute → gen > 0. RED: gen stays 0.
+    let req2 = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "facts": { "scorecard": { "score": 0 } } }))
+        .to_request();
+    let body2 = json_body(test::call_service(&app, req2).await).await;
+    let gen_after = body2["engine_generation"].as_u64();
+    assert!(
+        gen_after.unwrap_or(0) > 0,
+        "SC-3 / L-04: post-reload generation should be > 0; got {:?}; body: {body2}",
+        gen_after
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------
+// SC-2 / EXEC-03: batch_truthful_aggregation_one_failing_item
+// ---------------------------------------------------------------------
+
+/// POST `/v1/rules/batch-execute` with 2 items — one valid (`engine`
+/// omitted → default rete), one with `engine: "unknown"` (→ `execute_single`
+/// returns `Err` / HTTP 400). The truthful aggregate (D-03 / SC-2) is
+/// `succeeded == 1`, `failed == 1`, the failing item has `success: false`
+/// and `error: Some(...)`, and `total_fired >= 1` (only the successful
+/// item's fired rules count). RED today because `batch_execute_rules`
+/// converts `execute_single`'s `Err` into a placeholder
+/// `ExecuteResponse { rules_fired: 0, … }` and counts it as `succeeded`
+/// with `success: true` (`execution.rs:618-628`) → `succeeded == 2`,
+/// `failed == 0`. Plan 25-03 Task 2 changes the JoinSet task to return
+/// `Result<ExecuteResponse, String>` and the collector to branch
+/// `Err → failed / success:false / error:Some` (D-03).
+#[serial_test::serial]
+#[actix_web::test]
+async fn batch_truthful_aggregation_one_failing_item() {
+    reset_test_env();
+    let app = init_test_app!();
+
+    let batch_req = test::TestRequest::post()
+        .uri("/v1/rules/batch-execute")
+        .set_json(json!({
+            "requests": [
+                { "facts": { "scorecard": { "score": 0 } } },
+                { "facts": { "scorecard": { "score": 0 } }, "engine": "unknown" }
+            ]
+        }))
+        .to_request();
+    let body = json_body(test::call_service(&app, batch_req).await).await;
+
+    let succeeded = body["succeeded"].as_u64().unwrap_or(0);
+    let failed = body["failed"].as_u64().unwrap_or(0);
+    let total_fired = body["total_fired"].as_u64().unwrap_or(0);
+    let results = body["results"]
+        .as_array()
+        .expect("SC-2: batch response should contain 'results' array");
+
+    assert_eq!(
+        succeeded, 1,
+        "SC-2 / EXEC-03: succeeded should be 1 (one valid item); got {succeeded}; body: {body}"
+    );
+    assert_eq!(
+        failed, 1,
+        "SC-2 / EXEC-03: failed should be 1 (one unknown-engine item); got {failed}; body: {body}"
+    );
+    assert!(
+        total_fired >= 1,
+        "SC-2 / EXEC-03: total_fired should reflect the successful item's fired rules; got {total_fired}; body: {body}"
+    );
+
+    // The failing item (index 1) should have success:false + error:Some.
+    let failing = &results[1];
+    assert_eq!(
+        failing["success"].as_bool(),
+        Some(false),
+        "SC-2 / D-03: failing item should have success:false; body: {body}"
+    );
+    assert!(
+        failing["error"].is_string(),
+        "SC-2 / D-03: failing item should have error:Some(...); body: {body}"
+    );
+
+    // The successful item (index 0) should have success:true.
+    let ok_item = &results[0];
+    assert_eq!(
+        ok_item["success"].as_bool(),
+        Some(true),
+        "SC-2: successful item should have success:true; body: {body}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// L-05 / D-01: in_flight_run_uses_old_snapshot
+// ---------------------------------------------------------------------
+
+/// A run started before a reload completes against the OLD snapshot
+/// (generation-accept, D-01: swap immediately, tag with generation; in-
+/// flight runs finish against their already-cloned snapshot — L-05).
+///
+/// Wave 0 simplification: this scaffold verifies the observable contract —
+/// a pre-reload execute sees `gen == 0` / `score == 10`, and a post-reload
+/// execute sees `gen > 0` / `score == 20` (the new rule). True concurrent
+/// in-flight isolation (a run that spans the swap window) is verified in
+/// Plan 25-03's handler-level tests. RED today because reload doesn't swap
+/// — the post-reload execute still sees `score == 10` / `gen == 0`.
+#[serial_test::serial]
+#[actix_web::test]
+async fn in_flight_run_uses_old_snapshot() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+    write_rule_file(&dir, "r1", &score_plus_10_rule());
+
+    let app = init_test_app!();
+
+    // Pre-reload run → old snapshot: score 10, gen 0.
+    let req1 = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "facts": { "scorecard": { "score": 0 } } }))
+        .to_request();
+    let body1 = json_body(test::call_service(&app, req1).await).await;
+    assert_eq!(
+        body1["facts_after"]["scorecard"]["score"].as_i64(),
+        Some(10),
+        "L-05 / D-01: pre-reload run should see old snapshot (score 10); body: {body1}"
+    );
+    assert_eq!(
+        body1["engine_generation"].as_u64(),
+        Some(0),
+        "L-05 / D-01: pre-reload run should see gen 0; body: {body1}"
+    );
+
+    // Overwrite r1 (+20) and reload.
+    write_rule_file(&dir, "r1", &score_plus_20_rule());
+    let reload_req = test::TestRequest::post()
+        .uri("/v1/rules/reload")
+        .set_json(json!({ "async_reload": false }))
+        .to_request();
+    let _ = test::call_service(&app, reload_req).await;
+
+    // Post-reload run → new snapshot: score 20, gen > 0.
+    // RED: reload doesn't swap → score stays 10, gen stays 0.
+    let req2 = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "facts": { "scorecard": { "score": 0 } } }))
+        .to_request();
+    let body2 = json_body(test::call_service(&app, req2).await).await;
+    assert_eq!(
+        body2["facts_after"]["scorecard"]["score"].as_i64(),
+        Some(20),
+        "L-05 / D-01: post-reload run should see new snapshot (score 20); body: {body2}"
+    );
+    assert!(
+        body2["engine_generation"].as_u64().unwrap_or(0) > 0,
+        "L-05 / D-01: post-reload run should see gen > 0; body: {body2}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------
+// SC-2: batch_panicking_item_isolated
+// ---------------------------------------------------------------------
+
+/// A batch with one panicking item must not poison the others (SC-2 / L-06).
+/// The current `batch_execute_rules` collector already handles
+/// `JoinError` (panic) → `failed += 1` (`execution.rs:648-655`), so the
+/// isolation contract holds. However, a deterministic panic trigger
+/// requires Plan 25-03's per-item error propagation refactor (the JoinSet
+/// task returns `Result<ExecuteResponse, String>`), so this scaffold is
+/// `#[ignore]`d until 25-03 lands a test fixture that deterministically
+/// panics one item. Plan 25-03 removes the `#[ignore]` and turns this
+/// GREEN.
+#[serial_test::serial]
+#[actix_web::test]
+#[ignore = "Plan 25-03: deterministic panic trigger requires the Err→failed refactor"]
+async fn batch_panicking_item_isolated() {
+    reset_test_env();
+    let app = init_test_app!();
+
+    // Submit a batch of 2 valid items. The real SC-2 panic-isolation test
+    // (25-03) will replace one item with a deterministic panic trigger.
+    let batch_req = test::TestRequest::post()
+        .uri("/v1/rules/batch-execute")
+        .set_json(json!({
+            "requests": [
+                { "facts": { "scorecard": { "score": 0 } } },
+                { "facts": { "scorecard": { "score": 0 } } }
+            ]
+        }))
+        .to_request();
+    let body = json_body(test::call_service(&app, batch_req).await).await;
+
+    // At least one item should succeed (no poisoning). When 25-03 wires a
+    // deterministic panic trigger, exactly one item panics → failed == 1
+    // and the other succeeds → succeeded == 1.
+    let succeeded = body["succeeded"].as_u64().unwrap_or(0);
+    assert!(
+        succeeded >= 1,
+        "SC-2: at least one batch item should succeed (no poisoning); body: {body}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// D-03a: reload_empty_dir_warns_not_crashes
+// ---------------------------------------------------------------------
+
+/// Calling reload on an empty/missing rules directory should warn and
+/// continue with an empty ruleset (D-03a), NOT crash with a 500. RED today
+/// because `EngineState::reload_from_directory` returns `Err` for a missing
+/// directory (`execution.rs:119-121`), which the sync reload handler
+/// surfaces as HTTP 500. Plan 25-02's real `build_ruleset_from_dir` parser
+/// handles empty/missing dirs gracefully (warn + empty `RuleSet`) and
+/// `reload_and_swap` swaps the empty ruleset without error.
+#[serial_test::serial]
+#[actix_web::test]
+async fn reload_empty_dir_warns_not_crashes() {
+    reset_test_env();
+    // Point RULE_STORAGE_PATH at a nonexistent directory.
+    let dir = std::env::temp_dir().join(format!("rrules-empty-{}", uuid::Uuid::new_v4()));
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+
+    let app = init_test_app!();
+
+    let reload_req = test::TestRequest::post()
+        .uri("/v1/rules/reload")
+        .set_json(json!({ "async_reload": false }))
+        .to_request();
+    let resp = test::call_service(&app, reload_req).await;
+
+    // D-03a: reload on a missing dir should NOT return 500. RED: current
+    // reload_from_directory returns Err → 500.
+    assert_ne!(
+        resp.status().as_u16(),
+        500,
+        "D-03a: reload on empty/missing dir should not crash (500); got {}",
+        resp.status()
+    );
+}
+
+// ---------------------------------------------------------------------
+// DEPLOY-05 / D-04: sync_reload_swaps_and_bumps_generation
+// ---------------------------------------------------------------------
+
+/// POST `/v1/rules/reload {async:false}` returns 200, and a subsequent
+/// execute sees the refreshed rules + bumped generation (D-04: BOTH sync
+/// and async reload swap via the shared `reload_and_swap` helper). RED
+/// today because the sync reload path calls
+/// `engine_state.reload_from_directory` which only updates the
+/// `rule_files` map — it does NOT swap the shared `SharedRuleSet` or bump
+/// generation (L-02 / D-04). Plan 25-02's `reload_and_swap` makes both
+/// paths swap.
+#[serial_test::serial]
+#[actix_web::test]
+async fn sync_reload_swaps_and_bumps_generation() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+    write_rule_file(&dir, "r1", &score_plus_10_rule());
+
+    let app = init_test_app!();
+
+    // Pre-reload execute → score 10, gen 0.
+    let req1 = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "facts": { "scorecard": { "score": 0 } } }))
+        .to_request();
+    let body1 = json_body(test::call_service(&app, req1).await).await;
+    assert_eq!(
+        body1["facts_after"]["scorecard"]["score"].as_i64(),
+        Some(10),
+        "D-04: pre-reload execute should see score 10; body: {body1}"
+    );
+
+    // Overwrite r1 (+20) and sync reload.
+    write_rule_file(&dir, "r1", &score_plus_20_rule());
+    let reload_req = test::TestRequest::post()
+        .uri("/v1/rules/reload")
+        .set_json(json!({ "async_reload": false }))
+        .to_request();
+    let reload_resp = test::call_service(&app, reload_req).await;
+    assert!(
+        reload_resp.status().is_success(),
+        "D-04: sync reload should return 200, got {}",
+        reload_resp.status()
+    );
+
+    // Post-reload execute → score 20, gen > 0.
+    // RED: sync reload doesn't swap → score stays 10, gen stays 0.
+    let req2 = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "facts": { "scorecard": { "score": 0 } } }))
+        .to_request();
+    let body2 = json_body(test::call_service(&app, req2).await).await;
+    assert_eq!(
+        body2["facts_after"]["scorecard"]["score"].as_i64(),
+        Some(20),
+        "D-04: post-reload execute should see score 20 (swapped ruleset); body: {body2}"
+    );
+    assert!(
+        body2["engine_generation"].as_u64().unwrap_or(0) > 0,
+        "D-04: post-reload execute should see gen > 0 (bumped); body: {body2}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
