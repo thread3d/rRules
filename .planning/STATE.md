@@ -5,16 +5,16 @@ milestone_name: Phase Details
 current_phase: 23
 current_phase_name: execute-evaluator-wiring
 status: executing
-stopped_at: Completed 23-01-PLAN.md (pluggable-engine surface compiles; all four factories registered)
-last_updated: "2026-07-03T06:18:53.264Z"
+stopped_at: Completed 23-02-PLAN.md (Expression AST + full Condition matching)
+last_updated: "2026-07-03T06:35:28.043Z"
 last_activity: 2026-07-03
-last_activity_desc: Phase 23 execution started
+last_activity_desc: Phase 23 plan 02 complete
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 6
-  completed_plans: 1
-  percent: 0
+  completed_plans: 2
+  percent: 33
 ---
 
 # Project State
@@ -228,6 +228,7 @@ From v2.0 milestone:
 - D-172 to be defined: Dashboard patterns for rule management
 - [Phase ?]: Phase 23-01: Extended EngineResult with pub fired_rule_ids: Vec<String> field (RESEARCH Open Q#5) rather than a trait method.
 - [Phase ?]: Phase 23-01: Registered all four engine factories under static cfg gates (D-01) — available_engines() truthfully returns rete/treat/leaps/phreak. load_ruleset/get_facts default impls return Err/empty; engines override in Plan 03 (Rete) and Plan 06 (others).
+- [Phase ?]: Phase 23-02: Built Expression AST (D-06) + rewrote Condition::evaluate (D-05) with shared compare_values helper; Action::UpdateFact.fields now HashMap<String, Expression>; Condition::Pattern gained op field with real matching.
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -255,11 +256,11 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-**Resume file:** .planning/phases/23-execute-evaluator-wiring/23-02-PLAN.md
+**Resume file:** .planning/phases/23-execute-evaluator-wiring/23-03-PLAN.md
 
-**Stopped at:** Completed 23-01-PLAN.md (pluggable-engine surface compiles; all four factories registered)
+**Stopped at:** Completed 23-02-PLAN.md (Expression AST + full Condition matching)
 
-Last session: 2026-07-03T06:18:53.253Z
+Last session: 2026-07-03T06:34:26.610Z
 Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13 requirements partial; user chose to close inline via new frontend-wiring phase.
 
 **Completed Phases:**
@@ -289,3 +290,4 @@ Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13
 | Phase | Plan | Duration | Notes |
 |-------|------|----------|-------|
 | Phase 23 P01 | 4min | 2 tasks | 6 files |
+| Phase 23 P02 | 10min | 2 tasks | 4 files |
