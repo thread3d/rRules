@@ -20,6 +20,7 @@ use std::sync::{Arc, RwLock};
 use actix_web::{body::BoxBody, test, web, App, HttpResponse, Responder};
 use serde_json::{json, Value};
 
+use api::metrics::{create_metrics_channel, ExecutionCounters, MetricsTx};
 use api::v1::execution::{batch_execute_rules, execute_rules};
 use engine::engine::registry::EngineRegistry;
 use engine::engine::selector::EngineSelector;
@@ -88,10 +89,28 @@ fn shared_ruleset() -> web::Data<Arc<RwLock<RuleSet>>> {
     web::Data::new(Arc::new(RwLock::new(RuleSet::new())))
 }
 
-/// Initialize the test service with the full Plan 23-05 app_data stack
-/// (registry + selector + shared ruleset). Mirrors `execute_integration.rs`.
-/// Inlined per-test via macro because `test::init_service` yields an
-/// unnameable `impl Service` type.
+/// Build a shared `ExecutionCounters` (Plan 24-03). `execute_rules` and
+/// `batch_execute_rules` now extract `web::Data<ExecutionCounters>`, so the
+/// test App must install it or the handlers return 500 on the missing
+/// extractor.
+fn shared_counters() -> web::Data<ExecutionCounters> {
+    web::Data::new(ExecutionCounters::default())
+}
+
+/// Build a shared `MetricsTx` (broadcast sender) for the test App. Plan 24-03
+/// changed `execute_rules` / `batch_execute_rules` to extract
+/// `web::Data<MetricsTx>` and broadcast a `MetricsSnapshot` after each
+/// execute; installing it keeps the test App forward-compatible. The receiver
+/// is dropped here; no test in this file reads from the broadcast channel.
+fn shared_metrics_tx() -> web::Data<MetricsTx> {
+    let (tx, _rx) = create_metrics_channel(16);
+    web::Data::new(tx)
+}
+
+/// Initialize the test service with the full Plan 23-05 + Plan 24-03
+/// app_data stack (registry + selector + shared ruleset + counters +
+/// metrics_tx). Mirrors `execute_integration.rs`. Inlined per-test via macro
+/// because `test::init_service` yields an unnameable `impl Service` type.
 macro_rules! init_test_app {
     () => {
         test::init_service(
@@ -99,6 +118,8 @@ macro_rules! init_test_app {
                 .app_data(shared_registry())
                 .app_data(shared_selector())
                 .app_data(shared_ruleset())
+                .app_data(shared_counters())
+                .app_data(shared_metrics_tx())
                 .configure(configure_test_routes),
         )
         .await

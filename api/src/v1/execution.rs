@@ -5,12 +5,16 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 use uuid::Uuid;
 
 use engine::engine::{EngineRegistry, EngineSelector};
 use engine::environment::EngineBuilder;
 use engine::rules::RuleSet;
+
+use crate::metrics::{ExecutionCounters, MetricsSnapshot, MetricsTx};
 
 /// Request for rule execution
 #[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
@@ -338,6 +342,8 @@ pub async fn execute_single(
     registry: web::Data<EngineRegistry>,
     selector: web::Data<EngineSelector>,
     ruleset: web::Data<Arc<std::sync::RwLock<RuleSet>>>,
+    counters: web::Data<ExecutionCounters>,
+    metrics_tx: web::Data<MetricsTx>,
 ) -> Result<ExecuteResponse, HttpResponse> {
     let execution_id = Uuid::new_v4().to_string();
 
@@ -417,6 +423,13 @@ pub async fn execute_single(
     //    exists across requests. Return both the EngineResult and the
     //    post-execution facts so facts_after is serialized from real working
     //    memory (Pitfall 11) — NOT from the echoed request input.
+    //
+    //    Phase 24 (Plan 24-03): capture `Instant::now()` BEFORE web::block so
+    //    the histogram observes the full CPU-bound execute duration (Don't
+    //    Hand-Roll — Instant, not SystemTime). The counter increment + AtomicU64
+    //    fetch_add + MetricsSnapshot broadcast happen AFTER web::block returns,
+    //    in the async context (Pitfall 24-B / Open Q5 — NOT inside the closure).
+    let start = Instant::now();
     let (engine_result, post_facts) = match web::block(move || {
         let result = engine.execute();
         let facts = engine.get_facts();
@@ -431,6 +444,46 @@ pub async fn execute_single(
             })))
         }
     };
+
+    // Phase 24 (Plan 24-03 / Deliverable 3): instrument the execute path.
+    // Increment the three labeled Prometheus counters and the three AtomicU64
+    // snapshot mirrors AFTER web::block returns (Pitfall 24-B / Open Q5),
+    // then broadcast a populated MetricsSnapshot so the WS monitoring channel
+    // goes live (SC-2). The broadcast send error is discarded (Pitfall 24-C)
+    // — `broadcast::send` returns `Err(SendError)` when there are no
+    // subscribers, which is the normal case when no WS client is connected.
+    let elapsed = start.elapsed().as_secs_f64();
+    counters
+        .requests_total
+        .with_label_values(&[&engine_name])
+        .inc();
+    counters
+        .rules_fired_total
+        .with_label_values(&[&engine_name])
+        .inc_by(engine_result.rules_fired as u64);
+    counters
+        .duration_seconds
+        .with_label_values(&[&engine_name])
+        .observe(elapsed);
+    counters.snapshot_requests.fetch_add(1, Ordering::Relaxed);
+    counters
+        .snapshot_rules_fired
+        .fetch_add(engine_result.rules_fired as u64, Ordering::Relaxed);
+    counters
+        .snapshot_facts_inserted
+        .fetch_add(req.facts.len() as u64, Ordering::Relaxed);
+    let snapshot = MetricsSnapshot {
+        engine_name: engine_name.clone(),
+        rules_fired: counters.snapshot_rules_fired.load(Ordering::Relaxed),
+        facts_inserted: counters.snapshot_facts_inserted.load(Ordering::Relaxed),
+        // Open Q3: active_sessions and memory_bytes are 0 in Phase 24;
+        // Phase 27 populates active_sessions.
+        active_sessions: 0,
+        memory_bytes: 0,
+        last_updated: chrono::Utc::now().to_rfc3339(),
+    };
+    // Pitfall 24-C: discard the SendError — no panic when no WS subscribers.
+    let _ = metrics_tx.send(snapshot);
 
     // 7. Serialize facts_after from post-execution working memory via the
     //    reverse engine_value_to_json mapping (D-08 / Pitfall 11). Group by
@@ -496,8 +549,10 @@ pub async fn execute_rules(
     registry: web::Data<EngineRegistry>,
     selector: web::Data<EngineSelector>,
     ruleset: web::Data<Arc<std::sync::RwLock<RuleSet>>>,
+    counters: web::Data<ExecutionCounters>,
+    metrics_tx: web::Data<MetricsTx>,
 ) -> impl Responder {
-    match execute_single(req.into_inner(), registry, selector, ruleset).await {
+    match execute_single(req.into_inner(), registry, selector, ruleset, counters, metrics_tx).await {
         Ok(resp) => HttpResponse::Ok().json(resp),
         Err(err) => err,
     }
@@ -526,6 +581,8 @@ pub async fn batch_execute_rules(
     registry: web::Data<EngineRegistry>,
     selector: web::Data<EngineSelector>,
     ruleset: web::Data<Arc<std::sync::RwLock<RuleSet>>>,
+    counters: web::Data<ExecutionCounters>,
+    metrics_tx: web::Data<MetricsTx>,
 ) -> impl Responder {
     let inner = req.into_inner();
     let max_concurrency = inner.max_concurrency.unwrap_or(8).max(1);
@@ -539,6 +596,13 @@ pub async fn batch_execute_rules(
         let registry = registry.clone();
         let selector = selector.clone();
         let ruleset = ruleset.clone();
+        // Phase 24 (Plan 24-03 / PATTERNS.md batch pattern): clone the
+        // counters + metrics_tx web::Data handles into each JoinSet task
+        // alongside the existing registry/selector/ruleset clones so
+        // per-item execution increments counters and broadcasts — N items
+        // = N increments + N broadcasts.
+        let counters = counters.clone();
+        let metrics_tx = metrics_tx.clone();
         join_set.spawn(async move {
             // Acquire a concurrency permit before running. The semaphore is
             // never explicitly closed, so this only errors if the runtime shuts
@@ -551,7 +615,7 @@ pub async fn batch_execute_rules(
             // Each task builds its own engine via execute_single — no shared
             // &mut engine across requests (Pitfall 1). On error, report a
             // zero-fired placeholder so the per-item failure is surfaced.
-            match execute_single(request, registry, selector, ruleset).await {
+            match execute_single(request, registry, selector, ruleset, counters, metrics_tx).await {
                 Ok(resp) => resp,
                 Err(_) => ExecuteResponse {
                     execution_id: Uuid::new_v4().to_string(),
