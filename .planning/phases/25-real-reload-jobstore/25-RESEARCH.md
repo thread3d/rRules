@@ -562,10 +562,12 @@ No external dependencies. The Rust toolchain (`cargo`, `rustc`) is already used 
 - `EngineState::reload_engine` (`execution.rs:151-195`) — the no-op; replaced by `reload_and_swap`. The legacy `EngineState.engine` (`:96`) is unused by the execute path (Phase 23 moved to `EngineRegistry` + shared ruleset); `reload_rules` no longer takes `web::Data<EngineState>`. The planner may keep `EngineState` for `rule_files` or remove it (discretion).
 - `EngineState::reload_from_directory` (`:116-148`) — the sync-path no-op (updates `rule_files` map but never swaps the ruleset); replaced by `reload_and_swap` on both paths (D-04).
 
-## Open Questions
+## Open Questions (RESOLVED — both addressed in the plans)
 
 1. **Should `EngineState` be removed entirely?** Its `engine` field is legacy (execute path uses `EngineRegistry`), its `rule_files` map is updated by the old `reload_from_directory`/`reload_engine` but nothing reads it. Phase 25 could delete `EngineState` and its `app_data` wiring (`main.rs:79,210`). Discretion — the planner may keep it to minimize blast radius or remove it for clarity. Recommendation: remove if no handler outside `reload_rules` reads it; verify with `grep EngineState api/src/`.
+   - **RESOLVED:** Plan 25-03 Task 1 removes the `engine_state` parameter from `reload_rules` (replaced by `reload_and_swap` on the shared `SharedRuleSet` + `JobStore`), with a grep-verify acceptance criterion confirming no remaining `EngineState` reader on the reload path. Full struct removal is left to executor discretion with a `grep EngineState api/src/` guard — minimizes blast radius while closing the no-op.
 2. **`execute_single` return type refactor (R4)** — change to `Result<ExecuteResponse, (StatusCode, String)>` for clean batch error extraction, or keep `Result<ExecuteResponse, HttpResponse>` and extract the body string in the batch task? Recommendation: refactor to `(StatusCode, String)` — it's a small, mechanical change that makes the batch path clean and is reversible.
+   - **RESOLVED:** Plan 25-03 Task 2 implements the recommended refactor — `execute_single` returns `Result<ExecuteResponse, (http::StatusCode, String)>`; `execute_rules` reconstructs the `HttpResponse` from the `(StatusCode, String)` Err; the batch `JoinSet` task returns `Result<ExecuteResponse, String>` with a three-arm collector (`Ok(Ok)`/`Ok(Err)`/`Err(JoinError)`). This is the D-03 honest-aggregation mechanism.
 
 ## Sources
 
