@@ -4,17 +4,17 @@ milestone: v5.0
 milestone_name: Phase Details
 current_phase: 23
 current_phase_name: execute-evaluator-wiring
-status: executing
-stopped_at: Completed 23-05-PLAN.md (wire POST /v1/execute through real EngineRegistry — all four ROADMAP success criteria GREEN)
-last_updated: "2026-07-03T07:09:21.915Z"
+status: phase_complete
+stopped_at: Completed 23-06-PLAN.md (mirror direct evaluator onto treat/leaps/phreak — four engines honestly fire rules, phase 23 done)
+last_updated: "2026-07-03T07:20:40Z"
 last_activity: 2026-07-03
-last_activity_desc: Phase 23 plan 05 complete (execute_single rewritten — all four ROADMAP success criteria GREEN)
+last_activity_desc: Phase 23 plan 06 complete (Treat/Leaps/Phreak direct evaluator + per-engine keystone tests — phase 23 finished, 6/6 plans)
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 6
-  completed_plans: 5
-  percent: 0
+  completed_plans: 6
+  percent: 17
 ---
 
 # Project State
@@ -28,16 +28,16 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 ## Current Position
 
-Phase: 23 (execute-evaluator-wiring) — EXECUTING
-Plans: 6 (23-01..23-06) across 3 waves
-Status: Executing Phase 23
-Last activity: 2026-07-03 — Phase 23 plan 05 complete (execute_single rewritten — all four ROADMAP success criteria GREEN)
+Phase: 23 (execute-evaluator-wiring) — COMPLETE (6/6 plans shipped)
+Plans: 6 (23-01..23-06) across 3 waves — all complete
+Status: Phase 23 complete — ready for verifier
+Last activity: 2026-07-03 — Phase 23 plan 06 complete (Treat/Leaps/Phreak direct evaluator + per-engine keystone tests — four engines honestly fire rules)
 
 ### Milestone v5.0 Phases
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
-| 23 | Execute evaluator + wiring | EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05 | planned |
+| 23 | Execute evaluator + wiring | EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05 | complete |
 | 24 | Execution counters + metrics broadcast | MON-07 | not_started |
 | 25 | Real reload + JobStore | DEPLOY-05, EXEC-03 | not_started |
 | 26 | RuleExecutionTracker singleton + dead-rule live data | MON-06 | not_started |
@@ -237,6 +237,8 @@ From v2.0 milestone:
 - [Phase ?]: Phase 23-05: facts_after serialized from post-execution engine.get_facts() via reverse engine_value_to_json mapping (D-08 / Pitfall 11) — the request-input echo bug is removed.
 - [Phase ?]: Phase 23-05: Engine param validated via registry.available_engines() (&self) — 400 on unknown (ENGINE-07); omitted resolves to RRULES_DEFAULT_ENGINE env > selector.current_engine() (ENGINE-08). selector.select_engine (&mut self) is NOT called per request (Pitfall 7).
 - [Phase ?]: Phase 23-05: build_ruleset_from_dir returns empty RuleSet + warning on missing/empty dir (D-03a); live rule-file parsing deferred to Phase 25. All five Plan 23-04 RED scaffolds now GREEN — all four ROADMAP success criteria pass.
+- [Phase ?]: .planning/phases/23-execute-evaluator-wiring/23-06-SUMMARY.md
+- [Phase ?]: .planning/phases/23-execute-evaluator-wiring/23-06-SUMMARY.md
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -268,7 +270,7 @@ From v3.0 milestone:
 
 **Stopped at:** Completed 23-04-PLAN.md (MetricsSnapshot rename + Wave 0 RED scaffolds)
 
-Last session: 2026-07-03T07:09:21.902Z
+Last session: 2026-07-03T07:22:36.862Z
 Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13 requirements partial; user chose to close inline via new frontend-wiring phase.
 
 **Completed Phases:**
