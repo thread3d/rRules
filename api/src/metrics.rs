@@ -134,6 +134,20 @@ impl ExecutionCounters {
             .register(Box::new(duration_seconds.clone()))
             .expect("register rrules_execute_duration_seconds");
 
+        // Pre-initialize the "rete" label combination on each counter so the
+        // metric families are always present in `registry.gather()` output —
+        // even before any POST /v1/execute happens. Without this,
+        // `Registry::gather()` prunes families whose `Metric` list is empty
+        // (prometheus 0.13 registry.rs:126), and a cold /metrics scrape
+        // returns an empty body instead of the `# HELP` / `# TYPE` lines a
+        // Prometheus scraper expects. "rete" is the default engine
+        // (`EngineSelector::with_defaults()`); other engine labels
+        // (treat/leaps/phreak) are created lazily on first
+        // `with_label_values` call in `execute_single`.
+        requests_total.with_label_values(&["rete"]);
+        rules_fired_total.with_label_values(&["rete"]);
+        duration_seconds.with_label_values(&["rete"]);
+
         Self {
             requests_total,
             rules_fired_total,

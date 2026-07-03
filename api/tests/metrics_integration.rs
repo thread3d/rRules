@@ -16,7 +16,7 @@
 use actix_web::{body::BoxBody, test, web, App};
 use serde_json::Value;
 
-use api::metrics::{configure_metrics, configure_metrics_dashboards};
+use api::metrics::{configure_metrics, configure_metrics_dashboards, ExecutionCounters};
 use engine::monitoring::coverage::CoverageTracking;
 
 /// Unique rule id for the coverage test. The `CoverageTracking` singleton
@@ -41,7 +41,12 @@ async fn json_body(resp: actix_web::dev::ServiceResponse<BoxBody>) -> Value {
 
 #[actix_web::test]
 async fn metrics_prometheus_text_format() {
-    let app = test::init_service(App::new().configure(configure_metrics)).await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(ExecutionCounters::default()))
+            .configure(configure_metrics),
+    )
+    .await;
 
     let req = test::TestRequest::get()
         .uri("/metrics")
@@ -63,7 +68,12 @@ async fn metrics_prometheus_text_format() {
 
 #[actix_web::test]
 async fn metrics_json_engine_state() {
-    let app = test::init_service(App::new().configure(configure_metrics)).await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(ExecutionCounters::default()))
+            .configure(configure_metrics),
+    )
+    .await;
 
     let req = test::TestRequest::get()
         .uri("/metrics")
@@ -89,6 +99,7 @@ async fn dead_rules_returns_valid_json_array() {
     // /v1/metrics/dead-rules.
     let app = test::init_service(
         App::new()
+            .app_data(web::Data::new(ExecutionCounters::default()))
             .configure(configure_metrics)
             .service(web::scope("/v1").configure(configure_metrics_dashboards)),
     )
@@ -114,6 +125,7 @@ async fn coverage_endpoint_reads_tracked_data() {
 
     let app = test::init_service(
         App::new()
+            .app_data(web::Data::new(ExecutionCounters::default()))
             .configure(configure_metrics)
             .service(web::scope("/v1").configure(configure_metrics_dashboards)),
     )

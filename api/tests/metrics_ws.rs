@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use actix_test::start;
 use actix_web::{web, App};
-use api::metrics::{create_metrics_channel, MetricsSnapshot, MetricsTx};
+use api::metrics::{create_metrics_channel, ExecutionCounters, MetricsSnapshot, MetricsTx};
 use api::v1::execution::execute_rules;
 use api::websocket::configure_metrics_ws;
 use engine::data_types::Value as EngineValue;
@@ -138,6 +138,10 @@ fn spawn_server_with_execute() -> (
             .app_data(shared_registry())
             .app_data(shared_selector())
             .app_data(shared_ruleset())
+            // Phase 24 (Plan 24-03 / Open Q7): execute_rules now extracts
+            // web::Data<ExecutionCounters>; inject it so extraction succeeds
+            // in the broadcasts_snapshot_after_execute test.
+            .app_data(web::Data::new(ExecutionCounters::default()))
             .service(
                 web::scope("/v1")
                     .route("/execute", web::post().to(execute_rules))

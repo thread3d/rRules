@@ -32,7 +32,9 @@ use std::sync::{Arc, RwLock};
 use actix_web::{body::BoxBody, test, web, App};
 use serde_json::{json, Value};
 
-use api::metrics::{configure_metrics, coverage_endpoint, create_metrics_channel, MetricsTx};
+use api::metrics::{
+    configure_metrics, coverage_endpoint, create_metrics_channel, ExecutionCounters, MetricsTx,
+};
 use api::v1::execution::execute_rules;
 use engine::data_types::Value as EngineValue;
 use engine::engine::registry::EngineRegistry;
@@ -107,9 +109,25 @@ fn shared_selector() -> web::Data<EngineSelector> {
 /// compile against the current (pre-24-03) API — actix silently ignores unused
 /// `app_data`. The receiver is dropped here; a fresh channel per test is fine
 /// because no test in this file reads from the broadcast channel.
+/// Build a shared `MetricsTx` (broadcast sender) for the test App. Plan 24-03
+/// will change `execute_rules` to extract `web::Data<MetricsTx>` and broadcast a
+/// `MetricsSnapshot` after each execute; installing it in the test App now keeps
+/// `init_test_app!` forward-compatible and lets the Phase 24 RED scaffolds
+/// compile against the current (pre-24-03) API — actix silently ignores unused
+/// `app_data`. The receiver is dropped here; a fresh channel per test is fine
+/// because no test in this file reads from the broadcast channel.
 fn shared_metrics_tx() -> web::Data<MetricsTx> {
     let (tx, _rx) = create_metrics_channel(16);
     web::Data::new(tx)
+}
+
+/// Build a shared `ExecutionCounters` (Plan 24-03). `execute_rules` and
+/// `metrics_endpoint` now extract `web::Data<ExecutionCounters>`, so the test
+/// App must install it or the handlers return 500 on the missing extractor
+/// (Open Q7). `ExecutionCounters::default()` delegates to `new()`, which
+/// constructs the dedicated `Registry::new()` + three labeled metrics.
+fn shared_counters() -> web::Data<ExecutionCounters> {
+    web::Data::new(ExecutionCounters::default())
 }
 
 // =====================================================================
@@ -156,6 +174,7 @@ macro_rules! init_test_app {
                 .app_data(shared_registry())
                 .app_data(shared_selector())
                 .app_data(shared_ruleset())
+                .app_data(shared_counters())
                 .app_data(shared_metrics_tx())
                 .configure(configure_test_routes)
                 .configure(configure_metrics),
