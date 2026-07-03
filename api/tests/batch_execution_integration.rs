@@ -21,7 +21,7 @@ use actix_web::{body::BoxBody, test, web, App, HttpResponse, Responder};
 use serde_json::{json, Value};
 
 use api::metrics::{create_metrics_channel, ExecutionCounters, MetricsTx};
-use api::v1::execution::{batch_execute_rules, execute_rules};
+use api::v1::execution::{batch_execute_rules, execute_rules, SharedRuleSet};
 use engine::engine::registry::EngineRegistry;
 use engine::engine::selector::EngineSelector;
 use engine::rules::RuleSet;
@@ -85,8 +85,8 @@ fn shared_selector() -> web::Data<EngineSelector> {
 /// ruleset carries no rules: the now-real engine (Plan 23-05) fires nothing
 /// and the pre-23-05 stub-era `rules_fired == 0` / `total_fired == 0`
 /// assertions stay valid.
-fn shared_ruleset() -> web::Data<Arc<RwLock<RuleSet>>> {
-    web::Data::new(Arc::new(RwLock::new(RuleSet::new())))
+fn shared_ruleset() -> web::Data<Arc<RwLock<SharedRuleSet>>> {
+    web::Data::new(Arc::new(RwLock::new(SharedRuleSet::new(RuleSet::new()))))
 }
 
 /// Build a shared `ExecutionCounters` (Plan 24-03). `execute_rules` and

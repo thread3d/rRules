@@ -64,6 +64,37 @@ pub struct ExecuteResponse {
     pub engine_generation: u64,
 }
 
+/// Atomic ruleset + generation container (Phase 25 / D-02 / L-01).
+///
+/// Wraps the shared `RuleSet` with a `generation: u64` counter so the two are
+/// read together under a single `RwLock` read guard (coherent snapshot — a
+/// separate `AtomicU64` would race, see CONTEXT D-02). Reload (Plan 25-02's
+/// `reload_and_swap`) replaces `ruleset` and increments `generation` under the
+/// write lock; `execute_single` reads both atomically under the read lock and
+/// stamps `generation` into `ExecuteResponse.engine_generation` (L-04).
+///
+/// Lives inside the EXISTING `Arc<RwLock<SharedRuleSet>>` built once at
+/// startup (`main.rs`) — no `ArcSwap` (L-01). `Clone` is cheap (`RuleSet`'s
+/// `rules: Vec<Rule>` is the only non-Copy field; cloning the shared payload
+/// is never done on the hot read path — `execute_single` clones only the
+/// ruleset via `load_ruleset` and copies the `u64` generation out, then
+/// releases the guard before `web::block` per L-05).
+#[derive(Debug, Clone)]
+pub struct SharedRuleSet {
+    pub ruleset: RuleSet,
+    pub generation: u64,
+}
+
+impl SharedRuleSet {
+    /// Construct a new shared payload with generation 0 (pre-reload baseline).
+    pub fn new(ruleset: RuleSet) -> Self {
+        Self {
+            ruleset,
+            generation: 0,
+        }
+    }
+}
+
 /// Complete inference trace with full detail
 #[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct InferenceTrace {
@@ -256,7 +287,7 @@ impl ReloadStatus {
 }
 
 /// Shared state for tracking reload jobs
-type JobStore = Arc<std::sync::RwLock<HashMap<String, ReloadJob>>>;
+pub type JobStore = Arc<std::sync::RwLock<HashMap<String, ReloadJob>>>;
 
 /// Initialize job store
 pub fn init_job_store() -> JobStore {
@@ -341,7 +372,7 @@ pub async fn execute_single(
     req: ExecuteRequest,
     registry: web::Data<EngineRegistry>,
     selector: web::Data<EngineSelector>,
-    ruleset: web::Data<Arc<std::sync::RwLock<RuleSet>>>,
+    ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
     counters: web::Data<ExecutionCounters>,
     metrics_tx: web::Data<MetricsTx>,
 ) -> Result<ExecuteResponse, HttpResponse> {
@@ -383,21 +414,28 @@ pub async fn execute_single(
 
     // 4. Load the shared ruleset (read-only guard) and collect rule ids for
     //    rules_not_fired computation. The guard is dropped before execution
-    //    so no lock spans the CPU-bound engine.execute() call.
-    let all_rule_ids: Vec<String> = {
+    //    so no lock spans the CPU-bound engine.execute() call. Phase 25
+    //    (D-02 / L-04 / L-05): the shared payload is `SharedRuleSet`, so we
+    //    read the inner ruleset for `load_ruleset` + rule ids AND copy the
+    //    generation counter (a `u64` — free) atomically under the same read
+    //    lock, then release before `web::block` (per-request isolation
+    //    preserved — the generation reflects the snapshot the engine loaded).
+    let (all_rule_ids, generation): (Vec<String>, u64) = {
         let guard = ruleset.read().map_err(|e| {
             HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": format!("ruleset lock poisoned: {}", e)
             }))
         })?;
         engine
-            .load_ruleset(&guard)
+            .load_ruleset(&guard.ruleset)
             .map_err(|e| {
                 HttpResponse::InternalServerError().json(serde_json::json!({
                     "error": format!("load_ruleset failed: {}", e)
                 }))
             })?;
-        guard.rules.iter().map(|r| r.id.clone()).collect()
+        let ids = guard.ruleset.rules.iter().map(|r| r.id.clone()).collect();
+        let gen = guard.generation;
+        (ids, gen)
     };
 
     // 5. Insert request facts (convert JSON → engine::Value → Fact). Only
@@ -529,7 +567,7 @@ pub async fn execute_single(
         rules_not_fired,
         facts_after,
         inference_trace: None,
-        engine_generation: 0u64,
+        engine_generation: generation,
     })
 }
 
@@ -548,7 +586,7 @@ pub async fn execute_rules(
     req: web::Json<ExecuteRequest>,
     registry: web::Data<EngineRegistry>,
     selector: web::Data<EngineSelector>,
-    ruleset: web::Data<Arc<std::sync::RwLock<RuleSet>>>,
+    ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
     counters: web::Data<ExecutionCounters>,
     metrics_tx: web::Data<MetricsTx>,
 ) -> impl Responder {
@@ -580,7 +618,7 @@ pub async fn batch_execute_rules(
     req: web::Json<BatchExecuteRequest>,
     registry: web::Data<EngineRegistry>,
     selector: web::Data<EngineSelector>,
-    ruleset: web::Data<Arc<std::sync::RwLock<RuleSet>>>,
+    ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
     counters: web::Data<ExecutionCounters>,
     metrics_tx: web::Data<MetricsTx>,
 ) -> impl Responder {

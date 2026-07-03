@@ -20,7 +20,7 @@ mod websocket;
 pub mod v1;
 
 // Import execution endpoints for hot reload job tracking
-use crate::v1::execution::{get_job_status, list_jobs};
+use crate::v1::execution::{get_job_status, list_jobs, SharedRuleSet};
 use crate::v1::routes::monitoring::configure_monitoring;
 
 // Phase 23 (D-03 / L-07): real engine registry + selector + shared ruleset
@@ -113,10 +113,16 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
-    // D-03: shared read-only `Arc<RwLock<RuleSet>>` built once at startup.
+    // D-03: shared read-only `Arc<RwLock<SharedRuleSet>>` built once at
+    // startup. Phase 25 (Plan 25-01 / D-02 / L-01): the shared payload is now
+    // `SharedRuleSet { ruleset, generation: 0 }` so the execute path reads
+    // the ruleset and generation atomically under one read lock (L-04 / L-05).
+    // The generation is bumped on each successful reload (Plan 25-02's
+    // `reload_and_swap`). The `Arc<RwLock<...>>` pattern is preserved — no
+    // `ArcSwap` (L-01).
     let rules_dir = std::env::var("RULE_STORAGE_PATH")
         .unwrap_or_else(|_| "./rules".to_string());
-    let ruleset = build_ruleset_from_dir(&rules_dir);
+    let ruleset = SharedRuleSet::new(build_ruleset_from_dir(&rules_dir));
     let ruleset = web::Data::new(std::sync::Arc::new(std::sync::RwLock::new(ruleset)));
 
     // Create metrics broadcast channel for real-time updates (for future WebSocket use)

@@ -21,7 +21,7 @@ use std::time::Duration;
 use actix_test::start;
 use actix_web::{web, App};
 use api::metrics::{create_metrics_channel, ExecutionCounters, MetricsSnapshot, MetricsTx};
-use api::v1::execution::execute_rules;
+use api::v1::execution::{execute_rules, SharedRuleSet};
 use api::websocket::configure_metrics_ws;
 use engine::data_types::Value as EngineValue;
 use engine::engine::registry::EngineRegistry;
@@ -98,10 +98,10 @@ fn score_plus_10_rule() -> Rule {
 
 /// Build a shared `RuleSet` containing the keystone rule, wrapped for
 /// `web::Data` exactly as `main.rs` wires it.
-fn shared_ruleset() -> web::Data<Arc<RwLock<RuleSet>>> {
+fn shared_ruleset() -> web::Data<Arc<RwLock<SharedRuleSet>>> {
     let mut ruleset = RuleSet::new();
     ruleset.add_rule(score_plus_10_rule()).expect("add_rule");
-    web::Data::new(Arc::new(RwLock::new(ruleset)))
+    web::Data::new(Arc::new(RwLock::new(SharedRuleSet::new(ruleset))))
 }
 
 /// Build a real `EngineRegistry` with all four default factories registered.

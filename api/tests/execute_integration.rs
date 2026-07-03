@@ -35,7 +35,7 @@ use serde_json::{json, Value};
 use api::metrics::{
     configure_metrics, coverage_endpoint, create_metrics_channel, ExecutionCounters, MetricsTx,
 };
-use api::v1::execution::execute_rules;
+use api::v1::execution::{execute_rules, SharedRuleSet};
 use engine::data_types::Value as EngineValue;
 use engine::engine::registry::EngineRegistry;
 use engine::engine::selector::EngineSelector;
@@ -76,13 +76,13 @@ fn score_plus_10_rule() -> Rule {
         .build()
 }
 
-/// Build the shared read-only `RuleSet` containing the keystone rule, wrapped
-/// for `web::Data` exactly as `main.rs` will wire it in Plan 23-05
-/// (D-03: `Arc<RwLock<RuleSet>>`).
-fn shared_ruleset() -> web::Data<Arc<RwLock<RuleSet>>> {
+/// Build the shared read-only `SharedRuleSet` containing the keystone rule,
+/// wrapped for `web::Data` exactly as `main.rs` wires it (Phase 25 / D-02:
+/// `Arc<RwLock<SharedRuleSet>>` — generation starts at 0 pre-reload).
+fn shared_ruleset() -> web::Data<Arc<RwLock<SharedRuleSet>>> {
     let mut ruleset = RuleSet::new();
     ruleset.add_rule(score_plus_10_rule()).expect("add_rule");
-    web::Data::new(Arc::new(RwLock::new(ruleset)))
+    web::Data::new(Arc::new(RwLock::new(SharedRuleSet::new(ruleset))))
 }
 
 /// Build a real `EngineRegistry` with all four default factories registered
