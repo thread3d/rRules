@@ -59,7 +59,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 <details>
 <summary>📋 v5.0 Live Execution (Phases 23–28) — IN PROGRESS</summary>
 
-- [ ] **Phase 23: Execute evaluator + wiring** — Fix the v3.0 engine import bug, build a minimal real rule evaluator on `ReteEngine`, and route `/v1/execute` through `EngineRegistry`; factory shared, engine instance per request
+- [x] **Phase 23: Execute evaluator + wiring** — Fix the v3.0 engine import bug, build a minimal real rule evaluator on `ReteEngine`, and route `/v1/execute` through `EngineRegistry`; factory shared, engine instance per request (completed 2026-07-03)
 - [ ] **Phase 24: Execution counters + metrics broadcast** — `ExecutionCounters` + Prometheus promote + WS broadcast; dashboards go live
 - [ ] **Phase 25: Real reload + JobStore** — Shared reloadable `RuleSet` snapshot; async reload writes `ReloadJob`; batch inherits real execution
 - [ ] **Phase 26: RuleExecutionTracker singleton + dead-rule live data** — Singleton-ize tracker; dead-rules reads live firings; pin with e2e test
@@ -285,7 +285,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 20. Complete Management API | v4.0 | — | Complete | 2026-07-02 |
 | 21. Deployment & CI/CD | v4.0 | — | Complete | 2026-07-02 |
 | 22. Frontend Integration Closure | v4.0 | 6/6 | Complete (verified PASS) | 2026-07-02 |
-| 23. Execute evaluator + wiring | v5.0 | 6/6 | Complete   | 2026-07-03 |
+| 23. Execute evaluator + wiring | v5.0 | 6/6 | Complete    | 2026-07-03 |
 | 24. Execution counters + metrics broadcast | v5.0 | 0/? | Not started | - |
 | 25. Real reload + JobStore | v5.0 | 0/? | Not started | - |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 0/? | Not started | - |

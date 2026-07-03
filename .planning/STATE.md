@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Phase Details
-current_phase: 23
-current_phase_name: execute-evaluator-wiring
-status: phase_complete
-stopped_at: Completed 23-06-PLAN.md (mirror direct evaluator onto treat/leaps/phreak — four engines honestly fire rules, phase 23 done)
-last_updated: "2026-07-03T07:20:40Z"
+current_phase: 24
+current_phase_name: Execution counters + metrics broadcast
+status: verifying
+stopped_at: Completed 23-04-PLAN.md (MetricsSnapshot rename + Wave 0 RED scaffolds)
+last_updated: "2026-07-03T07:53:25.186Z"
 last_activity: 2026-07-03
-last_activity_desc: Phase 23 plan 06 complete (Treat/Leaps/Phreak direct evaluator + per-engine keystone tests — phase 23 finished, 6/6 plans)
+last_activity_desc: Phase 23 complete, transitioned to Phase 24
 progress:
   total_phases: 6
   completed_phases: 1
@@ -28,10 +28,10 @@ See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 ## Current Position
 
-Phase: 23 (execute-evaluator-wiring) — COMPLETE (6/6 plans shipped)
+Phase: 24 — Execution counters + metrics broadcast
 Plans: 6 (23-01..23-06) across 3 waves — all complete
 Status: Phase 23 complete — ready for verifier
-Last activity: 2026-07-03 — Phase 23 plan 06 complete (Treat/Leaps/Phreak direct evaluator + per-engine keystone tests — four engines honestly fire rules)
+Last activity: 2026-07-03 — Phase 23 complete, transitioned to Phase 24
 
 ### Milestone v5.0 Phases
 
