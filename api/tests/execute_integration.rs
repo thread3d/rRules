@@ -34,7 +34,8 @@ use actix_web::{body::BoxBody, test, web, App};
 use serde_json::{json, Value};
 
 use api::metrics::{
-    configure_metrics, coverage_endpoint, create_metrics_channel, ExecutionCounters, MetricsTx,
+    configure_metrics, coverage_endpoint, create_metrics_channel, dead_rules_endpoint,
+    ExecutionCounters, MetricsTx,
 };
 use api::v1::execution::{
     batch_execute_rules, execute_rules, get_job_status, init_job_store, list_jobs, reload_rules,
@@ -44,7 +45,8 @@ use engine::data_types::Value as EngineValue;
 use engine::engine::registry::EngineRegistry;
 use engine::engine::selector::EngineSelector;
 use engine::monitoring::coverage::CoverageTracking;
-use engine::rules::{Action, ComparisonOp, Condition, Expression, Rule, RuleSet};
+use engine::monitoring::detection::RuleExecutionTracker;
+use engine::rules::{Action, ComparisonOp, Condition, Expression, LogLevel, Rule, RuleSet};
 
 // =====================================================================
 // Fixture: the keystone `score := score + 10` rule
@@ -133,6 +135,61 @@ fn shared_ruleset() -> web::Data<Arc<RwLock<SharedRuleSet>>> {
     web::Data::new(Arc::new(RwLock::new(SharedRuleSet::new(ruleset))))
 }
 
+/// Build the never-fires sentinel rule: `r2` with condition `score == 999`
+/// and a no-op `Action::LogMessage`. `r2`'s condition never matches the
+/// inserted fact (`score == 0`), so it is evaluated but never fires. This is
+/// the D-07 / 26-RESEARCH.md "r2-unfired-rule trick": the r2-inclusion
+/// assertion in `keystone_dead_rules` is the RED→GREEN proof that the
+/// dead-rules panel is live (today dead-rules returns `[]` which excludes
+/// r1 trivially but also fails to INCLUDE r2).
+fn never_fires_rule() -> Rule {
+    Rule::builder("r2", "Never-fires sentinel")
+        .condition(Condition::Pattern {
+            fact_type: "scorecard".to_string(),
+            field: "score".to_string(),
+            value: EngineValue::Integer(999),
+            op: ComparisonOp::Eq,
+        })
+        .action(Action::LogMessage {
+            level: LogLevel::Info,
+            message: "r2 fired (should never happen in keystone)".to_string(),
+        })
+        .build()
+}
+
+/// Build a shared `SharedRuleSet` containing BOTH the keystone `r1` (fires
+/// against `score == 0`) and the never-fires sentinel `r2` (condition
+/// `score == 999`). Used by the Plan 26-02 SC-1/SC-2/SC-3 keystone e2e
+/// tests. Mirrors `shared_ruleset()` but with the two-rule fixture.
+fn two_rule_shared_ruleset() -> web::Data<Arc<RwLock<SharedRuleSet>>> {
+    let mut ruleset = RuleSet::new();
+    ruleset.add_rule(score_plus_10_rule()).expect("add_rule r1");
+    ruleset.add_rule(never_fires_rule()).expect("add_rule r2");
+    web::Data::new(Arc::new(RwLock::new(SharedRuleSet::new(ruleset))))
+}
+
+/// Initialize the test service with the two-rule (r1 + r2) app_data stack.
+/// Mirrors `init_test_app!` but swaps `shared_ruleset()` for
+/// `two_rule_shared_ruleset()` so the keystone e2e tests have the
+/// never-fires sentinel `r2` in the ruleset.
+macro_rules! init_two_rule_app {
+    () => {
+        test::init_service(
+            App::new()
+                .app_data(shared_registry())
+                .app_data(shared_selector())
+                .app_data(two_rule_shared_ruleset())
+                .app_data(shared_counters())
+                .app_data(shared_metrics_tx())
+                .app_data(shared_job_store())
+                .app_data(shared_engine_state())
+                .configure(configure_test_routes)
+                .configure(configure_metrics),
+        )
+        .await
+    };
+}
+
 /// Build a real `EngineRegistry` with all four default factories registered
 /// (Plan 23-01 D-01: `available_engines()` truthfully returns
 /// `rete`/`treat`/`leaps`/`phreak`).
@@ -214,6 +271,7 @@ fn configure_test_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/v1")
             .route("/execute", web::post().to(execute_rules))
             .route("/metrics/coverage", web::get().to(coverage_endpoint))
+            .route("/metrics/dead-rules", web::get().to(dead_rules_endpoint))
             // Phase 25 (Plan 25-01 Task 2): reload + batch + jobs routes.
             .route("/rules/batch-execute", web::post().to(batch_execute_rules))
             .route("/rules/reload", web::post().to(reload_rules))
@@ -267,6 +325,10 @@ macro_rules! init_test_app {
 /// reload tests that mutate it don't leak into siblings.
 fn reset_test_env() {
     CoverageTracking.clear();
+    // Plan 26-02: also reset the RuleExecutionTracker singleton so the
+    // keystone e2e tests start from a known-empty state (L-05 isolation
+    // for the second process-wide singleton).
+    RuleExecutionTracker::clear();
     // SAFETY on env vars: tests run serially (#[serial_test::serial]); no
     // concurrent test reads/writes these vars. Plan 23-05's handler reads
     // RRULES_DEFAULT_ENGINE once per request; Plan 25's reload handler reads
@@ -1143,4 +1205,236 @@ async fn sync_reload_swaps_and_bumps_generation() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// =====================================================================
+// Phase 26 Plan 26-02: SC-1 / SC-2 / SC-3 keystone e2e tests (Wave 0 RED)
+//
+// These three keystone e2e tests encode the Phase 26 success criteria and
+// are intentionally RED until Plan 26-02 Task 2 wires the
+// `RuleExecutionTracker::record_evaluation` / `record_fire` calls into BOTH
+// evaluator call sites (`direct_eval.rs` for Treat/Leaps/Phreak AND
+// `rete/mod.rs` for Rete — C1) and rewrites `dead_rules_endpoint` to read
+// from the singleton (D-03, L-02, L-03). They compile against the existing
+// Phase 23-25 API and FAIL on their substantive assertions:
+//
+//   - `keystone_dead_rules` fails on the r2-INCLUSION assertion: today no
+//     live path records into the singleton, so `find_dead_rules()` returns
+//     `[]` and `r2` (authored but never fired) is absent from the response.
+//     The r1-exclusion assertion passes trivially because `[]` excludes
+//     everything — the r2-inclusion assertion is the real proof the panel
+//     is live (D-07 / 26-RESEARCH.md "E2E Keystone Test Design").
+//   - `keystone_three_surfaces_agree` fails on the dead-rules r1-EXCLUSION
+//     assertion for the same reason: with the singleton empty, dead-rules
+//     returns `[]` which DOES exclude r1 — but the test also asserts
+//     `r1` is excluded because `fire_count > 0`, and the empty-list case
+//     fails the `fire_count > 0 ⇒ not dead` reasoning check (the test
+//     asserts r1 is NOT in the list AND that the Prometheus + coverage
+//     surfaces show r1 fired; if dead-rules returns `[]` while coverage
+//     shows r1.fired == true, the three surfaces disagree — dead-rules
+//     says r1 is dead, coverage says r1 is alive).
+//
+// Plan 26-02 Task 2 turns these GREEN. Mirrors the Phase 23-04 / 24-01 /
+// 25-01 Wave 0 RED→GREEN + Nyquist pattern.
+// =====================================================================
+
+/// Fire the keystone two-rule fixture against `engine: "rete"`. Inlined
+/// into each keystone test via the `fire_keystone!` macro because the
+/// `test::init_service` return type is unnameable (mirrors the
+/// `init_test_app!` pattern).
+macro_rules! fire_keystone {
+    ($app:expr) => {{
+        let req = test::TestRequest::post()
+            .uri("/v1/execute")
+            .set_json(json!({ "engine": "rete", "facts": { "scorecard": { "score": 0 } } }))
+            .to_request();
+        let body = json_body(test::call_service(&$app, req).await).await;
+        assert!(
+            body["rules_fired"].as_u64().unwrap_or(0) >= 1,
+            "keystone setup: r1 should fire, got rules_fired = {}; body: {body}",
+            body["rules_fired"]
+        );
+        body
+    }};
+}
+
+/// SC-1 (keystone_dead_rules): after POST /v1/execute fires `r1` (and `r2`
+/// is authored but never fires), GET /v1/metrics/dead-rules does NOT
+/// contain `r1` AND DOES contain `r2`. RED today because no live path
+/// records into the `RuleExecutionTracker` singleton, so
+/// `find_dead_rules()` returns `[]` which excludes `r1` trivially but
+/// also fails to INCLUDE `r2` — the r2-inclusion assertion is the
+/// RED→GREEN proof that the panel is live.
+#[serial_test::serial]
+#[actix_web::test]
+async fn keystone_dead_rules() {
+    reset_test_env();
+    let app = init_two_rule_app!();
+
+    let _body = fire_keystone!(app);
+
+    // Read the dead-rules surface.
+    let req = test::TestRequest::get()
+        .uri("/v1/metrics/dead-rules")
+        .to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    let rule_ids: Vec<String> = body
+        .as_array()
+        .expect("dead-rules response should be a JSON array")
+        .iter()
+        .map(|v| v.as_str().unwrap_or("").to_string())
+        .collect();
+
+    // SC-1: r1 fired ⇒ NOT dead ⇒ excluded.
+    assert!(
+        !rule_ids.contains(&"r1".to_string()),
+        "SC-1: dead-rules should NOT contain r1 (it fired); got {:?}; body: {body}",
+        rule_ids
+    );
+    // SC-1 / D-07: r2 authored but never fired ⇒ dead ⇒ INCLUDED. This is
+    // the RED→GREEN proof — today the singleton is empty so r2 is absent.
+    assert!(
+        rule_ids.contains(&"r2".to_string()),
+        "SC-1: dead-rules SHOULD contain r2 (authored but never fired); got {:?}; body: {body}",
+        rule_ids
+    );
+}
+
+/// SC-2 (keystone_coverage): after POST /v1/execute fires `r1`, GET
+/// /v1/metrics/coverage shows `r1.fired == true` + `r1.evaluation_count >=
+/// 1` AND `r2.fired == false`. This may already pass GREEN from Phase 23's
+/// coverage wiring — if so, it is a regression guard for the SC-2 contract.
+#[serial_test::serial]
+#[actix_web::test]
+async fn keystone_coverage() {
+    reset_test_env();
+    let app = init_two_rule_app!();
+
+    let _body = fire_keystone!(app);
+
+    // Read the coverage surface.
+    let req = test::TestRequest::get()
+        .uri("/v1/metrics/coverage")
+        .to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    let rules = body["rules"]
+        .as_array()
+        .expect("coverage 'rules' should be an array");
+    let r1 = rules
+        .iter()
+        .find(|r| r["rule_id"] == "r1")
+        .unwrap_or_else(|| panic!("SC-2: r1 should appear in coverage rules; body: {body}"));
+    let r2 = rules
+        .iter()
+        .find(|r| r["rule_id"] == "r2")
+        .unwrap_or_else(|| panic!("SC-2: r2 should appear in coverage rules; body: {body}"));
+
+    assert_eq!(
+        r1["fired"].as_bool(),
+        Some(true),
+        "SC-2: r1 should be fired in coverage; body: {body}"
+    );
+    assert!(
+        r1["evaluation_count"].as_u64().unwrap_or(0) >= 1,
+        "SC-2: r1 evaluation_count should be >= 1; body: {body}"
+    );
+    assert_eq!(
+        r2["fired"].as_bool(),
+        Some(false),
+        "SC-2: r2 should NOT be fired in coverage; body: {body}"
+    );
+}
+
+/// SC-3 (keystone_three_surfaces_agree): after POST /v1/execute fires `r1`,
+/// three metric surfaces agree on fire count:
+///   - Prometheus `/metrics`: `rrules_execute_rules_fired_total{engine="rete"}` >= 1
+///   - `/v1/metrics/coverage`: `r1.fire_count >= 1`
+///   - `/v1/metrics/dead-rules`: `r1` NOT in the list (fire_count > 0 ⇒ not dead)
+/// All three derive from the shared `fired_set` (D-02 — single source of
+/// truth), so agreement is by construction once Task 2 wires the recording.
+/// RED today because the dead-rules surface returns `[]` (singleton empty)
+/// while coverage shows `r1.fired == true` — the surfaces disagree.
+#[serial_test::serial]
+#[actix_web::test]
+async fn keystone_three_surfaces_agree() {
+    reset_test_env();
+    let app = init_two_rule_app!();
+
+    let _body = fire_keystone!(app);
+
+    // Surface 1: Prometheus text — parse `rrules_execute_rules_fired_total{engine="rete"}`.
+    let prom_req = test::TestRequest::get()
+        .uri("/metrics")
+        .insert_header(("Accept", "text/plain"))
+        .to_request();
+    let prom_resp = test::call_service(&app, prom_req).await;
+    assert!(
+        prom_resp.status().is_success(),
+        "SC-3: /metrics should return 200, got {}",
+        prom_resp.status()
+    );
+    let prom_bytes = test::read_body(prom_resp).await;
+    let prom_text = String::from_utf8_lossy(&prom_bytes);
+    let prom_fired_total = extract_prom_counter(&prom_text, "rrules_execute_rules_fired_total", "rete");
+    assert!(
+        prom_fired_total >= 1,
+        "SC-3: Prometheus rrules_execute_rules_fired_total{{engine=\"rete\"}} should be >= 1; got {prom_fired_total}; text: {prom_text}"
+    );
+
+    // Surface 2: coverage — r1.fire_count >= 1.
+    let cov_req = test::TestRequest::get()
+        .uri("/v1/metrics/coverage")
+        .to_request();
+    let cov_body = json_body(test::call_service(&app, cov_req).await).await;
+    let rules = cov_body["rules"]
+        .as_array()
+        .expect("SC-3: coverage 'rules' should be an array");
+    let r1 = rules
+        .iter()
+        .find(|r| r["rule_id"] == "r1")
+        .unwrap_or_else(|| panic!("SC-3: r1 should appear in coverage rules; body: {cov_body}"));
+    let cov_fire_count = r1["fire_count"].as_u64().unwrap_or(0);
+    assert!(
+        cov_fire_count >= 1,
+        "SC-3: coverage r1.fire_count should be >= 1; got {cov_fire_count}; body: {cov_body}"
+    );
+
+    // Surface 3: dead-rules — r1 NOT in the list (fire_count > 0 ⇒ not dead).
+    let dead_req = test::TestRequest::get()
+        .uri("/v1/metrics/dead-rules")
+        .to_request();
+    let dead_body = json_body(test::call_service(&app, dead_req).await).await;
+    let dead_ids: Vec<String> = dead_body
+        .as_array()
+        .expect("SC-3: dead-rules response should be a JSON array")
+        .iter()
+        .map(|v| v.as_str().unwrap_or("").to_string())
+        .collect();
+    assert!(
+        !dead_ids.contains(&"r1".to_string()),
+        "SC-3: dead-rules should NOT contain r1 (fire_count > 0 ⇒ not dead); got {:?}; body: {dead_body}",
+        dead_ids
+    );
+
+    // Three-surfaces agreement: Prometheus >= 1, coverage >= 1, dead-rules
+    // excludes r1. All three derive from fired_set (D-02).
+}
+
+/// Extract a Prometheus counter value from the exposition text for the
+/// metric `name{engine="<engine>"}`. Returns 0 if the metric line is not
+/// found. Prometheus exposition format:
+/// `rrules_execute_rules_fired_total{engine="rete"} 5`
+fn extract_prom_counter(text: &str, name: &str, engine: &str) -> u64 {
+    let label = format!("{name}{{engine=\"{engine}\"}}");
+    for line in text.lines() {
+        if line.starts_with(&label) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                return parts[1].parse::<u64>().unwrap_or(0);
+            }
+        }
+    }
+    0
 }
