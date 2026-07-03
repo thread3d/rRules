@@ -61,7 +61,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 
 - [x] **Phase 23: Execute evaluator + wiring** — Fix the v3.0 engine import bug, build a minimal real rule evaluator on `ReteEngine`, and route `/v1/execute` through `EngineRegistry`; factory shared, engine instance per request (completed 2026-07-03)
 - [x] **Phase 24: Execution counters + metrics broadcast** — `ExecutionCounters` + Prometheus promote + WS broadcast; dashboards go live (completed 2026-07-03)
-- [ ] **Phase 25: Real reload + JobStore** — Shared reloadable `RuleSet` snapshot; async reload writes `ReloadJob`; batch inherits real execution
+- [x] **Phase 25: Real reload + JobStore** — Shared reloadable `RuleSet` snapshot; async reload writes `ReloadJob`; batch inherits real execution (completed 2026-07-03)
 - [ ] **Phase 26: RuleExecutionTracker singleton + dead-rule live data** — Singleton-ize tracker; dead-rules reads live firings; pin with e2e test
 - [ ] **Phase 27: Stateful sessions** — `SessionManager` (DashMap, TTL, LRU, sweep); stateful `/v1/execute/session/{id}` endpoints
 - [ ] **Phase 28: Frontend test-runner** — `execution.ts` + `TestRunner` component; engine selector dropdown; inference trace surfaced
@@ -183,7 +183,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 2. `POST /v1/rules/batch-execute` with N items returns `total_fired`/`succeeded`/`failed` consistent with running each item through real execution; one panicking item does not poison the others
 3. `ExecuteResponse.engine_generation` increments after a reload, so callers can detect they ran against a prior rule set
 
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 ### Phase 26: RuleExecutionTracker singleton + dead-rule live data
 
@@ -295,7 +295,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 22. Frontend Integration Closure | v4.0 | 6/6 | Complete (verified PASS) | 2026-07-02 |
 | 23. Execute evaluator + wiring | v5.0 | 6/6 | Complete    | 2026-07-03 |
 | 24. Execution counters + metrics broadcast | v5.0 | 3/3 | Complete    | 2026-07-03 |
-| 25. Real reload + JobStore | v5.0 | 2/3 | In Progress|  |
+| 25. Real reload + JobStore | v5.0 | 3/3 | Complete   | 2026-07-03 |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 0/? | Not started | - |
 | 27. Stateful sessions | v5.0 | 0/? | Not started | - |
 | 28. Frontend test-runner | v5.0 | 0/? | Not started | - |
