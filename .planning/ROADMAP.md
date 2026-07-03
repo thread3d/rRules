@@ -107,9 +107,9 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 4. `GET /v1/metrics/coverage` shows `fired == true` for a rule fired by a recent `/v1/execute` (auto-populated, no separate record call)
 
 **Plans:**
-**Wave 1**
+1/6 plans executed
 
-- [ ] 23-01-PLAN.md — Engine compile-unblock (L-01 import fix), ExecutionEngine trait bridge (L-02) + EngineResult.fired_rule_ids, register all four factories (D-01), enable all four engine features on the api crate
+- [x] 23-01-PLAN.md — Engine compile-unblock (L-01 import fix), ExecutionEngine trait bridge (L-02) + EngineResult.fired_rule_ids, register all four factories (D-01), enable all four engine features on the api crate
 - [ ] 23-02-PLAN.md — Rule-model extensions: Expression type (D-06) + Action::UpdateFact computed expressions, full ComparisonOp coverage + real Pattern matching in Condition::evaluate (D-05)
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -285,7 +285,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 20. Complete Management API | v4.0 | — | Complete | 2026-07-02 |
 | 21. Deployment & CI/CD | v4.0 | — | Complete | 2026-07-02 |
 | 22. Frontend Integration Closure | v4.0 | 6/6 | Complete (verified PASS) | 2026-07-02 |
-| 23. Execute evaluator + wiring | v5.0 | 0/6 | Not started | - |
+| 23. Execute evaluator + wiring | v5.0 | 1/6 | In Progress|  |
 | 24. Execution counters + metrics broadcast | v5.0 | 0/? | Not started | - |
 | 25. Real reload + JobStore | v5.0 | 0/? | Not started | - |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 0/? | Not started | - |

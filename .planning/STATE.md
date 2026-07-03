@@ -1,15 +1,19 @@
 ---
 gsd_state_version: 1.0
 milestone: v5.0
-milestone_name: Live Execution
-status: planned
-last_updated: "2026-07-02T12:57:12.946Z"
-last_activity: 2026-07-02 — Phase 23 planned (6 plans, 3 waves)
+milestone_name: Phase Details
+current_phase: 23
+current_phase_name: execute-evaluator-wiring
+status: executing
+stopped_at: Completed 23-01-PLAN.md (pluggable-engine surface compiles; all four factories registered)
+last_updated: "2026-07-03T06:18:53.264Z"
+last_activity: 2026-07-03
+last_activity_desc: Phase 23 execution started
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 6
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -20,14 +24,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-06-09)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** Phase 23 — execute-wiring-core (route /v1/execute through real EngineRegistry)
+**Current focus:** Phase 23 — execute-evaluator-wiring
 
 ## Current Position
 
-Phase: 23 (Execute evaluator + wiring) — planned
+Phase: 23 (execute-evaluator-wiring) — EXECUTING
 Plans: 6 (23-01..23-06) across 3 waves
-Status: Phase 23 planned (6 plans, 3 waves) — ready to execute
-Last activity: 2026-07-02 — Phase 23 planned (6 plans, 3 waves)
+Status: Executing Phase 23
+Last activity: 2026-07-03 — Phase 23 execution started
 
 ### Milestone v5.0 Phases
 
@@ -222,6 +226,8 @@ From v2.0 milestone:
 
 - D-171 to be defined: React component architecture for rule authoring
 - D-172 to be defined: Dashboard patterns for rule management
+- [Phase ?]: Phase 23-01: Extended EngineResult with pub fired_rule_ids: Vec<String> field (RESEARCH Open Q#5) rather than a trait method.
+- [Phase ?]: Phase 23-01: Registered all four engine factories under static cfg gates (D-01) — available_engines() truthfully returns rete/treat/leaps/phreak. load_ruleset/get_facts default impls return Err/empty; engines override in Plan 03 (Rete) and Plan 06 (others).
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -249,11 +255,11 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-**Resume file:** .planning/phases/23-execute-evaluator-wiring/23-CONTEXT.md
+**Resume file:** .planning/phases/23-execute-evaluator-wiring/23-02-PLAN.md
 
-**Stopped at:** Phase 23 context gathered
+**Stopped at:** Completed 23-01-PLAN.md (pluggable-engine surface compiles; all four factories registered)
 
-Last session: 2026-07-02T12:57:12.938Z
+Last session: 2026-07-03T06:18:53.253Z
 Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13 requirements partial; user chose to close inline via new frontend-wiring phase.
 
 **Completed Phases:**
@@ -277,3 +283,9 @@ Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13
 ## Operator Next Steps
 
 - Plan Phase 23 (Execute evaluator + wiring) with `/gsd-plan-phase 23`
+
+## Performance Metrics
+
+| Phase | Plan | Duration | Notes |
+|-------|------|----------|-------|
+| Phase 23 P01 | 4min | 2 tasks | 6 files |
