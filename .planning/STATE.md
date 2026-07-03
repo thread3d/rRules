@@ -2,13 +2,9 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Phase Details
-current_phase: 25
-current_phase_name: Real reload + JobStore
-status: executing
-stopped_at: Completed 23-04-PLAN.md (MetricsSnapshot rename + Wave 0 RED scaffolds)
-last_updated: "2026-07-03T09:07:50.601Z"
-last_activity: 2026-07-03
-last_activity_desc: Phase 24 complete, transitioned to Phase 25
+status: verifying
+last_updated: "2026-07-03T09:26:36.601Z"
+last_activity: 2026-07-03 — Phase 24 complete, transitioned to Phase 25
 progress:
   total_phases: 6
   completed_phases: 2
@@ -267,11 +263,11 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-**Resume file:** .planning/phases/23-execute-evaluator-wiring/23-05-PLAN.md
+**Resume file:** .planning/phases/25-real-reload-jobstore/25-CONTEXT.md
 
-**Stopped at:** Completed 23-04-PLAN.md (MetricsSnapshot rename + Wave 0 RED scaffolds)
+**Stopped at:** Phase 25 context gathered
 
-Last session: 2026-07-03T07:22:36.862Z
+Last session: 2026-07-03T09:26:36.592Z
 Milestone v4.0 - audit found frontend (Phase 17) is a scaffolding skeleton; 9/13 requirements partial; user chose to close inline via new frontend-wiring phase.
 
 **Completed Phases:**
