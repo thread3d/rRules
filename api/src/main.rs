@@ -207,7 +207,7 @@ async fn main() -> std::io::Result<()> {
                     // stays at root (configured below).
                     .configure(metrics::configure_metrics_dashboards)
                     // Real-time metrics WebSocket (MON-02, Plan 22-04). A real
-                    // WS upgrade at /v1/metrics/ws broadcasting EngineState from
+                    // WS upgrade at /v1/metrics/ws broadcasting MetricsSnapshot from
                     // `metrics_tx` (replaces the prior JSON stub — RESEARCH §
                     // Pitfall 6). Public via the auth allowlist so a browser
                     // `new WebSocket()` (which cannot send a Bearer token)

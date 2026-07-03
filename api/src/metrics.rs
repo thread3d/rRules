@@ -7,9 +7,13 @@ use serde::Serialize;
 use engine::monitoring::detection::RuleExecutionTracker;
 use engine::monitoring::coverage::CoverageTracking;
 
-/// Engine state for real-time monitoring
+/// Metrics snapshot for real-time monitoring.
+///
+/// Renamed from `EngineState` (L-05 / Pitfall 10) to disambiguate from
+/// `api::v1::execution::EngineState` (the per-request engine holder) before
+/// Phase 23 Plan 05 adds execute-path logic that imports both types.
 #[derive(Debug, Clone, Serialize)]
-pub struct EngineState {
+pub struct MetricsSnapshot {
     pub engine_name: String,
     pub rules_fired: u64,
     pub facts_inserted: u64,
@@ -19,10 +23,10 @@ pub struct EngineState {
 }
 
 /// Broadcast channel for real-time updates
-pub type MetricsTx = Arc<tokio::sync::broadcast::Sender<EngineState>>;
+pub type MetricsTx = Arc<tokio::sync::broadcast::Sender<MetricsSnapshot>>;
 
 /// Create a new metrics broadcast sender
-pub fn create_metrics_channel(capacity: usize) -> (MetricsTx, tokio::sync::broadcast::Receiver<EngineState>) {
+pub fn create_metrics_channel(capacity: usize) -> (MetricsTx, tokio::sync::broadcast::Receiver<MetricsSnapshot>) {
     let (tx, rx) = tokio::sync::broadcast::channel(capacity);
     (Arc::new(tx), rx)
 }
