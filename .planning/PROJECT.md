@@ -27,6 +27,8 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 - ✓ **MON-01..04**: Prometheus metrics integration, real-time monitoring dashboard, dead-rule detection, coverage reporting — v4.0
 - ✓ **API-04**: Complete management API (rules/categories/tags/approvals/audit/branches) — v4.0
 - ✓ **DEPLOY-03..04**: Multi-environment Docker/Kubernetes support + hot reload — v4.0
+- ✓ **EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05**: Real `/v1/execute` evaluator + `EngineRegistry` wiring (fresh `Box<dyn ExecutionEngine>` per request) — v5.0 Phase 23
+- ✓ **MON-07**: Per-execution Prometheus counters (`rrules_execute_requests_total` / `_rules_fired_total` / `_duration_seconds`, engine-labeled, dedicated registry + `TextEncoder`) + WebSocket `MetricsSnapshot` broadcast after each execute — v5.0 Phase 24
 
 ### Active
 
@@ -52,7 +54,7 @@ v5.0 Live Execution — see `## Current Milestone` below and `.planning/REQUIREM
 - Deployment: Multi-stage Alpine Docker, Helm chart (dev/staging/prod), hot-reload with async job tracking
 
 **Known tech debt (deferred, not blocking v4.0):**
-- `execute_rules` stub — **RESOLVED in v5.0 Phase 23 (2026-07-03)**: `POST /v1/execute` now fires real rules via `EngineRegistry` (a fresh `Box<dyn ExecutionEngine>` constructed per request through `spawn_blocking`), returns truthful `rules_fired`/`rules_not_fired`/`facts_after` (serialized from post-execution working memory), and auto-populates `CoverageTracking` once per fired rule. The v3.0 `engine::`→`crate::` E0433 import bug is fixed across all four engine modules and `ReteEngine::execute_rules` is a real direct evaluator (mirrored onto TREAT/LEAPS/PHREAK). Remaining v5.0 work: auto-populate `RuleExecutionTracker` + Prometheus counters/WS broadcast (Phase 24), real reload + batch execution (Phase 25), dead-rule live data (Phase 26), stateful sessions (Phase 27), frontend test-runner (Phase 28)
+- `execute_rules` stub — **RESOLVED in v5.0 Phase 23 (2026-07-03)**: `POST /v1/execute` now fires real rules via `EngineRegistry` (a fresh `Box<dyn ExecutionEngine>` constructed per request through `spawn_blocking`), returns truthful `rules_fired`/`rules_not_fired`/`facts_after` (serialized from post-execution working memory), and auto-populates `CoverageTracking` once per fired rule. The v3.0 `engine::`→`crate::` E0433 import bug is fixed across all four engine modules and `ReteEngine::execute_rules` is a real direct evaluator (mirrored onto TREAT/LEAPS/PHREAK). **Phase 24 (2026-07-03) added live per-execution Prometheus counters + WebSocket `MetricsSnapshot` broadcast, so `/metrics` and the monitoring dashboard now read live execute data.** Remaining v5.0 work: real reload + batch execution (Phase 25), `RuleExecutionTracker` singleton + dead-rule live data (Phase 26), stateful sessions (Phase 27), frontend test-runner (Phase 28)
 - Pre-existing `cargo build -p engine --all-features` failure on the `metrics`/`prometheus` feature (`prometheus::Opts` API drift at `engine/src/engine/metrics.rs:288-293`) — off the production path (the `api` crate enables only the four engine features, not `metrics`; the `/metrics` endpoint uses hand-rolled Prometheus text). Logged in `.planning/phases/23-execute-evaluator-wiring/deferred-items.md` for a future cleanup phase
 - Some v1.0 governance/monitoring phases shipped as stubs originally and were promoted to real implementations across v3.0/v4.0
 
@@ -73,9 +75,9 @@ v5.0 Live Execution — see `## Current Milestone` below and `.planning/REQUIREM
 - Auto-populate `RuleExecutionTracker` + `CoverageTracking` so Prometheus `/metrics`, the monitoring dashboard, dead-rule detection, and coverage reporting show live data
 - Frontend test-runner UI in the rule IDE: run/test a rule, see fired rules, results, and coverage
 
-**Progress (1/6 phases):**
+**Progress (2/6 phases):**
 - ✅ **Phase 23 — Execute evaluator + wiring** (complete 2026-07-03, verified PASS): fixed the v3.0 `engine::`→`crate::` E0433 import bug across all four engine modules; built a minimal direct rule evaluator on `ReteEngine` (mirrored onto TREAT/LEAPS/PHREAK); wired `POST /v1/execute` through `EngineRegistry` with a fresh `Box<dyn ExecutionEngine>` per request; `ExecuteRequest.engine` validated against `available_engines()` (400 on unknown) with `RRULES_DEFAULT_ENGINE` default; `facts_after` from post-execution working memory; `CoverageTracking` recorded once per fired rule. Requirements met: EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05
-- ⬜ Phase 24 — Execution counters + metrics broadcast (MON-07)
+- ✅ **Phase 24 — Execution counters + metrics broadcast** (complete 2026-07-03, verified PASS): added `ExecutionCounters` (`AtomicU64` mirrors + three labeled Prometheus metrics on a dedicated `Registry`) held as `web::Data`; `execute_single` times via `Instant`, increments counters + broadcasts a `MetricsSnapshot` over the existing WS channel AFTER `web::block` (Pitfalls 24-A/B/C); `/metrics` rewritten with `TextEncoder::encode` over the dedicated registry; `ExecuteResponse.engine_generation: u64` added (Pitfall 8). Nyquist RED→GREEN closure (4 RED tests now GREEN); api 96/0, engine 241/0. Frontend dashboards render live numbers with zero frontend changes (SC-3 structural proof). Requirements met: MON-07
 - ⬜ Phase 25 — Real reload + JobStore (DEPLOY-05, EXEC-03)
 - ⬜ Phase 26 — RuleExecutionTracker singleton + dead-rule live data (MON-06)
 - ⬜ Phase 27 — Stateful sessions (SESS-01)
@@ -129,4 +131,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-03 — Phase 23 complete (execute evaluator + wiring); v5.0 Live Execution in progress (1/6 phases)*
+*Last updated: 2026-07-03 — Phase 24 complete (execution counters + metrics broadcast); v5.0 Live Execution in progress (2/6 phases)*
