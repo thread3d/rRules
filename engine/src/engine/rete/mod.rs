@@ -482,4 +482,51 @@ mod tests {
         let metrics = engine.get_metrics();
         assert_eq!(metrics.facts_inserted, 3);
     }
+
+    // ---- Plan 23-03 Task 1: load_ruleset / get_facts overrides (L-02) ----
+
+    /// `load_ruleset` with a ruleset containing one rule returns `Ok(())`
+    /// (RED: default impl returns `Err`, so this fails until overridden).
+    #[test]
+    fn load_ruleset_returns_ok_with_one_rule() {
+        use crate::rules::{Rule, RuleSet};
+
+        let mut ruleset = RuleSet::new();
+        let rule = Rule::builder("r1", "Rule 1").build();
+        ruleset.add_rule(rule).unwrap();
+
+        let mut engine = ReteEngine::new();
+        let result = engine.load_ruleset(&ruleset);
+        assert!(result.is_ok(), "load_ruleset should return Ok, got {:?}", result);
+    }
+
+    /// `get_facts` on a fresh engine returns an empty Vec.
+    #[test]
+    fn get_facts_empty_on_fresh_engine() {
+        let engine = ReteEngine::new();
+        assert!(engine.get_facts().is_empty());
+    }
+
+    /// `get_facts` after `assert_fact` returns a Vec containing the fact
+    /// (RED: default `get_facts` returns empty Vec, so this fails until
+    /// overridden to read `self.working_facts`).
+    #[test]
+    fn get_facts_returns_fact_after_assert_fact() {
+        let mut engine = ReteEngine::new();
+        let mut payload = HashMap::new();
+        payload.insert(
+            "score".to_string(),
+            crate::data_types::Value::Integer(0),
+        );
+        let fact = Fact::new("scorecard", payload);
+        engine.assert_fact(fact.clone());
+
+        let facts = engine.get_facts();
+        assert_eq!(facts.len(), 1, "expected one fact in working memory");
+        assert_eq!(facts[0].fact_type_id, "scorecard");
+        assert_eq!(
+            facts[0].payload.get("score"),
+            Some(&crate::data_types::Value::Integer(0))
+        );
+    }
 }
