@@ -319,6 +319,58 @@ pub struct ReloadResult {
     pub success: bool,
 }
 
+/// Atomically swap the shared `SharedRuleSet` with a freshly-built one and
+/// bump the generation counter (D-04 / D-02 / L-01 / Pitfall 4).
+///
+/// This is the ONE shared reload helper called by BOTH the sync and async
+/// reload paths in Plan 25-03, so they cannot diverge. The new `RuleSet` is
+/// built **off-to-side** via `build_ruleset_from_dir` (R1 — real JSON parser)
+/// BEFORE the write lock is acquired, so no file I/O or parsing happens
+/// under the lock (Pitfall 4: lock scope). Under the write lock, the whole
+/// `SharedRuleSet { ruleset, generation }` is replaced in a SINGLE
+/// assignment (`*guard = ...`) with `generation.wrapping_add(1)` — never
+/// in-place mutation of `ruleset` followed by a separate generation bump
+/// (D-02: two writes would be non-atomic; swap the whole struct). The guard
+/// is dropped immediately after the assignment.
+///
+/// Returns `Ok(ReloadResult)` on success or `Err(String)` if the write lock
+/// is poisoned. Not yet wired to any handler in this plan (Plan 25-03 Task 1
+/// rewrites `reload_rules` to call this).
+pub async fn reload_and_swap(
+    shared: &Arc<std::sync::RwLock<SharedRuleSet>>,
+    rules_dir: &str,
+) -> Result<ReloadResult, String> {
+    let start_time = Utc::now();
+
+    // Build the new RuleSet OFF-SIDE — no lock held during I/O + parse
+    // (Pitfall 4: lock scope). This is R1/D-05: the same parser used at
+    // startup, so the swapped ruleset matches what a restart would load.
+    let new_ruleset = build_ruleset_from_dir(rules_dir);
+    let rule_count = new_ruleset.rules.len();
+
+    // Acquire the write lock ONLY for the single whole-value swap.
+    let mut guard = shared
+        .write()
+        .map_err(|e| format!("shared ruleset lock poisoned: {}", e))?;
+    let next_gen = guard.generation.wrapping_add(1);
+    let reload_id = Uuid::new_v4().to_string();
+    // Pitfall 4 / D-02: swap the WHOLE SharedRuleSet in one assignment —
+    // never `guard.ruleset.rules.push(...)` in-place mutation.
+    *guard = SharedRuleSet {
+        ruleset: new_ruleset,
+        generation: next_gen,
+    };
+    // Guard dropped here (implicit on scope exit) — lock released.
+
+    Ok(ReloadResult {
+        reload_id,
+        rule_count,
+        start_time,
+        end_time: Utc::now(),
+        success: true,
+    })
+}
+
 /// Async job tracking for long-running operations
 #[derive(Debug, Clone, utoipa::ToSchema)]
 pub struct ReloadJob {
