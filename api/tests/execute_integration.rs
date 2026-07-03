@@ -897,8 +897,17 @@ async fn batch_truthful_aggregation_one_failing_item() {
         "SC-2 / EXEC-03: total_fired should reflect the successful item's fired rules; got {total_fired}; body: {body}"
     );
 
-    // The failing item (index 1) should have success:false + error:Some.
-    let failing = &results[1];
+    // The failing item should have success:false + error:Some. JoinSet
+    // returns tasks in completion order (NOT submission order), so the
+    // unknown-engine item — which returns Err instantly without engine
+    // construction or web::block — typically completes before the valid
+    // item. Find the failing/successful items by their `success` flag
+    // rather than assuming a fixed index (Rule 1 fix: the original
+    // `results[1]` assumption broke under completion-order delivery).
+    let failing = results
+        .iter()
+        .find(|r| r["success"].as_bool() == Some(false))
+        .expect("SC-2 / D-03: expected one failing item in results; body: {body}");
     assert_eq!(
         failing["success"].as_bool(),
         Some(false),
@@ -909,8 +918,10 @@ async fn batch_truthful_aggregation_one_failing_item() {
         "SC-2 / D-03: failing item should have error:Some(...); body: {body}"
     );
 
-    // The successful item (index 0) should have success:true.
-    let ok_item = &results[0];
+    let ok_item = results
+        .iter()
+        .find(|r| r["success"].as_bool() == Some(true))
+        .expect("SC-2: expected one successful item in results; body: {body}");
     assert_eq!(
         ok_item["success"].as_bool(),
         Some(true),

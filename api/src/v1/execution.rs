@@ -508,7 +508,7 @@ pub async fn execute_single(
     ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
     counters: web::Data<ExecutionCounters>,
     metrics_tx: web::Data<MetricsTx>,
-) -> Result<ExecuteResponse, HttpResponse> {
+) -> Result<ExecuteResponse, (actix_web::http::StatusCode, String)> {
     let execution_id = Uuid::new_v4().to_string();
 
     // 1. Resolve engine name: request override > RRULES_DEFAULT_ENGINE env >
@@ -524,9 +524,10 @@ pub async fn execute_single(
     //    Do NOT call selector.select_engine (it takes &mut self).
     let available = registry.available_engines();
     if !available.iter().any(|name| *name == engine_name.as_str()) {
-        return Err(HttpResponse::BadRequest().json(serde_json::json!({
-            "error": format!("unknown engine: {}", engine_name)
-        })));
+        return Err((
+            actix_web::http::StatusCode::BAD_REQUEST,
+            format!("unknown engine: {}", engine_name),
+        ));
     }
 
     // 3. Build a fresh per-request engine (Pitfall 1 / Pitfall 9: ReteEngine
@@ -534,14 +535,16 @@ pub async fn execute_single(
     let mut engine = match registry.create_engine_by_name(&engine_name) {
         Some(Ok(engine)) => engine,
         Some(Err(e)) => {
-            return Err(HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("engine creation failed: {}", e)
-            })))
+            return Err((
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("engine creation failed: {}", e),
+            ))
         }
         None => {
-            return Err(HttpResponse::BadRequest().json(serde_json::json!({
-                "error": format!("unknown engine: {}", engine_name)
-            })))
+            return Err((
+                actix_web::http::StatusCode::BAD_REQUEST,
+                format!("unknown engine: {}", engine_name),
+            ))
         }
     };
 
@@ -555,17 +558,17 @@ pub async fn execute_single(
     //    preserved — the generation reflects the snapshot the engine loaded).
     let (all_rule_ids, generation): (Vec<String>, u64) = {
         let guard = ruleset.read().map_err(|e| {
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("ruleset lock poisoned: {}", e)
-            }))
+            (
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("ruleset lock poisoned: {}", e),
+            )
         })?;
-        engine
-            .load_ruleset(&guard.ruleset)
-            .map_err(|e| {
-                HttpResponse::InternalServerError().json(serde_json::json!({
-                    "error": format!("load_ruleset failed: {}", e)
-                }))
-            })?;
+        engine.load_ruleset(&guard.ruleset).map_err(|e| {
+            (
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("load_ruleset failed: {}", e),
+            )
+        })?;
         let ids = guard.ruleset.rules.iter().map(|r| r.id.clone()).collect();
         let gen = guard.generation;
         (ids, gen)
@@ -582,9 +585,10 @@ pub async fn execute_single(
             }
             let fact = engine::fact::Fact::new(fact_type.clone(), payload);
             engine.insert_fact(fact).map_err(|e| {
-                HttpResponse::InternalServerError().json(serde_json::json!({
-                    "error": format!("insert_fact failed: {}", e)
-                }))
+                (
+                    actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("insert_fact failed: {}", e),
+                )
             })?;
         }
     }
@@ -610,9 +614,10 @@ pub async fn execute_single(
     {
         Ok(pair) => pair,
         Err(e) => {
-            return Err(HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("engine execution panicked: {}", e)
-            })))
+            return Err((
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("engine execution panicked: {}", e),
+            ))
         }
     };
 
@@ -725,7 +730,7 @@ pub async fn execute_rules(
 ) -> impl Responder {
     match execute_single(req.into_inner(), registry, selector, ruleset, counters, metrics_tx).await {
         Ok(resp) => HttpResponse::Ok().json(resp),
-        Err(err) => err,
+        Err((code, msg)) => HttpResponse::build(code).json(serde_json::json!({ "error": msg })),
     }
 }
 
@@ -783,20 +788,18 @@ pub async fn batch_execute_rules(
                 .acquire_owned()
                 .await
                 .expect("batch semaphore closed unexpectedly");
-            // Each task builds its own engine via execute_single — no shared
-            // &mut engine across requests (Pitfall 1). On error, report a
-            // zero-fired placeholder so the per-item failure is surfaced.
-            match execute_single(request, registry, selector, ruleset, counters, metrics_tx).await {
-                Ok(resp) => resp,
-                Err(_) => ExecuteResponse {
-                    execution_id: Uuid::new_v4().to_string(),
-                    rules_fired: 0,
-                    rules_not_fired: Vec::new(),
-                    facts_after: HashMap::new(),
-                    inference_trace: None,
-                    engine_generation: 0u64,
-                },
-            }
+            // D-03 / R4: each task builds its own engine via execute_single
+            // (Pitfall 1 — no shared &mut engine across requests). The task
+            // returns `Result<ExecuteResponse, String>`: `Ok(resp)` stays
+            // `Ok(resp)`; `Err((_, msg))` is mapped to `Err(msg)` so the
+            // three-arm collector below can surface the error string in the
+            // per-item `BatchItemResult.error` field without consuming an
+            // `HttpResponse` body. The Err-mask placeholder (hardcoded
+            // zero-fired `ExecuteResponse`) is GONE — an `execute_single` Err
+            // is now a per-item FAILURE, not a masked success (SC-2).
+            execute_single(request, registry, selector, ruleset, counters, metrics_tx)
+                .await
+                .map_err(|(_code, msg)| msg)
         });
     }
 
@@ -805,15 +808,32 @@ pub async fn batch_execute_rules(
     let mut succeeded = 0usize;
     let mut failed = 0usize;
 
+    // D-03 three-arm collector. `join_next()` yields `Result<Result<ExecuteResponse,
+    // String>, JoinError>`:
+    //   - `Ok(Ok(resp))`  → succeeded += 1, success:true, total_fired += resp.rules_fired
+    //   - `Ok(Err(msg))`  → failed += 1, success:false, error:Some(msg), response:None
+    //     (the D-03 fix — execute_single Err is a per-item FAILURE, not a
+    //     zero-fired success; e.g. unknown engine → 400 is now counted as
+    //     failed, not succeeded with rules_fired:0)
+    //   - `Err(JoinError)` → failed += 1, success:false, error:Some(join_err string)
+    //     (L-06 — panic → JoinError → failed; already correct, preserved)
     while let Some(join_result) = join_set.join_next().await {
         match join_result {
-            Ok(resp) => {
+            Ok(Ok(resp)) => {
                 total_fired += resp.rules_fired;
                 succeeded += 1;
                 results.push(BatchItemResult {
                     success: true,
                     response: Some(resp),
                     error: None,
+                });
+            }
+            Ok(Err(msg)) => {
+                failed += 1;
+                results.push(BatchItemResult {
+                    success: false,
+                    response: None,
+                    error: Some(msg),
                 });
             }
             Err(join_err) => {
