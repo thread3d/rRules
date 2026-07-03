@@ -182,11 +182,28 @@ impl EngineRegistry {
         self.factories.insert(engine_type, factory);
     }
 
-    /// Registers all default engines (Rete only in initial implementation).
+    /// Registers all default engines available under the enabled cargo
+    /// features. Each factory is registered only under its static
+    /// `#[cfg(feature = "engine-X")]` gate — no runtime/user input selects
+    /// which factories register (T-23-01 mitigation). With all four
+    /// features enabled, `available_engines()` truthfully returns
+    /// `["rete", "treat", "leaps", "phreak"]` (HashMap order not guaranteed).
     pub fn register_default_engines(&mut self) {
         #[cfg(feature = "engine-rete")]
         {
             self.register_factory(Box::new(ReteEngineFactory::new()));
+        }
+        #[cfg(feature = "engine-treat")]
+        {
+            self.register_factory(Box::new(TreatEngineFactory::new()));
+        }
+        #[cfg(feature = "engine-leaps")]
+        {
+            self.register_factory(Box::new(LeapsEngineFactory::new()));
+        }
+        #[cfg(feature = "engine-phreak")]
+        {
+            self.register_factory(Box::new(PhreakEngineFactory::new()));
         }
         #[cfg(not(feature = "engine-rete"))]
         {
@@ -237,6 +254,17 @@ impl Default for EngineRegistry {
 #[cfg(feature = "engine-rete")]
 pub use crate::engine::rete::{ReteEngine, ReteEngineFactory};
 
+/// Re-export the non-Rete factory types under their feature gates so
+/// `register_default_engines` can name them. The engine structs themselves
+/// are not re-exported here (Rete's `ReteEngine` is the shared type the
+/// others build on; the per-engine structs stay internal to their modules).
+#[cfg(feature = "engine-treat")]
+pub use crate::engine::treat::TreatEngineFactory;
+#[cfg(feature = "engine-leaps")]
+pub use crate::engine::leaps::LeapsEngineFactory;
+#[cfg(feature = "engine-phreak")]
+pub use crate::engine::phreak::PhreakEngineFactory;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,5 +286,42 @@ mod tests {
     #[test]
     fn test_engine_type_display() {
         assert_eq!(format!("{}", EngineType::Rete), "rete");
+    }
+
+    /// After `register_default_engines()` on a fresh registry with all four
+    /// engine features enabled, `available_engines()` must contain all four
+    /// names. HashMap iteration order is not guaranteed, so check membership
+    /// via `.contains(...)` rather than positional indexing. This is the
+    /// truthfulness guarantee for D-01 (register all four factories) that
+    /// downstream `engine` param validation (Plan 05) depends on.
+    #[cfg(all(feature = "engine-rete", feature = "engine-treat", feature = "engine-leaps", feature = "engine-phreak"))]
+    #[test]
+    fn test_register_default_engines_advertises_all_four() {
+        let mut registry = EngineRegistry::new();
+        registry.register_default_engines();
+        let names = registry.available_engines();
+        // `available_engines` returns `Vec<&'static str>` (the static name
+        // strings from `EngineType::name`), so compare against `&str` literals.
+        assert!(
+            names.contains(&"rete"),
+            "available_engines missing 'rete': {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"treat"),
+            "available_engines missing 'treat': {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"leaps"),
+            "available_engines missing 'leaps': {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"phreak"),
+            "available_engines missing 'phreak': {:?}",
+            names
+        );
+        assert_eq!(names.len(), 4, "expected exactly four engines, got {:?}", names);
     }
 }

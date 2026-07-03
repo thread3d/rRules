@@ -8,7 +8,13 @@ name = "rRules-server"
 path = "src/main.rs"
 
 [dependencies]
-engine = { path = "../engine" }
+# Phase 23 (D-01 / L-01): enable all four pluggable-engine features on the
+# api crate so `EngineRegistry::register_default_engines()` registers all
+# four factories and `available_engines()` truthfully returns
+# `["rete", "treat", "leaps", "phreak"]`. The non-rete features each pull
+# `engine-rete` for shared types (engine/Cargo.toml), so listing all four
+# is explicit and safe.
+engine = { path = "../engine", features = ["engine-rete", "engine-treat", "engine-leaps", "engine-phreak"] }
 actix-web = { version = "4.4", features = ["macros", "ws"] }
 actix-files = "0.6"
 # CORS middleware — required for D-22-05's separate-host prod URL mode (VITE_API_URL
