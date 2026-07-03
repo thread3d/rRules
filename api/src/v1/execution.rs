@@ -849,38 +849,107 @@ pub async fn batch_execute_rules(
 )]
 pub async fn reload_rules(
     req: web::Json<ReloadRequest>,
-    engine_state: web::Data<EngineState>,
+    shared: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
+    job_store: web::Data<JobStore>,
 ) -> impl Responder {
     let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
 
     if req.async_reload {
+        // L-03 / Pitfall 14: insert the Pending ReloadJob into the JobStore
+        // BEFORE spawning the reload task. If the spawn happened first, a
+        // rapid poll of `GET /v1/jobs/{job_id}` could see `404 not_found`
+        // before the task had a chance to insert the row. By inserting here
+        // (synchronously, under the handler's call frame) the 202 response
+        // and the Pending row are observable together.
         let job_id = Uuid::new_v4().to_string();
-        let engine_state_clone = engine_state.clone();
+        {
+            let mut jobs = job_store
+                .write()
+                .expect("job_store lock poisoned during Pending insert");
+            jobs.insert(
+                job_id.clone(),
+                ReloadJob {
+                    job_id: job_id.clone(),
+                    result: None,
+                    status: ReloadStatus::Pending,
+                    error: None,
+                },
+            );
+        }
+
+        // Clone the Arc handles + rules_dir into the spawned task so it can
+        // run independently of the handler's borrowed `web::Data` lifetime.
+        // `web::Data<T>` is `Arc<T>` underneath, so `get_ref().clone()` gives
+        // another `Arc` (cheap, refcount-only).
+        let shared_clone: Arc<std::sync::RwLock<SharedRuleSet>> = shared.get_ref().clone();
+        let job_store_clone: JobStore = job_store.get_ref().clone();
+        let dir_clone = rules_dir.clone();
+        let job_id_clone = job_id.clone();
 
         tokio::spawn(async move {
-            let _result = engine_state_clone.reload_engine(&rules_dir).await;
+            // Transition Pending → Running (L-03).
+            {
+                let mut jobs = job_store_clone
+                    .write()
+                    .expect("job_store lock poisoned during Running transition");
+                if let Some(job) = jobs.get_mut(&job_id_clone) {
+                    job.status = ReloadStatus::Running;
+                }
+            }
+
+            // D-04: call the ONE shared reload helper (same impl as the sync
+            // branch below — they cannot diverge). reload_and_swap builds the
+            // new RuleSet off-to-side, then swaps the whole SharedRuleSet +
+            // bumps generation under the write lock (Pitfall 4: no I/O under
+            // the lock).
+            match reload_and_swap(&shared_clone, &dir_clone).await {
+                Ok(result) => {
+                    // Running → Completed (with the ReloadResult payload).
+                    let mut jobs = job_store_clone
+                        .write()
+                        .expect("job_store lock poisoned during Completed transition");
+                    if let Some(job) = jobs.get_mut(&job_id_clone) {
+                        job.status = ReloadStatus::Completed;
+                        job.result = Some(result);
+                    }
+                }
+                Err(e) => {
+                    // Running → Failed (with the error string).
+                    let mut jobs = job_store_clone
+                        .write()
+                        .expect("job_store lock poisoned during Failed transition");
+                    if let Some(job) = jobs.get_mut(&job_id_clone) {
+                        job.status = ReloadStatus::Failed;
+                        job.error = Some(e);
+                    }
+                }
+            }
         });
 
+        // 202 + JobResponse { job_id, status: "pending" } — the status
+        // matches the row we just inserted (D discretion; SC-1 polls and
+        // observes pending/running → completed).
         HttpResponse::Accepted().json(JobResponse {
             job_id,
-            status: "running".to_string(),
+            status: "pending".to_string(),
         })
     } else {
-        match engine_state.reload_from_directory(&rules_dir).await {
-            Ok(rule_count) => {
-                HttpResponse::Ok().json(ReloadResponse {
-                    reload_id: Uuid::new_v4().to_string(),
-                    rules_reloaded: rule_count,
-                    status: format!("Successfully reloaded {} rules", rule_count),
-                })
-            }
-            Err(e) => {
-                HttpResponse::InternalServerError().json(serde_json::json!({
-                    "reload_id": Uuid::new_v4().to_string(),
-                    "rules_reloaded": 0,
-                    "status": format!("Reload failed: {}", e)
-                }))
-            }
+        // D-04: sync reload ALSO calls reload_and_swap inline — one shared
+        // swap implementation for both paths. A sync reload that didn't swap
+        // would be a lie (on-disk rules would differ from the executing
+        // ruleset). reload_and_swap builds the new RuleSet off-to-side and
+        // swaps under the write lock, bumping generation (L-02, L-04).
+        match reload_and_swap(shared.get_ref(), &rules_dir).await {
+            Ok(result) => HttpResponse::Ok().json(ReloadResponse {
+                reload_id: result.reload_id,
+                rules_reloaded: result.rule_count,
+                status: format!("Successfully reloaded {} rules", result.rule_count),
+            }),
+            Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+                "reload_id": Uuid::new_v4().to_string(),
+                "rules_reloaded": 0,
+                "status": format!("Reload failed: {}", e)
+            })),
         }
     }
 }
