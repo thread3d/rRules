@@ -32,7 +32,7 @@ use std::sync::{Arc, RwLock};
 use actix_web::{body::BoxBody, test, web, App};
 use serde_json::{json, Value};
 
-use api::metrics::coverage_endpoint;
+use api::metrics::{configure_metrics, coverage_endpoint, create_metrics_channel, MetricsTx};
 use api::v1::execution::execute_rules;
 use engine::data_types::Value as EngineValue;
 use engine::engine::registry::EngineRegistry;
@@ -100,6 +100,18 @@ fn shared_selector() -> web::Data<EngineSelector> {
     web::Data::new(EngineSelector::with_defaults())
 }
 
+/// Build a shared `MetricsTx` (broadcast sender) for the test App. Plan 24-03
+/// will change `execute_rules` to extract `web::Data<MetricsTx>` and broadcast a
+/// `MetricsSnapshot` after each execute; installing it in the test App now keeps
+/// `init_test_app!` forward-compatible and lets the Phase 24 RED scaffolds
+/// compile against the current (pre-24-03) API — actix silently ignores unused
+/// `app_data`. The receiver is dropped here; a fresh channel per test is fine
+/// because no test in this file reads from the broadcast channel.
+fn shared_metrics_tx() -> web::Data<MetricsTx> {
+    let (tx, _rx) = create_metrics_channel(16);
+    web::Data::new(tx)
+}
+
 // =====================================================================
 // Test App wiring
 // =====================================================================
@@ -144,7 +156,9 @@ macro_rules! init_test_app {
                 .app_data(shared_registry())
                 .app_data(shared_selector())
                 .app_data(shared_ruleset())
-                .configure(configure_test_routes),
+                .app_data(shared_metrics_tx())
+                .configure(configure_test_routes)
+                .configure(configure_metrics),
         )
         .await
     };
@@ -330,5 +344,111 @@ async fn coverage_auto_populated() {
         r1["fire_count"].as_u64(),
         Some(1),
         "MON-05 / Pitfall 6: r1 fire_count should be 1 (once-per-rule); body: {cov_body}"
+    );
+}
+
+// =====================================================================
+// Phase 24 Wave 0 RED scaffolds
+//
+// These three scaffolds encode the Phase 24 success contract and are
+// intentionally RED until Plans 24-02 (foundation) and 24-03
+// (instrumentation) wire the Prometheus counters, the response-shape
+// `engine_generation` field, and the execute→metrics broadcast path.
+// They compile against the existing Phase 23 API and FAIL on their
+// substantive assertions (not on compile or extraction errors).
+// =====================================================================
+
+/// SC-1 (Prometheus counters exposed): after a POST `/v1/execute`, the
+/// `/metrics` Prometheus exposition body contains the
+/// `rrules_execute_requests_total` counter. RED because the current
+/// `metrics_endpoint` returns hardcoded text containing only
+/// `engine_rules_fired` (Plan 24-03 swaps in a `prometheus::TextEncoder`
+/// over a real `CounterVec`).
+#[serial_test::serial]
+#[actix_web::test]
+async fn counters_exposed_in_metrics() {
+    reset_test_env();
+    let app = init_test_app!();
+
+    // Fire the engine so a counter (when wired) would be non-zero.
+    let exec_req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "facts": { "scorecard": { "score": 0 } } }))
+        .to_request();
+    let _ = json_body(test::call_service(&app, exec_req).await).await;
+
+    // Read the Prometheus exposition format.
+    let metrics_req = test::TestRequest::get()
+        .uri("/metrics")
+        .insert_header(("Accept", "text/plain"))
+        .to_request();
+    let metrics_resp = test::call_service(&app, metrics_req).await;
+    assert!(
+        metrics_resp.status().is_success(),
+        "metrics endpoint should return 200, got {}",
+        metrics_resp.status()
+    );
+    let bytes = test::read_body(metrics_resp).await;
+    let text = String::from_utf8_lossy(&bytes);
+
+    assert!(
+        text.contains("rrules_execute_requests_total"),
+        "SC-1: expected the rrules_execute_requests_total counter in /metrics; got: {text}"
+    );
+}
+
+/// Counter-correctness (24-VALIDATION.md): after TWO POST `/v1/execute`
+/// calls, the `/metrics` exposition body contains the
+/// `rrules_execute_rules_fired_total` counter with value >= 1. RED
+/// because the current hardcoded text lacks the new metric name.
+#[serial_test::serial]
+#[actix_web::test]
+async fn counters_increment_per_request() {
+    reset_test_env();
+    let app = init_test_app!();
+
+    // Fire the keystone rule twice so a per-request counter (when wired)
+    // would record at least one fired rule.
+    for _ in 0..2 {
+        let req = test::TestRequest::post()
+            .uri("/v1/execute")
+            .set_json(json!({ "facts": { "scorecard": { "score": 0 } } }))
+            .to_request();
+        let _ = json_body(test::call_service(&app, req).await).await;
+    }
+
+    let metrics_req = test::TestRequest::get()
+        .uri("/metrics")
+        .insert_header(("Accept", "text/plain"))
+        .to_request();
+    let bytes = test::read_body(test::call_service(&app, metrics_req).await).await;
+    let text = String::from_utf8_lossy(&bytes);
+
+    assert!(
+        text.contains("rrules_execute_rules_fired_total"),
+        "counter-correctness: expected the rrules_execute_rules_fired_total counter in /metrics; got: {text}"
+    );
+}
+
+/// Response-shape (24-VALIDATION.md): the `/v1/execute` response JSON
+/// contains an `engine_generation` field of type u64. RED because the
+/// current `ExecuteResponse` struct has no `engine_generation` field and
+/// serde omits it, so `body["engine_generation"]` is `Null`.
+#[serial_test::serial]
+#[actix_web::test]
+async fn response_includes_engine_generation() {
+    reset_test_env();
+    let app = init_test_app!();
+
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "facts": { "scorecard": { "score": 0 } } }))
+        .to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    assert!(
+        body["engine_generation"].is_u64(),
+        "response-shape: expected engine_generation to be a u64; got {:?}; body: {body}",
+        body["engine_generation"]
     );
 }
