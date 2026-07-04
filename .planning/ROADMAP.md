@@ -211,6 +211,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 3. `/metrics`, `/v1/metrics/coverage`, and `/v1/metrics/dead-rules` agree on the fire count for a rule (no three-counter drift)
 
 **Plans:** 2/2 plans complete
+
 - [x] 26-01-PLAN.md — Convert RuleExecutionTracker to LazyLock<Mutex<TrackerState>> singleton (mirror CoverageTracking); deprecate new(); migrate 6 detection.rs tests to singleton API + #[serial] + clear(); add test_once_per_rule (Wave 0 RED→GREEN)
 - [x] 26-02-PLAN.md — Wire recording at BOTH evaluator call sites (direct_eval.rs + rete/mod.rs per C1); rewrite dead_rules_endpoint to singleton; add SC-1/SC-2/SC-3 keystone e2e (r1 fires + r2 unfired); fix stale metrics_integration.rs comment (Wave 0 RED→GREEN)
 
