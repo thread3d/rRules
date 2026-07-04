@@ -242,7 +242,10 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 3. When the session count exceeds `MAX_SESSIONS`, the LRU entry is evicted; `rrules_sessions_active` gauge reflects the live count
 4. `DELETE /v1/execute/session/{id}` disposes the session; `POST /v1/execute/session/{id}/reset` clears working memory without disposing
 
-**Plans:** TBD
+**Plans:** 1 plan
+
+- [ ] 27-01-PLAN.md — Stateful sessions: SessionManager (DashMap + per-session Mutex + TTL/LRU/max-count/sweep/gauge), execute_single sessionful branch, DELETE/reset routes (Wave 0 RED → GREEN for SC-1..SC-4)
+
 **UI hint**: yes (session endpoints surface in the API the frontend will call)
 
 ### Phase 28: Frontend test-runner
@@ -299,7 +302,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 24. Execution counters + metrics broadcast | v5.0 | 3/3 | Complete    | 2026-07-03 |
 | 25. Real reload + JobStore | v5.0 | 3/3 | Complete    | 2026-07-03 |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 2/2 | Complete    | 2026-07-03 |
-| 27. Stateful sessions | v5.0 | 0/? | Not started | - |
+| 27. Stateful sessions | v5.0 | 0/1 | Not started | - |
 | 28. Frontend test-runner | v5.0 | 0/? | Not started | - |
 
 ---
