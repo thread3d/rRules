@@ -32,6 +32,13 @@ pub struct ExecuteRequest {
     /// NOT `EngineSelector::select_engine` (which takes `&mut self`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub engine: Option<String>,
+    /// Phase 28 (D-02 / EXEC-04): opt-in inference trace. Off by default
+    /// for performance (SC-3 latency neutrality). When absent/false the
+    /// evaluator skips all trace collection and `inference_trace` is
+    /// `None`. `#[serde(default)]` keeps existing clients/fixtures parsing
+    /// (absent deserializes to `None`).
+    #[serde(default)]
+    pub trace: Option<bool>,
 }
 
 /// Filter for selecting which rules to execute
@@ -209,6 +216,21 @@ pub struct InferenceTraceEntry {
 pub struct TraceSummary {
     pub total_duration_ms: f64,
     pub facts_matched: usize,
+}
+
+/// Phase 28 (D-03 / FRONTEND-04): response body for `GET /v1/engines`. The
+/// `engines` array is sorted ascending so the frontend dropdown is stable
+/// across requests (28-RESEARCH Open Q5 — `available_engines()` iterates a
+/// HashMap and is not order-guaranteed). `default` mirrors the exact
+/// default-resolution expression from `execute_single`:
+/// `RRULES_DEFAULT_ENGINE` env > `selector.current_engine()`.
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct EnginesResponse {
+    /// Sorted ascending list of registered engine names (from
+    /// `EngineRegistry::available_engines()`).
+    pub engines: Vec<String>,
+    /// The resolved default engine name.
+    pub default: String,
 }
 
 /// Shared engine state for hot reload functionality
@@ -571,6 +593,14 @@ pub async fn execute_single(
         }
     };
 
+    // Phase 28 (D-02 / EXEC-04): resolve the trace opt-in BEFORE web::block
+    // and enable it on the engine so the evaluator knows whether to emit
+    // ordered TraceEvents. `trace` is `#[serde(default)] Option<bool>` —
+    // absent deserializes to `None`, which `unwrap_or(false)` maps to the
+    // SC-3 latency-neutral off path (no trace allocation).
+    let collect_trace = req.trace.unwrap_or(false);
+    engine.set_collect_trace(collect_trace);
+
     // 4. Load the shared ruleset (read-only guard) and collect rule ids for
     //    rules_not_fired computation. The guard is dropped before execution
     //    so no lock spans the CPU-bound engine.execute() call. Phase 25
@@ -722,12 +752,40 @@ pub async fn execute_single(
         .cloned()
         .collect();
 
+    // Phase 28 (D-01 / D-02): map the engine-side TraceData → api
+    // InferenceTrace when `collect_trace` is true. The engine emits its own
+    // TraceEvent type (engine cannot import api types — Critical Finding 1);
+    // this is the cross-crate mapping boundary. `data: None` per D-01
+    // discretion (lean payload — SC-3). When `collect_trace` is false,
+    // `engine_result.trace` is `None` and `inference_trace` is `None` (the
+    // SC-3 latency-neutral path).
+    let inference_trace = if collect_trace {
+        engine_result.trace.as_ref().map(|td| InferenceTrace {
+            entries: td
+                .events
+                .iter()
+                .map(|e| InferenceTraceEntry {
+                    timestamp: e.timestamp.clone(),
+                    event_type: e.event_type.to_string(),
+                    rule_name: Some(e.rule_id.clone()),
+                    data: None,
+                })
+                .collect(),
+            summary: Some(TraceSummary {
+                total_duration_ms: td.total_duration_ms,
+                facts_matched: td.facts_matched,
+            }),
+        })
+    } else {
+        None
+    };
+
     Ok(ExecuteResponse {
         execution_id,
         rules_fired: engine_result.rules_fired,
         rules_not_fired,
         facts_after,
-        inference_trace: None,
+        inference_trace,
         engine_generation: generation,
         // Phase 27 (D-05): stateless path — no server session id.
         session_id: None,
@@ -832,6 +890,13 @@ async fn execute_sessionful(
         // at the end of this block.
         std::mem::replace(&mut guard.engine, placeholder)
     };
+
+    // Phase 28 (D-02 / EXEC-04): resolve the trace opt-in and enable it on
+    // the session engine before web::block owns it. Same pattern as the
+    // stateless path — `unwrap_or(false)` maps absent/None to the SC-3
+    // latency-neutral off path.
+    let collect_trace = req.trace.unwrap_or(false);
+    engine.set_collect_trace(collect_trace);
 
     // web::block owns the engine by value — no MutexGuard captured across
     // the .await (Pitfall 7 / Open Q#3).
@@ -942,12 +1007,35 @@ async fn execute_sessionful(
 
     // 7. Build ExecuteResponse with the server UUID (D-04) + creation gen (D-07).
     let execution_id = Uuid::new_v4().to_string();
+    // Phase 28 (D-01 / D-02): map engine TraceData → api InferenceTrace on
+    // the sessionful path too (do NOT leave this as None — the sessionful
+    // path also benefits from trace). Same mapping as the stateless path.
+    let inference_trace = if collect_trace {
+        engine_result.trace.as_ref().map(|td| InferenceTrace {
+            entries: td
+                .events
+                .iter()
+                .map(|e| InferenceTraceEntry {
+                    timestamp: e.timestamp.clone(),
+                    event_type: e.event_type.to_string(),
+                    rule_name: Some(e.rule_id.clone()),
+                    data: None,
+                })
+                .collect(),
+            summary: Some(TraceSummary {
+                total_duration_ms: td.total_duration_ms,
+                facts_matched: td.facts_matched,
+            }),
+        })
+    } else {
+        None
+    };
     Ok(ExecuteResponse {
         execution_id,
         rules_fired: engine_result.rules_fired,
         rules_not_fired,
         facts_after,
-        inference_trace: None,
+        inference_trace,
         engine_generation,
         // Phase 27 (D-04): server-generated UUID v4 primary key.
         session_id: Some(server_uuid.to_string()),
@@ -978,6 +1066,41 @@ pub async fn execute_rules(
         Ok(resp) => HttpResponse::Ok().json(resp),
         Err((code, msg)) => HttpResponse::build(code).json(serde_json::json!({ "error": msg })),
     }
+}
+
+/// List available engines - GET /v1/engines
+///
+/// Phase 28 (D-03 / FRONTEND-04): returns the registered engine names + the
+/// resolved default so the frontend engine-selector dropdown is honest about
+/// feature-gated engines (never hardcoded). `engines` is sorted ascending
+/// for a stable dropdown (28-RESEARCH Open Q5 — `available_engines()`
+/// iterates a HashMap and is not order-guaranteed). `default` mirrors the
+/// exact default-resolution expression from `execute_single`:
+/// `RRULES_DEFAULT_ENGINE` env > `selector.current_engine()`. Reuses the
+/// already-shared `web::Data<EngineRegistry>` + `web::Data<EngineSelector>`
+/// — no new app_data. Behind the existing `requires_auth` middleware on
+/// the `/v1` scope (T-28-03-engine-enum mitigation).
+#[utoipa::path(
+    get,
+    path = "/v1/engines",
+    tag = "execution",
+    responses(
+        (status = 200, description = "Available engines", body = EnginesResponse),
+    ),
+)]
+pub async fn list_engines(
+    registry: web::Data<EngineRegistry>,
+    selector: web::Data<EngineSelector>,
+) -> impl Responder {
+    let mut engines: Vec<String> = registry
+        .available_engines()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    engines.sort(); // stable dropdown order (Open Q5)
+    let default = std::env::var("RRULES_DEFAULT_ENGINE")
+        .unwrap_or_else(|_| selector.current_engine().to_string());
+    HttpResponse::Ok().json(EnginesResponse { engines, default })
 }
 
 /// Execute multiple rule sets concurrently - POST /v1/rules/batch-execute

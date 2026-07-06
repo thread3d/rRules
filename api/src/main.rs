@@ -259,6 +259,10 @@ async fn main() -> std::io::Result<()> {
                     .route("/auth/refresh", web::post().to(auth::refresh))
                     // Execution endpoint
                     .route("/execute", web::post().to(v1::execution::execute_rules))
+                    // Phase 28 (D-03 / FRONTEND-04): engine-selector dropdown
+                    // data source. Reuses shared web::Data<EngineRegistry> +
+                    // web::Data<EngineSelector>. Behind requires_auth on /v1.
+                    .route("/engines", web::get().to(v1::execution::list_engines))
                     // Phase 27 (D-05): sessionful lifecycle routes — dispose
                     // and reset. Registered before any wildcard /execute/{...}
                     // route (none currently exists, but the discipline holds

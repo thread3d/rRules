@@ -210,6 +210,13 @@ pub struct ReteEngine {
     /// `RuleSet` snapshot; per-request engines carry their own copy.
     rules: Vec<crate::rules::Rule>,
     metrics: crate::engine::metrics::SimpleMetricsCollector,
+    /// Phase 28 (D-01 / EXEC-04, C1 site 2): trace-collection flag. Rete
+    /// keeps its own inlined `execute_rules` (it does NOT delegate to the
+    /// shared `direct_eval::direct_execute` helper), so the trace emission
+    /// MUST be mirrored here independently — the C1 two-site requirement.
+    /// Set via `set_collect_trace` before `execute()`. Default `false`
+    /// (SC-3 latency neutrality — off-by-default).
+    collect_trace: bool,
 }
 
 impl ReteEngine {
@@ -222,6 +229,7 @@ impl ReteEngine {
             working_facts: HashMap::new(),
             rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
+            collect_trace: false,
         }
     }
 
@@ -234,6 +242,7 @@ impl ReteEngine {
             working_facts: HashMap::new(),
             rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
+            collect_trace: false,
         }
     }
 
@@ -350,6 +359,16 @@ impl ReteEngine {
         let mut fired_set: HashSet<String> = HashSet::new();
         let mut evaluated_set: HashSet<String> = HashSet::new();
 
+        // Phase 28 (D-01 / EXEC-04, C1 site 2): Rete keeps its own inlined
+        // fixpoint loop (it does NOT delegate to `direct_eval::direct_execute`),
+        // so trace emission is mirrored here independently. When
+        // `self.collect_trace` is false, no `Vec`/`String`/`chrono` work
+        // happens (SC-3 latency neutrality). `trace_start` is captured once
+        // at loop entry; events are pushed in firing order inside the loop.
+        let trace_start = if self.collect_trace { Some(std::time::Instant::now()) } else { None };
+        let mut trace_events: Vec<crate::engine::registry::TraceEvent> = Vec::new();
+        let mut facts_matched: usize = 0;
+
         // Fixpoint loop: repeat passes until no rule newly fires in a full
         // pass (D-07). Each rule fires at most once per execute() call
         // (fired_set guard) — this bounds the loop at |rules| passes and is
@@ -370,6 +389,20 @@ impl ReteEngine {
                 evaluated_set.insert(rule_id.clone());
                 let matched = self.rules[rule_idx].condition.evaluate(&facts);
                 if matched {
+                    // Phase 28 (D-01, C1 site 2): emit a TraceEvent at the
+                    // moment the rule fires — IN FIRING ORDER. Guarded by
+                    // `self.collect_trace` so the off path skips the chrono
+                    // call + String allocation entirely (SC-3). `facts.len()`
+                    // is the honest count of facts in working memory that the
+                    // condition matched against (D-01 discretion).
+                    if self.collect_trace {
+                        facts_matched += facts.len();
+                        trace_events.push(crate::engine::registry::TraceEvent {
+                            rule_id: rule_id.clone(),
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                            event_type: "rule_fired",
+                        });
+                    }
                     // Apply actions. Clone the actions Vec so the immutable
                     // borrow of `self.rules` ends before we mutably borrow
                     // `self.working_facts`.
@@ -411,8 +444,26 @@ impl ReteEngine {
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
         self.metrics.set_execution_time_ms(elapsed_ms);
 
+        // Phase 28 (D-01, C1 site 2): build the TraceData payload only when
+        // `collect_trace` is true AND at least one rule fired. When
+        // `collect_trace` is false, `trace_events` is empty and `trace_start`
+        // is None — `result.trace` stays `None` (SC-3 latency neutrality).
+        let trace = if self.collect_trace && !trace_events.is_empty() {
+            let total_duration_ms = trace_start
+                .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+                .unwrap_or(0.0);
+            Some(crate::engine::registry::TraceData {
+                events: trace_events,
+                total_duration_ms,
+                facts_matched,
+            })
+        } else {
+            None
+        };
+
         let mut result = EngineResult::success(fired_set.len());
         result.fired_rule_ids = fired_set.iter().cloned().collect();
+        result.trace = trace;
         result
     }
 }
@@ -529,6 +580,16 @@ impl ExecutionEngine for ReteEngine {
         self.working_facts.clear();
         self.rules.clear();
         self.metrics.reset_metrics();
+        // `collect_trace` is a config flag, not state — leave it across reset.
+    }
+
+    /// Phase 28 (D-01 / EXEC-04, C1 site 2): store the trace-collection flag
+    /// so `execute_rules` emits ordered `TraceEvent`s inline. Overrides the
+    /// trait's default noop. Rete keeps its own inlined fixpoint loop, so
+    /// this override is REQUIRED for Rete runs to trace (the shared
+    /// `direct_execute` helper is never called).
+    fn set_collect_trace(&mut self, enabled: bool) {
+        self.collect_trace = enabled;
     }
 
     /// Loads a ruleset into the engine by cloning the ruleset's `rules` Vec

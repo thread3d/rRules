@@ -46,5 +46,5 @@ pub mod selector;
 // Re-export core types for convenience
 #[cfg(feature = "engine-rete")]
 pub use metrics::{EngineMetrics, MetricsCollector};
-pub use registry::{EngineFactory, EngineRegistry, EngineType};
+pub use registry::{EngineFactory, EngineRegistry, EngineType, TraceData, TraceEvent};
 pub use selector::EngineSelector;

@@ -39,8 +39,8 @@ use api::metrics::{
     ExecutionCounters, MetricsTx,
 };
 use api::v1::execution::{
-    batch_execute_rules, execute_rules, get_job_status, init_job_store, list_jobs, reload_rules,
-    EngineState, JobStore, SharedRuleSet,
+    batch_execute_rules, execute_rules, get_job_status, init_job_store, list_engines, list_jobs,
+    reload_rules, EngineState, JobStore, SharedRuleSet,
 };
 use api::v1::sessions::{
     dispose_session, read_session_config, reset_session, SessionConfig, SessionManager,
@@ -392,6 +392,9 @@ fn configure_test_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/v1")
             .route("/execute", web::post().to(execute_rules))
+            // Phase 28 (D-03 / FRONTEND-04): engine-selector dropdown data
+            // source. Mirrors the main.rs /v1 scope registration.
+            .route("/engines", web::get().to(list_engines))
             // Phase 27 (D-09 / D-05): lifecycle routes for SC-4. Registered
             // before any wildcard `/execute/{...}` route (none currently
             // exists, but the discipline holds per PATTERNS.md line 372).

@@ -88,6 +88,15 @@ pub trait ExecutionEngine: Send + Sync + std::fmt::Debug {
         Ok(())
     }
 
+    /// Phase 28 (D-01 / EXEC-04): enable/disable inference-trace collection
+    /// on this engine. Called by `execute_single` BEFORE `engine.execute()`
+    /// so the evaluator knows whether to allocate `TraceEvent`s. Default is
+    /// a noop so existing engines keep compiling; engines that emit traces
+    /// override this to store the flag in a field. When `false` (the
+    /// default), the evaluator MUST skip all trace allocation (SC-3 latency
+    /// neutrality — no `Vec`, no `String`, no `chrono` call).
+    fn set_collect_trace(&mut self, _enabled: bool) {}
+
     /// Loads a ruleset into the engine so `execute` can fire rules against
     /// working memory. Default impl returns `Err` — engines that support
     /// real evaluation override this (Plan 03 wires `ReteEngine`, Plan 06
@@ -107,6 +116,43 @@ pub trait ExecutionEngine: Send + Sync + std::fmt::Debug {
     }
 }
 
+/// Phase 28 (D-01 / EXEC-04): a single inference-trace event emitted by the
+/// live evaluator at the moment a rule fires. The engine crate owns this
+/// type because the engine cannot import `api::v1::execution` types
+/// (dependency direction is `api → engine` — Critical Finding 1). The API
+/// layer maps it to the wire-schema `InferenceTraceEntry` in `execute_single`.
+///
+/// `event_type` is a `&'static str` (currently always `"rule_fired"`) so the
+/// common case avoids a per-event allocation; the API mapping clones it into
+/// an owned `String` only when `collect_trace` is true.
+#[derive(Debug, Clone)]
+pub struct TraceEvent {
+    /// The id of the rule that fired (matches `Rule.id` / `fired_rule_ids`).
+    pub rule_id: String,
+    /// RFC3339 timestamp captured at fire time via `chrono::Utc::now()`.
+    pub timestamp: String,
+    /// Event kind — currently always `"rule_fired"`.
+    pub event_type: &'static str,
+}
+
+/// Phase 28 (D-01 / EXEC-04): the ordered trace payload returned from the
+/// evaluator. `events` is in FIRING order (the order the fixpoint loop fired
+/// each rule), NOT `fired_rule_ids` order (`fired_rule_ids` is populated from
+/// a `HashSet` and is therefore unordered — Critical Finding 3). The API
+/// layer maps this to `InferenceTrace` in `execute_single`.
+#[derive(Debug, Clone, Default)]
+pub struct TraceData {
+    /// Ordered trace events — one per fired rule, in firing order.
+    pub events: Vec<TraceEvent>,
+    /// Wall-clock duration of the traced fixpoint loop in milliseconds
+    /// (captured via `Instant::now()` at loop entry / elapsed at end).
+    pub total_duration_ms: f64,
+    /// Honest count of facts that matched a fired rule's condition (D-01
+    /// discretion — the count is computed at fire time from the working
+    /// memory snapshot).
+    pub facts_matched: usize,
+}
+
 /// Result of engine execution.
 #[derive(Debug, Clone)]
 pub struct EngineResult {
@@ -124,6 +170,12 @@ pub struct EngineResult {
     /// the failure constructor and for the default `success` constructor
     /// when the engine does not track ids yet.
     pub fired_rule_ids: Vec<String>,
+    /// Phase 28 (D-01 / EXEC-04): ordered inference-trace payload. `None`
+    /// when `collect_trace` is false (the SC-3 latency-neutral path — the
+    /// evaluator skips all trace allocation). `Some(TraceData)` only when
+    /// `collect_trace == true` AND at least one rule fired. Additive to
+    /// `fired_rule_ids` (which remains populated for existing consumers).
+    pub trace: Option<TraceData>,
 }
 
 impl EngineResult {
@@ -134,6 +186,7 @@ impl EngineResult {
             rules_fired,
             message: format!("Executed {} rules", rules_fired),
             fired_rule_ids: Vec::new(),
+            trace: None,
         }
     }
 
@@ -144,6 +197,7 @@ impl EngineResult {
             rules_fired: 0,
             message: message.into(),
             fired_rule_ids: Vec::new(),
+            trace: None,
         }
     }
 
