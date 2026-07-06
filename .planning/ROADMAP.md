@@ -276,17 +276,17 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 3. With `trace: true`, the results panel shows the inference trace; with `trace` absent/false, the trace is omitted and latency is unaffected
 4. After "Reload then Run", the results panel reflects the edited rule (correlated via `engine_generation`)
 
-**Plans:** 5 plans
+**Plans:** 3/5 plans executed
 
 **Wave 0** *(parallel — RED scaffolds + frontend infra enablers)*
 
-- [ ] 28-01-PLAN.md — Wave 0 RED backend test scaffolds (trace on/off, Rete two-site, GET /v1/engines) in api/tests/execute_integration.rs — EXEC-04/FRONTEND-04
-- [ ] 28-02-PLAN.md — Frontend test infra (Vitest jsdom config + setup, @testing-library/jest-dom install) + QueryClientProvider in main.tsx (Critical Finding 2) + RED TestRunner component test scaffolds — FRONTEND-03/FRONTEND-04/EXEC-04
+- [x] 28-01-PLAN.md — Wave 0 RED backend test scaffolds (trace on/off, Rete two-site, GET /v1/engines) in api/tests/execute_integration.rs — EXEC-04/FRONTEND-04
+- [x] 28-02-PLAN.md — Frontend test infra (Vitest jsdom config + setup, @testing-library/jest-dom install) + QueryClientProvider in main.tsx (Critical Finding 2) + RED TestRunner component test scaffolds — FRONTEND-03/FRONTEND-04/EXEC-04
 
 **Wave 1** *(parallel — backend implementation + frontend API client; no file overlap)*
 
 - [ ] 28-03-PLAN.md — Backend: engine-side TraceEvent/TraceData type + two-site emission (D-01, C1 direct_eval + rete), ExecuteRequest.trace + execute_single mapping (D-02), GET /v1/engines handler (D-03) — flips 28-01 RED→GREEN — EXEC-04/FRONTEND-04
-- [ ] 28-04-PLAN.md — Frontend: execution.ts (6 functions incl. reloadRules — Critical Finding 3) + 9 snake_case TS types in types.ts (D-10) — FRONTEND-03/FRONTEND-04/EXEC-04
+- [x] 28-04-PLAN.md — Frontend: execution.ts (6 functions incl. reloadRules — Critical Finding 3) + 9 snake_case TS types in types.ts (D-10) — FRONTEND-03/FRONTEND-04/EXEC-04
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -319,7 +319,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 25. Real reload + JobStore | v5.0 | 3/3 | Complete    | 2026-07-03 |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 2/2 | Complete    | 2026-07-03 |
 | 27. Stateful sessions | v5.0 | 1/1 | Complete    | 2026-07-06 |
-| 28. Frontend test-runner | v5.0 | 0/5 | Not started | - |
+| 28. Frontend test-runner | v5.0 | 3/5 | In Progress|  |
 
 ---
 *Roadmap last updated: 2026-07-02 — v5.0 Live Execution milestone added (Phases 23–28)*
