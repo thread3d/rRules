@@ -112,7 +112,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 29-02-PLAN.md — Namespace-aware XXE-hardened CDATA-handled DMN parser + import corpus + parser tests (DMN-04, DMN-05)
+- [x] 29-02-PLAN.md — Namespace-aware XXE-hardened CDATA-handled DMN parser + import corpus + parser tests (DMN-04, DMN-05)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -245,7 +245,7 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 2/2 | Complete | 2026-07-03 |
 | 27. Stateful sessions | v5.0 | 1/1 | Complete | 2026-07-06 |
 | 28. Frontend test-runner | v5.0 | 5/5 | Complete | 2026-07-06 |
-| 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 1/3 | In Progress|  |
+| 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 2/3 | In Progress|  |
 | 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 0/TBD | Not started | - |
 | 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 0/TBD | Not started | - |
 | 32. Decision-Table Engine + Hit Policies | v6.0 | 0/TBD | Not started | - |

@@ -2,18 +2,14 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: DMN Level 3 Compliance
-current_phase: 29
-current_phase_name: planning complete, ready to plan Phase 29
 status: executing
-stopped_at: Phase 28 executed — human verification needed (3 UAT items)
-last_updated: "2026-07-06T18:38:16.422Z"
-last_activity: 2026-07-06
-last_activity_desc: Phase 29 planning complete
+last_updated: "2026-07-06T21:05:24.293Z"
+last_activity: 2026-07-06 -- Plan 29-02 executed (DMN 1.5 XML parser + integration test corpus)
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -29,15 +25,15 @@ See: `.planning/PROJECT.md` (updated 2026-07-06)
 ## Current Position
 
 Phase: 29 — DMN 1.5 Model + XML Parser + Canonical IR (executing)
-Plan: 29-01 complete; next is 29-02 (Wave 2 — parser)
+Plan: 29-02 complete; next is 29-03 (Wave 2 — exporter)
 Status: Executing Phase 29
-Last activity: 2026-07-06 -- Plan 29-01 executed (canonical IR + module wiring + locked stack deps)
+Last activity: 2026-07-06 -- Plan 29-02 executed (DMN 1.5 XML parser + integration test corpus)
 
 ### Milestone v6.0 Phases
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
-| 29 | DMN 1.5 Model + XML Parser + Canonical IR | DMN-04, DMN-05, DMN-06 | executing (29-01 complete) |
+| 29 | DMN 1.5 Model + XML Parser + Canonical IR | DMN-04, DMN-05, DMN-06 | executing (29-01, 29-02 complete) |
 | 30 | FEEL Value Types + Type Lattice + Temporal Domain | DMN-08, DMN-09, DMN-10 | not_started (research-needed) |
 | 31 | FEEL Parser + Evaluator + Built-in Function Library | DMN-11..DMN-18 | not_started (research-needed; largest) |
 | 32 | Decision-Table Engine + Hit Policies | DMN-19, DMN-20, DMN-21 | not_started |
@@ -252,6 +248,9 @@ From v2.0 milestone:
 - [Phase ?]: DMN IR does NOT reuse crate::data_types::Value or the rule-engine Expression AST (milestone research Anti-Pattern avoided)
 - [Phase ?]: HitPolicy::default() = Unique so DecisionTable::default() yields UNIQUE (Phase 29 success criterion 3 at IR level)
 - [Phase ?]: DmnParseError declared in model.rs (single error-type home); parser.rs (29-02) returns Result<_, DmnParseError>
+- [Phase ?]: DMN parser uses quick-xml NsReader streaming pull parser
+- [Phase ?]: Event::GeneralRef resolved explicitly — quick-xml 0.40 emits entity refs as separate events, not inlined into Event::Text
+- [Phase ?]: hitPolicy absent defaults to HitPolicy::Unique (DMN-04); FEEL stored as String, parsed in Phase 31
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -279,11 +278,11 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-**Resume file:** .planning/phases/28-frontend-test-runner/28-UAT.md
+**Resume file:** None
 
-**Stopped at:** Phase 28 executed — human verification needed (3 UAT items)
+**Stopped at:** Completed 29-02-PLAN.md
 
-Last session: 2026-07-06T18:36:11.494Z
+Last session: 2026-07-06T21:05:24.284Z
 
 **Completed Phases:**
 
@@ -317,3 +316,4 @@ Last session: 2026-07-06T18:36:11.494Z
 | Phase 23 P04 | 4min | 2 tasks | 8 files |
 | Phase 27 P01 | 90min | 3 tasks | 8 files |
 | Phase 29 P01 | 4min | 3 tasks | 7 files |
+| Phase 29 P02 | 45min | 2 tasks | 8 files |
