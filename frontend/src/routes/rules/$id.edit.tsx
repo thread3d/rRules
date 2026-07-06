@@ -3,6 +3,8 @@ import { createFileRoute } from '@tanstack/react-router'
 import { RuleEditor } from '@/components/RuleEditor'
 import { DecisionTable } from '@/features/rules/DecisionTable'
 import { HitPolicySelector } from '@/features/rules/HitPolicySelector'
+import { TestRunner } from '@/components/TestRunner'
+import { updateRule } from '@/api/rules'
 import type { HitPolicyId, DecisionTableColumn, DecisionTableRow } from '@/features/rules/types'
 
 function EditRulePage() {
@@ -15,6 +17,34 @@ function EditRulePage() {
   const [hitPolicy, setHitPolicy] = useState<HitPolicyId>('unique')
   const [columns] = useState<DecisionTableColumn[]>([])
   const [rows] = useState<DecisionTableRow[]>([])
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | undefined>(undefined)
+  const [savedAt, setSavedAt] = useState<string | undefined>(undefined)
+
+  // D-05: minimal Save → PUT /v1/rules/{id} enabler. Reuses the existing
+  // authenticated `updateRule` wrapper (Phase 20 management endpoint) — no
+  // new auth path; backend governance/approval still applies server-side.
+  // This is a MINIMAL enabler (D-05 scope): it persists the structured
+  // editable fields so "edit → save → reload → run" (SC-4) can observe a
+  // changed hitPolicy. A full authoring UX (expression ↔ conditions/actions
+  // mapping, validation, governance approval integration) is explicitly OUT
+  // of scope for Phase 28 — the expression editor remains a scaffold pending
+  // the future authoring phase.
+  async function handleSave() {
+    setSaving(true)
+    setSaveError(undefined)
+    try {
+      await updateRule(id, {
+        hitPolicy,
+        description: `Edited via edit page at ${new Date().toISOString()}`,
+      })
+      setSavedAt(new Date().toISOString())
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -42,6 +72,28 @@ function EditRulePage() {
           onHitPolicyChange={setHitPolicy}
         />
       </section>
+
+      {/* D-05: minimal Save → PUT /v1/rules/{id} enabler (SC-4 bridge) */}
+      <section className="space-y-2">
+        <h2 className="font-semibold">Save</h2>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="px-3 py-1 bg-blue-600 text-white rounded disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        {savedAt && <p className="text-xs text-gray-500">Saved at {savedAt}</p>}
+        {saveError && (
+          <p role="alert" className="text-xs text-red-600">
+            {saveError}
+          </p>
+        )}
+      </section>
+
+      {/* D-04: TestRunner mounted as a new section in the edit page. */}
+      <TestRunner ruleId={id} />
     </div>
   )
 }
