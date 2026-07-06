@@ -76,6 +76,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 **Milestone Goal:** Make DMN real — deliver a DMN 1.5 parser, a complete FEEL expression-language evaluator, and a decision-table engine with all hit policies, exposed via a decision-evaluation API and wired to the existing frontend editor. Closes the stubbed Phase 6 / `DMN-01..03` gap. Milestone-level success criterion: OMG DMN 1.5 Level 3 conformance (DMN-34 checklist 100% + TCK pass) with the existing Rete rule-execution path unchanged (zero regression).
 
 **Scope locks (user decisions):**
+
 - "Full DMN Level 3 FEEL" — complete FEEL semantics (the ambitious option).
 - All four v6.x differentiators in-scope: inference trace, per-decision Prometheus metrics + dashboard, hot-reload, DMNDI round-trip.
 - Decision evaluation MVP = FULL §10.4 decision-service support (multi-output) + DRD chaining, NOT single-decision-only.
@@ -93,94 +94,125 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 ## Phase Details
 
 ### Phase 29: DMN 1.5 Model + XML Parser + Canonical IR
+
 **Goal**: Users can import DMN 1.1–1.5 `.dmn` files into a canonical in-memory IR with annotations, IDs, and element order preserved — the round-trip foundation that every downstream phase parses into or evaluates against.
 **Depends on**: Nothing (first phase of v6.0; builds on the existing `engine` crate)
 **Requirements**: DMN-04, DMN-05, DMN-06
 **Key deliverables**: `engine/src/dmn/model.rs` (DMN 1.5 in-memory model / canonical IR); `engine/src/dmn/parser.rs` (namespace-aware `quick-xml` `NsReader`, XXE-hardened, CDATA-handled, `hitPolicy` defaults to UNIQUE, annotation/description preservation); `engine/src/dmn/exporter.rs` skeleton; item definitions + information items (Clause 7) parsed and represented in the IR; import corpus (DMN 1.1/1.3/1.5 files) passes.
 **Success Criteria** (what must be TRUE):
+
   1. A `.dmn` file from DMN 1.1, 1.3, or 1.5 imports into the canonical IR without error, preserving item definitions, information items, descriptions, annotations, IDs, and element order.
   2. The parser is XXE-hardened — external entity references are rejected — and CDATA sections are handled.
   3. A decision table imported with no explicit `hitPolicy` attribute defaults to UNIQUE.
-  4. The canonical IR is the sole store: nothing downstream reconstructs DMN from a non-IR shape (round-trip fidelity is structural from day one).
-**Plans**: TBD
+  4. The canonical IR is the sole store: nothing downstream reconstructs DMN from a non-IR shape (round-trip fidelity is structural from day one).**Plans**: 3 plans
+
+**Wave 1**
+
+- [ ] 29-01-PLAN.md — Canonical DMN 1.5 IR + module wiring + locked stack deps (DMN-05)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 29-02-PLAN.md — Namespace-aware XXE-hardened CDATA-handled DMN parser + import corpus + parser tests (DMN-04, DMN-05)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 29-03-PLAN.md — DMN XML exporter + round-trip DOM-compare tests against import corpus (DMN-06)
 
 ### Phase 30: FEEL Value Types + Type Lattice + Temporal Domain
+
 **Goal**: FEEL's semantic value domain — Decimal128 numbers, date/time/duration types, and the type lattice with conformance and implicit conversions — is in place and validated against OMG TCK numeric vectors, so the evaluator can be built on a correct foundation.
 **Depends on**: Phase 29 (the IR holds item definitions and allowed value types that the value domain must represent)
 **Requirements**: DMN-08, DMN-09, DMN-10
 **Key deliverables**: `engine::data_types::Value` extended additively (no fork) with `Date(NaiveDate)`, `Time(NaiveTime)`, `DaysTimeDuration(TimeDelta)`, `YearsMonthsDuration{years,months}`, `Range{...}`, `Function{...}`; `rust_decimal::Decimal` numeric path for FEEL; FEEL type lattice + conformance (`<:`) + equivalence (`≡`) + to/from-singleton-list conversions; temporal lexical formats (ISO 8601 `@""` literals); `0.1 + 0.2 = 0.3` passes.
 **Research needed**: Validate 28–29-digit `rust_decimal` precision against OMG TCK numeric conformance vectors BEFORE Phase 31 builds operators on top. If any TCK vector fails, switch to `bigdecimal` here. Run `/gsd-plan-phase --research-phase 30`.
 **Success Criteria** (what must be TRUE):
+
   1. `0.1 + 0.2 = 0.3` holds in the FEEL numeric domain (Decimal128 via `rust_decimal`), validated against OMG TCK numeric vectors — or, if TCK vectors demand 34 digits, a documented fallback to `bigdecimal` is in place before Phase 31.
   2. ISO 8601 `@""` lexical literals for `date`, `time`, `date and time`, `days and time duration`, and `years and months duration` parse and round-trip, with IANA timezones via `chrono-tz` (DST-correct duration arithmetic).
   3. FEEL type-lattice conformance (`<:`), equivalence (`≡`), and implicit conversions (number↔string, singleton-list↔value) behave per spec, with null propagating through the lattice.
   4. `engine::data_types::Value` is extended additively (not forked) and the existing Rete rule-execution path is unchanged (zero regression).
+
 **Plans**: TBD
 
 ### Phase 31: FEEL Parser + Evaluator + Built-in Function Library
+
 **Goal**: FEEL expressions parse and evaluate with full Level-3 semantics — grammar rules 1–65, three-valued logic, all 10 boxed expressions, ~70+ built-in functions, and user-defined lambdas — with cells pre-parsed to a cached AST so the #1 DMN performance bug (4–6× re-parse throughput loss) is prevented.
 **Depends on**: Phase 30 (Value extension + type lattice + temporal domain are the evaluator's semantic foundation)
 **Requirements**: DMN-11, DMN-12, DMN-13, DMN-14, DMN-15, DMN-16, DMN-17, DMN-18
 **Key deliverables**: `engine/src/dmn/feel/{ast.rs, parser.rs, eval.rs, builtins.rs, temporal.rs, coercion.rs}`; `FeelExpression` enum distinct from the rule `Expression` AST; `evaluate(&Scope)` signature; `feel_equals`/`feel_compare` returning `Option<_>` (null → `Value::Null`); explicit `and`/`or`/`not` truth tables; arithmetic/comparison/boolean/string-concat/date-time operators; `if`/`for`/`some`/`every`/path/filter/`instance of`; all 10 boxed expressions (recursive); boxed-context dependency-order (topological) evaluation with cycle detection; user-defined FEEL lambdas (grammar rule 55); full built-in library (~70+ functions across conversion/string/list/numeric/date-time/context/boolean/range/equality); AST cache primitive (`DashMap<String, Arc<FeelExpression>>`).
 **Research needed**: Largest phase — FEEL grammar 1–65, ~70 builtins, 10 boxed expressions, ternary logic, scope/longest-match QN resolution. Likely needs `/gsd-plan-phase --research-phase 31` and may warrant sub-phase splitting during planning. Three-valued-logic leak (Pitfall 1) must be prevented here: never reuse Rust `==`/`compare_values` for FEEL.
 **Success Criteria** (what must be TRUE):
+
   1. Any FEEL expression within grammar rules 1–65 parses via the hand-written recursive-descent parser, with dual entry points (`SimpleUnaryTests`, `Expression`) and keyword-as-name disambiguation.
   2. Three-valued logic is correct: `"a"=1`→null, `null<3`→null, `null=null`→true, `not(null)`→null; `and`/`or`/`not` use explicit truth tables (no Rust `==`/`compare_values` reuse for FEEL equality).
   3. All 10 boxed expression types evaluate recursively; boxed contexts evaluate in dependency (topological) order with cycle detection.
   4. The ~70+ FEEL built-in functions are available across conversion/string/list/numeric/date-time/context/boolean/range/equality families, and user-defined lambdas (grammar rule 55) evaluate.
   5. Cell/expression FEEL is pre-parsed to `Arc<FeelExpression>` at load time; the evaluator takes `&FeelExpression` and never re-parses (a 30-cell table × 10k evals ≈ 30 parses, not 300k).
+
 **Plans**: TBD
 
 ### Phase 32: Decision-Table Engine + Hit Policies
+
 **Goal**: Decision tables evaluate correctly under all 7 DMN hit policies — with their aggregators, allowed-values validation, and conflict semantics — input entries evaluated as FEEL unary tests, and all cell FEEL pre-parsed into ASTs at table-load time.
 **Depends on**: Phase 31 (input entries are FEEL unary tests; output entries are FEEL expressions)
 **Requirements**: DMN-19, DMN-20, DMN-21
 **Key deliverables**: `engine/src/dmn/decision_table.rs`; all 7 hit policies (UNIQUE, ANY, PRIORITY, FIRST, RULE ORDER, OUTPUT ORDER, COLLECT); COLLECT aggregators (SUM/MIN/MAX/COUNT); `allowedValues` validation for PRIORITY/OUTPUT ORDER; default output values; `HitPolicyViolation` error type for ANY conflicts and UNIQUE violations; multi-output rejection for aggregator tables; empty-match semantics (`C+`→null, `C#`→0); pre-parse all cell FEEL into ASTs at table-load time (closes the cache loop from Phase 31).
 **Success Criteria** (what must be TRUE):
+
   1. All 7 hit policies (UNIQUE, ANY, PRIORITY, FIRST, RULE ORDER, OUTPUT ORDER, COLLECT) evaluate per Clause 8, with input entries evaluated as FEEL unary tests.
   2. PRIORITY orders by the output column's `allowedValues` enumeration (not by row order); ANY conflicts raise an error rather than silently picking the first match; output `allowedValues` lists and default output values are validated at table load.
   3. COLLECT aggregators (SUM/MIN/MAX/COUNT) compute correctly; multi-output aggregator tables are rejected; empty-match semantics hold (empty SUM/MIN/MAX → null, empty COUNT → 0).
   4. All cell FEEL is pre-parsed into ASTs at table-load time — the evaluator never re-parses a cell on each evaluation.
+
 **Plans**: TBD
 
 ### Phase 33: Decision Evaluator + DRD Resolution + REST API + Metrics
+
 **Goal**: Users can evaluate decisions end-to-end via `POST /v1/decisions/{id}/evaluate` — full §10.4 decision-service support with multi-output and DRD chaining (the MVP is multi-output, not single-decision-only) — with per-decision Prometheus metrics, inference trace, and hot-reload wired to the v5.0 observability surfaces.
 **Depends on**: Phase 32 (decision-table engine), Phase 29 (canonical IR for persistence)
 **Requirements**: DMN-22, DMN-23, DMN-24, DMN-25, DMN-26, DMN-28
 **Key deliverables**: `engine/src/dmn/evaluator.rs` (decision orchestrator + topological DRD resolution for multi-output decision-service scope with cycle detection); `api/src/v1/decisions.rs` (`POST /v1/decisions/{id}/evaluate` + CRUD + import/export); `DecisionCounters` on the existing dedicated Prometheus registry (`rrules_dmn_evaluations_total`, `rrules_dmn_decision_duration_seconds`, `rrules_dmn_hit_policy_violations_total`); WS `MetricsSnapshot` broadcast reuse; `TraceEvent` emission with new `event_type` constants (two-site pattern, opt-in via request flag); `SharedDmnModel{model, generation}` under `Arc<RwLock>` with file-watcher reload-then-swap (mirrors v5.0 `SharedRuleSet`); `utoipa` OpenAPI schemas; `DMN_HIT_POLICY_VIOLATION` error code; `web::block` per-request pattern; stateless `DecisionEvaluator` (NOT routed through `EngineRegistry`).
 **Success Criteria** (what must be TRUE):
+
   1. `POST /v1/decisions/{id}/evaluate` resolves a multi-output decision service and returns all output decisions (§10.4), with enclosures (input data, decisions) wired per the decision service.
   2. DRD topological resolution resolves required-decision inputs with cycle detection; downstream decisions evaluate before their dependents.
   3. Decisions support CRUD + persistence (Git `.dmn` files + PostgreSQL metadata) and import/export endpoints.
   4. Per-decision Prometheus counters register on the existing dedicated registry (NOT a second registry); WebSocket `MetricsSnapshot` broadcasts after each evaluate.
   5. Inference trace (`TraceEvent`/`TraceData`, new `event_type` constants) is opt-in via request flag, and `SharedDmnModel{model, generation}` reloads via file-watcher (hot-reload of decisions).
+
 **Plans**: TBD
 
 ### Phase 34: Frontend Wiring + Hit-Policy Model Refactor
+
 **Goal**: The existing v4.0 decision-table editor is wired to the real backend evaluator — users can edit, evaluate, and see results/trace in the UI — with the hit-policy data model refactored to DMN canonical and the frontend editing through an IR projection (never reconstructing DMN from the frontend model).
 **Depends on**: Phase 33 (the API contract: evaluate, CRUD, import/export, trace)
 **Requirements**: DMN-29, DMN-30, DMN-31, DMN-32
 **Key deliverables**: `HitPolicySelector` refactor to `{policy, aggregator?}` with FIRST and OUTPUT ORDER added and spec-accurate descriptions (backend enum from Phase 32 is canonical; frontend maps TO it); `dmnSerializer.ts` (editor-shape ↔ backend DMN-model mapper, edit-through-IR-projection); `frontend/src/api/decisions.ts` client; "Evaluate Decision" button + results/trace panel (reuse v5.0 `InferenceTrace` rendering); allowed-values editor for output columns; engine-dropdown hidden on the DMN view.
 **Success Criteria** (what must be TRUE):
+
   1. `DecisionTable.tsx` + `HitPolicySelector.tsx` call the real backend evaluator via an "Evaluate Decision" action; results and trace render in a panel reusing v5.0 `InferenceTrace` rendering.
   2. `HitPolicySelector` uses the `{policy, aggregator?}` data model with FIRST and OUTPUT ORDER added and spec-accurate descriptions; the engine-dropdown is hidden on the DMN view.
   3. `dmnSerializer.ts` maps editor-shape ↔ backend DMN model via edit-through-IR-projection — it never reconstructs DMN from the frontend model (round-trip fidelity preserved).
   4. An allowed-values editor for output columns supports PRIORITY/OUTPUT ORDER usability.
+
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 35: Conformance Verification + Round-trip + Monitoring Close-out
+
 **Goal**: The v6.0 milestone passes the OMG DMN 1.5 Level 3 conformance gate — TCK vectors pass, the exporter round-trips (including DMNDI), monitoring surfaces are live, and the Level 3 conformance checklist is 100% before the v6.0 tag. This phase is the phase-exit gate: no "Level 3-ish" claim is allowed.
 **Depends on**: Phases 29–34 (everything must be in place before the gate)
 **Requirements**: DMN-07, DMN-27, DMN-33, DMN-34
 **Key deliverables**: OMG DMN TCK test vectors as the acceptance suite (import + evaluation) with documented known divergences (e.g. DMN15-31 Collect distinct-sum, `sum([])`) if any; `engine/src/dmn/exporter.rs` round-trip (model → `.dmn` XML preserving annotations, DMNDI layout, IDs, element order; byte/DOM-compare against the import corpus; XSD-valid output); `DmnDecisionTracker` (separate from `RuleExecutionTracker`) powering dead-decision-row detection, coverage extension, and a dashboard panel reading the new metrics; Level 3 conformance checklist (one item per built-in family, grammar rule, boxed expression type) as phase-exit criterion.
 **Research needed**: OMG DMN TCK availability and distribution format (TC archive vs public repo) needs confirmation during planning. If the TCK is unavailable, fall back to DMN 1.5 spec examples + Camunda feel-scala test corpus and document the gap. Run `/gsd-plan-phase --research-phase 35`.
 **Success Criteria** (what must be TRUE):
+
   1. OMG DMN TCK test vectors pass as the acceptance suite (import + evaluation); known divergences (e.g. DMN15-31 Collect distinct-sum, `sum([])`) are documented.
   2. The DMN XML exporter serializes the canonical IR back to `.dmn` XML preserving annotations, descriptions, IDs, element order, and DMNDI layout (DMN-07 round-trip); round-trip byte/DOM-compare passes against the import corpus; output is XSD-valid.
   3. `DmnDecisionTracker` (separate from `RuleExecutionTracker`) powers dead-decision-row detection, coverage extension, and a dashboard panel reading the new metrics — `RuleExecutionTracker`/`CoverageTracking` are not contaminated (separate `source` tag or tracker).
   4. The Level 3 conformance checklist (one item per built-in family, grammar rule, and boxed expression type) is 100% complete and is the phase-exit gate — the v6.0 tag is not cut until the checklist is complete and the TCK passes.
   5. The existing Rete rule-execution path (`/v1/execute`, `EngineRegistry`) is unchanged — zero regression.
+
 **Plans**: TBD
 **UI hint**: yes
 
@@ -213,7 +245,7 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 2/2 | Complete | 2026-07-03 |
 | 27. Stateful sessions | v5.0 | 1/1 | Complete | 2026-07-06 |
 | 28. Frontend test-runner | v5.0 | 5/5 | Complete | 2026-07-06 |
-| 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 0/TBD | Not started | - |
+| 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 0/3 | Not started | - |
 | 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 0/TBD | Not started | - |
 | 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 0/TBD | Not started | - |
 | 32. Decision-Table Engine + Hit Policies | v6.0 | 0/TBD | Not started | - |
