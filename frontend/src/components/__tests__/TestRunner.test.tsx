@@ -108,8 +108,11 @@ describe('TestRunner', () => {
 
     renderWithClient(<TestRunner ruleId="r1" />)
 
-    // Click the Run button to trigger executeRule.
-    const runButton = screen.getByRole('button', { name: /run/i })
+    // Click the Run button to trigger executeRule. Anchored to ^run$ so the
+    // "Reload then Run" button (whose accessible name also contains "run") is
+    // not matched by the substring regex — Plan 28-05 Rule 1 fix for an
+    // ambiguous getByRole selector.
+    const runButton = screen.getByRole('button', { name: /^run$/i })
     fireEvent.click(runButton)
 
     // Assert the panel shows the fired count (1), the not-fired rule (r2),
@@ -149,7 +152,7 @@ describe('TestRunner', () => {
       session_id: null,
     })
     renderWithClient(<TestRunner ruleId="r1" />)
-    fireEvent.click(screen.getByRole('button', { name: /run/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^run$/i }))
     await waitFor(() => {
       expect(screen.getByText(/10/)).toBeInTheDocument()
     })
@@ -175,7 +178,7 @@ describe('TestRunner', () => {
       engine_generation: 1,
       session_id: null,
     })
-    fireEvent.click(screen.getByRole('button', { name: /run/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^run$/i }))
     await waitFor(() => {
       expect(screen.getByText(/inference trace/i)).toBeInTheDocument()
     })
