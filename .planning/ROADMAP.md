@@ -303,7 +303,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 24. Execution counters + metrics broadcast | v5.0 | 3/3 | Complete    | 2026-07-03 |
 | 25. Real reload + JobStore | v5.0 | 3/3 | Complete    | 2026-07-03 |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 2/2 | Complete    | 2026-07-03 |
-| 27. Stateful sessions | v5.0 | 1/1 | Complete   | 2026-07-06 |
+| 27. Stateful sessions | v5.0 | 1/1 | Complete    | 2026-07-06 |
 | 28. Frontend test-runner | v5.0 | 0/? | Not started | - |
 
 ---
