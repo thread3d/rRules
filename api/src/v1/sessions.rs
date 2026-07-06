@@ -8,11 +8,12 @@
 //! dashboard). The stateless one-shot path (Phase 23) stays unchanged when
 //! `session_id` is absent (D-05).
 //!
-//! Wave 0 RED scaffold (D-09): the public types and signatures compile, but
-//! `lookup_or_create` / `dispose_session` / `reset_session` return
-//! `StatusCode::NOT_IMPLEMENTED` so the four SC tests fail RED. Task 2
-//! replaces the stub bodies with real implementations; Task 3 wires the live
-//! `execute_single` branch + `main.rs` glue.
+//! Task 2 (GREEN): the public types, signatures, and full implementations
+//! are in place — `lookup_or_create` with D-04/D-06 semantics, `sweep_expired`
+//! with D-03 TTL/LRU/max-count + gauge update, `dispose_by_alias`,
+//! `reset_by_alias` with Open Q#1 rebuild approach, and `dispose_session` /
+//! `reset_session` actix handlers. Task 3 wires the live `execute_single`
+//! branch + `main.rs` glue to turn the four SC tests GREEN.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -138,35 +139,177 @@ impl SessionManager {
     /// CRITICAL (Pitfall 1): the caller clones the `Arc<Mutex<Entry>>` out
     /// and the DashMap `Ref` guards drop BEFORE the per-session Mutex is
     /// locked — no DashMap shard guard is held across `web::block`.
-    ///
-    /// Wave 0 RED: returns `NOT_IMPLEMENTED`. Task 2 replaces the body.
     pub fn lookup_or_create(
         &self,
-        _client_alias: &str,
-        _req_engine: Option<&str>,
-        _registry: &EngineRegistry,
-        _ruleset: &Arc<std::sync::RwLock<SharedRuleSet>>,
+        client_alias: &str,
+        req_engine: Option<&str>,
+        registry: &EngineRegistry,
+        ruleset: &Arc<std::sync::RwLock<SharedRuleSet>>,
     ) -> Result<(Uuid, Arc<Mutex<StatefulSessionEntry>>), (StatusCode, String)> {
-        Err((
-            StatusCode::NOT_IMPLEMENTED,
-            "SessionManager not yet implemented (Wave 0 RED)".to_string(),
-        ))
+        // --- Resume path (D-04 / Pattern 3) ---
+        // Clone the alias→UUID out of the aliases map, then drop the Ref guard
+        // immediately (Pitfall 1 — no shard guard held across anything slow).
+        if let Some(uuid) = self.aliases.get(client_alias).map(|r| *r) {
+            // Clone the Arc<Mutex<Entry>> out, drop the Ref guard immediately.
+            if let Some(entry_arc) = self.sessions.get(&uuid).map(|r| r.clone()) {
+                // D-06: engine is fixed at session creation. A resume call
+                // with a conflicting engine param returns HTTP 400.
+                if let Some(req_name) = req_engine {
+                    let locked = entry_arc.lock().map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("session mutex poisoned: {}", e),
+                        )
+                    })?;
+                    if locked.engine_name != req_name {
+                        return Err((
+                            StatusCode::BAD_REQUEST,
+                            format!(
+                                "session engine is fixed: expected {}, got {}",
+                                locked.engine_name, req_name
+                            ),
+                        ));
+                    }
+                }
+                return Ok((uuid, entry_arc));
+            }
+            // Stale alias: UUID not in sessions map (evicted). Fall through
+            // to create — the alias will be overwritten (Pitfall 3 avoidance).
+        }
+
+        // --- Create path ---
+        // 1. Resolve engine name: req > env RRULES_DEFAULT_ENGINE > "rete".
+        let engine_name = req_engine
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                std::env::var("RRULES_DEFAULT_ENGINE")
+                    .unwrap_or_else(|_| "rete".to_string())
+            });
+
+        // 2. Validate against registered factories (ENGINE-07).
+        let available = registry.available_engines();
+        if !available.iter().any(|name| *name == engine_name.as_str()) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("unknown engine: {}", engine_name),
+            ));
+        }
+
+        // 3. Build a fresh per-session engine.
+        let mut engine = match registry.create_engine_by_name(&engine_name) {
+            Some(Ok(engine)) => engine,
+            Some(Err(e)) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("engine creation failed: {}", e),
+                ))
+            }
+            None => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!("unknown engine: {}", engine_name),
+                ))
+            }
+        };
+
+        // 4. Load the shared ruleset (read-only guard) + capture generation.
+        //    The guard is dropped before the entry is inserted so no lock
+        //    spans the registry insertion (D-07 / L-03).
+        let generation = {
+            let guard = ruleset.read().map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("ruleset lock poisoned: {}", e),
+                )
+            })?;
+            engine.load_ruleset(&guard.ruleset).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("load_ruleset failed: {}", e),
+                )
+            })?;
+            guard.generation
+        };
+
+        // 5. Build the entry + insert into both maps + update gauge.
+        let server_id = Uuid::new_v4();
+        let entry = StatefulSessionEntry {
+            engine,
+            engine_name,
+            engine_generation: generation,
+            last_used: Instant::now(),
+            created_at: Instant::now(),
+            server_id,
+            client_alias: Some(client_alias.to_string()),
+        };
+        let entry_arc = Arc::new(Mutex::new(entry));
+        self.sessions.insert(server_id, entry_arc.clone());
+        self.aliases.insert(client_alias.to_string(), server_id);
+        self.sessions_active.set(self.sessions.len() as i64);
+
+        Ok((server_id, entry_arc))
     }
 
     /// Evict sessions by (a) idle TTL, (b) max lifetime, then (c) LRU when
     /// over `max_sessions` (D-03). Updates the gauge after each sweep
     /// (Pitfall 6 — a sweep that evicts without updating the gauge leaves
     /// the dashboard lying about the live count).
-    ///
-    /// Wave 0 RED: no-op stub. Task 2 replaces the body.
-    pub fn sweep_expired(&self) {}
+    pub fn sweep_expired(&self) {
+        let now = Instant::now();
+
+        // Phase 1: evict by idle TTL or max lifetime. Collect UUIDs first so
+        // no shard lock is held across `remove` (RESEARCH Pattern 4 note).
+        let mut to_evict: Vec<Uuid> = Vec::new();
+        for entry in self.sessions.iter() {
+            let uuid = *entry.key();
+            // Lock the per-session Mutex to read timestamps. Skip on poison
+            // (a poisoned session is likely broken anyway — evict it).
+            let should_evict = entry.value().lock().map(|g| {
+                now.duration_since(g.last_used) > self.idle_ttl
+                    || now.duration_since(g.created_at) > self.max_lifetime
+            }).unwrap_or(true);
+            if should_evict {
+                to_evict.push(uuid);
+            }
+        }
+        for uuid in &to_evict {
+            self.remove_by_uuid(uuid);
+        }
+
+        // Phase 2: LRU eviction while over max_sessions. Evict the entry with
+        // the oldest last_used (min_by_key). Collect the key, drop the iter
+        // guard, then remove — no shard lock held across remove.
+        while self.sessions.len() > self.max_sessions {
+            let lru_uuid = self.sessions.iter()
+                .min_by_key(|e| {
+                    e.value().lock().map(|g| g.last_used).unwrap_or(Instant::now())
+                })
+                .map(|e| *e.key());
+            match lru_uuid {
+                Some(uuid) => self.remove_by_uuid(&uuid),
+                None => break,
+            }
+        }
+
+        // Pitfall 6: update the gauge after every sweep so the dashboard
+        // reflects the true live count.
+        self.sessions_active.set(self.sessions.len() as i64);
+    }
 
     /// Dispose a session by client alias (D-05). Removes from both maps and
     /// updates the gauge. Returns `true` if a session was removed; `false`
     /// if the alias was not found or stale.
-    ///
-    /// Wave 0 RED: returns `false`. Task 2 replaces the body.
-    pub fn dispose_by_alias(&self, _alias: &str) -> bool {
+    pub fn dispose_by_alias(&self, alias: &str) -> bool {
+        if let Some(uuid) = self.aliases.get(alias).map(|r| *r) {
+            // Check the session still exists (not stale).
+            if self.sessions.contains_key(&uuid) {
+                self.remove_by_uuid(&uuid);
+                self.sessions_active.set(self.sessions.len() as i64);
+                return true;
+            }
+            // Stale alias — clean up the orphaned alias entry.
+            self.aliases.remove(alias);
+        }
         false
     }
 
@@ -176,17 +319,109 @@ impl SessionManager {
     /// `registry.create_engine_by_name` + `load_ruleset` with the session's
     /// captured generation rather than relying on `reset()` alone.
     ///
-    /// Wave 0 RED: returns `NOT_IMPLEMENTED`. Task 2 replaces the body.
+    /// Reset rebuilds the engine (Open Q#1: ReteEngine::reset() clears rules
+    /// too; rebuild rather than rely on reset()). Reloads the CURRENT shared
+    /// ruleset — D-07 discretion: reset-also-reload. This is the cleaner
+    /// contract for "reset clears WM without disposing" and aligns with
+    /// D-07's "default = just clear WM" since clearing WM + reloading the
+    /// same ruleset is equivalent when no reload has happened.
     pub fn reset_by_alias(
         &self,
-        _alias: &str,
-        _registry: &EngineRegistry,
-        _ruleset: &Arc<std::sync::RwLock<SharedRuleSet>>,
+        alias: &str,
+        registry: &EngineRegistry,
+        ruleset: &Arc<std::sync::RwLock<SharedRuleSet>>,
     ) -> Result<(), (StatusCode, String)> {
-        Err((
-            StatusCode::NOT_IMPLEMENTED,
-            "reset not yet implemented (Wave 0 RED)".into(),
-        ))
+        // Lookup alias → UUID → entry Arc. Clone the Arc out, drop all Ref
+        // guards BEFORE locking the per-session Mutex (Pitfall 1).
+        let (uuid, entry_arc) = {
+            let uuid = self.aliases.get(alias).map(|r| *r).ok_or_else(|| {
+                (
+                    StatusCode::NOT_FOUND,
+                    format!("session not found: {}", alias),
+                )
+            })?;
+            let entry_arc = self.sessions.get(&uuid).map(|r| r.clone()).ok_or_else(|| {
+                // Stale alias — clean up.
+                self.aliases.remove(alias);
+                (
+                    StatusCode::NOT_FOUND,
+                    format!("session not found: {}", alias),
+                )
+            })?;
+            (uuid, entry_arc)
+        };
+
+        // Lock the per-session Mutex and rebuild the engine.
+        let mut guard = entry_arc.lock().map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("session mutex poisoned: {}", e),
+            )
+        })?;
+
+        // Read the engine_name for the rebuild.
+        let engine_name = guard.engine_name.clone();
+
+        // Rebuild a fresh engine (Open Q#1 — reset() clears rules too).
+        let mut new_engine = match registry.create_engine_by_name(&engine_name) {
+            Some(Ok(e)) => e,
+            Some(Err(e)) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("engine creation failed during reset: {}", e),
+                ))
+            }
+            None => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("engine factory lost during reset: {}", engine_name),
+                ))
+            }
+        };
+
+        // Load the CURRENT shared ruleset (D-07 discretion: reset-also-reload).
+        {
+            let rs_guard = ruleset.read().map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("ruleset lock poisoned: {}", e),
+                )
+            })?;
+            new_engine.load_ruleset(&rs_guard.ruleset).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("load_ruleset failed during reset: {}", e),
+                )
+            })?;
+            // Update the generation to the current ruleset generation.
+            guard.engine_generation = rs_guard.generation;
+        }
+
+        // Replace the engine + touch the session.
+        guard.engine = new_engine;
+        guard.last_used = Instant::now();
+
+        // Suppress unused-variable warning for uuid (it's part of the lookup
+        // tuple but not needed after the entry Arc is extracted).
+        let _ = uuid;
+
+        Ok(())
+    }
+
+    /// Private helper: remove a session by server UUID from both maps.
+    /// Called by `sweep_expired` and `dispose_by_alias`. Does NOT update
+    /// the gauge — the caller is responsible for the gauge update (so sweep
+    /// can batch-evict and set the gauge once at the end).
+    fn remove_by_uuid(&self, uuid: &Uuid) {
+        if let Some((_, entry_arc)) = self.sessions.remove(uuid) {
+            // Clean up the alias entry. Lock the per-session Mutex to read
+            // the client_alias (brief hold — no blocking work inside).
+            if let Ok(guard) = entry_arc.lock() {
+                if let Some(alias) = &guard.client_alias {
+                    self.aliases.remove(alias);
+                }
+            }
+        }
     }
 }
 
@@ -247,7 +482,8 @@ pub async fn run_session_sweep(manager: Arc<SessionManager>) {
 
 /// `DELETE /v1/execute/session/{id}` — dispose a session (D-05).
 ///
-/// Wave 0 RED: returns `NOT_IMPLEMENTED`. Task 2 replaces the body.
+/// Returns 200 `{"status":"disposed","session_id":alias}` on success,
+/// 404 on not-found.
 ///
 /// Returns `impl Responder` (matching the `execute_rules` pattern at
 /// `execution.rs:733-745`) rather than `Result<HttpResponse, (StatusCode,
@@ -255,25 +491,45 @@ pub async fn run_session_sweep(manager: Arc<SessionManager>) {
 /// `actix_web::ResponseError` and cannot be used directly as a handler
 /// return type.
 pub async fn dispose_session(
-    _id: web::Path<String>,
-    _manager: web::Data<Arc<SessionManager>>,
+    id: web::Path<String>,
+    manager: web::Data<Arc<SessionManager>>,
 ) -> impl actix_web::Responder {
-    HttpResponse::build(StatusCode::NOT_IMPLEMENTED)
-        .json(serde_json::json!({ "error": "dispose not implemented (Wave 0 RED)" }))
+    let alias = id.into_inner();
+    if manager.dispose_by_alias(&alias) {
+        HttpResponse::Ok().json(serde_json::json!({
+            "status": "disposed",
+            "session_id": alias,
+        }))
+    } else {
+        HttpResponse::build(StatusCode::NOT_FOUND)
+            .json(serde_json::json!({ "error": format!("session not found: {}", alias) }))
+    }
 }
 
 /// `POST /v1/execute/session/{id}/reset` — clear WM without disposing (D-05).
 ///
-/// Wave 0 RED: returns `NOT_IMPLEMENTED`. Task 2 replaces the body. Task 2
-/// also widens the signature to include `web::Data<EngineRegistry>` and
-/// `web::Data<Arc<RwLock<SharedRuleSet>>>` so `reset_by_alias` can rebuild a
-/// fresh engine (Open Q#1).
+/// Returns 200 `{"status":"reset","session_id":alias}` on success,
+/// 404 on not-found.
+///
+/// Signature includes `web::Data<EngineRegistry>` and
+/// `web::Data<Arc<RwLock<SharedRuleSet>>>` so `reset_by_alias` can rebuild
+/// a fresh engine (Open Q#1 — ReteEngine::reset() clears rules too).
 ///
 /// Returns `impl Responder` — see `dispose_session` doc comment for rationale.
 pub async fn reset_session(
-    _id: web::Path<String>,
-    _manager: web::Data<Arc<SessionManager>>,
+    id: web::Path<String>,
+    manager: web::Data<Arc<SessionManager>>,
+    registry: web::Data<EngineRegistry>,
+    ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
 ) -> impl actix_web::Responder {
-    HttpResponse::build(StatusCode::NOT_IMPLEMENTED)
-        .json(serde_json::json!({ "error": "reset not implemented (Wave 0 RED)" }))
+    let alias = id.into_inner();
+    match manager.reset_by_alias(&alias, &registry, &ruleset) {
+        Ok(()) => HttpResponse::Ok().json(serde_json::json!({
+            "status": "reset",
+            "session_id": alias,
+        })),
+        Err((code, msg)) => {
+            HttpResponse::build(code).json(serde_json::json!({ "error": msg }))
+        }
+    }
 }
