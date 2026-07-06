@@ -4,17 +4,23 @@ phase: 28-frontend-test-runner
 source: [28-01-SUMMARY.md, 28-02-SUMMARY.md, 28-03-SUMMARY.md, 28-04-SUMMARY.md, 28-05-SUMMARY.md]
 started: 2026-07-06T11:26:05Z
 updated: 2026-07-06T11:46:15Z
-verifier: automated-live (Claude, self-run)
+verifier: automated-live (Claude, self-run) + headless-Chromium click-through
 ---
 
 # Phase 28 — User Acceptance Testing
 
 > Restarted from SUMMARYs (28-01..28-05). All 9 tests were performed by Claude
 > against a **live dev stack** (backend API on :8080 + Vite frontend on :5173),
-> not via human click-through. The keystone `score := score + 10` rule was
+> verified at THREE levels: (1) live API via curl + JWT, (2) the real TestRunner
+> component via Vitest (4/4) + `npm run build`, and (3) a **literal headless-
+> Chromium click-through** driving the rendered edit page (Playwright via
+> `playwright-core`, Chromium 147). The keystone `score := score + 10` rule was
 > materialized to `./rules/r1.rules` (serialized via a one-off
 > `engine/examples/emit_keystone.rs`) so the execute path had a real on-disk
-> rule to fire. Auth: logged in as `admin`/`admin` → JWT bearer for `/v1/*`.
+> rule to fire. Auth (API): `admin`/`admin` → JWT bearer for `/v1/*`. Auth
+> (browser): logged in through the `/login` UI as `admin@rrules.dev`/`admin`
+> (the `type=email` input requires valid-email format; the backend resolves the
+> identifier by username OR email per `api/src/auth/mod.rs:59-64`).
 
 ## Current Test
 
@@ -44,8 +50,9 @@ evidence: |
   resolves the import (`npm run build` ✓ built in 6.29s; `_id.edit` chunk
   emitted). Vitest "renders fired rules and facts_after" renders the panel and
   clicks the Run button (getByRole 'button' name /^run$/i) successfully.
-  NOTE: literal in-browser rendering not observed (no browser-automation tool
-  available); verified via source + build + component test.
+  Browser click-through: the `Test Runner` section was located on the rendered
+  edit page (`section:has(h2:has-text("Test Runner"))`) and every control below
+  driven for real — see "Browser Click-Through Verification".
 
 ### 3. SC-1 — Run renders real facts_after
 expected: On the edit page for the "score := score + 10" rule, enter facts JSON `{"scorecard":{"score":0}}` and click Run. Results panel shows rules_fired >= 1, rules_not_fired listing the other rules, and facts_after.scorecard.score == 10 — the real incremented score, not the input 0.
@@ -146,31 +153,55 @@ blocked: 0
 
 [none — all 9 tests passed]
 
-## Verification Caveat
+## Browser Click-Through Verification
 
-The literal browser click-through (opening http://localhost:5173 in a real
-browser, navigating to the rule edit page, clicking Run/Reload-then-Run, and
-visually observing the rendered panel) was **not** performed: no browser-
-automation tool (Playwright/Puppeteer MCP) is available in this session.
-Verification was done at three levels that jointly cover the feature:
+The literal browser click-through **was performed**: headless Chromium 147
+(Playwright via `playwright-core` resolvable from
+`/home/threaded/.hermes/hermes-agent/node_modules/playwright-core`; no MCP
+server required) drove the rendered app at http://localhost:5173. After logging
+in through the `/login` UI (`admin@rrules.dev`/`admin` → `localStorage.auth_token`
+stored, len 167), it navigated to `/rules/{id}/edit`, located the `Test Runner`
+section, typed facts into the CodeMirror facts editor, toggled Trace, swapped
+the engine `<select>`, and clicked Run / Reload-then-Run — observing the real
+rendered results panel each time. **9/9 browser checks passed; 0 console/page
+errors** across the whole session.
+
+| Check | Result | Observed in browser |
+|-------|--------|---------------------|
+| LOGIN | pass | UI login stored JWT in localStorage (len 167) |
+| T2 mount | pass | `Test Runner` section rendered on the edit page |
+| SC-1 | pass | Run → `rules_fired=1`, `facts_after.scorecard.score=10` |
+| SC-2 | pass | dropdown options `[leaps,phreak,rete,treat]`, default `rete`; `treat` run fired=1 score=10 |
+| SC-3a | pass | Trace ON → "Inference trace" section visible; entry `… — rule_fired — r1` |
+| SC-3b | pass | Trace OFF → "Inference trace" hidden; score unchanged (10) |
+| SC-4 | pass | edit +10→+20 on disk → "Reload then Run" → score=20, `engine_generation: 1 (pre-reload: 0)` |
+| T9 | pass | invalid facts JSON → `role="alert"` banner: "Invalid facts JSON: …" |
+| T1 console | pass | 0 console/page errors during the entire session |
+
+Screenshots captured (in `/tmp/rrules_browser_uat/`, session-local — not
+committed): `sc1-run.png`, `sc2-treat.png`, `sc3a-trace-on.png`,
+`sc3b-trace-off.png`, `sc4-reload-then-run.png`, `t9-invalid-facts.png`,
+`final-edit-page.png`. Script: `/tmp/rrules_browser_uat.mjs`; results:
+`/tmp/rrules_browser_uat/results.json`.
+
+Verification was therefore completed at three levels that jointly cover the
+feature:
 
 1. **Live API (curl + JWT)** — every backend contract exercised end-to-end
-   through the running server: real execution (facts_after.score==10),
-   trace on/off, engine swap, async reload + job polling + generation
-   correlation, save enabler persistence, invalid-facts rejection.
-2. **Real component (Vitest + Testing Library)** — the actual TestRunner.tsx
-   renders the panel, dropdown (default rete), trace-section conditional, and
-   reload-then-run polling (4/4 tests pass).
-3. **Build + source** — `npm run build` succeeds; edit page mounts
-   `<TestRunner ruleId={id} />`; Vite dev server boots and serves/transforms
-   all TSX modules.
-
-If the literal click-in-browser verification is desired, install a
-Playwright/Puppeteer MCP server and re-run `/gsd-verify-work 28` (resume).
+   through the running server (see per-test evidence above).
+2. **Real component (Vitest + Testing Library)** — TestRunner.tsx renders the
+   panel, dropdown (default rete), trace-section conditional, and reload-then-
+   run polling (4/4 tests pass).
+3. **Literal browser click-through (headless Chromium)** — the rendered edit
+   page driven end-to-end as described in the table above (9/9, 0 console
+   errors).
 
 ## Artifacts Created During UAT (cleanup recommended)
 
 - `engine/examples/emit_keystone.rs` — one-off rule-JSON emitter (safe to delete)
 - `./rules/r1.rules` — keystone rule on disk (was absent; needed for live execute)
-- `./rules/r1.rules` was edited (+10 → +20) for SC-4 and left at +20 — revert to
-  +10 or delete `./rules/` if not wanted for future phases.
+- `./rules/r1.rules` was edited (+10 → +20) for SC-4 (API run AND the browser
+  click-through) and is **currently left at +20** — revert to +10 or delete
+  `./rules/` if not wanted for future phases.
+- `frontend/node_modules/.vite/deps/*` — Vite dev-cache churn from booting the
+  dev server (uncommitted, git-tracked cache files; harmless).
