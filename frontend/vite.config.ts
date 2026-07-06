@@ -1,8 +1,18 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
 
 export default defineConfig({
+  // Phase 28 (Plan 28-02): Vitest component-test configuration.
+  // jsdom env so @testing-library/react can render; globals:true so
+  // `describe`/`it`/`expect` work without per-file imports; setupFiles
+  // registers @testing-library/jest-dom matchers globally.
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.ts'],
+  },
   // tanstackRouter MUST come before react() so routeTree.gen.ts is generated
   // before the React plugin processes imports (RESEARCH § Pattern 1).
   plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true }), react()],
