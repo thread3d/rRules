@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: DMN Level 3 Compliance
 status: planning
-last_updated: "2026-07-06T17:16:36.002Z"
+last_updated: "2026-07-06T20:00:00.000Z"
 last_activity: 2026-07-06
 progress:
-  total_phases: 0
+  total_phases: 7
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,30 +17,31 @@ progress:
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-07-03)
+See: `.planning/PROJECT.md` (updated 2026-07-06)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** Phase 28 — frontend-test-runner
+**Current focus:** v6.0 DMN Level 3 Compliance — planning complete (requirements + roadmap defined); next: `/gsd-plan-phase 29`
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Not started (planning complete, ready to plan Phase 29)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-07-06 — Milestone v6.0 started
+Status: Planning — requirements + roadmap defined, 0/7 phases started
+Last activity: 2026-07-06 — v6.0 research + requirements + roadmap committed
 
-### Milestone v5.0 Phases
+### Milestone v6.0 Phases
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
-| 23 | Execute evaluator + wiring | EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05 | complete |
-| 24 | Execution counters + metrics broadcast | MON-07 | complete |
-| 25 | Real reload + JobStore | DEPLOY-05, EXEC-03 | complete |
-| 26 | RuleExecutionTracker singleton + dead-rule live data | MON-06 | complete |
-| 27 | Stateful sessions | SESS-01 | not_started |
-| 28 | Frontend test-runner | FRONTEND-03, FRONTEND-04, EXEC-04 | not_started |
+| 29 | DMN 1.5 Model + XML Parser + Canonical IR | DMN-04, DMN-05, DMN-06 | not_started |
+| 30 | FEEL Value Types + Type Lattice + Temporal Domain | DMN-08, DMN-09, DMN-10 | not_started (research-needed) |
+| 31 | FEEL Parser + Evaluator + Built-in Function Library | DMN-11..DMN-18 | not_started (research-needed; largest) |
+| 32 | Decision-Table Engine + Hit Policies | DMN-19, DMN-20, DMN-21 | not_started |
+| 33 | Decision Evaluator + DRD Resolution + REST API + Metrics | DMN-22..DMN-26, DMN-28 | not_started |
+| 34 | Frontend Wiring + Hit-Policy Model Refactor | DMN-29..DMN-32 | not_started |
+| 35 | Conformance Verification + Round-trip + Monitoring Close-out | DMN-07, DMN-27, DMN-33, DMN-34 | not_started (research-needed; gate) |
 
-**Coverage:** 13/13 v5.0 requirements mapped, 0 orphans, 6/6 phases with ≥1 requirement.
+**Coverage:** 31/31 v6.0 requirements (DMN-04..DMN-34) mapped to exactly one phase, 0 orphans, 7/7 phases with ≥1 requirement.
 
 ### Milestone v4.0 Plans Status
 
