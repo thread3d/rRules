@@ -32,7 +32,9 @@
 //! `execute_rules` are removed — this helper owns coverage recording.
 
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
+use crate::engine::registry::{TraceData, TraceEvent};
 use crate::fact::Fact;
 use crate::monitoring::coverage::CoverageTracking;
 use crate::monitoring::detection::RuleExecutionTracker;
@@ -40,12 +42,23 @@ use crate::rules::{Action, Rule};
 
 /// Run the direct rule evaluator (D-04) over `rules` against `working_facts`.
 ///
-/// Returns `(fired_set, evaluated_set)` — the set of rule ids that fired and
-/// the set of rule ids that were evaluated (fired or not). Records
+/// Returns `(fired_set, evaluated_set, trace)` — the set of rule ids that
+/// fired, the set of rule ids that were evaluated (fired or not), and an
+/// optional ordered `TraceData` payload. Records
 /// `CoverageTracking::record_rule_eval` once per evaluated rule and
 /// `record_rule_fire` once per fired rule AFTER the fixpoint loop (L-06 /
 /// Pitfall 6). The caller wraps `fired_set` into `EngineResult` (populating
-/// `fired_rule_ids`) and performs any engine-specific metrics bookkeeping.
+/// `fired_rule_ids`), attaches `trace` to `EngineResult.trace`, and performs
+/// any engine-specific metrics bookkeeping.
+///
+/// Phase 28 (D-01 / EXEC-04, C1 site 1): when `collect_trace` is true, the
+/// loop emits one `TraceEvent` per fired rule IN FIRING ORDER (the order the
+/// fixpoint loop fires them — NOT the HashSet iteration order of
+/// `fired_set`, which is nondeterministic per Critical Finding 3). When
+/// `collect_trace` is false, NO trace work happens — no `Vec`, no `String`,
+/// no `chrono` call — so SC-3 latency neutrality holds for the trace-off
+/// path. The trace is ADDITIVE to `fired_rule_ids` (existing consumers are
+/// unchanged).
 ///
 /// The `RRULES_MAX_CHAIN_ITERATIONS` env var (default 1000) caps the
 /// fixpoint loop (D-07). Each rule fires at most once per call (the
@@ -54,7 +67,8 @@ use crate::rules::{Action, Rule};
 pub fn direct_execute(
     rules: &[Rule],
     working_facts: &mut HashMap<String, Fact>,
-) -> (HashSet<String>, HashSet<String>) {
+    collect_trace: bool,
+) -> (HashSet<String>, HashSet<String>, Option<TraceData>) {
     // D-07: fixpoint cap — configurable via env var, default 1000.
     let max_iter = std::env::var("RRULES_MAX_CHAIN_ITERATIONS")
         .ok()
@@ -63,6 +77,15 @@ pub fn direct_execute(
 
     let mut fired_set: HashSet<String> = HashSet::new();
     let mut evaluated_set: HashSet<String> = HashSet::new();
+
+    // Phase 28 (D-01): trace state — only meaningfully used when
+    // `collect_trace` is true. `trace_start` is captured once at loop entry
+    // (cheap `Instant::now()`); events are pushed in firing order inside
+    // the loop. When `collect_trace` is false, no `TraceEvent` is ever
+    // pushed and no `chrono` call is made (SC-3 latency neutrality).
+    let trace_start = if collect_trace { Some(Instant::now()) } else { None };
+    let mut trace_events: Vec<TraceEvent> = Vec::new();
+    let mut facts_matched: usize = 0;
 
     // Fixpoint loop: repeat passes until no rule newly fires in a full
     // pass (D-07). Each rule fires at most once per execute() call
@@ -83,6 +106,20 @@ pub fn direct_execute(
             let facts: Vec<&Fact> = working_facts.values().collect();
             evaluated_set.insert(rule_id.clone());
             if rules[rule_idx].condition.evaluate(&facts) {
+                // Phase 28 (D-01): emit a TraceEvent at the moment the rule
+                // fires — IN FIRING ORDER. Guarded by `collect_trace` so the
+                // off path skips the chrono call + String allocation entirely
+                // (SC-3). `facts.len()` is the honest count of facts in
+                // working memory that the condition matched against (D-01
+                // discretion — a light, honest count).
+                if collect_trace {
+                    facts_matched += facts.len();
+                    trace_events.push(TraceEvent {
+                        rule_id: rule_id.clone(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        event_type: "rule_fired",
+                    });
+                }
                 // Apply actions. Clone the actions Vec so the immutable
                 // borrow of `rules` ends before we mutably borrow
                 // `working_facts`.
@@ -121,7 +158,24 @@ pub fn direct_execute(
         RuleExecutionTracker::record_fire(id, id_to_name[id]);
     }
 
-    (fired_set, evaluated_set)
+    // Phase 28 (D-01): build the TraceData payload only when `collect_trace`
+    // is true AND at least one rule fired. When `collect_trace` is false,
+    // `trace_events` is empty and `trace_start` is None — we return `None`
+    // so `EngineResult.trace` stays `None` (SC-3 latency neutrality).
+    let trace = if collect_trace && !trace_events.is_empty() {
+        let total_duration_ms = trace_start
+            .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+            .unwrap_or(0.0);
+        Some(TraceData {
+            events: trace_events,
+            total_duration_ms,
+            facts_matched,
+        })
+    } else {
+        None
+    };
+
+    (fired_set, evaluated_set, trace)
 }
 
 /// Apply a single `Action` to the engine's working memory (D-04). Mirrors

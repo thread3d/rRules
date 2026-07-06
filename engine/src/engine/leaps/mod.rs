@@ -224,6 +224,10 @@ pub struct LeapsEngine {
     /// `RuleSet` snapshot; per-request engines carry their own copy.
     rules: Vec<crate::rules::Rule>,
     metrics: crate::engine::metrics::SimpleMetricsCollector,
+    /// Phase 28 (D-01 / EXEC-04): trace-collection flag. Set via
+    /// `set_collect_trace` before `execute()`; threaded into `direct_execute`.
+    /// Default `false` (SC-3 latency neutrality — off-by-default).
+    collect_trace: bool,
 }
 
 impl LeapsEngine {
@@ -236,6 +240,7 @@ impl LeapsEngine {
             working_facts: HashMap::new(),
             rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
+            collect_trace: false,
         }
     }
 
@@ -248,6 +253,7 @@ impl LeapsEngine {
             working_facts: HashMap::new(),
             rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
+            collect_trace: false,
         }
     }
 
@@ -380,8 +386,11 @@ impl LeapsEngine {
     pub fn execute_rules(&mut self) -> EngineResult {
         let start = std::time::Instant::now();
 
-        let (fired_set, _evaluated_set) =
-            crate::engine::direct_eval::direct_execute(&self.rules, &mut self.working_facts);
+        let (fired_set, _evaluated_set, trace) = crate::engine::direct_eval::direct_execute(
+            &self.rules,
+            &mut self.working_facts,
+            self.collect_trace,
+        );
 
         // Record per-fire metrics for parity with the placeholder loop.
         for _ in &fired_set {
@@ -392,6 +401,9 @@ impl LeapsEngine {
 
         let mut result = EngineResult::success(fired_set.len());
         result.fired_rule_ids = fired_set.iter().cloned().collect();
+        // Phase 28 (D-01): attach the ordered trace payload from the shared
+        // helper (C1 site 1). `None` when `collect_trace` is false.
+        result.trace = trace;
         result
     }
 
@@ -463,6 +475,14 @@ impl ExecutionEngine for LeapsEngine {
         self.working_facts.clear();
         self.rules.clear();
         self.metrics.reset_metrics();
+        // `collect_trace` is a config flag, not state — leave it across reset.
+    }
+
+    /// Phase 28 (D-01 / EXEC-04): store the trace-collection flag so
+    /// `execute_rules` threads it into `direct_execute`. Overrides the
+    /// trait's default noop.
+    fn set_collect_trace(&mut self, enabled: bool) {
+        self.collect_trace = enabled;
     }
 
     /// Loads a ruleset into the engine by cloning the ruleset's `rules` Vec
