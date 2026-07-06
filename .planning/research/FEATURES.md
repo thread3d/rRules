@@ -1,191 +1,286 @@
 # Feature Research
 
-**Domain:** BRMS live execution surface + frontend test-runner (rRules v5.0)
-**Researched:** 2026-07-02
-**Confidence:** MEDIUM (BRMS execution-API patterns cross-checked against Drools/KIE, DMN/Kogito, and five rule-engine test-runner UIs; grounded in current rRules code at `api/src/v1/execution.rs`, `engine/src/environment.rs`, `engine/src/engine/registry.rs`, `engine/src/coverage/mod.rs`, and `frontend/src/routes/rules/$id.edit.tsx`)
+**Domain:** DMN 1.5 Decision Tables + FEEL Expression Language for an existing production BRMS (Rust backend, React/TS frontend)
+**Researched:** 2026-07-06
+**Confidence:** HIGH (authoritative: OMG DMN 1.5 plain-text spec Clause 10 grammar rules 1–65; Camunda 8 / Drools FEEL handbook corroborate semantics; OMG conformance clause 2.1)
 
-## Scope Note
+## DMN Level 3 Conformance Checklist (the bar this milestone must clear)
 
-This file covers ONLY the new v5.0 "Live Execution" surface — wiring the existing engine to the API, populating trackers, and the frontend test-runner. It does NOT re-research already-shipped features (authoring IDE, decision tables, RBAC/approvals/audit, Prometheus metrics, dead-rule detection, coverage reporting *structures*, pluggable engines, Docker/Helm, hot-reload job tracking).
+Per OMG DMN spec §2.1, a **Level 3** claim requires full compliance with Clauses 6, 7, 8, **and 10** (Level 1 = 6/7/8 only; Level 2 = + S-FEEL Clause 9; Level 3 = + full FEEL Clause 10). S-FEEL is a strict subset of FEEL, so Level 3 implies 2 and 1. No partial claims are permitted ("based on" is not "conformant").
+
+| Clause | Requirement | rRules status before v6.0 | v6.0 must deliver |
+|--------|-------------|---------------------------|-------------------|
+| §6 DRG/DRD | Decision Requirements Graph + Diagram notation (decision, BKM, input data, knowledge source, decision service; information/knowledge/authority requirements) | NOT required for this milestone's API-first scope — DRD visual editing is a Level 1 *notation* concern. rRules persists rules, not DRD diagrams. | Parser must accept `<definitions>`/`<decision>`/`<inputData>`/`<businessKnowledgeModel>` elements without error; visual DRD editor is an explicit anti-feature (see below). |
+| §7 Decision Logic | Relating decision logic to DRG; boxed expressions (literal, invocation); item definitions; information items | No `dmn` module exists (Phase 6 was a stub). | Item definitions + information items modeled in the parser; boxed literal + boxed invocation supported (other boxed types come from Clause 10). |
+| §8 Decision Table | Table notation; input/output clauses; entries; **all 7 hit policies**; default output values; orientations | Frontend `DecisionTable.tsx` + `HitPolicySelector.tsx` already render the table UI (v4.0); `HIT_POLICIES` incl. aggregating COLLECT already enumerated. Backend has no DMN table evaluator. | Decision-table engine: evaluate all 7 hit policies + COLLECT aggregators + default outputs; accept the frontend's existing table model. |
+| §10 Full FEEL | Grammar rules 1–65; **all 10 boxed expression types**; complete operator set; ternary logic; type lattice; **built-in function library**; user-defined + external (Java/PMML) functions; decision-service execution semantics; XML data mapping | Engine has `Expression` AST + `Condition::evaluate` over `ComparisonOp` for Integer/Float/String/Boolean only. No FEEL parser/evaluator. | Full FEEL evaluator: parser (grammar 1–65), evaluator (semantic domain incl. Decimal128, date/time/duration, lists, contexts, ranges, functions), ternary logic, built-in function library. |
+
+**Load-bearing consequence:** "Full DMN Level 3 FEEL" (per PROJECT.md key decision) means the FEEL scope is the large one — grammar rules 1–65, all boxed expressions, the full built-in function library, ternary logic, and the type lattice. This is the dominant cost of the milestone.
+
+---
 
 ## Feature Landscape
 
-### Table Stakes (Users Expect These)
+### Table Stakes (Users Expect These) — Required for a Credible Level 3 Claim
 
-A BRMS whose `/v1/execute` returns `rules_fired: 0` is functionally a no-op. These features are what makes the platform *actually execute rules*. Missing any of them = the execution surface is broken or misleading.
+Features without which the "DMN Level 3 compliant" claim is false. Organized by the quality-gate categories.
 
-| Feature | Why Expected | Complexity | Notes & rRules Dependencies |
-|---------|--------------|------------|------------------------------|
-| **Real single-execute wiring** (`POST /v1/execute` fires rules) | The whole point of a BRMS. The stub at `execution.rs:307` (`let _engine = EngineBuilder::new().build()`, `rules_fired = 0`) must drive the engine. | MEDIUM | Reuse `EngineBuilder` (`environment.rs:23`) + `Engine::create_session(stateful, …)` + `execute_forward()` → `ExecutionResult`. Convert `req.facts` (already mapped via `json_to_engine_value`) into `Fact`s via `engine::fact::Fact`. Need to load rules from the rule store (Git-backed) into the engine before firing — `Engine::load_rules` (`environment.rs:122`) is currently a stub taking `&str`; wiring rule-source loading is the bulk of the work. |
-| **`rules_fired` + `rules_not_fired` populated truthfully** | `ExecuteResponse` already declares both; today both are `0`/empty. Users will diff response vs. expectation. | LOW | `ExecutionResult` exposes `is_success`/`message` but NOT a fire-list — the engine must surface which rules fired. Either thread `CoverageTracker::record_fire` results or extend `ExecutionResult` to carry a fired-rule-name vector. `CoverageTracker` (`coverage/mod.rs`) already has `record_fire(rule_id)` + `record_skipped(rule_id)`. |
-| **`facts_after` reflects post-inference working memory** | `ExecuteResponse.facts_after` today just echoes the input (`facts_after.insert(fact_type, fact_value.clone())`). Users expect to see inferred/modified facts. | MEDIUM | `Engine::working_memory()` / `working_memory_mut()` (`environment.rs:112-117`) expose `&WorkingMemory`. Need a `WorkingMemory → HashMap<String, serde_json::Value>` serializer (inverse of `json_to_engine_value`). Consequence facts inserted by rule actions must be captured here. |
-| **Stateless one-shot execution mode** | Drools/KIE stateless session: created per request, disposed after, fire-and-forget. The default execution mode for API-driven decisions (risk scoring, eligibility). | LOW | `Engine::create_session(stateful=false, None)` (`environment.rs:102`) already exists. `execute_single` should default to this when `session_id` is absent. No cross-request state. |
-| **Per-request engine selection** (`engine` param) | v3.0 shipped Rete/TREAT/LEAPS/PHREAK with a runtime selector; v5.0 must exercise it. A `?engine=treat` (or body field) that's ignored makes the pluggable architecture a lie. | MEDIUM | `EngineRegistry::create_engine_by_name` (`registry.rs:177`) + `EngineSelector::with_defaults()` (`selector.rs:77`) exist. `ExecuteRequest` does NOT currently carry an `engine` field — add `pub engine: Option<String>` (serde-skip-if-none) with a config-defined default (`EngineConfig::algorithm`, `selector.rs:23`). Validate against `registry.available_engines()`; 400 on unknown. |
-| **Config-defined default engine** | Ops must set a default without code changes; per-request override is optional. | LOW | `EngineSelector::current_engine()` + `EngineConfig::algorithm` already model this. Wire `RULES_ENGINE_DEFAULT` env (or YAML) into `EngineState` so `execute_single` falls back to it. |
-| **Batch-execute drives real execution** (`POST /v1/rules/batch-execute`) | The batch endpoint already has real concurrency (Semaphore + JoinSet, `execution.rs:374`) layered on the stub. Once `execute_single` is real, batch inherits it for free. | LOW (once single is real) | No new code beyond making `execute_single` real — the `BatchExecuteResponse` (`results`, `total_fired`, `succeeded`, `failed`) already aggregates correctly. Verify per-item isolation: each task builds its own engine (already true). |
-| **Async reload-then-execute** (`POST /v1/rules/reload` + execute against refreshed rules) | v4.0 shipped hot-reload with `EngineState` + `ReloadJob`/`ReloadStatus` + `JobStore` + `GET /v1/jobs/{id}`. v5.0 must make the reloaded engine actually serve subsequent executes. | MEDIUM | `EngineState::reload_engine` (`execution.rs:131`) currently rebuilds `rule_files` but does NOT swap a compiled engine into `self.engine` (the write-lock block at 163-166 is a no-op hold). Wire: compile rules → replace `self.engine` contents → subsequent `execute_single` reads from `EngineState` instead of building a throwaway. Requires `execute_single` to accept `web::Data<EngineState>` (signature change). |
-| **Auto-populate `CoverageTracker` on every execute** | v4.0 shipped coverage reporting *structures* and dead-rule detection that read empty data because executes never recorded. The milestone's stated goal: "monitoring surfaces read live data." | MEDIUM | `CoverageTracker::record_evaluation`/`record_fire`/`record_skipped` (`coverage/mod.rs`) must be called from inside the engine's firing loop OR from `execute_single` post-run. Cleanest: instrument `Engine::execute_forward` to call into a tracker ref. Tracker state must be shared (Arc) and surfaced to the monitoring module + Prometheus `/metrics`. |
-| **Frontend "Run rule" affordance in the rule editor** | A rule IDE where you can author but not run a rule is half-finished. The edit page (`routes/rules/$id.edit.tsx`) currently has Expression + HitPolicy + DecisionTable but no Run button. | MEDIUM | Add a `RunPanel` component below the editor. Needs: a new `frontend/src/api/execute.ts` (none exists — `api/rules.ts` is CRUD-only), a `useExecute` hook, and a route-level execute call. `apiClient` (`api/client.ts`) already targets `/v1` with JWT bearer — reuse. |
-| **Fired-rules + results display in the run panel** | The minimum useful run output: which rules fired and the final decision/result. | MEDIUM | `ExecuteResponse.rules_fired` (count) + `rules_not_fired` (names) + `facts_after` (decision). Render as a list with pass/fail highlighting. Ground in DecisionRules' "received output" panel + GoRules results tab. |
-| **Inference trace surfaced (when debug enabled)** | `ExecuteResponse.inference_trace` (`InferenceTraceEntry`: timestamp, event_type, rule_name, data) is already declared but always `None`. Power users need to see *why* a rule fired. | MEDIUM | `EngineBuilder::enable_debug_trace(true)` (`environment.rs:53`) + `InferenceTraceCollector` (`chaining::mode_selector`) exist. `execute_single` should enable trace when requested (e.g., `?trace=true` or body `trace: bool`) and serialize the collector's output into `inference_trace`. Off by default (perf). |
+#### Parser (DMN 1.5 XML)
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| DMN 1.5 XML parser (`<definitions>` → decision table + boxed expressions) | No DMN compliance without ingesting the standard interchange format (Clause 7 + §2.2). Also needed for round-trip export. | MEDIUM | Root `<definitions>` with namespace `https://www.omg.org/spec/DMN/20230324/MODEL/`; parse `<decision>`, `<inputData>`, `<businessKnowledgeModel>`, `<decisionService>`, `<itemDefinition>`, `<inputExpression>`, `<inputEntry>`, `<outputEntry>`, `<rule>`. `hitPolicy` + `aggregation` + `preferredOrientation` attrs. Recommend `quick-xml` (Rust) for streaming parse. FEEL text inside `<text>` elements is parsed by the FEEL parser (dependency). |
+| DMN XML exporter (round-trip) | Round-trip is table stakes for an interchange format; a BRMS that can import but not export is not interoperable. | LOW–MEDIUM | Serialize the internal model back to DMN 1.5 XML with the correct namespace. `exporter`/`exporterVersion` attrs on `<definitions>` aid tool-to-tool interchange. Reuse the same model types as the parser. |
+| Item definitions + information items (Clause 7) | Required by Clause 7; types flow into FEEL `instance of` and output `typeRef`. | MEDIUM | `itemDefinition` with `typeRef` (FEEL type names: number, string, boolean, date, time, date and time, days and time duration, years and months duration, list, context, function, range, Any). Feeds the FEEL type lattice. |
+
+#### FEEL Expression Language (Clause 10) — the dominant scope
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| FEEL lexer + parser (grammar rules 1–65) | Level 3 = full FEEL (Clause 10). Cannot evaluate without parsing. | HIGH | 65 grammar rules; EBNF. Names can contain spaces and symbols (`-`, `'`, `+`, `*`, `/`) → ambiguous with operators, needs longest-match + scope disambiguation. `@`-prefixed date/time literals. Java-style comments. Recommend a Pratt parser over a hand-written recursive-descent parser, or a `pest`/`lalrpop` PEG grammar. This is the highest-complexity single artifact. |
+| FEEL evaluator — arithmetic operators (`+ - * / **` unary `-`) | Clause 10 operator semantics; Decimal128 (34 digits). | MEDIUM | Numbers are IEEE 754-2008 Decimal128 → use `bigdecimal`/`rust_decimal` crate (NOT `f64`). `+` is also string concat when both operands are strings, and date+duration→date etc. Precedence: `**` > unary `-` > `* /` > `+ -`; all left-associative. Existing engine `ComparisonOp` over Integer/Float is NOT reusable (wrong numeric type, missing operators). |
+| FEEL evaluator — comparison operators (`= != < <= > >=` `between` `in`) | Clause 10 rule 49. Decision-table input entries are unary tests built on these. | MEDIUM | `between` is sugar (`x between a and b` = `x>=a and x<=b`). `in` supports list membership, range/interval membership, and unary-test satisfaction. Type-specific equality (numbers by value; strings by char sequence; dates by value; lists element-wise; contexts by key-set + values). `e = null` tests nullity. |
+| FEEL evaluator — boolean operators with **ternary logic** (`and` `or` `not()`) | Clause 10 ternary logic (true/false/null) is normative. SQL/PMML-style. | MEDIUM | Truth tables: `and`→false if any false else null if any null else true; `or`→true if any true else null if any null else false; `not(null)`→null. Critical: the existing engine's boolean evaluation is 2-valued; FEEL requires 3-valued. This is a semantic divergence, not just a syntax add. |
+| FEEL evaluator — `if...then...else` | Grammar rule 45. | LOW | Condition true→then; otherwise (false OR null)→else. |
+| FEEL evaluator — `for...in...return` | Grammar rule 44. Table stakes for list construction. | MEDIUM | Returns a list of results in order. Multiple iteration contexts = cross product. Implicit `partial` variable. Iteration context can be a range `a..b`. |
+| FEEL evaluator — quantified `some`/`every...in...satisfies` | Grammar rule 46. | MEDIUM | `some` over empty → false; `every` over empty → true. Multiple iteration contexts supported. |
+| FEEL evaluator — path expression (`.`) | Grammar rule 43. Needed for context access + list-of-contexts projection. | LOW | `context.key`; `[{x:1,y:2},{x:2,y:3}].y` → `[2,3]` (list projection). |
+| FEEL evaluator — filter expression (`list[boolean]`) | Grammar rule 50. Table stakes for list processing. | MEDIUM | `item` references current element; if element is a context, its entries are directly accessible. Implicit to-singleton-list conversion. |
+| FEEL evaluator — `instance of` | Grammar rule 51. Required by Clause 10 type system. | LOW | Type check against grammar rule 52 type expressions (qualified name, `range<T>`, `list<T>`, `context<k:T>`, `function<...>->T`). |
+| FEEL boxed expressions — **all 10 types** | Clause 10 normative boxed expression inventory. | HIGH | (1) decision table (recursive — a boxed expression can be a decision table), (2) boxed literal, (3) boxed invocation (named params, ≥1 required), (4) boxed context (name/value pairs + optional result, names distinct), (5) boxed list, (6) relation (homogeneous contexts as a table), (7) boxed function definition (kind FEEL/PMML/Java + params + body), (8) boxed conditional (if/then/else), (9) boxed filter, (10) boxed iterator. Recursive. |
+| FEEL type lattice + implicit conversions | Clause 10 semantic domain. `Any` top, `Null` bottom; equivalence (≡) + conformance (<:) relations; to-singleton-list, from-singleton-list, conforms-to conversions. | HIGH | This is the semantic backbone. Without it, `instance of`, function binding, and filter conversions are wrong. Types: number, string, boolean, date, time, date-and-time, days-and-time-duration, years-and-months-duration, list, context, function, range, null, any. |
+| FEEL built-in function library | Clause 10 normative. | HIGH | ~70+ functions across categories (see Built-in Function Inventory below). Conversion / string / list / numeric / date-time / context / boolean / range / equality. This is a large surface area; each function has specified null-propagation semantics. |
+| Date/time/duration value types + arithmetic | Clause 10 semantic domain + operator tables. | HIGH | `date`, `time`, `date and time`, `days and time duration`, `years and months duration`. Lexical formats (ISO 8601: `@"2019-03-31"`, `@"23:59:00z"`, `duration("P1Y1M")`). Arithmetic: date+ym-duration→date, datetime−datetime→dt-duration, time−time→dt-duration, duration×number→duration, duration÷duration→number. Recommend `chrono` + a dedicated FEEL temporal module. |
+| FEEL null + three-valued logic propagation | Clause 10 ternary semantics. | MEDIUM | Most operations involving null → null (with specific exceptions in `and`/`or` short-circuits). `e = null` tests nullity. This permeates every operator and function. |
+| User-defined functions (FEEL lambdas) | Grammar rule 55 (`function(params) body`); Clause 10 function semantics. | MEDIUM | Closures with lexical scope. External Java/PMML functions are out of scope for a Rust BRMS (see Anti-Features). |
+| Function invocation (named + positional) | Grammar rules 38–42. | LOW | Named: unsupplied params → null. Positional: all must be supplied. from-singleton-list conversion on args. |
+
+#### Decision-Table Engine
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| Hit policy: UNIQUE (U) | Default; Clause 8. | LOW | At most one match; >1 match = runtime error. |
+| Hit policy: ANY (A) | Clause 8. | LOW | Overlap allowed; all matching rules must agree on output; disagreement = error. |
+| Hit policy: PRIORITY (P) | Clause 8. | MEDIUM | Output chosen by priority from output column's allowed-values list (earlier = higher priority). Rule order irrelevant. Requires allowed-values modeling on output columns. |
+| Hit policy: FIRST (F) | Clause 8. | LOW | Top-down; first match wins; rule order is semantically meaningful. |
+| Hit policy: COLLECT (C) | Clause 8. | LOW | All matches as an unordered list. |
+| Hit policy: RULE ORDER (R) | Clause 8. | LOW | All matches in table row order. |
+| Hit policy: OUTPUT ORDER (O) | Clause 8. | MEDIUM | All matches sorted by output column's allowed-values priority (decreasing). Requires allowed-values modeling. |
+| COLLECT aggregators: SUM (C+) MIN (C<) MAX (C>) COUNT (C#) | Clause 8; already enumerated in frontend `HIT_POLICIES`. | MEDIUM | Single output column only; returns scalar. COUNT ignores output values (counts matching rules). Watch open issue DMN15-31: SUM is "sum of distinct outputs" (deferred to 1.6) and `sum([])` is undefined — pick a defensible behavior (recommend 0 for empty SUM, null for empty MIN/MAX) and document it. |
+| Default output values | Clause 8. | LOW | When no rule matches: evaluate the output column's default expression; else null. Applies to ALL hit policies (Collect does NOT implicitly return empty list). |
+| Input entry unary-test evaluation | Clause 8 + Clause 9 S-FEEL. | MEDIUM | Input entries are unary tests (`< 5`, `[1..10]`, `"A","B"`, `not(...)`, `-` = any). Built on FEEL comparison + range + `in` semantics. The decision-table engine depends on the FEEL evaluator. |
+| Output entry FEEL expression evaluation | Clause 8. | LOW | Each output entry is a FEEL expression evaluated in the scope of the matched rule's input bindings. |
+| Allowed-values lists on output columns | Clause 8 (required for PRIORITY + OUTPUT ORDER). | MEDIUM | Ordered list of allowed output values; drives priority. Must be modeled in the parser + table model + surfaced in the frontend. |
+
+#### API
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| `POST /v1/decisions/{id}/evaluate` | PROJECT.md target. The decision-evaluation entry point. | MEDIUM | Accept input context (FEEL context of named values), resolve the decision by id, evaluate its decision logic (table or boxed expression), return the output (+ trace). Reuse actix-web patterns from `/v1/execute`. |
+| Decision-evaluation integration with existing `EngineRegistry` / Prometheus / inference-trace | PROJECT.md target; consistency with v5.0 execution surfaces. | MEDIUM | Emit `rrules_decision_evaluate_*` Prometheus counters (mirror v5.0 `rrules_execute_*`), broadcast `MetricsSnapshot`, emit `TraceEvent`s on the dedicated registry. Reuse `web::block` per-request pattern (fresh evaluator, no `&mut self` sharing). |
+| Decision CRUD + persistence (Git + PostgreSQL) | Decisions must be stored/versioned like rules. | MEDIUM | Reuse the hybrid Git+PostgreSQL storage from rules. A `.dmn` file is a natural Git artifact. Decision metadata (id, name, version, hit policy) in PostgreSQL. |
+
+#### Frontend Wiring
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| Wire existing `DecisionTable.tsx` to backend evaluator | PROJECT.md: "does NOT rebuild the editor" — wire it. | MEDIUM | The editor already exists (v4.0). Add an API client call to `POST /v1/decisions/{id}/evaluate`, surface results in the existing results panel. The `HIT_POLICIES` constant already includes aggregating COLLECT. |
+| Wire `HitPolicySelector.tsx` to backend hit-policy semantics | The selector exists; backend must honor the selected policy. | LOW | Frontend already sends the hit policy; backend evaluator must respect it. Mostly a contract-alignment task. |
+| Surface decision-evaluation results + trace in the UI | Consistency with v5.0 frontend test-runner trace panel. | MEDIUM | Reuse the `TraceEvent` display from the v5.0 test-runner. Show fired rules, matched outputs, aggregator result. |
+| Allowed-values editor for output columns (PRIORITY/OUTPUT ORDER) | Required to make P + O hit policies usable. | MEDIUM | New frontend control (does not exist today) for ordering allowed output values. Not a rebuild of the table editor — an addition to it. |
 
 ### Differentiators (Competitive Advantage)
 
-These distinguish rRules' execution surface from a minimal BRMS and from the Drools/DMN baselines. They lean on existing rRules assets (pluggable engines, Prometheus, governance) that competitors often lack.
+Not required for the Level 3 claim, but they materially improve the product against Drools/Camunda/Trisotech.
 
-| Feature | Value Proposition | Complexity | Notes & rRules Dependencies |
-|---------|-------------------|------------|------------------------------|
-| **Side-by-side engine comparison on one input** | Run the same facts through Rete AND TREAT AND LEAPS AND PHREAK and diff results/timing. No competitor exposes four Rete-family algorithms in one UI. Directly leverages v3.0. | HIGH | New `POST /v1/execute/compare` endpoint iterating `EngineType::all_variants()` (`registry.rs:33`), calling `execute_single` per engine, returning a `CompareResponse { by_engine: HashMap<String, ExecuteResponse> }`. Frontend: a "Compare engines" toggle in the Run panel rendering a table (engine × rules_fired × duration × result). Reuses `EngineMetrics` (`engine/metrics.rs`) for timing. |
-| **Per-execution Prometheus metric emission + live dashboard correlation** | Every execute updates `/metrics` counters (rules fired, latency histogram, engine breakdown) so the monitoring dashboard (`routes/monitoring/index.tsx` → `EngineMetricsDashboard`) shows real activity within seconds. Most BRMS dashboards are batch/lagged. | MEDIUM | `metrics::MetricsCollector` (`engine/metrics.rs`) + existing Prometheus endpoint. Add execution-latency histogram + engine-label dimension. The v4.0 `useEngineMetrics` hook already consumes this; once populated it Just Works. |
-| **Coverage + dead-rule detection fed by real runs** | The test-runner and live executions both feed `CoverageTracker`, so "this rule never fires" is backed by actual execution evidence, not synthetic tests. Couples execution to the v4.0 monitoring surfaces. | MEDIUM | `CoverageTracker` is the single shared sink for both API executes and UI test-runs. `monitoring::dead_rules` reads from it. Requires the tracker to be a process-wide `Arc<RwLock<CoverageTracker>>` injected via `web::Data`, not per-request. |
-| **Stateful KIE-session-style sessions** (`POST /v1/execute/session/{id}`) | Multi-interaction execution: insert facts, fire, insert more, fire again, dispose. Drools charges a license for this; rRules can expose it natively. The `execute_with_session` handler (`execution.rs:561`) is a stub returning `rules_fired: 0`. | HIGH | `Engine::create_session(stateful=true, Some(id))` + `Session::insert_fact/execute/destroy` (`environment.rs:166-206`) exist. Need a `SessionStore` (Arc<RwLock<HashMap<SessionId, Session>>), handlers: create-session, execute-on-session, dispose-session, TTL eviction. `session_id` field already on `ExecuteRequest`. RBAC: sessions are per-user. |
-| **Decision-table row-match highlighting in the run panel** | When a decision-table rule runs, highlight which rows matched (green), were evaluated-but-not-matched (yellow), and violated columns (red). GoRules/OpenRules have this; it turns a decision table from a spec into a live artifact. | HIGH | Requires the engine to report per-row match outcomes (extend `ExecutionResult` or emit via `CoverageTracker`). Frontend: `DecisionTable.tsx` (`features/rules/DecisionTable.tsx`) accepts `rows`/`columns` — add an optional `rowResults?: RowMatchStatus[]` prop. Coupling between engine output shape and UI prop is the hard part. |
-| **Expected-vs-actual diff + "Save as test"** | Run a rule, assert the expected output, see a diff, and one-click save it as a regression test (feeds v2.0 testing framework). DecisionRules/Corticon pattern. | HIGH | New `TestRun` entity (name, rule_id, input, expected, actual, status, execution_time). Backend: `POST /v1/rules/{id}/tests` + `POST /v1/rules/{id}/tests/{test_id}/run`. Frontend: "Save as test" button in the Run panel posting the last `ExecuteResponse` + user-provided expected. Reuses `engine::testing` module. |
-| **Per-rule / per-node timing in the trace** | Microsecond-level timing per fired rule so users find the slow rule. GoRules ships this; Drools exposes it only via `kie-scanner` tooling. | MEDIUM | `InferenceTraceEntry` already has `timestamp: String` — derive per-entry delta. Add `duration_us: Option<u64>`. `MetricsCollector` already tracks engine-level metrics; per-rule timing needs instrumentation in the firing loop. Frontend: render trace as a timeline/flamebar. |
-| **Run-panel engine selector wired to the runtime selector** | A dropdown in the Run panel picking rete/treat/leaps/phreak per run, defaulting from config — making the pluggable engine a user-facing feature, not just an internal one. | LOW | Frontend `<select>` bound to `engine` field on the execute request. List from a new `GET /v1/engines` endpoint exposing `registry.available_engines()`. Pairs with per-request engine selection table-stake. |
+| Feature | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| Inference-trace emission for decision evaluation | rRules already emits `TraceEvent` for rule execution (v5.0). Extending to DMN decisions gives a debuggable decision surface that Drools/Camunda do not expose by default. | MEDIUM | Reuse the v5.0 two-site trace emission pattern. Trace = which rules matched, which were filtered by hit policy, aggregator inputs. |
+| Per-decision Prometheus metrics + dashboard | v5.0 has per-rule-execution metrics; per-decision metrics let operators monitor decision health alongside rule health. | MEDIUM | Mirror `rrules_execute_*` counters with `rrules_decision_*` (engine-labeled, hit-policy-labeled). |
+| DMN ↔ existing Rete engine bridge | The existing Rete/TREAT/LEAPS/PHREAK engine evaluates `.rules`; DMN decisions are a different evaluation path. A bridge that lets a DMN boxed invocation call into the rule engine (or vice versa) is a genuine differentiator. | HIGH | Optional. The spec allows external functions; treating the rRules engine as an "external function" from FEEL's perspective is spec-compliant and uniquely valuable. Defer to post-MVP. |
+| DMN XML round-trip with DMNDI (diagram interchange) | Most BRMS tools import DMN XML but drop the diagram layout. Preserving DMNDI (`<DMNDiagram>`/`<DMNShape>`/`<DMNEdge>`) on round-trip is a differentiator. | MEDIUM | DMNDI is a separate schema (DMNDI15.xsd). Parsing/storing layout is LOW complexity; rendering a DRD is HIGH and is an explicit anti-feature for this milestone. |
+| Hot-reload of decisions (reload-then-swap) | v5.0 ships reload-then-swap for `RuleSet`. Extending the same `SharedRuleSet{generation}` pattern to decisions gives zero-downtime decision updates. | MEDIUM | Reuse the v5.0 Phase 25 `Arc<RwLock<…>>` + `generation.wrapping_add(1)` pattern. |
 
 ### Anti-Features (Commonly Requested, Often Problematic)
 
+Features that seem good but would blow the milestone scope or add risk without Level 3 value.
+
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| **Always-on full inference trace** | "I want to see everything that happened." | Trace collection doubles execution latency and bloats response payloads; 90% of production executes don't need it. Defaulting it on poisons perf benchmarks. | Opt-in via `trace: bool` (body/query) per request. UI defaults on in the test-runner, off in the API path. |
-| **Cross-request shared working memory in stateless mode** | "Let me accumulate facts without managing sessions." | Blurs stateless/stateful distinction; creates undeclared state, race conditions under concurrency, and non-deterministic results that are hell to debug. | Explicit stateful sessions via `session_id` with a real `SessionStore` and TTL. Stateless = strictly per-request. |
-| **Synchronous batch with shared engine/lock** | "Batch is just a loop — share the engine for speed." | A single `Arc<RwLock<Engine>>` across batch items serializes them and defeats the concurrency v4.0 already built (Semaphore + JoinSet). One panicking item poisons the shared engine. | Keep the current per-task throwaway engine (`execute_single` builds its own). Sharing is for the *reloaded* engine, not for execute paths. |
-| **GraphQL / streaming execute response** | "One query for execute + coverage + trace + metrics." | Adds a transport layer, schema, and auth model for a single feature. The audience (rule authors) is small; REST + a JSON body already carries everything. | REST `POST /v1/execute` with optional fields. WebSocket (already present in v4.0 for monitoring) can stream live-run updates if needed. |
-| **Auto-reload on every execute** | "Always run the freshest rules." | Re-compiling the rule set on every request makes execute O(rules) per call instead of amortized; kills throughput. The hot-reload watcher (`start_file_watcher`, `execution.rs:529`) already handles freshness. | `EngineState` holds the compiled engine; reload is event-driven (file watcher / explicit `POST /v1/rules/reload`). Execute reads the current `self.engine`. |
-| **Client-side rule execution in the browser** | "Run rules in the frontend for instant feedback." | Duplicates the engine in WASM, drifts from the authoritative Rust implementation, and bypasses governance/audit/coverage. Two engines = two truths. | Frontend calls the backend execute API; the test-runner is a thin client over `/v1/execute`. |
-| **Breakpoints / step-through debugger in v5.0** | "I want to step into a rule." | A real step-debugger requires engine-level pause/resume, a debug protocol, and a UI state machine — a milestone of its own. Stuffing it into v5.0 explodes scope. | v5.0 ships the inference trace (post-hoc step list). Defer live breakpoints to a later milestone; the trace covers 80% of debugging need. |
+| Visual DRD (Decision Requirements Diagram) editor | "DMN has diagrams; a BRMS should render them." | Clause 6 DRD *notation* is a Level 1 concern, not a Level 3 FEEL concern. A full DRD canvas (nodes, edges, auto-layout, DMNDI render) is a large frontend effort that delivers zero Level 3 conformance value (Level 3 = Clause 10 FEEL, not diagram rendering). | Parse + persist DMNDI on round-trip (LOW effort, preserves interchange), but do NOT render a DRD canvas this milestone. The frontend decision-table editor is the authoring surface. |
+| External Java/PMML function integration | Grammar rule 55 allows `external` functions; Clause 10 mentions Java/PMML. | rRules is Rust; a JVM integration is a massive scope expansion (JNI/FFI, classloader, serialization). PMML is a separate large spec. Neither is required for Level 3 (the spec says FEEL "completely defines the meaning of expressions that do not invoke externally-defined functions"). | Support user-defined FEEL lambdas (rule 55, non-external). Leave `external` as a parser-recognized but unsupported-at-eval token that returns null with a logged warning. |
+| Full DMN 1.6 features (decision services composition, new boxed expression editors) | "Ship the latest." | DMN 1.6 is beta; the namespace + semantics are unsettled (e.g., DMN15-31 Collect semantics deferred to 1.6). Targeting 1.6 destabilizes the conformance claim. | Target DMN 1.5 (stable, normative XSD `DMN15.xsd`). Document the 1.6-deferred edge cases (Collect distinct-sum, `sum([])`) as known divergences. |
+| Cross-table `in` evaluation / decision-service chaining (one decision calling another) | "Real DMN models chain decisions." | Multi-decision dependency graphs require a topological evaluator + cycle detection + a DRG (Clause 6) model. This is a Phase-6-level scope on its own. | Single-decision evaluation per API call for v6.0 MVP. A caller orchestrates multiple decisions via repeated `POST /v1/decisions/{id}/evaluate`. Add decision chaining as a post-MVP differentiator. |
+| Replacing the existing `ComparisonOp`/`Expression` AST with the FEEL AST | "One AST to rule them all." | The existing engine AST is validated across Rete/TREAT/LEAPS/PHREAK + 118 tests. Migrating it to FEEL risks regressions in shipped v1.0–v5.0 capabilities and double the work. | Keep the FEEL AST separate (`dmn` crate / module). The two ASTs coexist; the optional DMN↔engine bridge (differentiator) translates between them. |
+| ag-Grid replacement for the decision-table editor | "ag-Grid would be cleaner." | The editor already exists and is validated (v4.0). Rebuilding it risks scope blowout and gains no conformance value. | Wire the existing editor to the backend. Only add the allowed-values control (needed for P/O hit policies). |
+| FEEL→SQL transpilation | "Compile FEEL to SQL for speed." | FEEL's ternary logic, date/duration semantics, and list/context types do not map cleanly to SQL. Transpilation is a research project, not an implementation task. | Interpret FEEL directly (tree-walking evaluator). Optimize later only if profiling demands it. |
 
 ## Feature Dependencies
 
 ```
-[Real single-execute wiring]
-    ├──requires──> [Engine.load_rules actually loading rule store → engine]
-    ├──requires──> [WorkingMemory → facts_after serializer]
-    └──enables──> [Batch-execute drives real execution] (inherits for free)
-                  [CoverageTracker auto-populated]
-                  [Prometheus emission + live dashboard]
-                  [Frontend Run button]
-                  [Side-by-side engine comparison]
+[DMN XML parser]
+    ├──requires──> [FEEL lexer/parser]   (FEEL text inside <text> elements)
+    └──requires──> [Item definitions + type model]
 
-[Per-request engine selection]
-    ├──requires──> [EngineRegistry wired into execute_single]
-    └──requires──> [Config-defined default engine]
+[FEEL lexer/parser]
+    └──requires──> [FEEL type lattice + implicit conversions]
 
-[Async reload-then-execute]
-    ├──requires──> [reload_engine swaps compiled engine into EngineState]
-    └──requires──> [execute_single reads from EngineState, not throwaway]
+[FEEL evaluator (arithmetic/comparison/boolean/if/for/quantified/path/filter/instance-of)]
+    ├──requires──> [FEEL type lattice + implicit conversions]
+    ├──requires──> [Decimal128 numeric type]
+    └──requires──> [Date/time/duration value types]
 
-[Stateful sessions]
-    ├──requires──> [SessionStore (Arc<RwLock<HashMap>>)]
-    ├──requires──> [execute_single signature change to accept shared state]
-    └──enables──> [Multi-interaction test-runner scenarios]
+[FEEL built-in function library]
+    └──requires──> [FEEL evaluator] + [Date/time/duration types] + [List/context/range types]
 
-[Frontend Run panel]
-    ├──requires──> [new frontend/src/api/execute.ts]
-    ├──requires──> [ExecuteResponse types in frontend/src/api/types.ts]
-    └──enhances──> [Decision-table row-match highlighting] (needs per-row match data)
+[FEEL boxed expressions (all 10)]
+    └──requires──> [FEEL evaluator] + [FEEL parser] (recursion)
 
-[Inference trace surfaced]
-    ├──requires──> [enable_debug_trace(true) path + InferenceTraceCollector → InferenceTrace]
-    └──enhances──> [Per-rule timing] (timestamp deltas)
+[Decision-table engine]
+    ├──requires──> [FEEL evaluator]  (input entries = unary tests; output entries = FEEL exprs)
+    ├──requires──> [Hit policy evaluation: U/A/P/F/C/R/O]
+    ├──requires──> [COLLECT aggregators: SUM/MIN/MAX/COUNT]
+    └──requires──> [Allowed-values lists on output columns]  (P + O)
 
-[CoverageTracker auto-populated]
-    └──enables──> [Dead-rule detection fed by real runs]
-                  [Coverage reporting fed by real runs]
-                  [Per-rule coverage in test-runner]
+[Decision-evaluation API: POST /v1/decisions/{id}/evaluate]
+    ├──requires──> [Decision-table engine] + [FEEL boxed expressions]
+    ├──requires──> [Decision CRUD + persistence]
+    └──enhances──> [Existing EngineRegistry / Prometheus / inference-trace]  (v5.0 surfaces)
 
-[Side-by-side engine comparison]
-    └──requires──> [Per-request engine selection] + [Real single-execute]
+[Frontend wiring: DecisionTable.tsx + HitPolicySelector.tsx → backend]
+    └──requires──> [Decision-evaluation API]
+    └──requires──> [Allowed-values editor for output columns]  (to make P/O usable)
+
+[DMN XML exporter (round-trip)]
+    └──requires──> [DMN XML parser]  (shared model types)
+
+[DMN↔Rete engine bridge] ──enhances──> [FEEL evaluator]  (optional differentiator, defer)
+[Hot-reload of decisions] ──enhances──> [Decision CRUD + persistence]  (reuse v5.0 pattern)
+[Inference-trace for decisions] ──enhances──> [Decision-evaluation API]  (reuse v5.0 pattern)
 ```
 
 ### Dependency Notes
 
-- **Real single-execute is the keystone.** Six table-stakes and four differentiators are downstream of it; until `execute_single` actually fires rules, nothing else has live data. Phase ordering must put it first.
-- **CoverageTracker population requires a shared, process-wide tracker.** Per-request trackers can't feed monitoring. This is an architectural decision (inject `Arc<RwLock<CoverageTracker>>` via `web::Data`), not just a call-site addition.
-- **Async reload-then-execute conflicts with throwaway engines in `execute_single`.** Today `execute_single` builds `EngineBuilder::new().build()` and discards it. To execute against reloaded rules, `execute_single` must instead read the compiled engine from `EngineState` — a signature change from `execute_single(req)` to `execute_single(req, engine_state, tracker)`. This ripples into `batch_execute_rules`.
-- **Decision-table row-match highlighting couples engine output to UI props.** The engine currently reports `rules_fired: usize`, not per-row match status. Enabling row highlighting requires extending the execution result shape — design this before implementing the UI prop, or the UI will be built against a shape the engine can't fill.
-- **Stateful sessions depend on shared-state injection** (the same `web::Data` change as reload-then-execute). Build the shared-state plumbing once and both features ride it.
-- **Frontend Run panel is gated on a new `api/execute.ts`.** The existing `api/rules.ts` is CRUD-only with no execute function; the test-runner cannot be built until that client exists.
+- **DMN XML parser requires FEEL parser:** `<inputExpression>`, `<inputEntry>`, `<outputEntry>` all contain FEEL text. A parser that only ingests XML structure but cannot parse FEEL is a Level 1/2 tool, not Level 3.
+- **Decision-table engine requires FEEL evaluator:** input entries are S-FEEL unary tests (`< 5`, `[1..10]`, `"A","B"`); output entries are FEEL expressions. The existing `Condition::evaluate` over `ComparisonOp` is insufficient (2-valued logic, no ranges, no `in`, no null semantics).
+- **PRIORITY + OUTPUT ORDER require allowed-values lists:** these hit policies are undefined without an ordered allowed-values list on the output column. The parser, table model, and frontend must all model it.
+- **FEEL evaluator requires Decimal128 + date/time/duration types:** the semantic domain is normative. `f64` is non-conformant (34-digit Decimal128 precision). The existing engine's Integer/Float is not reusable for FEEL.
+- **Boxed expressions require the full FEEL evaluator:** boxed expressions are recursive (a boxed context value can be a boxed list, which can contain a decision table). The evaluator must handle the full grammar.
+- **The DMN↔Rete bridge is optional:** the two evaluation paths (Rete `.rules` vs DMN decisions) can coexist without a bridge for the MVP. The bridge is a differentiator, not table stakes.
+- **Frontend wiring requires the API but NOT a DRD canvas:** the existing `DecisionTable.tsx` is the authoring surface; a DRD canvas is an anti-feature for this milestone.
 
 ## MVP Definition
 
-### Launch With (v5.0 — "Live Execution")
+### Launch With (v6.0 — the Level 3 claim)
 
-The minimum that makes the platform *execute* and the monitoring surfaces *read live data*.
+Minimum to credibly claim DMN Level 3 compliance.
 
-- [ ] **Real single-execute** (`POST /v1/execute` fires rules, returns truthful `rules_fired`/`rules_not_fired`/`facts_after`) — closes the documented stub; the milestone's core promise.
-- [ ] **Per-request engine selection** (`engine` field + config default) — exercises the v3.0 pluggable engines; without it the selector is dead code.
-- [ ] **Stateless one-shot mode** as the default — the dominant execution pattern for API-driven decisions.
-- [ ] **CoverageTracker auto-populated** from every execute — the bridge that makes v4.0 monitoring surfaces show live data.
-- [ ] **Prometheus metrics emission** per execute (latency, rules fired, engine label) — makes the dashboard real.
-- [ ] **Async reload-then-execute** actually swaps the compiled engine — makes hot-reload meaningful for execution, not just file watching.
-- [ ] **Batch-execute drives real execution** — inherited once single is real; verify only.
-- [ ] **Frontend Run button + fired-rules/results panel** in the rule editor — the user-facing proof that execution works.
-- [ ] **Inference trace surfaced on demand** (`trace: true`) — minimum debugging support; the `InferenceTrace` types already exist.
+- [ ] FEEL lexer/parser (grammar 1–65) — without this, no FEEL, no Level 3.
+- [ ] FEEL evaluator: arithmetic, comparison, boolean (ternary), `if`, `for`, `some`/`every`, path, filter, `instance of` — Clause 10 operator surface.
+- [ ] FEEL type lattice + implicit conversions + null/ternary propagation — semantic backbone.
+- [ ] Decimal128 numeric type + date/time/duration value types — normative semantic domain.
+- [ ] FEEL built-in function library (all categories) — Clause 10 normative.
+- [ ] All 10 FEEL boxed expressions — Clause 10 normative inventory.
+- [ ] User-defined FEEL functions (lambdas, non-external) — grammar rule 55.
+- [ ] DMN 1.5 XML parser + exporter (round-trip) — interchange format.
+- [ ] Item definitions + information items — Clause 7.
+- [ ] Decision-table engine: all 7 hit policies + COLLECT aggregators + default outputs + allowed-values — Clause 8.
+- [ ] Decision CRUD + persistence (Git + PostgreSQL) — decisions are first-class artifacts.
+- [ ] `POST /v1/decisions/{id}/evaluate` — the evaluation entry point.
+- [ ] Decision-eval integration with Prometheus + inference-trace — consistency with v5.0.
+- [ ] Frontend wiring: `DecisionTable.tsx` + `HitPolicySelector.tsx` → backend evaluator — PROJECT.md explicit scope.
+- [ ] Allowed-values editor for output columns — required for P/O hit policies to be usable.
+- [ ] Conformance test suite: DMN 1.5 spec examples + TCK (Technology Compatibility Kit) cases, if available.
 
-### Add After Validation (v5.x)
+### Add After Validation (v6.x)
 
-- [ ] **Stateful KIE-session-style sessions** — multi-interaction execution; high value but a separate session-lifecycle subsystem (store, TTL, dispose). Trigger: users wanting conversational/multi-step decisions.
-- [ ] **Side-by-side engine comparison** — the marquee differentiator; build once single-execute + per-request selection are stable. Trigger: users asking "which engine should I pick?"
-- [ ] **Decision-table row-match highlighting** — high UX value, high coupling cost. Trigger: decision-table authors wanting visual match feedback.
-- [ ] **Per-rule timing in trace** — cheap once trace is shipped; add the `duration_us` field and a timeline render. Trigger: performance tuning requests.
+- [ ] Inference-trace emission for decisions — high-value differentiator, low marginal cost after API exists.
+- [ ] Per-decision Prometheus metrics + dashboard panel.
+- [ ] Hot-reload of decisions (reload-then-swap, reusing v5.0 `SharedRuleSet{generation}` pattern).
+- [ ] DMNDI round-trip preservation (parse + persist layout; no rendering).
+- [ ] Decision chaining / decision-service composition (multi-decision dependency graph).
 
-### Future Consideration (v6+)
+### Future Consideration (v7+)
 
-- [ ] **Expected-vs-actual diff + "Save as test"** — bridges execution to regression testing; a milestone of its own given the `TestRun` entity + UI.
-- [ ] **Live breakpoints / step-through debugger** — deferred per anti-feature rationale; the inference trace covers most debugging.
-- [ ] **WebSocket streaming of live-run trace** — incremental trace events as they fire, instead of post-run payload.
+- [ ] DMN↔Rete engine bridge (FEEL external function calling the rRules engine) — genuine differentiator, HIGH complexity.
+- [ ] Visual DRD canvas — only if customer demand; large frontend effort.
+- [ ] External PMML function support — separate spec, separate scope.
+- [ ] DMN 1.6 features — wait for the spec to stabilize (Collect distinct-sum, `sum([])`).
 
 ## Feature Prioritization Matrix
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| Real single-execute wiring | HIGH | MEDIUM | P1 |
-| CoverageTracker auto-populated | HIGH | MEDIUM | P1 |
-| Per-request engine selection | HIGH | MEDIUM | P1 |
-| Stateless one-shot mode | HIGH | LOW | P1 |
-| Prometheus metrics emission per execute | HIGH | MEDIUM | P1 |
-| Async reload-then-execute (swap engine) | HIGH | MEDIUM | P1 |
-| Batch-execute drives real execution | MEDIUM | LOW | P1 |
-| Frontend Run button + results panel | HIGH | MEDIUM | P1 |
-| Inference trace surfaced on demand | MEDIUM | MEDIUM | P1 |
-| Run-panel engine selector dropdown | MEDIUM | LOW | P2 |
-| Per-rule timing in trace | MEDIUM | MEDIUM | P2 |
-| Side-by-side engine comparison | HIGH | HIGH | P2 |
-| Stateful sessions | HIGH | HIGH | P2 |
-| Coverage/dead-rule fed by real runs | HIGH | LOW | P2 |
-| Decision-table row-match highlighting | HIGH | HIGH | P2 |
-| Expected-vs-actual + Save as test | HIGH | HIGH | P3 |
-| Live breakpoints / step debugger | MEDIUM | HIGH | P3 |
+| FEEL lexer/parser (grammar 1–65) | HIGH (enabler) | HIGH | P1 |
+| FEEL evaluator — arithmetic/comparison/boolean (ternary) | HIGH (enabler) | HIGH | P1 |
+| FEEL type lattice + null/ternary propagation | HIGH (semantic backbone) | HIGH | P1 |
+| Decimal128 + date/time/duration types | HIGH (normative) | HIGH | P1 |
+| FEEL built-in function library | HIGH (Clause 10) | HIGH | P1 |
+| FEEL boxed expressions (all 10) | HIGH (Clause 10) | HIGH | P1 |
+| FEEL `if`/`for`/`some`/`every`/path/filter/`instance of` | HIGH (Clause 10) | MEDIUM | P1 |
+| User-defined FEEL functions | MEDIUM | MEDIUM | P1 |
+| DMN 1.5 XML parser + exporter | HIGH (interchange) | MEDIUM | P1 |
+| Item definitions + info items | HIGH (Clause 7) | MEDIUM | P1 |
+| Decision-table: U/A/F/C/R hit policies | HIGH (Clause 8) | LOW | P1 |
+| Decision-table: P/O hit policies + allowed-values | HIGH (Clause 8) | MEDIUM | P1 |
+| COLLECT aggregators (SUM/MIN/MAX/COUNT) | HIGH (Clause 8) | MEDIUM | P1 |
+| Default output values | MEDIUM (Clause 8) | LOW | P1 |
+| `POST /v1/decisions/{id}/evaluate` | HIGH (entry point) | MEDIUM | P1 |
+| Decision CRUD + persistence | HIGH (storage) | MEDIUM | P1 |
+| Frontend `DecisionTable.tsx` wiring | HIGH (PROJECT.md scope) | MEDIUM | P1 |
+| Allowed-values frontend editor | MEDIUM (P/O usability) | MEDIUM | P1 |
+| Inference-trace for decisions | MEDIUM (differentiator) | MEDIUM | P2 |
+| Per-decision Prometheus metrics | MEDIUM (ops) | MEDIUM | P2 |
+| Hot-reload of decisions | MEDIUM (ops) | MEDIUM | P2 |
+| DMNDI round-trip preservation | LOW (interchange fidelity) | MEDIUM | P2 |
+| Decision chaining / decision services | MEDIUM (real models) | HIGH | P3 |
+| DMN↔Rete engine bridge | LOW–MEDIUM (differentiator) | HIGH | P3 |
+| Visual DRD canvas | LOW (no Level 3 value) | HIGH | P3 (anti-feature for v6.0) |
+| External Java/PMML functions | LOW (non-Rust) | HIGH | P3 (anti-feature) |
 
 **Priority key:**
-- P1: Must have for the v5.0 milestone to satisfy "live execution" + "monitoring reads live data."
-- P2: Should have; high value but separable subsystems — add in v5.x once P1 is stable.
-- P3: Future; deferred per anti-feature rationale or scope size.
+- P1: Must have for the DMN Level 3 claim (v6.0 launch)
+- P2: Should have, add when possible (v6.x)
+- P3: Nice to have / future consideration / anti-feature for this milestone
 
 ## Competitor Feature Analysis
 
-| Feature | Drools / KIE Server | DMN (Kogito / RHPAM) | rRules (v5.0 plan) |
-|---------|---------------------|----------------------|--------------------|
-| Single execute | `POST /containers/instances/{id}` with `BatchExecutionCommand` | `POST /dmn/models/{model}` (business-domain) or `/dmnresult` (full) | `POST /v1/execute` with `ExecuteRequest` (facts + optional rule_filter + engine + session_id) |
-| Batch execute | Not native — one `BatchExecutionCommand` wraps multiple *commands*, not multiple evaluations | No native batch — one model instance per call | `POST /v1/rules/batch-execute` with real per-item concurrency (already built) |
-| Stateless vs stateful | `lookup` required (stateless) vs optional (stateful); `DisposeCommand` for stateful | N/A (DMN is stateless by spec) | `session_id` absent = stateless one-shot; present = stateful session via `SessionStore` |
-| Per-request engine selection | Not exposed (algorithm fixed in `kmodule.xml`) | N/A (single DMN evaluator) | **Differentiator**: `engine` param selects Rete/TREAT/LEAPS/PHREAK per request |
-| Engine comparison | Not offered | Not applicable | **Differentiator**: side-by-side diff across 4 algorithms |
-| Fired-rules trace | `out-identifier` on `fire-all-rules` returns count, not named trace; full trace needs audit/JBoss tooling | `decisionResults[]` shows decisions, not rule-level trace | `InferenceTrace` with per-entry timestamp/event_type/rule_name (opt-in) |
-| Coverage / dead-rule | Requires external tooling (KIE scanner) | Not native | **Differentiator**: `CoverageTracker` fed by every execute → dead-rule detection + coverage dashboard |
-| Test-runner UI | Drools workbench test runner (separate) | DMN modeler test (basic) | Run panel in-rule-editor (P1) + Save-as-test (P3) |
-| Working-memory inspector | IBM ODM Working Memory view; Drools via IDE debug | N/A | Inference trace + `facts_after` (post-inference diff); live WM inspector deferred |
-| Per-rule timing | Via external profiler | Not native | Per-entry `duration_us` in trace (P2) |
+| Feature | Drools (Red Hat) | Camunda 8 | Trisotech | Our approach (rRules v6.0) |
+|---------|------------------|-----------|-----------|---------------------------|
+| FEEL evaluator | Full FEEL (Java) — mature, DMN TCK-passing | Full FEEL (Java) — mature | Full FEEL — mature, cloud-first | New Rust FEEL evaluator (Decimal128 via `rust_decimal`/`bigdecimal`, `chrono` for temporal). Smaller ecosystem but native Rust integration with the existing engine. |
+| Hit policies | All 7 + aggregators | All 7 + aggregators | All 7 + aggregators | All 7 + aggregators (table stakes — must match). |
+| DMN XML interchange | Full import/export (1.1–1.5) | Full (1.1–1.5) | Full (1.5, cloud) | DMN 1.5 import/export (round-trip). Single-version focus is acceptable for v6.0. |
+| DRD canvas | Full visual editor | Full visual editor (web) | Full visual editor (cloud) | **No DRD canvas** (anti-feature for v6.0). Decision-table editor is the authoring surface. Differentiate on engine + governance, not diagrams. |
+| Inference trace | Limited (debug logging) | Limited | Limited | **Differentiator**: structured `TraceEvent` emission + frontend trace panel (reuse v5.0). |
+| Per-decision metrics | Via Prometheus (generic) | Via Prometheus (generic) | Cloud metrics | **Differentiator**: dedicated `rrules_decision_*` counters, hit-policy-labeled. |
+| External functions | Java + PMML | Java | Java + PMML | FEEL lambdas only (non-external). Java/PMML explicitly out of scope (Rust). |
+| Governance (RBAC/approvals/audit/git) | Via Business Central | Via Camunda Console | Via cloud platform | **Already shipped** (v4.0) — a real differentiator. DMN decisions inherit rRules governance. |
+| Pluggable engine (Rete/TREAT/LEAPS/PHREAK) | No (single algorithm) | No | No | **Already shipped** (v3.0) — unique. DMN decisions use a separate evaluator but can optionally bridge. |
+
+## Built-in Function Inventory (Clause 10 reference)
+
+For the FEEL built-in function library feature (P1, HIGH complexity). ~70+ functions; grouped by category. Each has specified null-propagation semantics.
+
+- **Conversion** (13): `string`, `number` (1–2 arg), `date` (3 overloads), `time` (4 overloads), `date and time` (3 overloads), `duration`, `years and months duration`.
+- **String** (14): `substring`, `string length`, `upper case`, `lower case`, `substring before`, `substring after`, `replace` (regex), `contains`, `starts with`, `ends with`, `matches` (regex), `split` (regex), `string join` (1–2 arg).
+- **List** (20+): `list contains`, `list replace` (2 overloads), `count`, `min`, `max`, `sum`, `mean`, `all`, `any`, `sublist`, `append`, `concatenate`, `insert before`, `remove`, `reverse`, `index of`, `union`, `distinct values`, `flatten`, `product`, `median`, `stddev`, `mode`, `sort`.
+- **Numeric** (13): `decimal`, `floor` (1–2 arg), `ceiling` (1–2 arg), `round up`, `round down`, `round half up`, `round half down`, `abs`, `modulo`, `sqrt`, `log`, `exp`, `odd`, `even`.
+- **Date/Time** (6): `now`, `today`, `day of year`, `day of week`, `month of year`, `week of year`.
+- **Context** (5, DMN 1.4+): `context`, `context put` (2 overloads), `context merge`, `get value`, `get entries`.
+- **Boolean** (1): `not`.
+- **Range ordering** (13): `before`, `after`, `meets`, `met by`, `overlaps`, `overlaps before`, `overlaps after`, `finishes`, `finished by`, `includes`, `during`, `starts`, `started by`, `coincides`.
+- **Equality** (1): `is`.
 
 ## Sources
 
-- Drools / KIE Server REST execution (BatchExecutionCommand, lookup, stateless vs stateful, DisposeCommand): Red Hat PAM 7.9 Runtime Commands — https://docs.redhat.com/en/documentation/red_hat_process_automation_manager/7.9/html/deploying_and_managing_red_hat_process_automation_manager_services/runtime-commands-con_kie-apis ; Red Hat Decision Manager 7.13 KIE Server REST API — https://docs.redhat.com/en/documentation/red_hat_decision_manager/7.13/html/deploying_and_managing_red_hat_decision_manager_services/kie-server-rest-api-con_kie-apis (confidence: MEDIUM, web)
-- DMN decision-service REST endpoints (business-domain vs `dmnresult`, singleton coercion, no native batch, no rule-level trace): KIE docs GitHub — https://github.com/kiegroup/kie-docs/blob/ef14e5d2d3fe5ac85299a4e7d1f0709ce9f18bd7/doc-content/shared-kie-docs/src/main/asciidoc/KieServer/ref-rest-api-dmn-endpoints.adoc ; KIE Community — https://blog.kie.org/2020/08/kogito-2840-about-dmn-endpoints-on-kogito.html (confidence: MEDIUM, web)
-- Rule-engine test-runner UI patterns (fired-rules, working-memory deltas, inference trace, coverage, timing, diff highlighting): GoRules testing — https://gorules.mintlify.app/learn/authoring/testing ; IBM ODM ruleset debugging — https://www.ibm.com/docs/en/dbaoc?topic=rulesets-ruleset-debugging-tools ; OpenRules rule debugger — https://openrulesdecisionmanager.com/graphical-decision-modeling/rule-debugger/ ; Progress Corticon trace — https://docs.progress.com/bundle/corticon-js-rule-modeling/page/Trace-rule-execution.html ; DecisionRules rule testing — https://docs.decisionrules.io/doc/rules/common-rule-features/rule-testing (confidence: MEDIUM, web)
-- rRules codebase (grounding): `api/src/v1/execution.rs` (stub at line 307, request/response types, batch + reload already built), `engine/src/environment.rs` (`EngineBuilder`, `Engine::create_session`, `Session`, `ExecutionResult`), `engine/src/engine/registry.rs` (`EngineRegistry`, `ExecutionEngine` trait, `EngineType::all_variants`), `engine/src/engine/selector.rs` (`EngineSelector`, `EngineConfig`), `engine/src/coverage/mod.rs` (`CoverageTracker`, `record_evaluation`/`record_fire`/`record_skipped`), `frontend/src/routes/rules/$id.edit.tsx` (editor with no Run button), `frontend/src/api/rules.ts` (CRUD-only, no execute), `frontend/src/api/client.ts` (`/v1` baseURL + JWT bearer) (confidence: HIGH, local code)
+- OMG DMN 1.5 plain-text spec, Clause 10 (FEEL grammar rules 1–65, boxed expressions, semantic domain, operator semantics) — https://github.com/omg-dmn-taskforce/plain-text-spec/blob/main/10-expression-language-FEEL.adoc — **HIGH** (authoritative, OMG-published)
+- OMG DMN 1.3/1.5 specification §2.1 (conformance levels) — https://www.omg.org/spec/DMN/1.3/PDF — **HIGH** (normative conformance clause)
+- OMG DMN XSD schemas (DMN15.xsd, namespace `https://www.omg.org/spec/DMN/20230324/MODEL/`) — https://github.com/omg-dmn-taskforce/omg-dmn-spec — **HIGH** (normative interchange schema)
+- Camunda 8 Docs — hit policies — https://docs.camunda.io/docs/next/components/best-practices/modeling/choosing-the-dmn-hit-policy/ — **MEDIUM** (vendor docs, corroborate spec)
+- Drools DMN FEEL Handbook — https://kiegroup.github.io/dmn-feel-handbook/ — **MEDIUM** (vendor, corroborates function library + semantics)
+- QuantumBPM — boxed expressions + hit policies — https://quantumbpm.com/docs/dmn/expressions/overview — **MEDIUM** (community reference)
+- OMG Issue Tracker DMN15-31 — Collect semantics edge cases — https://issues.omg.org/issues/DMN15-31 — **HIGH** (normative; documents the distinct-sum + `sum([])` ambiguities deferred to 1.6)
 
 ---
-*Feature research for: BRMS live execution surface + frontend test-runner (rRules v5.0)*
-*Researched: 2026-07-02*
+*Feature research for: DMN 1.5 Decision Tables + FEEL Expression Language (DMN Level 3 compliance)*
+*Researched: 2026-07-06*
