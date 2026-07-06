@@ -1953,3 +1953,311 @@ async fn session_lifecycle_delete_reset() {
         "SC-4: reset session should have empty WM (no scorecard); body: {body5}",
     );
 }
+
+// =====================================================================
+// Phase 28 (Plan 28-01): Wave 0 RED backend integration scaffolds
+//
+// Four scaffolds encoding the EXEC-04 (inference_trace population) and
+// FRONTEND-04 (GET /v1/engines) contracts. Intentionally RED until Plan
+// 28-03 implements the backend:
+//
+//   - `trace_on_populates_entries`  (EXEC-04 / D-01) — `trace: true` →
+//     `inference_trace` is `Some` with `entries.len() >= 1` and the first
+//     entry has `event_type == "rule_fired"` + `rule_name == "r1"`.
+//   - `trace_off_is_none`           (EXEC-04 / D-02) — `trace` omitted →
+//     `inference_trace` is null/absent AND execution still works
+//     (`rules_fired >= 1`, `facts_after.scorecard.score == 10`).
+//   - `rete_trace_populated`        (EXEC-04 / D-01 C1 two-site) —
+//     `engine: "rete"` + `trace: true` → `inference_trace` populated
+//     (Rete's inlined `execute_rules` must also emit trace, not just the
+//     shared `direct_eval` helper).
+//   - `list_engines_returns_registry` (FRONTEND-04 / D-03) —
+//     `GET /v1/engines` → 200 `{ engines: [...], default: "..." }`;
+//     `engines` non-empty + sorted ascending + includes the default;
+//     `default` is a string.
+//
+// RED today because:
+//   - `ExecuteRequest` has no `trace` field yet (D-02) — serde ignores the
+//     unknown key and `execute_single` always sets `inference_trace: None`
+//     (L-01, `execution.rs:730`/`:950`). The `trace_on_populates_entries`
+//     and `rete_trace_populated` assertions on `inference_trace.entries`
+//     fail because the field is `null`.
+//   - `trace_off_is_none` PASSES today (trace off → null is the current
+//     behavior) — it is a regression guard for the GREEN plan (28-03 must
+//     keep the off path null + execution working). The `rules_fired >= 1`
+//     and `facts_after.scorecard.score == 10` assertions hold from Phase 23.
+//   - `GET /v1/engines` route is not registered (`main.rs` / configure_test_routes
+//     has no `/engines` route) → 404 → the status + body assertions fail.
+//
+// Plan 28-03 implements: `ExecuteRequest.trace: Option<bool>`, evaluator
+// trace emission at BOTH sites (D-01), and the `GET /v1/engines` handler +
+// route registration (D-03). Mirrors the Phase 23-04 / 24-01 / 25-01 /
+// 26-01 / 27-01 Wave 0 RED→GREEN + Nyquist pattern.
+//
+// Filter: `cargo test -p api --test execute_integration -- trace_on
+//          trace_off rete_trace list_engines`
+// =====================================================================
+
+/// EXEC-04 / D-01: POST `/v1/execute` with the keystone rule
+/// (`score := score + 10`), facts `{ "scorecard": { "score": 0 } }`, and
+/// `trace: true` in the body → response body's `inference_trace` is NOT
+/// null, has `entries` with length >= 1, the first entry has
+/// `event_type == "rule_fired"` and `rule_name` matching the fired rule id
+/// (`r1`); `summary` is present.
+///
+/// RED today: `ExecuteRequest` has no `trace` field (D-02) and
+/// `execute_single` always returns `inference_trace: None` (L-01). The
+/// `inference_trace` assertion fails because the field is `null`.
+/// Plan 28-03 turns this GREEN.
+#[serial_test::serial]
+#[actix_web::test]
+async fn trace_on_populates_entries() {
+    reset_test_env();
+    let app = init_test_app!();
+
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "facts": { "scorecard": { "score": 0 } },
+            "trace": true,
+        }))
+        .to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    // inference_trace must be present (an object, not null).
+    assert!(
+        body["inference_trace"].is_object(),
+        "EXEC-04 / D-01: inference_trace should be an object when trace:true; got {:?}; body: {body}",
+        body.get("inference_trace"),
+    );
+
+    // entries array with length >= 1.
+    let entries = body["inference_trace"]["entries"]
+        .as_array()
+        .unwrap_or_else(|| {
+            panic!(
+                "EXEC-04 / D-01: inference_trace.entries should be a non-empty array; got {:?}; body: {body}",
+                body["inference_trace"]["entries"],
+            )
+        });
+    assert!(
+        !entries.is_empty(),
+        "EXEC-04 / D-01: inference_trace.entries should have length >= 1; got len={}; body: {body}",
+        entries.len(),
+    );
+
+    // First entry: event_type == "rule_fired", rule_name == "r1".
+    let first = &entries[0];
+    assert_eq!(
+        first["event_type"].as_str(),
+        Some("rule_fired"),
+        "EXEC-04 / D-01: first trace entry event_type should be 'rule_fired'; got {:?}; body: {body}",
+        first["event_type"],
+    );
+    assert_eq!(
+        first["rule_name"].as_str(),
+        Some("r1"),
+        "EXEC-04 / D-01: first trace entry rule_name should be 'r1'; got {:?}; body: {body}",
+        first["rule_name"],
+    );
+
+    // summary present (object).
+    assert!(
+        body["inference_trace"]["summary"].is_object(),
+        "EXEC-04 / D-01: inference_trace.summary should be present (object); got {:?}; body: {body}",
+        body["inference_trace"]["summary"],
+    );
+}
+
+/// EXEC-04 / D-02: POST `/v1/execute` with the same keystone rule + facts
+/// but `trace` omitted (or `trace: false`) → response body's
+/// `inference_trace` is null/absent; `rules_fired` still >= 1 and
+/// `facts_after.scorecard.score == 10` (execution still works without
+/// trace — SC-3 latency neutrality is enforced by the evaluator skipping
+/// trace work when `trace` is absent/false).
+///
+/// This scaffold is GREEN today (trace off → null is the current behavior)
+/// and serves as a regression guard: Plan 28-03 must keep the off path
+/// null + execution working. The `rules_fired >= 1` and
+/// `facts_after.scorecard.score == 10` assertions hold from Phase 23.
+#[serial_test::serial]
+#[actix_web::test]
+async fn trace_off_is_none() {
+    reset_test_env();
+    let app = init_test_app!();
+
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "facts": { "scorecard": { "score": 0 } },
+            "trace": false,
+        }))
+        .to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    // inference_trace must be null/absent when trace is false.
+    assert!(
+        body["inference_trace"].is_null() || body.get("inference_trace").is_none(),
+        "EXEC-04 / D-02: inference_trace should be null/absent when trace:false; got {:?}; body: {body}",
+        body.get("inference_trace"),
+    );
+
+    // Execution still works: rules_fired >= 1.
+    assert!(
+        body["rules_fired"].as_u64().unwrap_or(0) >= 1,
+        "EXEC-04 / D-02: rules_fired should be >= 1 even without trace; got {}; body: {body}",
+        body["rules_fired"],
+    );
+
+    // facts_after.scorecard.score == 10 (the action's increment).
+    assert_eq!(
+        body["facts_after"]["scorecard"]["score"].as_i64(),
+        Some(10),
+        "EXEC-04 / D-02: facts_after.scorecard.score should be 10 (execution works without trace); body: {body}",
+    );
+}
+
+/// EXEC-04 / D-01 (C1 two-site): POST `/v1/execute` with `engine: "rete"`
+/// and `trace: true` → response `inference_trace` is populated with
+/// entries. This is the C1 two-site requirement — Rete's inlined
+/// `execute_rules` (`engine/src/engine/rete/mod.rs`) must also emit trace,
+/// not just the shared `direct_eval` helper (`direct_eval.rs`).
+///
+/// RED today: `ExecuteRequest` has no `trace` field (D-02) and neither
+/// evaluator site emits trace (D-01 not implemented). The
+/// `inference_trace` assertion fails because the field is `null`.
+/// Plan 28-03 turns this GREEN by threading `collect_trace` into BOTH
+/// the shared helper AND `ReteEngine::execute_rules` (C1).
+#[serial_test::serial]
+#[actix_web::test]
+async fn rete_trace_populated() {
+    reset_test_env();
+    let app = init_test_app!();
+
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "engine": "rete",
+            "facts": { "scorecard": { "score": 0 } },
+            "trace": true,
+        }))
+        .to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    // inference_trace must be present (an object, not null) for the rete engine.
+    assert!(
+        body["inference_trace"].is_object(),
+        "EXEC-04 / D-01 (C1 rete): inference_trace should be an object when engine:'rete' + trace:true; got {:?}; body: {body}",
+        body.get("inference_trace"),
+    );
+
+    // entries array with length >= 1.
+    let entries = body["inference_trace"]["entries"]
+        .as_array()
+        .unwrap_or_else(|| {
+            panic!(
+                "EXEC-04 / D-01 (C1 rete): inference_trace.entries should be a non-empty array; got {:?}; body: {body}",
+                body["inference_trace"]["entries"],
+            )
+        });
+    assert!(
+        !entries.is_empty(),
+        "EXEC-04 / D-01 (C1 rete): inference_trace.entries should have length >= 1 for rete engine; got len={}; body: {body}",
+        entries.len(),
+    );
+
+    // First entry event_type == "rule_fired" (the rete path emits the same
+    // event shape as the direct_eval path).
+    assert_eq!(
+        entries[0]["event_type"].as_str(),
+        Some("rule_fired"),
+        "EXEC-04 / D-01 (C1 rete): first trace entry event_type should be 'rule_fired'; got {:?}; body: {body}",
+        entries[0]["event_type"],
+    );
+}
+
+/// FRONTEND-04 / D-03: GET `/v1/engines` → 200 response with body
+/// `{ "engines": [...], "default": "..." }`; `engines` array is non-empty
+/// and includes at least the default engine; `engines` is sorted ascending;
+/// `default` is a string.
+///
+/// RED today: no `/v1/engines` route is registered in `configure_test_routes`
+/// (or `main.rs`) → the request returns 404 → the status assertion fails.
+/// Plan 28-03 adds the `list_engines` handler + registers the route
+/// (D-03).
+#[serial_test::serial]
+#[actix_web::test]
+async fn list_engines_returns_registry() {
+    reset_test_env();
+    let app = init_test_app!();
+
+    let req = test::TestRequest::get()
+        .uri("/v1/engines")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(
+        resp.status().is_success(),
+        "FRONTEND-04 / D-03: GET /v1/engines should return 200, got {}",
+        resp.status(),
+    );
+
+    let body = json_body(resp).await;
+
+    // engines is a non-empty array of strings.
+    let engines = body["engines"]
+        .as_array()
+        .unwrap_or_else(|| {
+            panic!(
+                "FRONTEND-04 / D-03: 'engines' should be an array; got {:?}; body: {body}",
+                body["engines"],
+            )
+        });
+    assert!(
+        !engines.is_empty(),
+        "FRONTEND-04 / D-03: 'engines' should be non-empty; got {:?}; body: {body}",
+        engines,
+    );
+    for e in engines {
+        assert!(
+            e.is_string(),
+            "FRONTEND-04 / D-03: each engine entry should be a string; got {:?}; body: {body}",
+            e,
+        );
+    }
+
+    // default is a string.
+    let default = body["default"]
+        .as_str()
+        .unwrap_or_else(|| {
+            panic!(
+                "FRONTEND-04 / D-03: 'default' should be a string; got {:?}; body: {body}",
+                body["default"],
+            )
+        });
+    assert!(
+        !default.is_empty(),
+        "FRONTEND-04 / D-03: 'default' should be a non-empty string; got {:?}; body: {body}",
+        default,
+    );
+
+    // engines includes the default.
+    let engine_names: Vec<String> = engines
+        .iter()
+        .map(|v| v.as_str().unwrap_or("").to_string())
+        .collect();
+    assert!(
+        engine_names.iter().any(|n| n == default),
+        "FRONTEND-04 / D-03: 'engines' should include the default engine ({}); got {:?}; body: {body}",
+        default,
+        engine_names,
+    );
+
+    // engines is sorted ascending.
+    let mut sorted = engine_names.clone();
+    sorted.sort();
+    assert_eq!(
+        engine_names, sorted,
+        "FRONTEND-04 / D-03: 'engines' should be sorted ascending; got {:?}; body: {body}",
+        engine_names,
+    );
+}
