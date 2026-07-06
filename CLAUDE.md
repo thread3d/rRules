@@ -8,9 +8,9 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 
 ## Current Phase
 
-Milestone v4.0 (Production Platform) — **shipped & tagged** 2026-07-02 (Phases 17–22; phase 22 verified PASS, 9/9 requirements MET). Git tags `v1.0`–`v4.0` all exist.
+Milestone v5.0 (Live Execution) — **shipped & tagged** 2026-07-06 (Phases 23–28; verified closeout via audit → debt-fix → re-audit `passed`). Git tags `v1.0`–`v5.0` all exist. v5.0 closed the long-standing `/v1/execute` stub: real rule firing through `EngineRegistry`, live Prometheus metrics + WS broadcast, `RuleExecutionTracker` singleton feeding dead-rule detection, shared reloadable `RuleSet` + `JobStore`, `SessionManager` (stateful sessions), and a frontend test-runner.
 
-**Next Step:** v4.0 is closed and tagged. Run `/gsd:new-milestone` to plan the next milestone. Candidate thesis (proposed): **v5.0 Live Execution** — wire the `/v1/execute` API (currently a stub returning `rules_fired: 0`, `api/src/v1/execution.rs:307`) to real engine invocation, auto-populate `RuleExecutionTracker`/`CoverageTracking`, and feed the v4.0 monitoring surfaces (Prometheus, dashboard, dead-rule, coverage) with live data.
+**Next Step:** v5.0 is closed and tagged. Run `/gsd:new-milestone` to plan the next milestone. Candidate thesis (proposed): **v6.0 DMN Level 3 Compliance** — Phase 6 shipped as a *stub* in v1.0 (no `dmn` module exists in `engine/src` or `api/src`); deliver a real DMN 1.5 parser, FEEL expression language, and decision-table engine with hit policies to close that stated key requirement.
 
 ## Project Structure
 
@@ -48,5 +48,5 @@ Milestone v4.0 (Production Platform) — **shipped & tagged** 2026-07-02 (Phases
 
 ## Next Steps
 
-1. Run `/gsd:new-milestone` to plan the next milestone (proposed thesis: **v5.0 Live Execution** — close the `execute_rules` stub gap)
-2. Optionally: add a git remote (`git remote add origin <url>`) and push tags `v1.0`–`v4.0` — currently local-only (no remote configured)
+1. Run `/gsd:new-milestone` to plan the next milestone (proposed thesis: **v6.0 DMN Level 3 Compliance** — close the stubbed Phase 6 gap; no real `dmn` module exists yet)
+2. Optionally: add a git remote (`git remote add origin <url>`) and push tags `v1.0`–`v5.0` — currently local-only (no remote configured)

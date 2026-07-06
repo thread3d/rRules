@@ -4,7 +4,8 @@ use actix_web::web;
 
 pub mod approvals;
 pub mod audit;
-// pub mod auth;  // TODO: implement authentication module
+// Auth is implemented at `crate::auth` (handlers) + `crate::middleware::auth`
+// (JWT validation) — see api/src/lib.rs, not a v1 submodule.
 pub mod branches;
 pub mod categories;
 pub mod execution;
@@ -13,7 +14,8 @@ pub mod rules;
 pub mod sessions;
 pub mod simulation;
 pub mod tags;
-// pub mod tenants;  // TODO: implement multi-tenancy module
+// NOTE: multi-tenancy (TenantStore/MemoryTenantStore) exists but a v1 tenants
+// route module is not yet wired — see .planning/STATE.md deferred items.
 
 // Export common types for use in main.rs
 pub use execution::{ReloadRequest, ReloadResponse};

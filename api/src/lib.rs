@@ -3,7 +3,6 @@
 //! Provides HTTP endpoints for rule execution, CRUD operations,
 //! and governance features.
 
-pub mod models;
 pub mod metrics;
 pub mod v1;
 pub mod websocket;
