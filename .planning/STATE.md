@@ -2,15 +2,19 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: DMN Level 3 Compliance
+current_phase: 29
+current_phase_name: complete — all 3 plans done
 status: executing
-last_updated: "2026-07-06T21:05:24.293Z"
-last_activity: 2026-07-06 -- Plan 29-02 executed (DMN 1.5 XML parser + integration test corpus)
+stopped_at: Completed 29-03-PLAN.md
+last_updated: "2026-07-06T21:26:45.907Z"
+last_activity: 2026-07-06
+last_activity_desc: Plan 29-03 executed (DMN XML exporter + round-trip DOM-compare gate)
 progress:
   total_phases: 7
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
-  percent: 0
+  completed_plans: 3
+  percent: 14
 ---
 
 # Project State
@@ -24,16 +28,16 @@ See: `.planning/PROJECT.md` (updated 2026-07-06)
 
 ## Current Position
 
-Phase: 29 — DMN 1.5 Model + XML Parser + Canonical IR (executing)
-Plan: 29-02 complete; next is 29-03 (Wave 2 — exporter)
-Status: Executing Phase 29
-Last activity: 2026-07-06 -- Plan 29-02 executed (DMN 1.5 XML parser + integration test corpus)
+Phase: 29 — DMN 1.5 Model + XML Parser + Canonical IR (complete — all 3 plans done)
+Plan: 29-03 complete; Phase 29 fully delivered (29-01 IR + 29-02 parser + 29-03 exporter/round-trip)
+Status: Phase 29 complete — ready to plan Phase 30
+Last activity: 2026-07-06 -- Plan 29-03 executed (DMN XML exporter + round-trip DOM-compare gate)
 
 ### Milestone v6.0 Phases
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
-| 29 | DMN 1.5 Model + XML Parser + Canonical IR | DMN-04, DMN-05, DMN-06 | executing (29-01, 29-02 complete) |
+| 29 | DMN 1.5 Model + XML Parser + Canonical IR | DMN-04, DMN-05, DMN-06 | complete (29-01, 29-02, 29-03 all done) |
 | 30 | FEEL Value Types + Type Lattice + Temporal Domain | DMN-08, DMN-09, DMN-10 | not_started (research-needed) |
 | 31 | FEEL Parser + Evaluator + Built-in Function Library | DMN-11..DMN-18 | not_started (research-needed; largest) |
 | 32 | Decision-Table Engine + Hit Policies | DMN-19, DMN-20, DMN-21 | not_started |
@@ -200,6 +204,13 @@ From v2.0 milestone:
 
 - D-61 to D-63 (DMN 1.5 parser, decision tables with hit policies, FEEL expression language)
 
+**Phase 29 DMN 1.5 Model + XML Parser + Canonical IR (v6.0):**
+
+- D-29-03a: Use quick_xml::writer::Writer with Event::CData/Event::Text directly (not quick_xml::se serde serializer) — serde-XML loses attribute order and CDATA fidelity (Pitfall 11)
+- D-29-03b: Always emit hitPolicy (default Unique -> "UNIQUE") so the default is structural on export; parse("UNIQUE")==Unique round-trips cleanly
+- D-29-03c: CDATA branch on TextContent.is_cdata — Event::CData when true, escaped BytesText otherwise (T-29-05 XML-injection mitigation)
+- D-29-03d: Round-trip is structural IR-equality (PartialEq), not byte-exact; byte-exact round-trip is Phase 35 (DMN-07)
+
 **Phase 7 Core Testing Infrastructure Foundation (v2.0):**
 
 - D-71 to D-76 (Rust testing stack, TestSession, FixtureBuilder, ForwardChainingTester, InferenceTrace exposure, DeterministicMode)
@@ -282,7 +293,7 @@ From v3.0 milestone:
 
 **Stopped at:** Completed 29-02-PLAN.md
 
-Last session: 2026-07-06T21:05:24.284Z
+Last session: 2026-07-06T21:26:36.615Z
 
 **Completed Phases:**
 
@@ -317,3 +328,4 @@ Last session: 2026-07-06T21:05:24.284Z
 | Phase 27 P01 | 90min | 3 tasks | 8 files |
 | Phase 29 P01 | 4min | 3 tasks | 7 files |
 | Phase 29 P02 | 45min | 2 tasks | 8 files |
+| Phase 29 P03 | 15min | 2 tasks | 2 files |

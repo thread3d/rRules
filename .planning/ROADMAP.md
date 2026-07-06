@@ -83,7 +83,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 - New parallel evaluation surface (`engine/src/dmn/` + `POST /v1/decisions/{id}/evaluate`); NOT routed through `/v1/execute` or `EngineRegistry`.
 - Build FEEL from scratch (no `dsntk` dependency); stack: `quick-xml 0.40`, `rust_decimal 1.42`, `chrono-tz 0.10`, hand-written recursive-descent FEEL parser.
 
-- [ ] **Phase 29: DMN 1.5 Model + XML Parser + Canonical IR** — DMN 1.1–1.5 `.dmn` import into a canonical IR (round-trip foundation)
+- [x] **Phase 29: DMN 1.5 Model + XML Parser + Canonical IR** — DMN 1.1–1.5 `.dmn` import into a canonical IR (round-trip foundation) (completed 2026-07-06)
 - [ ] **Phase 30: FEEL Value Types + Type Lattice + Temporal Domain** — Decimal128, date/time/duration types, type lattice (research-needed)
 - [ ] **Phase 31: FEEL Parser + Evaluator + Built-in Function Library** — Full FEEL grammar 1–65, ternary logic, 10 boxed expressions, ~70 builtins, AST cache (research-needed; largest phase)
 - [ ] **Phase 32: Decision-Table Engine + Hit Policies** — All 7 hit policies + COLLECT aggregators + allowed-values validation
@@ -104,7 +104,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
   1. A `.dmn` file from DMN 1.1, 1.3, or 1.5 imports into the canonical IR without error, preserving item definitions, information items, descriptions, annotations, IDs, and element order.
   2. The parser is XXE-hardened — external entity references are rejected — and CDATA sections are handled.
   3. A decision table imported with no explicit `hitPolicy` attribute defaults to UNIQUE.
-  4. The canonical IR is the sole store: nothing downstream reconstructs DMN from a non-IR shape (round-trip fidelity is structural from day one).**Plans**: 1/3 plans executed
+  4. The canonical IR is the sole store: nothing downstream reconstructs DMN from a non-IR shape (round-trip fidelity is structural from day one).**Plans**: 3/3 plans complete
 
 **Wave 1**
 
@@ -116,7 +116,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 29-03-PLAN.md — DMN XML exporter + round-trip DOM-compare tests against import corpus (DMN-06)
+- [x] 29-03-PLAN.md — DMN XML exporter + round-trip DOM-compare tests against import corpus (DMN-06)
 
 ### Phase 30: FEEL Value Types + Type Lattice + Temporal Domain
 
@@ -245,7 +245,7 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 2/2 | Complete | 2026-07-03 |
 | 27. Stateful sessions | v5.0 | 1/1 | Complete | 2026-07-06 |
 | 28. Frontend test-runner | v5.0 | 5/5 | Complete | 2026-07-06 |
-| 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 2/3 | In Progress|  |
+| 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 3/3 | Complete   | 2026-07-06 |
 | 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 0/TBD | Not started | - |
 | 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 0/TBD | Not started | - |
 | 32. Decision-Table Engine + Hit Policies | v6.0 | 0/TBD | Not started | - |
