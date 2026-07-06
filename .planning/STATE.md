@@ -24,7 +24,7 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-06)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** v6.0 DMN Level 3 Compliance — planning complete (requirements + roadmap defined); next: `/gsd-plan-phase 29`
+**Current focus:** v6.0 DMN Level 3 Compliance — Phase 29 (DMN model + XML parser + canonical IR) complete; next: `/gsd-plan-phase 30` (research-needed)
 
 ## Current Position
 
