@@ -15,6 +15,7 @@ use utoipa::OpenApi;
     paths(
         // Execution
         crate::v1::execution::execute_rules,
+        crate::v1::execution::list_engines,
         crate::v1::execution::batch_execute_rules,
         crate::v1::execution::reload_rules,
         crate::v1::execution::get_job_status,
@@ -76,6 +77,7 @@ use utoipa::OpenApi;
         crate::v1::execution::InferenceTrace,
         crate::v1::execution::InferenceTraceEntry,
         crate::v1::execution::TraceSummary,
+        crate::v1::execution::EnginesResponse,
         crate::v1::execution::ReloadResult,
         crate::v1::execution::ReloadJob,
         crate::v1::execution::ReloadStatus,
