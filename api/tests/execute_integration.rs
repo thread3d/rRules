@@ -29,6 +29,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use actix_web::{body::BoxBody, test, web, App};
 use serde_json::{json, Value};
@@ -40,6 +41,9 @@ use api::metrics::{
 use api::v1::execution::{
     batch_execute_rules, execute_rules, get_job_status, init_job_store, list_jobs, reload_rules,
     EngineState, JobStore, SharedRuleSet,
+};
+use api::v1::sessions::{
+    dispose_session, read_session_config, reset_session, SessionConfig, SessionManager,
 };
 use engine::data_types::Value as EngineValue;
 use engine::engine::registry::EngineRegistry;
@@ -74,6 +78,48 @@ fn score_plus_10_rule() -> Rule {
             field: "score".to_string(),
             value: EngineValue::Integer(0),
             op: ComparisonOp::Eq,
+        })
+        .action(Action::UpdateFact {
+            id: "scorecard".to_string(),
+            fields,
+        })
+        .build()
+}
+
+/// Phase 27 (SC-1..SC-4): the accumulating keystone rule — same action as
+/// `score_plus_10_rule()` (`score := score + 10`) but with condition
+/// `score >= 0` (`ComparisonOp::Ge`) so the rule fires on EVERY execute call
+/// as long as a `scorecard` fact exists in working memory. This lets SC-1
+/// prove WM accumulation: call 1 inserts `{score:0}` → rule fires → score:10;
+/// call 2 with `facts={}` → WM retains score:10 → rule fires again → score:20
+/// (impossible in the stateless path, which starts from request facts each
+/// call and would have no scorecard to match).
+///
+/// Rule 1 deviation: the plan's SC-1 expects `score:20` on the second
+/// same-session call, but `score_plus_10_rule()` has condition `score == 0`
+/// which only matches on the first call (after increment, score is 10 and the
+/// condition never matches again). The accumulating variant with `Ge` is the
+/// minimal fix that preserves the plan's intent (prove WM accumulation) while
+/// staying deterministic (one scorecard fact in WM, one rule fire, one
+/// `UpdateFact` application per call).
+fn score_plus_10_accumulating_rule() -> Rule {
+    let mut fields = HashMap::new();
+    fields.insert(
+        "score".to_string(),
+        Expression::Add(
+            Box::new(Expression::FieldRef {
+                fact_type: "scorecard".to_string(),
+                field: "score".to_string(),
+            }),
+            Box::new(Expression::Literal(EngineValue::Integer(10))),
+        ),
+    );
+    Rule::builder("r1", "Increment score (accumulating)")
+        .condition(Condition::Pattern {
+            fact_type: "scorecard".to_string(),
+            field: "score".to_string(),
+            value: EngineValue::Integer(0),
+            op: ComparisonOp::Ge,
         })
         .action(Action::UpdateFact {
             id: "scorecard".to_string(),
@@ -135,6 +181,20 @@ fn shared_ruleset() -> web::Data<Arc<RwLock<SharedRuleSet>>> {
     web::Data::new(Arc::new(RwLock::new(SharedRuleSet::new(ruleset))))
 }
 
+/// Phase 27 (SC-1..SC-4): shared `SharedRuleSet` containing the accumulating
+/// keystone rule (`score >= 0` → `score += 10`). Used by
+/// `init_test_app_with_manager!` so the sessionful SC tests can prove WM
+/// accumulation across calls (the `score == 0` condition in
+/// `score_plus_10_rule` only fires once, making `score:20` on the second call
+/// impossible — see `score_plus_10_accumulating_rule` doc comment).
+fn shared_accumulating_ruleset() -> web::Data<Arc<RwLock<SharedRuleSet>>> {
+    let mut ruleset = RuleSet::new();
+    ruleset
+        .add_rule(score_plus_10_accumulating_rule())
+        .expect("add_rule");
+    web::Data::new(Arc::new(RwLock::new(SharedRuleSet::new(ruleset))))
+}
+
 /// Build the never-fires sentinel rule: `r2` with condition `score == 999`
 /// and a no-op `Action::LogMessage`. `r2`'s condition never matches the
 /// inserted fact (`score == 0`), so it is evaluated but never fires. This is
@@ -183,6 +243,8 @@ macro_rules! init_two_rule_app {
                 .app_data(shared_metrics_tx())
                 .app_data(shared_job_store())
                 .app_data(shared_engine_state())
+                // Phase 27 (D-09): shared SessionManager for SC-1..SC-4.
+                .app_data(shared_session_manager())
                 .configure(configure_test_routes)
                 .configure(configure_metrics),
         )
@@ -257,6 +319,66 @@ fn shared_engine_state() -> web::Data<EngineState> {
 }
 
 // =====================================================================
+// Phase 27 (SESS-01): shared SessionManager for SC-1..SC-4
+// =====================================================================
+
+/// `OnceLock` holding the single shared `Arc<SessionManager>` the test App and
+/// `reset_test_env()` both reference. Constructed once on first access via
+/// `shared_session_manager()`; `reset_test_env()` calls `.clear()` on the
+/// same `Arc` between tests so SC-1..SC-4 start from a known-empty state
+/// (D-09 — mirrors the `CoverageTracking::clear()` /
+/// `RuleExecutionTracker::clear()` pattern).
+static SHARED_SESSION_MANAGER: std::sync::OnceLock<std::sync::Arc<SessionManager>> =
+    std::sync::OnceLock::new();
+
+/// Construct the `rrules_sessions_active` IntGauge on a fresh
+/// `prometheus::Registry` (test-isolation: NOT the api crate's shared
+/// `ExecutionCounters.registry` — registering the same metric name twice on
+/// the same registry panics, Pitfall 24-A). The gauge is set to
+/// `SessionManager::len()` after each execute and on every sweep eviction.
+fn build_session_gauge() -> prometheus::IntGauge {
+    let gauge = prometheus::IntGauge::new(
+        "rrules_sessions_active_test",
+        "Active stateful session count (test gauge)",
+    )
+    .expect("construct rrules_sessions_active_test gauge");
+    let registry = prometheus::Registry::new();
+    registry
+        .register(Box::new(gauge.clone()))
+        .expect("register rrules_sessions_active_test");
+    gauge
+}
+
+/// Build (or return the cached) shared `Arc<SessionManager>` for SC-1..SC-4.
+/// The same `Arc` is installed as `app_data` in `init_test_app!` /
+/// `init_two_rule_app!` and referenced by `reset_test_env()` so `.clear()`
+/// drains the same registry the tests use (D-09). Mirrors the
+/// `shared_counters()` shape.
+fn shared_session_manager() -> web::Data<std::sync::Arc<SessionManager>> {
+    let arc = SHARED_SESSION_MANAGER.get_or_init(|| {
+        std::sync::Arc::new(SessionManager::new(
+            read_session_config(),
+            build_session_gauge(),
+        ))
+    });
+    web::Data::new(arc.clone())
+}
+
+/// Test-only accessor for the shared `Arc<SessionManager>` so
+/// `reset_test_env()` can call `.clear()` on the same instance the App uses
+/// (D-09 — registry isolation between serial tests).
+fn shared_session_manager_arc() -> std::sync::Arc<SessionManager> {
+    SHARED_SESSION_MANAGER
+        .get_or_init(|| {
+            std::sync::Arc::new(SessionManager::new(
+                read_session_config(),
+                build_session_gauge(),
+            ))
+        })
+        .clone()
+}
+
+// =====================================================================
 // Test App wiring
 // =====================================================================
 
@@ -270,6 +392,17 @@ fn configure_test_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/v1")
             .route("/execute", web::post().to(execute_rules))
+            // Phase 27 (D-09 / D-05): lifecycle routes for SC-4. Registered
+            // before any wildcard `/execute/{...}` route (none currently
+            // exists, but the discipline holds per PATTERNS.md line 372).
+            .route(
+                "/execute/session/{id}",
+                web::delete().to(dispose_session),
+            )
+            .route(
+                "/execute/session/{id}/reset",
+                web::post().to(reset_session),
+            )
             .route("/metrics/coverage", web::get().to(coverage_endpoint))
             .route("/metrics/dead-rules", web::get().to(dead_rules_endpoint))
             // Phase 25 (Plan 25-01 Task 2): reload + batch + jobs routes.
@@ -312,6 +445,34 @@ macro_rules! init_test_app {
                 .app_data(shared_metrics_tx())
                 .app_data(shared_job_store())
                 .app_data(shared_engine_state())
+                // Phase 27 (D-09): shared SessionManager for SC-1..SC-4.
+                .app_data(shared_session_manager())
+                .configure(configure_test_routes)
+                .configure(configure_metrics),
+        )
+        .await
+    };
+}
+
+/// Phase 27 (SC-2 / SC-3): like `init_test_app!` but swaps
+/// `shared_session_manager()` for a caller-supplied `web::Data<Arc<SessionManager>>`
+/// so tests needing non-default `idle_ttl` / `max_sessions` knobs can install
+/// their own manager without disturbing the process-shared OnceLock instance
+/// (D-09 — the shared manager captures env vars at first construction).
+macro_rules! init_test_app_with_manager {
+    ($manager_data:expr) => {
+        test::init_service(
+            App::new()
+                .app_data(shared_registry())
+                .app_data(shared_selector())
+                // Phase 27 (SC-1..SC-4): accumulating rule so WM accumulation
+                // is provable across same-session calls (score >= 0, not ==0).
+                .app_data(shared_accumulating_ruleset())
+                .app_data(shared_counters())
+                .app_data(shared_metrics_tx())
+                .app_data(shared_job_store())
+                .app_data(shared_engine_state())
+                .app_data($manager_data)
                 .configure(configure_test_routes)
                 .configure(configure_metrics),
         )
@@ -329,10 +490,24 @@ fn reset_test_env() {
     // keystone e2e tests start from a known-empty state (L-05 isolation
     // for the second process-wide singleton).
     RuleExecutionTracker::clear();
+    // Phase 27 (D-09): clear the shared SessionManager registry so SC-1..SC-4
+    // start from a known-empty state. Same shape as the CoverageTracking /
+    // RuleExecutionTracker clear() calls — the shared Arc is the same one
+    // the test App installs as app_data.
+    shared_session_manager_arc().clear();
     // SAFETY on env vars: tests run serially (#[serial_test::serial]); no
     // concurrent test reads/writes these vars. Plan 23-05's handler reads
     // RRULES_DEFAULT_ENGINE once per request; Plan 25's reload handler reads
-    // RULE_STORAGE_PATH once per reload.
+    // RULE_STORAGE_PATH once per reload. Phase 27's read_session_config
+    // reads the TTL/max-sessions knobs once per SessionManager construction
+    // (the SHARED_SESSION_MANAGER OnceLock), so env-var mutations between
+    // tests only take effect on the first access per process — SC-2/SC-3
+    // mutate env vars AND call clear() + use the existing manager (the env
+    // vars are read by sweep_expired's Instant math via the manager's
+    // idle_ttl/max_sessions fields captured at construction). Tests that
+    // need different env-var-driven TTL/max-sessions values must construct
+    // their own SessionManager (not the shared one) — see
+    // `lru_evicts_oldest_and_gauge_capped` + `session_ttl_evicts_idle`.
     std::env::set_var("RRULES_DEFAULT_ENGINE", "rete");
     std::env::set_var("RULE_STORAGE_PATH", "./rules");
 }
@@ -1437,4 +1612,344 @@ fn extract_prom_counter(text: &str, name: &str, engine: &str) -> u64 {
         }
     }
     0
+}
+
+// =====================================================================
+// Phase 27 (SESS-01): Wave 0 RED keystone SC tests
+//
+// Four `#[serial_test::serial]` integration tests encoding the SC-1..SC-4
+// success criteria. These are RED today (Task 1) because `execute_single`
+// has no sessionful branch, `lookup_or_create` returns `NOT_IMPLEMENTED`,
+// and `dispose_session` / `reset_session` return `NOT_IMPLEMENTED`. Task 2
+// implements `SessionManager`; Task 3 wires the live `execute_single` branch
+// and turns all four GREEN.
+//
+// All four use the accumulating keystone rule (`score >= 0` → `score += 10`,
+// see `score_plus_10_accumulating_rule`) so WM accumulation across same-
+// session calls is provable: call 1 inserts `{score:0}` → score:10; call 2
+// with `facts={}` → WM retains score:10 → rule fires again → score:20.
+//
+// Filter: `cargo test -p api --test execute_integration -- stateful_session
+//          session_ttl lru_evicts session_lifecycle`
+// =====================================================================
+
+/// SC-1: A second `POST /v1/execute` with the same `session_id` and
+/// `facts={}` fires r1 again against the accumulated working memory and
+/// returns `facts_after.scorecard.score == 20` (NOT 10 — proves WM
+/// accumulated across calls; impossible in the stateless path which starts
+/// from request facts each call and would have no scorecard to match).
+///
+/// Also asserts `response.session_id` is present (the server-generated UUID)
+/// on the first call — absent on the stateless path (D-04/D-05).
+///
+/// RED today: `execute_single` has no sessionful branch → stateless path
+/// returns `session_id: None` (assertion fails) and the second call with
+/// `facts={}` has no scorecard in WM → no rule fires → no score (assertion
+/// fails).
+#[serial_test::serial]
+#[actix_web::test]
+async fn stateful_session_accumulates_wm() {
+    reset_test_env();
+    let app = init_test_app_with_manager!(shared_session_manager());
+
+    // Call 1: insert {score:0}, rule fires (0 >= 0), score → 10.
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "session_id": "s1",
+            "facts": { "scorecard": { "score": 0 } }
+        }))
+        .to_request();
+    let body1 = json_body(test::call_service(&app, req).await).await;
+    let score1 = body1["facts_after"]["scorecard"]["score"].as_i64();
+    assert_eq!(
+        score1,
+        Some(10),
+        "SC-1 call 1: facts_after.scorecard.score should be 10, got {:?}; body: {body1}",
+        score1,
+    );
+    assert!(
+        body1["session_id"].as_str().is_some(),
+        "SC-1 call 1: response should carry server session_id (D-04), got {:?}; body: {body1}",
+        body1.get("session_id"),
+    );
+
+    // Call 2: same session_id, facts={}. WM retains score:10 from call 1.
+    // Rule fires again (10 >= 0), score → 20. This is the keystone honesty
+    // anchor — impossible in the stateless path.
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "session_id": "s1",
+            "facts": {}
+        }))
+        .to_request();
+    let body2 = json_body(test::call_service(&app, req).await).await;
+    let score2 = body2["facts_after"]["scorecard"]["score"].as_i64();
+    assert_eq!(
+        score2,
+        Some(20),
+        "SC-1 call 2: facts_after.scorecard.score should be 20 (accumulated WM), got {:?}; body: {body2}",
+        score2,
+    );
+}
+
+/// SC-2: A session untouched for >idle TTL is evicted by `sweep_expired()`;
+/// a subsequent call with that `session_id` creates a FRESH session with
+/// empty WM (no scorecard in `facts_after`). A session touched within TTL
+/// persists — its second call returns `score:20` (WM accumulated).
+///
+/// Uses a custom `SessionManager` with `idle_ttl = 1s` so the test is
+/// deterministic (sleep 1100ms → sweep → evict). The sweep is called directly
+/// (white-box, RESEARCH A2) — no reliance on the background sweep task.
+///
+/// RED today: `execute_single` has no sessionful branch → no sessions are
+/// created → `session_id` assertion fails on call 1.
+#[serial_test::serial]
+#[actix_web::test]
+async fn session_ttl_evicts_idle() {
+    reset_test_env();
+
+    // Custom manager with idle_ttl=1s for deterministic eviction.
+    let config = SessionConfig {
+        idle_ttl: Duration::from_secs(1),
+        max_lifetime: Duration::from_secs(86400),
+        max_sessions: 1024,
+        sweep_interval: Duration::from_secs(60),
+    };
+    let manager = Arc::new(SessionManager::new(config, build_session_gauge()));
+    let app = init_test_app_with_manager!(web::Data::new(manager.clone()));
+
+    // Call 1: create s2, insert {score:0}, rule fires, score → 10.
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "session_id": "s2",
+            "facts": { "scorecard": { "score": 0 } }
+        }))
+        .to_request();
+    let body1 = json_body(test::call_service(&app, req).await).await;
+    assert_eq!(
+        body1["facts_after"]["scorecard"]["score"].as_i64(),
+        Some(10),
+        "SC-2 call 1: score should be 10; body: {body1}",
+    );
+    assert!(
+        body1["session_id"].as_str().is_some(),
+        "SC-2 call 1: response should carry server session_id; body: {body1}",
+    );
+
+    // Wait > idle_ttl (1s), then sweep — evicts s2 (idle).
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    manager.sweep_expired();
+
+    // Call 2: s2 was evicted → fresh session with empty WM → no scorecard.
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "session_id": "s2", "facts": {} }))
+        .to_request();
+    let body2 = json_body(test::call_service(&app, req).await).await;
+    assert!(
+        body2["facts_after"]["scorecard"].is_null(),
+        "SC-2: evicted session should have empty WM (no scorecard in facts_after), got {:?}; body: {body2}",
+        body2["facts_after"]["scorecard"],
+    );
+
+    // Contrast: a touched session persists. Create s2b, then immediately
+    // call again (touch within TTL) → WM accumulates → score:20.
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "session_id": "s2b",
+            "facts": { "scorecard": { "score": 0 } }
+        }))
+        .to_request();
+    let _body2b1 = json_body(test::call_service(&app, req).await).await;
+
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "session_id": "s2b", "facts": {} }))
+        .to_request();
+    let body2b2 = json_body(test::call_service(&app, req).await).await;
+    assert_eq!(
+        body2b2["facts_after"]["scorecard"]["score"].as_i64(),
+        Some(20),
+        "SC-2: touched session should persist with accumulated WM (score:20), got {:?}; body: {body2b2}",
+        body2b2["facts_after"]["scorecard"]["score"],
+    );
+}
+
+/// SC-3: When session count exceeds `MAX_SESSIONS`, `sweep_expired()` evicts
+/// the LRU entry (oldest `last_used`). The `rrules_sessions_active` gauge
+/// reflects the capped live count (reads `MAX_SESSIONS`, not
+/// `MAX_SESSIONS + 1`).
+///
+/// Uses a custom `SessionManager` with `max_sessions = 2`. Creates s1/s2/s3,
+/// calls `sweep_expired()` directly (LRU eviction when over max), asserts
+/// `len() == 2` (gauge capped), s1 evicted (fresh WM on resume), s2 persists
+/// (accumulated WM).
+///
+/// RED today: no sessions are created (stateless path) → `len() == 0` !=
+/// 2 → assertion fails.
+#[serial_test::serial]
+#[actix_web::test]
+async fn lru_evicts_oldest_and_gauge_capped() {
+    reset_test_env();
+
+    let config = SessionConfig {
+        idle_ttl: Duration::from_secs(900),
+        max_lifetime: Duration::from_secs(86400),
+        max_sessions: 2,
+        sweep_interval: Duration::from_secs(60),
+    };
+    let manager = Arc::new(SessionManager::new(config, build_session_gauge()));
+    let app = init_test_app_with_manager!(web::Data::new(manager.clone()));
+
+    // Create three sessions (exceeds max_sessions=2). Each call inserts
+    // {score:0} and fires the rule → score:10.
+    for sid in ["s3a", "s3b", "s3c"] {
+        let req = test::TestRequest::post()
+            .uri("/v1/execute")
+            .set_json(json!({
+                "session_id": sid,
+                "facts": { "scorecard": { "score": 0 } }
+            }))
+            .to_request();
+        let body = json_body(test::call_service(&app, req).await).await;
+        assert_eq!(
+            body["facts_after"]["scorecard"]["score"].as_i64(),
+            Some(10),
+            "SC-3: {} call 1 should give score:10; body: {body}",
+            sid,
+        );
+    }
+
+    // LRU eviction: sweep evicts the oldest-touched entry (s3a) to cap at
+    // max_sessions. The gauge must read 2, not 3.
+    manager.sweep_expired();
+    assert_eq!(
+        manager.len(),
+        2,
+        "SC-3: gauge should reflect capped count 2, not {}",
+        manager.len(),
+    );
+
+    // s3a was evicted → fresh session → empty WM → no scorecard.
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "session_id": "s3a", "facts": {} }))
+        .to_request();
+    let body_a = json_body(test::call_service(&app, req).await).await;
+    assert!(
+        body_a["facts_after"]["scorecard"].is_null(),
+        "SC-3: s3a (LRU-evicted) should have empty WM; body: {body_a}",
+    );
+
+    // s3b persists → WM accumulated → score:20 (10 + 10).
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "session_id": "s3b", "facts": {} }))
+        .to_request();
+    let body_b = json_body(test::call_service(&app, req).await).await;
+    assert_eq!(
+        body_b["facts_after"]["scorecard"]["score"].as_i64(),
+        Some(20),
+        "SC-3: s3b (persisted) should have accumulated WM (score:20); body: {body_b}",
+    );
+}
+
+/// SC-4: `DELETE /v1/execute/session/{id}` disposes the session (a
+/// subsequent call creates a fresh session with empty WM).
+/// `POST /v1/execute/session/{id}/reset` clears WM WITHOUT disposing (a
+/// subsequent call resumes with empty WM).
+///
+/// RED today: `dispose_session` and `reset_session` return `NOT_IMPLEMENTED`
+/// (501) → status assertion fails.
+#[serial_test::serial]
+#[actix_web::test]
+async fn session_lifecycle_delete_reset() {
+    reset_test_env();
+    let app = init_test_app_with_manager!(shared_session_manager());
+
+    // Create s4, insert {score:0}, rule fires, score → 10.
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "session_id": "s4",
+            "facts": { "scorecard": { "score": 0 } }
+        }))
+        .to_request();
+    let body1 = json_body(test::call_service(&app, req).await).await;
+    assert_eq!(
+        body1["facts_after"]["scorecard"]["score"].as_i64(),
+        Some(10),
+        "SC-4: s4 call 1 should give score:10; body: {body1}",
+    );
+
+    // DELETE s4 → 200 (disposed).
+    let req = test::TestRequest::delete()
+        .uri("/v1/execute/session/s4")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "SC-4: DELETE session/s4 should return 200, got {}",
+        resp.status(),
+    );
+
+    // POST s4 with facts={} → fresh session (disposed) → empty WM → no score.
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "session_id": "s4", "facts": {} }))
+        .to_request();
+    let body2 = json_body(test::call_service(&app, req).await).await;
+    assert!(
+        body2["facts_after"]["scorecard"].is_null(),
+        "SC-4: disposed session should have empty WM on resume; body: {body2}",
+    );
+
+    // Create s5, accumulate WM (score:10 → score:20).
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "session_id": "s5",
+            "facts": { "scorecard": { "score": 0 } }
+        }))
+        .to_request();
+    let _body3 = json_body(test::call_service(&app, req).await).await;
+
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "session_id": "s5", "facts": {} }))
+        .to_request();
+    let body4 = json_body(test::call_service(&app, req).await).await;
+    assert_eq!(
+        body4["facts_after"]["scorecard"]["score"].as_i64(),
+        Some(20),
+        "SC-4: s5 should accumulate WM (score:20) before reset; body: {body4}",
+    );
+
+    // POST /v1/execute/session/s5/reset → 200 (WM cleared, session kept).
+    let req = test::TestRequest::post()
+        .uri("/v1/execute/session/s5/reset")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "SC-4: POST session/s5/reset should return 200, got {}",
+        resp.status(),
+    );
+
+    // POST s5 with facts={} → WM was cleared by reset → no scorecard.
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "session_id": "s5", "facts": {} }))
+        .to_request();
+    let body5 = json_body(test::call_service(&app, req).await).await;
+    assert!(
+        body5["facts_after"]["scorecard"].is_null(),
+        "SC-4: reset session should have empty WM (no scorecard); body: {body5}",
+    );
 }

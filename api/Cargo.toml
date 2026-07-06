@@ -54,6 +54,9 @@ jsonwebtoken = { version = "10.4", features = ["rust_crypto"] }
 # engine/Cargo.toml:15 minus the `optional` gate. No new supply-chain surface
 # (T-24-03-W1): the crate is already vetted by the engine.
 prometheus = { workspace = true }
+# Phase 27 (D-02): sharded concurrent HashMap for the SessionManager registry.
+# Pinned per ROADMAP — NOT 7.0.0-rc2.
+dashmap = "6.2.1"
 
 [dev-dependencies]
 criterion = "0.5"

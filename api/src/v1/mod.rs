@@ -10,6 +10,7 @@ pub mod categories;
 pub mod execution;
 pub mod metrics;
 pub mod rules;
+pub mod sessions;
 pub mod simulation;
 pub mod tags;
 // pub mod tenants;  // TODO: implement multi-tenancy module

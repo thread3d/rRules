@@ -15,6 +15,7 @@ use engine::environment::EngineBuilder;
 use engine::rules::{Rule, RuleSet};
 
 use crate::metrics::{ExecutionCounters, MetricsSnapshot, MetricsTx};
+use crate::v1::sessions::SessionManager;
 
 /// Request for rule execution
 #[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
@@ -62,6 +63,13 @@ pub struct ExecuteResponse {
     /// field exists, which is expected and documented in Plan 24-02.
     #[serde(default)]
     pub engine_generation: u64,
+    /// Phase 27 (D-04): server-generated UUID v4 primary key for the
+    /// stateful session. Absent (`None`) on the stateless one-shot path
+    /// (Phase 23 — unchanged, D-05); present on the sessionful path so the
+    /// caller learns the canonical id on first creation. The client
+    /// `session_id` is an idempotency alias; this field is the server truth.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Atomic ruleset + generation container (Phase 25 / D-02 / L-01).
@@ -706,6 +714,8 @@ pub async fn execute_single(
         facts_after,
         inference_trace: None,
         engine_generation: generation,
+        // Phase 27 (D-05): stateless path — no server session id.
+        session_id: None,
     })
 }
 
