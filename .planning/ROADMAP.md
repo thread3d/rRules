@@ -104,11 +104,11 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
   1. A `.dmn` file from DMN 1.1, 1.3, or 1.5 imports into the canonical IR without error, preserving item definitions, information items, descriptions, annotations, IDs, and element order.
   2. The parser is XXE-hardened — external entity references are rejected — and CDATA sections are handled.
   3. A decision table imported with no explicit `hitPolicy` attribute defaults to UNIQUE.
-  4. The canonical IR is the sole store: nothing downstream reconstructs DMN from a non-IR shape (round-trip fidelity is structural from day one).**Plans**: 3 plans
+  4. The canonical IR is the sole store: nothing downstream reconstructs DMN from a non-IR shape (round-trip fidelity is structural from day one).**Plans**: 1/3 plans executed
 
 **Wave 1**
 
-- [ ] 29-01-PLAN.md — Canonical DMN 1.5 IR + module wiring + locked stack deps (DMN-05)
+- [x] 29-01-PLAN.md — Canonical DMN 1.5 IR + module wiring + locked stack deps (DMN-05)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -245,7 +245,7 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 2/2 | Complete | 2026-07-03 |
 | 27. Stateful sessions | v5.0 | 1/1 | Complete | 2026-07-06 |
 | 28. Frontend test-runner | v5.0 | 5/5 | Complete | 2026-07-06 |
-| 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 0/3 | Not started | - |
+| 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 1/3 | In Progress|  |
 | 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 0/TBD | Not started | - |
 | 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 0/TBD | Not started | - |
 | 32. Decision-Table Engine + Hit Policies | v6.0 | 0/TBD | Not started | - |

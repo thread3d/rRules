@@ -12,7 +12,7 @@ Requirements for the v6.0 milestone. Each maps to roadmap phases 29–35.
 ### DMN Model & Interchange
 
 - [ ] **DMN-04**: DMN 1.5 XML parser — namespace-aware (accepts DMN 1.1–1.5), XXE-hardened, CDATA-handled; imports `.dmn` files into a canonical in-memory IR; `hitPolicy` defaults to UNIQUE
-- [ ] **DMN-05**: DMN item definitions + information items (Clause 7) parsed and represented in the canonical IR
+- [x] **DMN-05**: DMN item definitions + information items (Clause 7) parsed and represented in the canonical IR
 - [ ] **DMN-06**: DMN XML exporter — serializes the canonical IR back to `.dmn` XML preserving annotations, descriptions, IDs, and element order; round-trip byte/DOM-compare passes against the import corpus
 - [ ] **DMN-07**: DMNDI diagram layout round-trip — parser preserves DMNDI layout and exporter emits it unchanged (no rendering) for external-tool interop *(differentiator)*
 
@@ -94,7 +94,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | DMN-04 | Phase 29 | Pending |
-| DMN-05 | Phase 29 | Pending |
+| DMN-05 | Phase 29 | Complete |
 | DMN-06 | Phase 29 | Pending |
 | DMN-07 | Phase 35 | Pending |
 | DMN-08 | Phase 30 | Pending |
@@ -126,6 +126,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DMN-34 | Phase 35 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 31 total (DMN-04..DMN-34)
 - Mapped to phases: 31
 - Unmapped: 0 ✓

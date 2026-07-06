@@ -2,15 +2,18 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: DMN Level 3 Compliance
+current_phase: 29
+current_phase_name: planning complete, ready to plan Phase 29
 status: executing
 stopped_at: Phase 28 executed — human verification needed (3 UAT items)
-last_updated: "2026-07-06T18:24:17.950Z"
-last_activity: 2026-07-06 -- Phase 29 planning complete
+last_updated: "2026-07-06T18:38:16.422Z"
+last_activity: 2026-07-06
+last_activity_desc: Phase 29 planning complete
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 3
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -25,16 +28,16 @@ See: `.planning/PROJECT.md` (updated 2026-07-06)
 
 ## Current Position
 
-Phase: Not started (planning complete, ready to plan Phase 29)
-Plan: —
-Status: Ready to execute
-Last activity: 2026-07-06 -- Phase 29 planning complete
+Phase: 29 — DMN 1.5 Model + XML Parser + Canonical IR (executing)
+Plan: 29-01 complete; next is 29-02 (Wave 2 — parser)
+Status: Executing Phase 29
+Last activity: 2026-07-06 -- Plan 29-01 executed (canonical IR + module wiring + locked stack deps)
 
 ### Milestone v6.0 Phases
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
-| 29 | DMN 1.5 Model + XML Parser + Canonical IR | DMN-04, DMN-05, DMN-06 | not_started |
+| 29 | DMN 1.5 Model + XML Parser + Canonical IR | DMN-04, DMN-05, DMN-06 | executing (29-01 complete) |
 | 30 | FEEL Value Types + Type Lattice + Temporal Domain | DMN-08, DMN-09, DMN-10 | not_started (research-needed) |
 | 31 | FEEL Parser + Evaluator + Built-in Function Library | DMN-11..DMN-18 | not_started (research-needed; largest) |
 | 32 | Decision-Table Engine + Hit Policies | DMN-19, DMN-20, DMN-21 | not_started |
@@ -245,6 +248,10 @@ From v2.0 milestone:
 - [Phase 27]: D-03: TTL+LRU+max-count+sweep+gauge ship TOGETHER (Pitfall 5 — OOM is silent)
 - [Phase 27]: D-04: Server UUID v4 primary key + client session_id as idempotency alias
 - [Phase 27]: D-11: Per-session std::sync::Mutex; engine.execute() in web::block (Pitfall 7 guard-scope pattern)
+- [Phase ?]: DMN IR is the sole store; frontend is a projection (round-trip fidelity structural from day one — Pitfall 11)
+- [Phase ?]: DMN IR does NOT reuse crate::data_types::Value or the rule-engine Expression AST (milestone research Anti-Pattern avoided)
+- [Phase ?]: HitPolicy::default() = Unique so DecisionTable::default() yields UNIQUE (Phase 29 success criterion 3 at IR level)
+- [Phase ?]: DmnParseError declared in model.rs (single error-type home); parser.rs (29-02) returns Result<_, DmnParseError>
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -276,7 +283,7 @@ From v3.0 milestone:
 
 **Stopped at:** Phase 28 executed — human verification needed (3 UAT items)
 
-Last session: 2026-07-06T11:22:37.508Z
+Last session: 2026-07-06T18:36:11.494Z
 
 **Completed Phases:**
 
@@ -309,3 +316,4 @@ Last session: 2026-07-06T11:22:37.508Z
 | Phase 23 P03 | 7min | 2 tasks | 2 files |
 | Phase 23 P04 | 4min | 2 tasks | 8 files |
 | Phase 27 P01 | 90min | 3 tasks | 8 files |
+| Phase 29 P01 | 4min | 3 tasks | 7 files |
