@@ -2,19 +2,15 @@
 gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Phase Details
-current_phase: 28
-status: executing
-stopped_at: Phase 28 executed — human verification needed (3 UAT items)
-last_updated: "2026-07-06T12:38:59.505Z"
-last_activity: 2026-07-06
-last_activity_desc: Phase 28 complete
+status: Awaiting next milestone
+last_updated: "2026-07-06T15:46:35.852Z"
+last_activity: 2026-07-06 — Milestone v5.0 completed and archived
 progress:
   total_phases: 6
   completed_phases: 6
   total_plans: 20
   completed_plans: 20
   percent: 100
-current_phase_name: frontend-test-runner
 ---
 
 # Project State
@@ -28,11 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-07-03)
 
 ## Current Position
 
-Phase: 28
-Plan: Not started
-Plans: Phase 27 not yet planned — run /gsd-plan-phase 27 to plan stateful sessions (SESS-01)
-Status: Executing Phase 28
-Last activity: 2026-07-06 — Phase 28 complete
+Phase: Milestone v5.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-06 — Milestone v5.0 completed and archived
 
 ### Milestone v5.0 Phases
 
@@ -301,7 +296,7 @@ Last session: 2026-07-06T11:22:37.508Z
 
 ## Operator Next Steps
 
-- Plan Phase 23 (Execute evaluator + wiring) with `/gsd-plan-phase 23`
+- Start the next milestone with /gsd-new-milestone
 
 ## Performance Metrics
 

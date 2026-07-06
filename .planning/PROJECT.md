@@ -4,7 +4,7 @@
 
 rRules is a production-grade Business Rules Management System (BRMS) built in Rust. It provides a complete platform for defining, deploying, and managing business decision logic — from rule authoring through execution, governance, and monitoring — with a full React/TypeScript web frontend, enterprise governance controls, Prometheus monitoring, and Docker/Kubernetes deployment.
 
-**Shipped:** v4.0 Production Platform (2026-07-02). The platform now delivers end-to-end: authors write rules in a browser IDE, governance controls who can change them and how those changes are approved, the engine executes them, and Prometheus/metrics dashboards monitor their live behaviour.
+**Shipped:** v5.0 Live Execution (2026-07-06), building on v4.0 Production Platform (2026-07-02). The platform now delivers end-to-end: authors write rules in a browser IDE, governance controls who can change them and how those changes are approved, the engine **actually executes them** (real rule evaluator + `/v1/execute`), and Prometheus/metrics dashboards + a frontend test-runner monitor and exercise their live behaviour.
 
 ## Core Value
 
@@ -31,10 +31,13 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 - ✓ **MON-07**: Per-execution Prometheus counters (`rrules_execute_requests_total` / `_rules_fired_total` / `_duration_seconds`, engine-labeled, dedicated registry + `TextEncoder`) + WebSocket `MetricsSnapshot` broadcast after each execute — v5.0 Phase 24
 - ✓ **SESS-01**: Stateful session execution — `SessionManager` (DashMap 6.2.1, per-session `Box<dyn ExecutionEngine>` under `std::sync::Mutex`, server UUID v4 primary key + client `session_id` as idempotency alias) lets a caller resume a session and see accumulated working memory; bounded by idle/max-lifetime TTL + LRU + max-count + 60s background sweep + `rrules_sessions_active` gauge on the dedicated Prometheus registry; stateless one-shot path (Phase 23) unchanged when `session_id` absent; `DELETE /v1/execute/session/{id}` disposes, `POST /v1/execute/session/{id}/reset` clears WM without disposing (rebuilds fresh engine because `ReteEngine::reset()` clears rules) — v5.0 Phase 27
 - ✓ **DEPLOY-05, EXEC-03**: Real reload-then-swap of the shared `RuleSet` snapshot (`SharedRuleSet{ruleset, generation}` under one `Arc<RwLock>`, swap-don't-mutate with `generation.wrapping_add(1)`); async reload writes `ReloadJob{Pending→Running→Completed/Failed}` to `JobStore` (Pending inserted before spawn) so `GET /v1/jobs/{id}` returns real status; sync reload shares one `reload_and_swap` helper; `build_ruleset_from_dir` parses real `.rules` JSON; batch-execute aggregates truthfully via a `Result<ExecuteResponse,String>` three-arm collector (unknown-engine→failed, panic→JoinError→failed) — v5.0 Phase 25
+- ✓ **MON-06**: Live dead-rule detection — `RuleExecutionTracker` as a process-wide `LazyLock<Mutex<…>>` singleton (mirroring `CoverageTracking`), `record_evaluation`/`record_fire` wired at both evaluator sites (`direct_eval.rs` + `rete/mod.rs`); `/v1/metrics/dead-rules` reads live firings (no longer always `[]`); three surfaces agree on fire count — v5.0 Phase 26
+- ✓ **EXEC-04, FRONTEND-04**: Inference trace (`TraceEvent`/`TraceData`, two-site emission) opt-in via `ExecuteRequest.trace` + `GET /v1/engines` engine registry; trace surfaced in the frontend results panel only when requested (latency unaffected when off) — v5.0 Phase 28
+- ✓ **FRONTEND-03**: Frontend test-runner — `execution.ts` API client + `TestRunner` component (facts editor, engine dropdown, Run + Reload-then-Run, stacked results, trace toggle); `rule_filter` now honored server-side on the stateless path (commit `384b1f17d`) for a true "test this rule" UX — v5.0 Phase 28
 
 ### Active
 
-v5.0 Live Execution — see `## Current Milestone` below and `.planning/REQUIREMENTS.md`. Closes the `execute_rules` stub and wires execution → trackers → live monitoring data.
+v5.0 Live Execution shipped 2026-07-06 — all 13 requirements validated. No active requirements yet for the next milestone; run `/gsd-new-milestone` to define the next scope (candidate thesis: address the pre-existing engine `--all-features` build debt surfaced in the v5.0 audit, or pursue a new feature milestone).
 
 ### Out of Scope
 
@@ -45,19 +48,22 @@ v5.0 Live Execution — see `## Current Milestone` below and `.planning/REQUIREM
 
 ## Current State
 
-**Shipped version:** v4.0 Production Platform (2026-07-02)
+**Shipped version:** v5.0 Live Execution (2026-07-06); prior v4.0 Production Platform (2026-07-02)
 
-**Codebase:** ~31,500 LOC across Rust backend + React/TypeScript frontend; 6 phases (17–22) delivered over 22 days.
+**Codebase:** Rust backend (engine + actix-web API) + React/TypeScript frontend; 12 phases (17–28) delivered across v4.0 + v5.0 (22 days for v4.0, 4 days for v5.0; 157 commits in the v5.0 range).
 
 **Tech stack:**
 - Backend: Rust (actix-web), hybrid Git + PostgreSQL storage
-- Frontend: React 19 + TypeScript + Vite + TanStack Router + Zustand, CodeMirror + ag-Grid
-- Monitoring: Prometheus `/metrics` endpoint, WebSocket streaming
+- Frontend: React 19 + TypeScript + Vite + TanStack Router + Zustand, CodeMirror + ag-Grid, Vitest
+- Monitoring: Prometheus `/metrics` endpoint (HTML/JSON/text, dedicated registry), WebSocket `MetricsSnapshot` streaming, live dead-rule + coverage surfaces
 - Deployment: Multi-stage Alpine Docker, Helm chart (dev/staging/prod), hot-reload with async job tracking
+- Execution: real direct rule evaluator on Rete/TREAT/LEAPS/PHREAK (fresh `Box<dyn ExecutionEngine>` per request), stateful sessions (`SessionManager`), frontend test-runner
 
-**Known tech debt (deferred, not blocking v4.0):**
-- `execute_rules` stub — **RESOLVED in v5.0 Phase 23 (2026-07-03)**: `POST /v1/execute` now fires real rules via `EngineRegistry` (a fresh `Box<dyn ExecutionEngine>` constructed per request through `spawn_blocking`), returns truthful `rules_fired`/`rules_not_fired`/`facts_after` (serialized from post-execution working memory), and auto-populates `CoverageTracking` once per fired rule. The v3.0 `engine::`→`crate::` E0433 import bug is fixed across all four engine modules and `ReteEngine::execute_rules` is a real direct evaluator (mirrored onto TREAT/LEAPS/PHREAK). **Phase 24 (2026-07-03) added live per-execution Prometheus counters + WebSocket `MetricsSnapshot` broadcast, so `/metrics` and the monitoring dashboard now read live execute data. Phase 25 (2026-07-03) made reload real: `reload_and_swap` swaps the shared `RuleSet` snapshot (generation-bumped) under one write lock, async reload writes `ReloadJob` transitions to `JobStore` so `GET /v1/jobs/{id}` works, and batch-execute aggregates truthfully (per-item failure no longer masked as a zero-fired success).** Phase 26 (2026-07-03) made dead-rule detection live: `RuleExecutionTracker` is now a process-wide `LazyLock<Mutex<…>>` singleton (mirroring `CoverageTracking`), `record_evaluation`/`record_fire` wired at both evaluator sites (`direct_eval.rs` + `rete/mod.rs`), and `/v1/metrics/dead-rules` reads from the singleton — no longer always returns `[]`; three keystone e2e tests pin SC-1/SC-2/SC-3. Remaining v5.0 work: stateful sessions (Phase 27), frontend test-runner (Phase 28)
-- Pre-existing `cargo build -p engine --all-features` failure on the `metrics`/`prometheus` feature (`prometheus::Opts` API drift at `engine/src/engine/metrics.rs:288-293`) — off the production path (the `api` crate enables only the four engine features, not `metrics`; the `/metrics` endpoint uses hand-rolled Prometheus text). Logged in `.planning/phases/23-execute-evaluator-wiring/deferred-items.md` for a future cleanup phase
+**Known tech debt (deferred, non-blocking — logged in the v5.0 milestone audit, `.planning/milestones/v5.0-MILESTONE-AUDIT.md`):**
+- `execute_rules` stub — **FULLY RESOLVED in v5.0 (Phases 23–28, 2026-07-03 → 2026-07-06)**: `POST /v1/execute` fires real rules via `EngineRegistry`; `facts_after` is post-execution working memory (not echoed input); `CoverageTracking` records once per fired rule; live Prometheus counters + WS `MetricsSnapshot` broadcast; real reload-then-swap with `JobStore`; `RuleExecutionTracker` singleton makes dead-rule detection live; stateful sessions; frontend test-runner. The v5.0 milestone audit's 2 cross-phase WARNINGs (`rule_filter` dead input; `/metrics` HTML/JSON `active_sessions` hardcoded) were **resolved post-audit in commit `384b1f17d`** and verified (cargo 118/0, vitest 5/5) — see the re-audit (status `passed`).
+- Pre-existing `cargo build -p engine --all-features` failure on the `metrics`/`prometheus` feature (`prometheus::Opts` API drift at `engine/src/engine/metrics.rs:288-293`) — off the production path (the `api` crate enables only the four engine features, not `metrics`; the `/metrics` endpoint uses hand-rolled Prometheus text / the Phase-24 dedicated registry). Logged in `.planning/phases/23-execute-evaluator-wiring/deferred-items.md` for a future cleanup phase.
+- Legacy dead duplicate `ExecuteRequest` at `api/src/models/execution.rs:8` (no usages; live model is `api::v1::execution::ExecuteRequest`) — safe-to-delete cleanup surfaced during the audit debt fix.
+- Pre-existing engine TODO `rete/mod.rs:557` (retraction network cleanup, Phase 10 era) + `treat/mod.rs` dead-code warnings — no functional impact.
 - Some v1.0 governance/monitoring phases shipped as stubs originally and were promoted to real implementations across v3.0/v4.0
 
 ## Previous Milestones
@@ -77,13 +83,17 @@ v5.0 Live Execution — see `## Current Milestone` below and `.planning/REQUIREM
 - Auto-populate `RuleExecutionTracker` + `CoverageTracking` so Prometheus `/metrics`, the monitoring dashboard, dead-rule detection, and coverage reporting show live data
 - Frontend test-runner UI in the rule IDE: run/test a rule, see fired rules, results, and coverage
 
-**Progress (4/6 phases):**
+**Progress (6/6 phases — SHIPPED 2026-07-06, audit `passed`):**
 - ✅ **Phase 23 — Execute evaluator + wiring** (complete 2026-07-03, verified PASS): fixed the v3.0 `engine::`→`crate::` E0433 import bug across all four engine modules; built a minimal direct rule evaluator on `ReteEngine` (mirrored onto TREAT/LEAPS/PHREAK); wired `POST /v1/execute` through `EngineRegistry` with a fresh `Box<dyn ExecutionEngine>` per request; `ExecuteRequest.engine` validated against `available_engines()` (400 on unknown) with `RRULES_DEFAULT_ENGINE` default; `facts_after` from post-execution working memory; `CoverageTracking` recorded once per fired rule. Requirements met: EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05
 - ✅ **Phase 24 — Execution counters + metrics broadcast** (complete 2026-07-03, verified PASS): added `ExecutionCounters` (`AtomicU64` mirrors + three labeled Prometheus metrics on a dedicated `Registry`) held as `web::Data`; `execute_single` times via `Instant`, increments counters + broadcasts a `MetricsSnapshot` over the existing WS channel AFTER `web::block` (Pitfalls 24-A/B/C); `/metrics` rewritten with `TextEncoder::encode` over the dedicated registry; `ExecuteResponse.engine_generation: u64` added (Pitfall 8). Nyquist RED→GREEN closure (4 RED tests now GREEN); api 96/0, engine 241/0. Frontend dashboards render live numbers with zero frontend changes (SC-3 structural proof). Requirements met: MON-07
 - ✅ **Phase 25 — Real reload + JobStore** (complete 2026-07-03, verified PASS, 17/17 must-haves): introduced `SharedRuleSet{ruleset, generation}` under the existing `Arc<RwLock>` (D-02) and migrated the execute-path handlers; implemented the real `.rules` JSON parser in `build_ruleset_from_dir` (R1 — was empty); added `reload_and_swap` (D-04 — builds off-to-side, single write-lock assignment with `generation.wrapping_add(1)`, no I/O under lock); wired `reload_rules` with sync (inline swap) + async (`ReloadJob` Pending→Running→Completed/Failed in `JobStore`, Pending inserted before spawn — Pitfall 14) so `GET /v1/jobs/{id}` returns real status; fixed batch truthful aggregation via a `Result<ExecuteResponse,String>` three-arm collector (Ok(Ok)→succeeded, Ok(Err)→failed+error, Err(JoinError)→failed — L-06) and refactored `execute_single` to `Result<ExecuteResponse,(StatusCode,String)>` (R4). Nyquist RED→GREEN closure: all 7 Wave 0 RED tests now GREEN (8th `#[ignore]`d, passes with `--include-ignored`); api 103/0/1, engine 241/0/3. Requirements met: DEPLOY-05, EXEC-03
 - ✅ **Phase 26 — RuleExecutionTracker singleton + dead-rule live data** (complete 2026-07-03, verified PASS, 10/10 must-haves): converted `RuleExecutionTracker` to a `LazyLock<Mutex<TrackerState>>` singleton mirroring `CoverageTracking` (associated-function API, `#[deprecated] new()`, `clear()` for test isolation); wired `record_evaluation`/`record_fire` at BOTH post-fixpoint recording blocks — `direct_eval.rs` (Treat/Leaps/Phreak) and `rete/mod.rs` (C1 — Rete's inlined `execute_rules`); rewrote `dead_rules_endpoint` to read `RuleExecutionTracker::find_dead_rules()` from the singleton (no `new()` per call — no longer always returns `[]`); pinned with 3 `#[serial]` keystone e2e tests (SC-1 dead-rules excludes fired `r1`, SC-2 coverage shows `r1.fired`, SC-3 three surfaces agree — no counter drift). C1 (both evaluator sites) + C4 (engine `metrics.rs` untouched) prohibitions honored. Requirements met: MON-06
 - ✅ **Phase 27 — Stateful sessions** (complete 2026-07-06, verified PASS, 12/12 must-haves): `SessionManager` (`Arc<DashMap<String, Arc<Mutex<StatefulSessionEntry>>>>` + alias→UUID DashMap, DashMap 6.2.1 pinned) with per-session `Box<dyn ExecutionEngine>`; `execute_single` branches on `session_id` (D-05 — stateless path unchanged when absent); server UUID v4 primary key + client `session_id` as idempotency alias (D-04); engine fixed at creation, 400 on conflicting resume engine (D-06); snapshot retained with `engine_generation` tag (D-07); four OOM controls shipped together — idle/max-lifetime TTL + LRU + max-count(1024) + 60s `tokio::time::interval` sweep + `rrules_sessions_active` IntGauge on the Phase-24 dedicated Prometheus `Registry` (D-08, Pitfall 24-A); `MetricsSnapshot.active_sessions` from `SessionManager::len()`; `DELETE /v1/execute/session/{id}` + `POST /v1/execute/session/{id}/reset` (reset rebuilds fresh engine — `ReteEngine::reset()` clears rules too, Open Q#1); Pitfall 7 web::block closure (std::mem::replace engine out, drop guard, move into web::block, re-lock to write back). Four `#[serial]` keystone tests (SC-1 score:10→20 accumulation, SC-2 TTL eviction, SC-3 LRU+gauge capped count, SC-4 delete/reset lifecycle) GREEN; api 110/0/1, engine 242/0/3. Requirements met: SESS-01
-- ⬜ Phase 28 — Frontend test-runner (FRONTEND-03, FRONTEND-04, EXEC-04)
+- ✅ **Phase 28 — Frontend test-runner** (complete 2026-07-06, verified PASS, 4/4 must-haves): `frontend/src/api/execution.ts` (6 typed API functions incl. `reloadRules`) + 9 snake_case TS types in `types.ts`; `TestRunner.tsx` component (facts JSON editor via CodeMirror `javascript({json:true})`, engine dropdown from `GET /v1/engines`, Run + Reload-then-Run buttons, stacked Fired/Not-fired/Facts-after/Trace results, trace toggle off-by-default) mounted in `$id.edit.tsx`; backend `TraceEvent`/`TraceData` two-site emission + `GET /v1/engines`; `ExecuteRequest.trace` opt-in. Vitest 5/5; 3 human-verify items performed 2026-07-06 (headless-Chromium click-through + live latency). Requirements met: FRONTEND-03, FRONTEND-04, EXEC-04
+
+---
+
+**Milestone v5.0 complete.** Next: run `/gsd-new-milestone` to plan the next milestone (candidate thesis: address the pre-existing engine `--all-features` build debt surfaced in the v5.0 audit, or pursue a new feature milestone). Optionally add a git remote and push tags `v1.0`–`v5.0` (currently local-only).
 
 ## Context
 
@@ -114,6 +124,11 @@ Key technical context:
 | Frontend `/v1` API alignment via single VITE_API_URL | One env-driven baseURL + vite proxy eliminated the /api/v1 vs /v1 mismatch that orphaned the UI | ✓ Good (v4.0, Phase 22) |
 | JWT auth with alg-pinned HS256 validation | Pragmatic auth without external IdP dependency; pinning alg prevents alg-confusion attacks | ✓ Good (v4.0, Phase 22) |
 | Goal-backward verification of frontend integration (Phase 22) | Verified the 9 partial requirements deliver end-to-end against live code, not SUMMARY claims | ✓ Good — 9/9 MET (v4.0) |
+| Per-request engine via `web::block` (Phase 23) | Fresh `Box<dyn ExecutionEngine>` constructed per request from the shared `EngineRegistry` factory — avoids `&mut self` engine-sharing serialization (Pitfall 1/9); `ReteEngine: !Clone` so no pool | ✓ Good (v5.0) |
+| `RuleExecutionTracker` + `CoverageTracking` as `LazyLock<Mutex<…>>` singletons (Phase 26) | Process-wide single source of truth for fire/eval recording; dead-rules + coverage read live data; `#[serial]` + `clear()` for test isolation | ✓ Good (v5.0) |
+| `SessionManager` — TTL+LRU+max-count+sweep+gauge ship together (Phase 27) | The OOM failure mode is silent; all four controls + the Prometheus gauge ship as one unit (Pitfall 5); server UUID v4 primary key + client `session_id` as idempotency alias | ✓ Good (v5.0) |
+| `Cow<'a, RuleSet>` zero-clone `rule_filter` (Phase 28 debt fix) | `Borrowed` on the no-filter hot path (zero alloc), `Owned` only when filtering; honors the frontend "test this rule" UX on the stateless path; `Option<web::Data<…>>` extractor keeps minimal test apps backward-compatible | ✓ Good (v5.0) |
+| Milestone audit → debt-fix → re-audit closeout (v5.0) | Initial audit flagged 2 cross-phase WARNINGs as `tech_debt`; fixed both + verified (cargo 118/0, vitest 5/5) before tagging; re-audit `passed` | ✓ Good (v5.0) |
 
 ## Evolution
 
@@ -133,4 +148,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-06 — Phase 27 complete (stateful sessions via SessionManager); v5.0 Live Execution in progress (5/6 phases)*
+*Last updated: 2026-07-06 — v5.0 Live Execution milestone shipped (Phases 23–28 complete, audit `passed`); REQUIREMENTS.md archived to `milestones/v5.0-REQUIREMENTS.md` (fresh requirements created by the next `/gsd-new-milestone`)*
