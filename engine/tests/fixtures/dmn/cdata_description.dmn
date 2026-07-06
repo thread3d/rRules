@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20200524/MODEL/"
+             id="_defsCdata" name="CdataExamples"
+             namespace="https://www.omg.org/spec/DMN/20200524/MODEL/">
+  <decision id="_decCdata" name="CdataDecision">
+    <description><![CDATA[This decision fires when age >= 18 & eligible]]></description>
+    <variable name="CdataDecision" typeRef="feel:string"/>
+    <decisionTable id="_dtCdata" name="CdataTable" hitPolicy="UNIQUE">
+      <input id="_inCdata" label="Age">
+        <inputExpression><text>applicant.age</text></inputExpression>
+      </input>
+      <output id="_outCdata" name="CdataDecision" typeRef="feel:string"/>
+      <rule id="_rCdata1">
+        <description><![CDATA[Rule fires when age >= 18 & eligible]]></description>
+        <inputEntry><text>&gt;= 18</text></inputEntry>
+        <outputEntry><text>"Eligible"</text></outputEntry>
+      </rule>
+      <rule id="_rCdata2">
+        <inputEntry><text>&lt; 18</text></inputEntry>
+        <outputEntry><text>"Not Eligible"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>

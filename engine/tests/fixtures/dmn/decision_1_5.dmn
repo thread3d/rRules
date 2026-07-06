@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20200524/MODEL/"
+             xmlns:dmn="https://www.omg.org/spec/DMN/20200524/MODEL/"
+             id="_defs1" name="EligibilityRules"
+             namespace="https://www.omg.org/spec/DMN/20200524/MODEL/"
+             typeLanguage="https://www.omg.org/spec/DMN/20200524/FEEL/"
+             expressionLanguage="https://www.omg.org/spec/DMN/20200524/FEEL/">
+  <itemDefinition id="_itemAge" name="Age" isCollection="false">
+    <typeRef>feel:number</typeRef>
+    <allowedValues><text>&gt;= 18</text></allowedValues>
+  </itemDefinition>
+  <decision id="_decEligibility" name="Eligibility">
+    <variable name="Eligibility" typeRef="feel:string"/>
+    <decisionTable id="_dt1" name="EligTable" hitPolicy="UNIQUE">
+      <input id="_in1" label="Applicant Age">
+        <inputExpression><text>applicant.age</text></inputExpression>
+      </input>
+      <input id="_in2" label="Citizen">
+        <inputExpression><text>applicant.citizen</text></inputExpression>
+      </input>
+      <output id="_out1" name="Eligibility" typeRef="feel:string"/>
+      <rule id="_r1">
+        <description>Adult citizen is eligible.</description>
+        <inputEntry id="_ie1"><text>&gt;= 18</text></inputEntry>
+        <inputEntry id="_ie2"><text>true</text></inputEntry>
+        <outputEntry id="_oe1"><text>"Eligible"</text></outputEntry>
+      </rule>
+      <rule id="_r2">
+        <inputEntry id="_ie3"><text>&lt; 18</text></inputEntry>
+        <inputEntry id="_ie4"><text>false</text></inputEntry>
+        <outputEntry id="_oe2"><text>"Not Eligible"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <textAnnotation id="_ta1" text="Eligibility policy table" textFormat="text/plain"/>
+  <association id="_assoc1" sourceRef="_decEligibility" targetRef="_ta1" type="Association"/>
+</definitions>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20180521/MODEL/"
+             id="_defs13" name="YesNoRules"
+             namespace="https://www.omg.org/spec/DMN/20180521/MODEL/"
+             typeLanguage="https://www.omg.org/spec/DMN/20180521/FEEL/"
+             expressionLanguage="https://www.omg.org/spec/DMN/20180521/FEEL/">
+  <itemDefinition id="_item13" name="Result" isCollection="false">
+    <typeRef>feel:string</typeRef>
+  </itemDefinition>
+  <decision id="_dec13" name="Approval">
+    <variable name="Approval" typeRef="feel:string"/>
+    <decisionTable id="_dt13" name="ApproveTable" hitPolicy="PRIORITY">
+      <input id="_in13" label="Score">
+        <inputExpression><text>applicant.score</text></inputExpression>
+      </input>
+      <output id="_out13" name="Approval" typeRef="feel:string">
+        <outputValues>
+          <itemComponent><text>"Yes"</text></itemComponent>
+          <itemComponent><text>"No"</text></itemComponent>
+        </outputValues>
+      </output>
+      <rule id="_r13a">
+        <inputEntry><text>&gt;= 80</text></inputEntry>
+        <outputEntry><text>"Yes"</text></outputEntry>
+      </rule>
+      <rule id="_r13b">
+        <inputEntry><text>&lt; 80</text></inputEntry>
+        <outputEntry><text>"No"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>

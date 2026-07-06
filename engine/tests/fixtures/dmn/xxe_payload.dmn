@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE definitions [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<definitions xmlns="https://www.omg.org/spec/DMN/20200524/MODEL/"
+             id="_defsXxe" name="XxePayload"
+             namespace="https://www.omg.org/spec/DMN/20200524/MODEL/">
+  <decision id="_decXxe" name="XxeDecision">
+    <description>&xxe;</description>
+    <decisionTable id="_dtXxe" name="XxeTable" hitPolicy="UNIQUE">
+      <input id="_inXxe" label="Value">
+        <inputExpression><text>input.value</text></inputExpression>
+      </input>
+      <output id="_outXxe" name="XxeDecision" typeRef="feel:string"/>
+      <rule id="_rXxe">
+        <inputEntry><text>&gt;= 1</text></inputEntry>
+        <outputEntry><text>&xxe;</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>

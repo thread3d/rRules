@@ -36,7 +36,7 @@
 
 use std::collections::HashMap;
 
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::name::{QName, ResolveResult};
 use quick_xml::reader::NsReader;
 
@@ -1862,6 +1862,54 @@ impl<'a> Parser<'a> {
 
     /// Read text/CDATA content until the closing End event matching `end_local`.
     /// Sets `is_cdata = true` if any `Event::CData` segment was seen.
+    /// Resolve a general/character entity reference (`&gt;`, `&amp;`, `&#62;`,
+    /// ...) emitted as a separate [`Event::GeneralRef`] by quick-xml 0.40.
+    ///
+    /// quick-xml's streaming pull parser does NOT inline-decode entity
+    /// references into adjacent `Event::Text` segments — it emits each
+    /// `&name;` / `&#NN;` as its own `GeneralRef` event. If that event is
+    /// dropped (as a naive `Ok(_) => {}` catch-all does), the resolved
+    /// character silently vanishes from the text, e.g. `&gt;= 18` becomes
+    /// `= 18`. This helper resolves the 5 predefined XML 1.0 entities plus
+    /// numeric character references (`&#decimal;` / `&#xHEX;`). Because the
+    /// parser rejects `<!DOCTYPE>`/`<!ENTITY>` (XXE hardening, T-29-01), no
+    /// custom named entities can ever be defined, so any unknown named
+    /// reference is an error rather than a silent drop.
+    fn resolve_general_ref(r: &BytesRef) -> Result<String, DmnParseError> {
+        // Numeric character reference (`&#62;` / `&#x3E;`).
+        if r.is_char_ref() {
+            return match r.resolve_char_ref() {
+                Ok(Some(ch)) => Ok(ch.to_string()),
+                Ok(None) => Err(DmnParseError::XmlError(format!(
+                    "unresolvable character reference {:?}",
+                    String::from_utf8_lossy(r.as_ref())
+                ))),
+                Err(e) => Err(DmnParseError::XmlError(e.to_string())),
+            };
+        }
+        // Named entity — only the 5 predefined XML 1.0 entities are valid
+        // (DOCTYPE/ENTITY declarations are rejected, so no custom entities
+        // can be in scope).
+        let name = r
+            .decode()
+            .map_err(|e| DmnParseError::XmlError(e.to_string()))?;
+        let resolved = match name.as_ref() {
+            "gt" => ">",
+            "lt" => "<",
+            "amp" => "&",
+            "quot" => "\"",
+            "apos" => "'",
+            other => {
+                return Err(DmnParseError::XmlError(format!(
+                    "undefined named entity reference '&{};' (DOCTYPE/ENTITY declarations \
+                     are rejected by XXE hardening; only gt/lt/amp/quot/apos are predefined)",
+                    other
+                )));
+            }
+        };
+        Ok(resolved.to_string())
+    }
+
     fn read_text_content(&mut self, end_local: &str) -> Result<TextContent, DmnParseError> {
         let mut content = String::new();
         let mut is_cdata = false;
@@ -1877,6 +1925,10 @@ impl<'a> Parser<'a> {
                 Ok(Event::CData(c)) => {
                     is_cdata = true;
                     content.push_str(&String::from_utf8_lossy(c.as_ref()));
+                }
+                Ok(Event::GeneralRef(r)) => {
+                    let e = r.into_owned();
+                    content.push_str(&Self::resolve_general_ref(&e)?);
                 }
                 Ok(Event::End(e)) => {
                     if local_name_str(e.name()) == end_local {

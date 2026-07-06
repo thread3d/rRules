@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20200524/MODEL/"
+             id="_defsNohp" name="NoHitPolicy"
+             namespace="https://www.omg.org/spec/DMN/20200524/MODEL/">
+  <decision id="_decNohp" name="DefaultUnique">
+    <variable name="DefaultUnique" typeRef="feel:string"/>
+    <decisionTable id="_dtNohp" name="NoHitTable">
+      <input id="_inNohp" label="Value">
+        <inputExpression><text>input.value</text></inputExpression>
+      </input>
+      <output id="_outNohp" name="DefaultUnique" typeRef="feel:string"/>
+      <rule id="_rNohp">
+        <inputEntry><text>&gt;= 1</text></inputEntry>
+        <outputEntry><text>"OK"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>

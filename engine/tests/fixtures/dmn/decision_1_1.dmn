@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/DMN/20151101/dmn.xsd"
+             id="_defs11" name="SumScores"
+             namespace="http://www.omg.org/spec/DMN/20151101/dmn.xsd">
+  <itemDefinition id="_item11" name="Score" isCollection="false">
+    <typeRef>feel:number</typeRef>
+  </itemDefinition>
+  <decision id="_dec11" name="TotalScore">
+    <variable name="TotalScore" typeRef="feel:number"/>
+    <decisionTable id="_dt11" name="SumTable" hitPolicy="COLLECT" aggregation="SUM">
+      <input id="_in11" label="Component Score">
+        <inputExpression><text>component.score</text></inputExpression>
+      </input>
+      <output id="_out11" name="TotalScore" typeRef="feel:number"/>
+      <rule id="_r11a">
+        <inputEntry><text>&gt;= 10</text></inputEntry>
+        <outputEntry><text>10</text></outputEntry>
+      </rule>
+      <rule id="_r11b">
+        <inputEntry><text>&gt;= 20</text></inputEntry>
+        <outputEntry><text>20</text></outputEntry>
+      </rule>
+      <rule id="_r11c">
+        <inputEntry><text>&gt;= 30</text></inputEntry>
+        <outputEntry><text>30</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>
