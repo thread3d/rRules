@@ -108,3 +108,99 @@ export interface ApprovalsResponse {
     created_at: string
   }>
 }
+
+// ---------------------------------------------------------------------------
+// Phase 28 — Execution / Trace / Engine / Job types (D-10, EXEC-04)
+//
+// These interfaces mirror the backend `serde::Serialize`/`Deserialize` shapes
+// in `api/src/v1/execution.rs` EXACTLY — snake_case keys, matching
+// nullability, no camelCase transform. The existing `ApprovalState` /
+// `ApprovalsResponse` block above sets the precedent (backend serde is
+// snake_case; the frontend does not rename keys). Plan 28-05's TestRunner
+// renders these responses directly, so a key mismatch surfaces as a runtime
+// shape error, not a silent transform. See D-10 (snake_case mirroring) and
+// EXEC-04 (trace types) for the decision trail.
+// ---------------------------------------------------------------------------
+
+/** Request body for `POST /v1/execute` (execution.rs ExecuteRequest :21-35). */
+export interface ExecuteRequest {
+  session_id?: string | null
+  facts: Record<string, unknown>
+  rule_filter?: {
+    name_pattern?: string
+    categories?: string[]
+  } | null
+  engine?: string | null
+  /**
+   * Opt-in inference trace (Plan 28-03 adds this to the backend as
+   * `#[serde(default)] pub trace: Option<bool>`). Off-by-default so SC-3
+   * latency neutrality holds; `null`/omitted ⇒ backend treats as `false`.
+   */
+  trace?: boolean | null
+}
+
+/** Response from `POST /v1/execute` (execution.rs ExecuteResponse :47-73). */
+export interface ExecuteResponse {
+  execution_id: string
+  rules_fired: number
+  rules_not_fired: string[]
+  facts_after: Record<string, unknown>
+  inference_trace?: InferenceTrace | null
+  engine_generation: number
+  session_id?: string | null
+}
+
+/** Complete inference trace (execution.rs InferenceTrace :188-194). */
+export interface InferenceTrace {
+  entries: InferenceTraceEntry[]
+  summary?: TraceSummary | null
+}
+
+/** Single trace entry emitted at the moment a rule fires (execution.rs :197-205). */
+export interface InferenceTraceEntry {
+  timestamp: string
+  event_type: string
+  rule_name?: string | null
+  data?: unknown | null
+}
+
+/** Summary statistics for an inference trace (execution.rs TraceSummary :208-212). */
+export interface TraceSummary {
+  total_duration_ms: number
+  facts_matched: number
+}
+
+/** Response from `GET /v1/engines` (Plan 28-03 / D-03). */
+export interface EnginesResponse {
+  engines: string[]
+  default: string
+}
+
+/** Reload job row (execution.rs ReloadJob :382-408, serialized with skip-None). */
+export interface ReloadJob {
+  job_id: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  result?: unknown
+  error?: string | null
+}
+
+/** Request body for `POST /v1/rules/batch-execute` (execution.rs :462-471). */
+export interface BatchExecuteRequest {
+  requests: ExecuteRequest[]
+  max_concurrency?: number | null
+}
+
+/** Per-item result inside a BatchExecuteResponse (execution.rs BatchItemResult :474-481). */
+export interface BatchItemResult {
+  success: boolean
+  response?: ExecuteResponse | null
+  error?: string | null
+}
+
+/** Response from `POST /v1/rules/batch-execute` (execution.rs :484-494). */
+export interface BatchExecuteResponse {
+  results: BatchItemResult[]
+  total_fired: number
+  succeeded: number
+  failed: number
+}
