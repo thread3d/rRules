@@ -110,6 +110,43 @@ impl SharedRuleSet {
     }
 }
 
+/// Filter a `RuleSet` to rules matching `rule_filter` (FRONTEND-03 follow-up /
+/// v5.0 audit WARNING 1: `rule_filter` was a dead input — the TestRunner sends
+/// `{ name_pattern: ruleId }` for a "test this rule" UX but the engine
+/// previously loaded ALL rules). A rule matches when `name_pattern` equals its
+/// `id` OR `name` (exact match — the TestRunner sends the edited rule's id).
+/// The `categories` field is not yet backed by `Rule` metadata (rules carry no
+/// category field) and is therefore a documented no-op.
+///
+/// Returns `Cow::Borrowed(src)` when `filter` is `None` or carries no
+/// `name_pattern`, so the non-filtered execute path borrows the shared
+/// ruleset directly — no clone on the hot path (the pre-fix behavior). Only
+/// the filtered path clones, and only the matching rules.
+fn filter_ruleset<'a>(
+    src: &'a RuleSet,
+    filter: Option<&'a RuleFilter>,
+) -> std::borrow::Cow<'a, RuleSet> {
+    let Some(f) = filter else {
+        return std::borrow::Cow::Borrowed(src);
+    };
+    // Only name_pattern is honored; categories has no Rule metadata to match.
+    let Some(pat) = f.name_pattern.as_deref() else {
+        return std::borrow::Cow::Borrowed(src);
+    };
+    let matching: Vec<Rule> = src
+        .rules
+        .iter()
+        .filter(|r| r.id == pat || r.name == pat)
+        .cloned()
+        .collect();
+    let mut out = RuleSet::new();
+    // Source rules are already validated + deduped; add_rules re-checks
+    // (harmless) and is the only public way to populate a RuleSet (the
+    // `compiled` field is private).
+    let _ = out.add_rules(matching);
+    std::borrow::Cow::Owned(out)
+}
+
 /// Build a shared read-only `RuleSet` from a rules directory (R1 / D-05 / D-03a).
 ///
 /// Reads each `*.rules` and `*.drl` file in `rules_dir`, parses the JSON
@@ -609,6 +646,15 @@ pub async fn execute_single(
     //    generation counter (a `u64` — free) atomically under the same read
     //    lock, then release before `web::block` (per-request isolation
     //    preserved — the generation reflects the snapshot the engine loaded).
+    //    FRONTEND-03 follow-up (v5.0 audit WARNING 1): honor
+    //    `req.rule_filter.name_pattern` by loading only matching rules into
+    //    the per-request engine. `filter_ruleset` returns `Cow::Borrowed` of
+    //    the full ruleset when no filter is present, so the non-filtered path
+    //    is unchanged (no extra clone). `rule_filter` is honored on the
+    //    stateless path only — the sessionful path's engine is loaded once at
+    //    session creation (see `execute_sessionful`). `all_rule_ids` is taken
+    //    from the loaded (possibly filtered) ruleset so `rules_not_fired`
+    //    stays consistent with what the engine actually evaluated.
     let (all_rule_ids, generation): (Vec<String>, u64) = {
         let guard = ruleset.read().map_err(|e| {
             (
@@ -616,13 +662,14 @@ pub async fn execute_single(
                 format!("ruleset lock poisoned: {}", e),
             )
         })?;
-        engine.load_ruleset(&guard.ruleset).map_err(|e| {
+        let loaded = filter_ruleset(&guard.ruleset, req.rule_filter.as_ref());
+        engine.load_ruleset(&loaded).map_err(|e| {
             (
                 actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
                 format!("load_ruleset failed: {}", e),
             )
         })?;
-        let ids = guard.ruleset.rules.iter().map(|r| r.id.clone()).collect();
+        let ids = loaded.rules.iter().map(|r| r.id.clone()).collect();
         let gen = guard.generation;
         (ids, gen)
     };

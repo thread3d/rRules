@@ -9,6 +9,8 @@ use serde::Serialize;
 use engine::monitoring::detection::RuleExecutionTracker;
 use engine::monitoring::coverage::CoverageTracking;
 
+use crate::v1::sessions::SessionManager;
+
 /// Metrics snapshot for real-time monitoring.
 ///
 /// Renamed from `EngineState` (L-05 / Pitfall 10) to disambiguate from
@@ -310,35 +312,50 @@ fn metrics_html(engine_name: &str, rules_fired: u64, memory_bytes: u64, active_s
 pub async fn metrics_endpoint(
     req: actix_web::HttpRequest,
     counters: web::Data<ExecutionCounters>,
+    // v5.0 audit WARNING 2: read the live session count for the HTML + JSON
+    // arms so they agree with the Prometheus text arm (which gathers the
+    // rrules_sessions_active gauge from counters.registry) and the WS
+    // broadcast (execution.rs uses session_manager.len()). Previously these
+    // two arms hardcoded active_sessions: 0.
+    //
+    // `Option<...>` so the handler degrades to 0 in minimal test apps that
+    // don't install a SessionManager (e.g. the auth allowlist + standalone
+    // metrics tests). Production `main.rs` always installs it (app_data at
+    // main.rs:224) → `Some` → live count; the
+    // `metrics_json_active_sessions_live` regression test proves that path.
+    session_manager: Option<web::Data<Arc<SessionManager>>>,
 ) -> impl Responder {
     let accept = req.headers().get("Accept").and_then(|h| h.to_str().ok()).unwrap_or("");
 
     match accept {
         _ if accept.contains("text/html") || accept.contains("*/*") => {
             // Phase 24 (Plan 24-03): read live rules_fired from the AtomicU64
-            // mirror. memory_bytes and active_sessions stay 0 (Open Q3 —
-            // Phase 27 populates active_sessions).
+            // mirror. v5.0 audit WARNING 2: active_sessions now read from the
+            // live SessionManager (matches the Prometheus text + WS arms);
+            // memory_bytes stays 0 (Open Q3 — no memory metric wired yet).
             HttpResponse::Ok()
                 .content_type("text/html; charset=utf-8")
                 .body(metrics_html(
                     "default",
                     counters.snapshot_rules_fired.load(Ordering::Relaxed),
                     0,
-                    0,
+                    session_manager.as_ref().map_or(0, |sm| sm.len()),
                 ))
         }
         _ if accept.contains("application/json") => {
             // Phase 24 (Plan 24-03): read live counter values from the AtomicU64
             // mirrors. The engine_name stays "default" for the JSON arm (the
             // per-execute engine_name goes through the WS broadcast, not this
-            // generic scrape). active_sessions and memory_bytes stay 0 (Open Q3).
+            // generic scrape). v5.0 audit WARNING 2: active_sessions now read
+            // from the live SessionManager (matches the Prometheus text + WS
+            // arms); memory_bytes stays 0 (Open Q3).
             HttpResponse::Ok()
                 .content_type("application/json")
                 .json(serde_json::json!({
                     "engine_name": "default",
                     "rules_fired": counters.snapshot_rules_fired.load(Ordering::Relaxed),
                     "facts_inserted": counters.snapshot_facts_inserted.load(Ordering::Relaxed),
-                    "active_sessions": 0,
+                    "active_sessions": session_manager.as_ref().map_or(0, |sm| sm.len()),
                     "memory_bytes": 0
                 }))
         }

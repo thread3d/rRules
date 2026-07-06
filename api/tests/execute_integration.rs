@@ -2264,3 +2264,147 @@ async fn list_engines_returns_registry() {
         engine_names,
     );
 }
+
+// =====================================================================
+// v5.0 audit WARNING 1 (FRONTEND-03): rule_filter is honored server-side.
+// The TestRunner sends { name_pattern: ruleId } for a "test this rule" UX;
+// pre-fix the engine loaded ALL rules (rule_filter was a dead input). These
+// tests prove `filter_ruleset` scopes the loaded ruleset on the stateless
+// path. Uses the two-rule fixture (r1 fires on score==0; r2 needs score==999).
+// =====================================================================
+
+/// rule_filter matching r2 (the never-fires sentinel) must EXCLUDE r1 from the
+/// loaded ruleset. With facts score==0, r1 would normally fire — proving the
+/// filter actually scopes the engine (without it rules_fired would be >= 1).
+#[serial_test::serial]
+#[actix_web::test]
+async fn rule_filter_excludes_non_matching_rule() {
+    reset_test_env();
+    let app = init_two_rule_app!();
+
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "facts": { "scorecard": { "score": 0 } },
+            "rule_filter": { "name_pattern": "r2" }
+        }))
+        .to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    // r1 was filtered OUT → only r2 loaded → r2 needs score==999 → nothing fires.
+    assert_eq!(
+        body["rules_fired"].as_u64(),
+        Some(0),
+        "FRONTEND-03: rule_filter=r2 must exclude r1 (which fires on score==0); \
+         rules_fired should be 0, got {:?}; body: {body}",
+        body["rules_fired"]
+    );
+    // Only r2 was loaded, and it didn't fire → rules_not_fired == ["r2"].
+    let not_fired = body["rules_not_fired"]
+        .as_array()
+        .expect("rules_not_fired should be an array");
+    assert_eq!(not_fired.len(), 1, "only r2 was loaded; body: {body}");
+    assert_eq!(
+        not_fired[0], "r2",
+        "rules_not_fired should be [\"r2\"]; body: {body}"
+    );
+}
+
+/// rule_filter by human-readable NAME (not id) loads that rule. Filtering to
+/// r1's name "Increment score" with score==0 fires r1 (rules_fired >= 1).
+#[serial_test::serial]
+#[actix_web::test]
+async fn rule_filter_matches_by_name() {
+    reset_test_env();
+    let app = init_two_rule_app!();
+
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "facts": { "scorecard": { "score": 0 } },
+            "rule_filter": { "name_pattern": "Increment score" }
+        }))
+        .to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    assert!(
+        body["rules_fired"].as_u64().unwrap_or(0) >= 1,
+        "FRONTEND-03: rule_filter by name 'Increment score' should load r1 \
+         and fire on score==0; rules_fired = {:?}; body: {body}",
+        body["rules_fired"]
+    );
+}
+
+/// rule_filter matching no rule loads an empty ruleset → rules_fired 0 and
+/// rules_not_fired empty (graceful — no 500, no phantom rules).
+#[serial_test::serial]
+#[actix_web::test]
+async fn rule_filter_no_match_loads_empty_ruleset() {
+    reset_test_env();
+    let app = init_two_rule_app!();
+
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "facts": { "scorecard": { "score": 0 } },
+            "rule_filter": { "name_pattern": "does-not-exist" }
+        }))
+        .to_request();
+    let body = json_body(test::call_service(&app, req).await).await;
+
+    assert_eq!(
+        body["rules_fired"].as_u64(),
+        Some(0),
+        "no rules loaded → rules_fired 0; body: {body}"
+    );
+    assert!(
+        body["rules_not_fired"]
+            .as_array()
+            .map_or(true, |a| a.is_empty()),
+        "rules_not_fired should be empty; body: {body}"
+    );
+}
+
+// =====================================================================
+// v5.0 audit WARNING 2 (MON-07): /metrics HTML + JSON arms now read the live
+// session count (previously hardcoded active_sessions: 0). Proves the JSON arm
+// agrees with the WS broadcast + Prometheus text arm after a session is created.
+// =====================================================================
+
+/// After a stateful POST /v1/execute (session_id present), GET /metrics with
+/// Accept: application/json reports active_sessions >= 1 (the live count from
+/// the installed SessionManager), NOT the pre-fix hardcoded 0.
+#[serial_test::serial]
+#[actix_web::test]
+async fn metrics_json_active_sessions_live() {
+    reset_test_env();
+    let app = init_test_app!();
+
+    // Create a stateful session (session_id present → sessionful path).
+    let exec_req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "session_id": "metrics-live-session",
+            "facts": { "scorecard": { "score": 0 } }
+        }))
+        .to_request();
+    let exec_body = json_body(test::call_service(&app, exec_req).await).await;
+    assert!(
+        exec_body["session_id"].as_str().is_some(),
+        "setup: sessionful execute should return a server session_id; body: {exec_body}"
+    );
+
+    // Read the JSON /metrics arm — active_sessions must reflect the live count.
+    let metrics_req = test::TestRequest::get()
+        .uri("/metrics")
+        .insert_header(("Accept", "application/json"))
+        .to_request();
+    let body = json_body(test::call_service(&app, metrics_req).await).await;
+
+    assert!(
+        body["active_sessions"].as_u64().unwrap_or(0) >= 1,
+        "MON-07 / WARNING 2: /metrics JSON arm should report the live session \
+         count (>= 1 after creating a session), got {:?}; body: {body}",
+        body["active_sessions"]
+    );
+}
