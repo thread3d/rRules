@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Phase Details
 current_phase: 27
-status: executing
+current_phase_name: stateful-sessions
+status: verifying
 stopped_at: Phase 27 context gathered (--auto)
-last_updated: "2026-07-04T04:55:58.152Z"
-last_activity: 2026-07-04
-last_activity_desc: Phase 27 planning complete
+last_updated: "2026-07-06T08:46:05.564Z"
+last_activity: 2026-07-06
 progress:
   total_phases: 6
-  completed_phases: 4
-  total_plans: 14
-  completed_plans: 14
-  percent: 67
+  completed_phases: 5
+  total_plans: 15
+  completed_plans: 15
+  percent: 83
 ---
 
 # Project State
@@ -23,15 +23,15 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-03)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** Phase 27 — stateful sessions
+**Current focus:** Phase 27 — stateful-sessions
 
 ## Current Position
 
-Phase: 27
-Plan: Not started
+Phase: 27 (stateful-sessions) — EXECUTING
+Plan: 1 of 1
 Plans: Phase 27 not yet planned — run /gsd-plan-phase 27 to plan stateful sessions (SESS-01)
-Status: Ready to execute
-Last activity: 2026-07-04 — Phase 27 planning complete
+Status: Phase complete — ready for verification
+Last activity: 2026-07-06
 
 ### Milestone v5.0 Phases
 
@@ -241,6 +241,12 @@ From v2.0 milestone:
 - [Phase ?]: .planning/phases/23-execute-evaluator-wiring/23-06-SUMMARY.md
 - [Phase 26]: Phase 26-01: RuleExecutionTracker converted to `LazyLock<Mutex<TrackerState>>` singleton mirroring CoverageTracking; `new()` marked `#[deprecated]` (D-04) to catch stray local instantiation; `clear()` for `#[serial]` test isolation; internal `chrono::Utc::now().to_rfc3339()` timestamp (D-06).
 - [Phase 26]: Phase 26-02: `record_evaluation`/`record_fire` wired at BOTH post-fixpoint evaluator sites (`direct_eval.rs` for Treat/Leaps/Phreak + `rete/mod.rs` for Rete's inlined `execute_rules` — C1); `dead_rules_endpoint` reads `RuleExecutionTracker::find_dead_rules()` singleton (no `new()` per call); `engine/src/engine/metrics.rs` untouched (C4 — CoverageTracking remains canonical fire source, no three-counter drift).
+- [Phase ?]: D-03: TTL+LRU+max-count+sweep+gauge ship TOGETHER (Pitfall 5)
+- [Phase 27]: D-01: StatefulSession wraps per-session Box<dyn ExecutionEngine> (Phase-23 surface), NOT v1.0 environment::Session stub
+- [Phase 27]: D-02: Arc<DashMap<String, Arc<Mutex<StatefulSessionEntry>>>> sharded registry (DashMap 6.2.1 pinned)
+- [Phase 27]: D-03: TTL+LRU+max-count+sweep+gauge ship TOGETHER (Pitfall 5 — OOM is silent)
+- [Phase 27]: D-04: Server UUID v4 primary key + client session_id as idempotency alias
+- [Phase 27]: D-11: Per-session std::sync::Mutex; engine.execute() in web::block (Pitfall 7 guard-scope pattern)
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -272,7 +278,7 @@ From v3.0 milestone:
 
 **Stopped at:** Phase 27 context gathered (--auto)
 
-Last session: 2026-07-04T04:41:52.668Z
+Last session: 2026-07-06T08:45:51.312Z
 
 **Completed Phases:**
 
@@ -304,3 +310,4 @@ Last session: 2026-07-04T04:41:52.668Z
 | Phase 23 P02 | 10min | 2 tasks | 4 files |
 | Phase 23 P03 | 7min | 2 tasks | 2 files |
 | Phase 23 P04 | 4min | 2 tasks | 8 files |
+| Phase 27 P01 | 90min | 3 tasks | 8 files |

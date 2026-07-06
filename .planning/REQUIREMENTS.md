@@ -10,7 +10,7 @@ Populated during roadmap creation. Each requirement maps to exactly one phase (P
 | EXEC-04 | Phase 28 | Pending |
 | ENGINE-07 | Phase 23 | Complete |
 | ENGINE-08 | Phase 23 | Complete |
-| SESS-01 | Phase 27 | Pending |
+| SESS-01 | Phase 27 | Complete |
 | DEPLOY-05 | Phase 25 | Complete |
 | MON-05 | Phase 23 | Complete |
 | MON-06 | Phase 26 | Complete |
