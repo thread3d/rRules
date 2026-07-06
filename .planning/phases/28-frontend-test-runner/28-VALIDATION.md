@@ -1,10 +1,11 @@
 ---
 phase: 28
 slug: frontend-test-runner
-status: draft
+status: active
 nyquist_compliant: false
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-07-06
+updated: 2026-07-06
 ---
 
 # Phase 28 — Validation Strategy
