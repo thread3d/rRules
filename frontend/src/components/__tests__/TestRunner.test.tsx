@@ -219,4 +219,20 @@ describe('TestRunner', () => {
     await waitFor(() => expect(mocks.executeRule).toHaveBeenCalled())
     expect(screen.getByText(/20/)).toBeInTheDocument()
   })
+
+  // UI-REVIEW (Pillar 6): the role="alert" error banner is the panel's only
+  // user-visible failure surface and was previously uncovered. This exercises
+  // the executeMutation.onError path: when executeRule rejects, the banner
+  // appears with role="alert" and the rejection's message.
+  it('shows an error banner when execution fails', async () => {
+    mocks.executeRule.mockRejectedValue(new Error('engine exploded'))
+
+    renderWithClient(<TestRunner ruleId="r1" />)
+    fireEvent.click(screen.getByRole('button', { name: /^run$/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument()
+    })
+    expect(screen.getByText(/engine exploded/i)).toBeInTheDocument()
+  })
 })

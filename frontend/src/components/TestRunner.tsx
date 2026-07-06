@@ -148,14 +148,25 @@ export function TestRunner({ ruleId }: TestRunnerProps) {
       })
   }
 
+  // UI-REVIEW (Pillar 6): Run is in-flight while the execute mutation
+  // is pending; the Reload-then-Run button is in-flight while a reload job
+  // is being polled OR the post-reload execute is running. Binding these to
+  // `disabled` prevents the double-fire mutation risk flagged in the review.
+  const executeInFlight = executeMutation.isPending
+  const reloadInFlight = !!jobId || executeMutation.isPending
+
   return (
     <section className="space-y-4">
       <h2 className="font-semibold">Test Runner</h2>
 
       {/* D-06: facts JSON editor (Critical Finding 7 — javascript({json:true})) */}
       <div className="space-y-1">
-        <label className="text-sm font-medium">Facts (JSON)</label>
+        <label htmlFor={`facts-json-${ruleId}`} className="text-sm font-medium">
+          Facts (JSON)
+        </label>
         <CodeMirror
+          id={`facts-json-${ruleId}`}
+          aria-label={`Facts JSON for rule ${ruleId}`}
           value={factsJson}
           height="120px"
           theme={oneDark}
@@ -167,9 +178,12 @@ export function TestRunner({ ruleId }: TestRunnerProps) {
 
       {/* D-08: engine dropdown */}
       <div className="space-y-1">
-        <label className="text-sm font-medium">Engine</label>
+        <label htmlFor={`engine-${ruleId}`} className="text-sm font-medium">
+          Engine
+        </label>
         <select
-          className="border rounded px-2 py-1"
+          id={`engine-${ruleId}`}
+          className="border rounded px-2 py-1 bg-background"
           value={selectedEngine ?? ''}
           onChange={(e) => setSelectedEngine(e.target.value)}
         >
@@ -194,27 +208,55 @@ export function TestRunner({ ruleId }: TestRunnerProps) {
         </label>
       </div>
 
-      {/* Run + Reload then Run buttons */}
-      <div className="flex gap-2">
-        <button type="button" onClick={handleRun}>
+      {/* Run + Reload then Run buttons.
+          UI-REVIEW (Pillars 2/3/5/6): Run is the primary CTA (token-backed
+          `bg-primary`, padding, disabled-while-pending); "Reload then Run" is
+          demoted to an outline variant. A "Reloading…" indicator shows while
+          the async reload job is being polled (D-07), so the panel does not
+          look frozen. */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleRun}
+          disabled={executeInFlight}
+          className="px-3 py-1 rounded bg-primary text-primary-foreground disabled:opacity-50 inline-flex items-center"
+        >
           <Play className="inline mr-1 h-4 w-4" /> Run
         </button>
-        <button type="button" onClick={handleReloadThenRun}>
+        <button
+          type="button"
+          onClick={handleReloadThenRun}
+          disabled={reloadInFlight}
+          className="px-3 py-1 rounded border border-border disabled:opacity-50 inline-flex items-center"
+        >
           <RefreshCw className="inline mr-1 h-4 w-4" /> Reload then Run
         </button>
+        {reloadInFlight && (
+          <span className="text-sm text-muted-foreground">Reloading…</span>
+        )}
       </div>
 
-      {/* Error banner */}
+      {/* Error banner. UI-REVIEW (Pillar 3): token-backed destructive classes
+          so the banner tracks --destructive in both light and dark mode. */}
       {error && (
         <div
           role="alert"
-          className="bg-red-100 border border-red-400 text-red-700 px-3 py-2 rounded"
+          className="bg-destructive/10 border border-destructive/40 text-destructive px-3 py-2 rounded"
         >
           {error}
         </div>
       )}
 
-      {/* D-09: stacked results sections (response-driven — Pitfall 8) */}
+      {/* D-09: stacked results sections (response-driven — Pitfall 8).
+          UI-REVIEW (Pillar 1): empty-state copy before the first Run, so a
+          developer landing on the panel has guidance instead of an absent
+          results panel. */}
+      {!lastResult && !error && (
+        <p className="text-sm text-muted-foreground">
+          No runs yet — click Run to execute this rule.
+        </p>
+      )}
+
       {lastResult && (
         <div className="space-y-3">
           <section>
@@ -235,7 +277,7 @@ export function TestRunner({ ruleId }: TestRunnerProps) {
 
           <section>
             <h3 className="font-semibold">Facts after</h3>
-            <pre className="bg-gray-50 p-2 rounded text-sm overflow-auto">
+            <pre className="bg-muted p-2 rounded text-sm font-mono overflow-auto">
               {JSON.stringify(lastResult.facts_after, null, 2)}
             </pre>
           </section>
@@ -261,8 +303,9 @@ export function TestRunner({ ruleId }: TestRunnerProps) {
             </section>
           )}
 
-          {/* SC-4 correlation hint */}
-          <p className="text-xs text-gray-500">
+          {/* SC-4 correlation hint. UI-REVIEW (Pillar 3): token-backed muted
+              foreground instead of the hardcoded gray-500. */}
+          <p className="text-xs text-muted-foreground">
             engine_generation: {lastResult.engine_generation}
             {preReloadGeneration !== undefined && (
               <> (pre-reload: {preReloadGeneration})</>

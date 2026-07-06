@@ -50,7 +50,7 @@ function EditRulePage() {
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Edit Rule {id}</h1>
-        <p className="text-gray-500">Editing existing rule definition.</p>
+        <p className="text-muted-foreground">Editing existing rule definition.</p>
       </div>
 
       <section className="space-y-2">
@@ -73,20 +73,23 @@ function EditRulePage() {
         />
       </section>
 
-      {/* D-05: minimal Save → PUT /v1/rules/{id} enabler (SC-4 bridge) */}
+      {/* D-05: minimal Save → PUT /v1/rules/{id} enabler (SC-4 bridge).
+          UI-REVIEW (Pillar 3): Save now uses the --primary token instead of
+          the one-off bg-blue-600; meta/error copy uses muted/destructive
+          tokens so it tracks dark mode. */}
       <section className="space-y-2">
         <h2 className="font-semibold">Save</h2>
         <button
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="px-3 py-1 bg-blue-600 text-white rounded disabled:opacity-50"
+          className="px-3 py-1 bg-primary text-primary-foreground rounded disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
-        {savedAt && <p className="text-xs text-gray-500">Saved at {savedAt}</p>}
+        {savedAt && <p className="text-xs text-muted-foreground">Saved at {savedAt}</p>}
         {saveError && (
-          <p role="alert" className="text-xs text-red-600">
+          <p role="alert" className="text-xs text-destructive">
             {saveError}
           </p>
         )}
