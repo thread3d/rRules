@@ -64,7 +64,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 - [x] **Phase 25: Real reload + JobStore** — Shared reloadable `RuleSet` snapshot; async reload writes `ReloadJob`; batch inherits real execution (completed 2026-07-03)
 - [x] **Phase 26: RuleExecutionTracker singleton + dead-rule live data** — Singleton-ize tracker; dead-rules reads live firings; pin with e2e test (completed 2026-07-03)
 - [x] **Phase 27: Stateful sessions** — `SessionManager` (DashMap, TTL, LRU, sweep); stateful `/v1/execute/session/{id}` endpoints (completed 2026-07-06)
-- [ ] **Phase 28: Frontend test-runner** — `execution.ts` + `TestRunner` component; engine selector dropdown; inference trace surfaced
+- [x] **Phase 28: Frontend test-runner** — `execution.ts` + `TestRunner` component; engine selector dropdown; inference trace surfaced (completed 2026-07-06)
 
 </details>
 
@@ -319,7 +319,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 25. Real reload + JobStore | v5.0 | 3/3 | Complete    | 2026-07-03 |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 2/2 | Complete    | 2026-07-03 |
 | 27. Stateful sessions | v5.0 | 1/1 | Complete    | 2026-07-06 |
-| 28. Frontend test-runner | v5.0 | 5/5 | Complete   | 2026-07-06 |
+| 28. Frontend test-runner | v5.0 | 5/5 | Complete    | 2026-07-06 |
 
 ---
 *Roadmap last updated: 2026-07-02 — v5.0 Live Execution milestone added (Phases 23–28)*
