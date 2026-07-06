@@ -1,218 +1,219 @@
 # Project Research Summary
 
-**Project:** rRules (BRMS) — Milestone v5.0 "Live Execution"
-**Domain:** Wiring live rule execution into an existing Rust actix-web + React BRMS
-**Researched:** 2026-07-02
+**Project:** rRules — DMN 1.5 Level 3 Compliance (milestone v6.0)
+**Domain:** DMN Decision Tables + FEEL Expression Language integrated into an existing production Rust BRMS
+**Researched:** 2026-07-06
 **Confidence:** HIGH
 
 ## Executive Summary
 
-rRules v5.0 is a brownfield **wiring** milestone, not a build milestone. The real pluggable engines (Rete/TREAT/LEAPS/PHREAK via `EngineRegistry`), the `CoverageTracking` singleton, the hot-reload plumbing (`EngineState`, `ReloadJob`, `JobStore`), the frontend monitoring dashboards and their contract adapters, and the Prometheus workspace crate are all already in place. The gap is that `POST /v1/execute` (`api/src/v1/execution.rs:307`) routes through a **stub** `engine::environment::Engine` (`load_rules`, `execute_forward`, `Session::execute` all return placeholder strings) instead of the real `EngineRegistry`/`ExecutionEngine` surface. As a result nothing fires, `rules_fired` is hardcoded to `0`, `facts_after` echoes the request input, `CoverageTracking` never receives data, and every monitoring dashboard displays zeros. The keystone act of v5.0 is: **route `/v1/execute` through the real `EngineRegistry`** (share `Arc<EngineRegistry>` as `web::Data`; construct a fresh `Box<dyn ExecutionEngine>` per request via `spawn_blocking` since engines are `&mut self`/`!Clone`), and enable the engine cargo features on the `api` crate so `register_default_engines` actually registers factories.
+rRules v6.0 adds OMG DMN 1.5 Level 3 compliance to a shipped production BRMS (Rust actix-web + React/TS, v5.0 audit-passed). Level 3 is binary: it requires **full FEEL** (Clause 10 grammar rules 1–65, all 10 boxed expression types, ~70+ built-in functions, three-valued logic, the type lattice, decision-service semantics) on top of decision tables (Clause 8) and the DMN interchange model (Clauses 6–7). "Level 3-ish" is not a claim — partial implementations may only say "based on DMN." The dominant cost of the milestone is the FEEL evaluator; everything else (parser, hit policies, API, frontend) is straightforward once FEEL exists.
 
-The recommended approach is **connect-before-build**, ordered so each phase ends with a verifiable vertical slice and downstream features inherit live data for free. Once `execute_single` drives a real engine, `CoverageTracking` auto-populates (ReteEngine already calls `record_rule_eval`/`record_rule_fire` at `rete/mod.rs:293,332`) and the three frontend dashboards (Engine, Coverage, DeadRule) display live data with **zero protocol/UI changes** — their adapters already tolerate the real shapes. A small set of new wiring is required alongside the keystone: an `ExecutionCounters` (`AtomicU64`) struct + `prometheus` (already a workspace dep, promote into `api/Cargo.toml`) drives `/metrics` and the WebSocket broadcast; a shared `Arc<RwLock<RuleSet>>` (or `ArcSwap`) makes `reload_engine` actually swap rules; `RuleExecutionTracker` must be converted to a `LazyLock<Mutex<…>>` singleton (today `dead_rules_endpoint` instantiates a fresh empty tracker at `metrics.rs:214`, so it always returns `[]`); and `facts_after` must be serialized from post-execution `WorkingMemory` rather than echoing the request JSON.
+The recommended approach is a **new, parallel evaluation surface** — `engine/src/dmn/` with its own `DecisionEvaluator` behind `POST /v1/decisions/{id}/evaluate` — NOT a compilation of DMN into the existing Rete/TREAT/LEAPS/PHREAK `ExecutionEngine`. DMN is stateless, side-effect-free, single-pass, and three-valued; the Rete engines are forward-chaining, working-memory-mutating, two-valued, and v5.0-audit-passed. Sharing `Value` (extended additively) and `TraceEvent`/`TraceData` is correct; sharing the execution engine or the `Expression` AST is not. Stack additions are minimal and lean: `quick-xml 0.40` for DMN XML, `rust_decimal 1.42` (with `maths`) for Decimal128, `chrono-tz 0.10` for IANA timezones, and a hand-written recursive-descent FEEL parser in-tree.
 
-The principal risks are (1) treating `EngineState.engine` (the stub `environment::Engine`) as a shared mutable execution engine — `execute(&mut self)` plus an actix `RwLock` write-lock would serialize the entire API and collapse the batch `Semaphore + JoinSet` concurrency; (2) coverage double-counting — `record_rule_fire` is called **inside the per-nagram inner loop** at `rete/mod.rs:332`, so one logical firing is recorded as many; (3) the `reload_engine` no-op being mistaken for working hot-reload (it acquires and drops a write lock at `execution.rs:163-166`, never recompiles, and the async branch discards its result so `GET /v1/jobs/{id}` 404s); and (4) feature-gating — `register_default_engines` only registers Rete today, gated by `engine-rete`; the API build must enable all four engine cargo features or the `engine` param is a lie. Mitigations: share the **factory**, construct a fresh engine per request; record coverage once per rule per execution outside the inner loop; make reload swap-don't-mutate plus a generation tag and write a real `ReloadJob` to `JobStore`; and enable engine features in the `api` crate build. Stack additions are minimal — only `dashmap` 6.2.1 for the session store and the already-pinned `prometheus` 0.13 promoted into `api/Cargo.toml`. **No engine pooling is needed** — construction is O(1) today because `load_rules` is a stub; revisit only if a future milestone makes `load_rules` parse real rule files.
+The top risks are (1) three-valued-logic leak — reusing Rust `PartialEq`/`compare_values` for FEEL equality silently coerces `null` to `false`, breaking filter/`if`/ANY semantics; (2) PRIORITY-as-first-match — DMN PRIORITY orders by the output column's `allowedValues` enumeration, not by row; (3) FEEL re-parsing on every evaluation — the #1 documented DMN performance bug, a 4–6× throughput loss; (4) round-trip fidelity loss — the existing frontend `DecisionTable.tsx` shape is not DMN and cannot be the canonical store; (5) false Level 3 claim — shipping S-FEEL + decision tables and labeling it Level 3 is non-compliant and an enterprise-buyer audit risk. All five are preventable if the phase sequence below is followed and the conformance checklist is a phase-exit gate.
 
 ## Key Findings
 
 ### Recommended Stack
 
-See `.planning/research/STACK.md` for full rationale. The milestone reuses the existing actix-web 4.4 / tokio "full" / engine crate / hybrid Git+PostgreSQL stack verbatim. Only two NEW additions are required.
+NEW additions only — existing validated deps (actix-web 4.4, tokio, the Rete engines, `EngineRegistry`, Prometheus 0.13, `chrono 0.4`, hybrid Git+PostgreSQL, the v4.0 frontend editor) are reused unchanged. The single most important stack decision: **do NOT take the `dsntk-*` crate family as a dependency** (pre-1.0 SemVer risk, `Value`/`AstNode` impedance mismatch, pulls `reqwest` into a pure-compute evaluator, designed as a standalone CLI). Build from scratch; read `dsntk` source as a reference for FEEL semantics.
 
-**Core technologies:**
-- `dashmap` 6.2.1 — concurrent session store for stateful `/v1/execute/session/{id}` calls. The existing `Arc<RwLock<HashMap>>` pattern (used for `job_store`, `user_store`) serializes every session lookup behind a single write lock; DashMap is sharded, takes `&self`, and fits `web::Data`'s `Send + Sync + 'static` bound. MSRV 1.65 fits the toolchain.
-- `prometheus` 0.13 (workspace, **promote into `api/Cargo.toml`**) — register API-layer `IntCounter`/`Gauge`/`Histogram` (`execute_requests_total`, `execute_rules_fired_total`, `execute_duration_seconds`, `active_sessions`) for live `/metrics` output. Already used by `engine/src/metrics/prometheus.rs`; this is **extension, not replacement** — the engine-side per-engine gauges stay as-is.
+**Core technologies (NEW):**
+- `quick-xml 0.40` — DMN 1.5 XML import/export via streaming `NsReader` + `Writer`; handles DMN's multi-namespace XML (MODEL/DMNDI/DC/DI); ~50× faster than alternatives.
+- `rust_decimal 1.42` (features `serde`, `macros`, `maths`) — FEEL Decimal128 numeric domain; 28–29 significant digits (sufficient for every real-world BRMS use case). **Fallback:** `bigdecimal` only if OMG TCK conformance vectors prove 28–29 digits is insufficient — flagged as a phase-specific research item.
+- `chrono-tz 0.10` — IANA timezone database for FEEL `time`/`date and time` with named zones (DST-correct duration arithmetic). ~7 MB binary add.
+- Hand-written recursive-descent FEEL parser (in-tree, `engine/src/dmn/feel/parser.rs`) — FEEL has no left recursion; O(n); ~600 LoC per the Go reference. Keyword-as-name disambiguation and dual entry points (`SimpleUnaryTests` vs `Expression`) are context-sensitive and easier in hand-written code than in generated parsers. Confirmed by 3 independent reference implementations.
+- `chrono 0.4` (existing) — reused for FEEL `date`/`time`/`date and time`/`days and time duration`; no version bump.
+- `proptest` + `criterion` (existing) — fuzz the FEEL coercion matrix; bench the hot path. No new dev deps.
 
-**Supporting (already-present, no version change):**
-- `tokio` 1.35 ("full") — `task::spawn_blocking` for CPU-bound `engine.execute()` (keeps the actix worker free); `time::interval` for session TTL sweep.
-- `tracing` 0.1 — `#[tracing::instrument]` spans carrying `execution_id`, `engine`, `session_id`, `rules_fired` to feed the inference-trace UI without a new logging crate.
+**Reconciliation note (parser strategy):** STACK.md and ARCHITECTURE.md recommend hand-written recursive descent; FEATURES.md mentions a Pratt parser or `pest`/`lalrpop`. These are compatible — Pratt parsing is a precedence-handling technique *within* a hand-written recursive-descent parser, and is the right choice for FEEL's expression-precedence layers. Parser generators (`lalrpop`/`pest`) are explicitly rejected. **Synthesis: hand-written recursive descent with Pratt-style precedence for the expression grammar.**
 
-**Critical version requirements:** `dashmap` must be pinned to `6.2.1` (not `7.0.0-rc2` — no semver guarantees). `prometheus` must match the workspace pin `0.13` on both sides to avoid version skew.
-
-**What NOT to add:** `deadpool`/`r2d2` engine pool (construction is O(1) — premature optimization), `tower-sessions`/`actix-session` (those solve user auth sessions, not rule-engine working-memory sessions; Phase 22 JWT auth already exists), a new abstraction over `EngineSelector`/`EngineRegistry` (would duplicate `EngineFactory`), `sqlx`-backed session persistence (`ExecutionEngine` is not serializable), or a second async runtime.
+**Reconciliation note (numeric crate):** STACK.md and PITFALLS.md recommend `rust_decimal` (28–29 digits); FEATURES.md mentions `bigdecimal`/`rust_decimal`. The 34-digit Decimal128 mandate is normative, but 28–29 digits exceeds every real-world financial/insurance/healthcare requirement. **Synthesis: `rust_decimal 1.42` as the default; `bigdecimal` is a TCK-gated fallback, flagged for phase-specific research if conformance vectors demand strict 34-digit precision.**
 
 ### Expected Features
 
-See `.planning/research/FEATURES.md` for full landscape and prioritization matrix.
+**Must have (table stakes for the Level 3 claim):**
+- FEEL lexer/parser — grammar rules 1–65 (the enabler; without it, no FEEL, no Level 3).
+- FEEL evaluator — arithmetic, comparison, boolean with **ternary logic**, `if`, `for`, `some`/`every`, path, filter, `instance of`.
+- FEEL type lattice + implicit conversions + null/ternary propagation — semantic backbone.
+- Decimal128 numeric type + `date`/`time`/`date and time`/`days and time duration`/`years and months duration` value types.
+- FEEL built-in function library — all ~70+ functions across conversion/string/list/numeric/date-time/context/boolean/range/equality.
+- All 10 FEEL boxed expression types (recursive).
+- User-defined FEEL functions (lambdas, non-external) — grammar rule 55.
+- DMN 1.5 XML parser + exporter (round-trip) — canonical IR is the store, frontend is a projection.
+- Item definitions + information items — Clause 7.
+- Decision-table engine: all 7 hit policies (U/A/P/F/C/R/O) + COLLECT aggregators + default outputs + allowed-values lists.
+- Decision CRUD + persistence (Git `.dmn` files + PostgreSQL metadata).
+- `POST /v1/decisions/{id}/evaluate` — mirrors v5.0 `/v1/execute` wiring.
+- Decision-eval integration with Prometheus (`rrules_dmn_*` on existing dedicated registry) + trace (`TraceEvent`/`TraceData`, extended `event_type`).
+- Frontend wiring: `DecisionTable.tsx` + `HitPolicySelector.tsx` → backend evaluator (PROJECT.md explicit scope; does NOT rebuild the editor).
+- `HitPolicySelector` refactor: `{policy, aggregator?}`; add missing FIRST + OUTPUT ORDER; fix misleading descriptions.
+- Allowed-values editor for output columns (PRIORITY/OUTPUT ORDER usability).
+- OMG DMN TCK conformance vectors as the acceptance suite.
 
-**Must have (table stakes — P1):**
-- Real single-execute wiring (`POST /v1/execute` fires rules, returns truthful `rules_fired`/`rules_not_fired`/`facts_after`) — closes the documented stub; the milestone's core promise.
-- Per-request engine selection (`engine` field on `ExecuteRequest` + config default via env `RRULES_DEFAULT_ENGINE`) — exercises the v3.0 pluggable engines; without it the selector is dead code.
-- Stateless one-shot mode as the default — the dominant pattern for API-driven decisions.
-- `CoverageTracker` auto-populated from every execute — the bridge that makes v4.0 monitoring surfaces show live data.
-- Prometheus metrics emission per execute (latency histogram, rules fired, engine label) — makes the dashboard real.
-- Async reload-then-execute actually swaps the compiled engine — makes hot-reload meaningful for execution, not just file watching.
-- Batch-execute drives real execution — inherited once single is real; verify only.
-- Frontend Run button + fired-rules/results panel in the rule editor — the user-facing proof that execution works.
-- Inference trace surfaced on demand (`trace: bool`, opt-in; off by default for perf) — minimum debugging support; the `InferenceTrace` types already exist.
+**Should have (differentiators, v6.x):**
+- Inference-trace emission for decisions (reuse v5.0 two-site trace pattern).
+- Per-decision Prometheus metrics + dashboard panel.
+- Hot-reload of decisions (`SharedDmnModel{model, generation}` mirroring v5.0 `SharedRuleSet`).
+- DMNDI round-trip preservation (parse + persist layout; NO rendering).
 
-**Should have (differentiators — P2, v5.x):**
-- Side-by-side engine comparison on one input (Rete AND TREAT AND LEAPS AND PHREAK) — no competitor exposes four Rete-family algorithms in one UI.
-- Per-execution Prometheus metric emission + live dashboard correlation within seconds.
-- Coverage + dead-rule detection fed by real runs (couples execution to the v4.0 monitoring surfaces).
-- Stateful KIE-session-style sessions (multi-interaction: insert facts, fire, insert more, fire again, dispose).
-- Decision-table row-match highlighting (green/yellow/red) — high UX value, high coupling cost.
-- Per-rule / per-node timing in the trace (`duration_us`).
-- Run-panel engine selector dropdown wired to the runtime selector.
-
-**Defer (v6+, anti-features):**
-- Always-on full inference trace (doubles latency — keep opt-in).
-- Cross-request shared working memory in stateless mode (race conditions, non-deterministic).
-- Synchronous batch with shared engine/lock (defeats existing concurrency; one panicking item poisons the engine).
-- GraphQL / streaming execute response (small audience; REST + JSON suffices; WS already exists for monitoring).
-- Auto-reload on every execute (re-compiles per request — kills throughput; reload is event-driven).
-- Client-side rule execution in the browser (WASM drift; bypasses governance/audit/coverage; two engines = two truths).
-- Live breakpoints / step-through debugger (a milestone of its own — the inference trace covers ~80% of debugging).
-- Expected-vs-actual diff + "Save as test" (P3 — a `TestRun` entity + UI; bridge to regression testing).
+**Defer (v7+, anti-features for v6.0):**
+- Visual DRD canvas — Level 1 notation concern, zero Level 3 value.
+- External Java/PMML function integration — massive scope expansion; not required for Level 3; Rust BRMS.
+- Cross-table `in` evaluation / decision-service chaining — defer to post-MVP (single-decision eval per API call for v6.0).
+- DMN↔Rete engine bridge — genuine differentiator but HIGH complexity; post-MVP.
+- DMN 1.6 features (Collect distinct-sum, `sum([])`) — spec unsettled; target 1.5.
+- Replacing the existing `Expression` AST with the FEEL AST — would regress v1.0–v5.0.
+- FEEL→SQL transpilation — research project, not implementation task.
 
 ### Architecture Approach
 
-See `.planning/research/ARCHITECTURE.md` for component map and per-subsystem data flows.
-
-The pivotal finding: **two unrelated "engine" surfaces exist and are NOT connected.** `engine::environment::Engine` (the stub) is built by `/v1/execute` and never fires; `engine::engine::ExecutionEngine` + `EngineRegistry` (the real one, with `ReteEngine::execute_rules` actually propagating the Rete network and calling `CoverageTracking`) is dead code from the API's perspective. v5.0's central act is to route `/v1/execute` through the real surface.
+A new `engine/src/dmn/` module tree is the parallel evaluation surface, sibling to `engine/src/engine/` (NOT nested inside it — DMN is not a Rete-family algorithm and must never be wired through `EngineRegistry`). The `DecisionEvaluator` is stateless, `Send + Sync + 'static`, held in `web::Data`, constructed per-request inside `web::block` (mirrors v5.0's CPU-off-async-executor discipline without the `EngineRegistry`/`Box<dyn ExecutionEngine>` ceremony). A `SharedDmnModel{model, generation}` under `Arc<RwLock>` mirrors `SharedRuleSet` for reload-then-swap. `engine::data_types::Value` is extended additively with FEEL variants (`Date`, `Time`, `DaysTimeDuration`, `YearsMonthsDuration`, `Range`, `Function`) — NOT forked. The `Expression` AST is NOT shared; a distinct `FeelExpression` enum with `evaluate(&Scope)` lives in `dmn/feel/ast.rs`. `TraceEvent`/`TraceData` are reused with new `event_type` constants. `DecisionCounters` registers on the SAME dedicated Prometheus `Registry` as `ExecutionCounters`. The existing Rete path is UNCHANGED — zero regression risk.
 
 **Major components:**
-1. `EngineRegistry` (shared `web::Data`) — holds registered factories; `create_engine_by_name()` produces a fresh owned `Box<dyn ExecutionEngine>` per request. Build once at startup; extend `register_default_engines` to register all four factories (today only Rete, gated by `engine-rete` feature).
-2. `EngineSelector` — resolves default engine name from config + validates per-request `engine` param. Keep separate from the registry (config object vs. factory).
-3. `execute_single` / `execute_rules` (modified) — resolve engine, load shared RuleSet, insert facts, call `engine.execute()` inside `spawn_blocking`, return real `rules_fired`/`facts_after`. Signature change: accept `web::Data<EngineRegistry>` + `web::Data<EngineSelector>` (+ later `EngineState` for the reloaded RuleSet).
-4. `SessionManager` (NEW, `api/src/v1/sessions.rs`) — owns `Box<dyn ExecutionEngine>` per session_id; TTL eviction via background `tokio::time::interval`. Does NOT salvage the abandoned `environment::Session` stub.
-5. `ExecutionCounters` (NEW, `engine/src/monitoring/counters.rs` or `api/src/metrics.rs` extension) — `AtomicU64` counters read by `/metrics`, `/v1/monitoring/engine-state`, and broadcast via the existing `metrics_tx` WS channel.
-6. `RuleExecutionTracker` (singleton-ized) — mirror the `CoverageTracking` `LazyLock<Mutex<…>>` pattern; add `record_*` calls next to `CoverageTracking` calls in `rete/mod.rs:293,332`.
-7. Shared `RuleSet` snapshot (`Arc<RwLock<RuleSet>>` or `ArcSwap<RuleSet>`) — built once at startup from `RULE_STORAGE_PATH`, updated atomically by reload; read per request. Decouples "which rules" (shared, reloadable) from "the engine instance" (per-request, not shared).
-8. Frontend `api/execution.ts` + `TestRunner` component (NEW) — thin client over `/v1/execute`; monitoring dashboards need NO frontend changes (adapters already wired).
-
-**Key patterns:**
-- **Factory shared, instance per-request** — `web::Data<EngineRegistry>`; fresh `Box<dyn ExecutionEngine>` per call. Avoids shared mutable state, preserves the batch "no shared locks" contract.
-- **Process-wide singleton via `LazyLock<Mutex>`** — `CoverageTracking` (existing) and `RuleExecutionTracker` (new). Any handler reads live data without `web::Data` plumbing.
-- **ArcSwap/Arc-RwLock for hot-reloadable shared snapshot** — readers never block on reload; reload is atomic.
-- **Generation tag on every `ExecuteResponse`** — solves both the hot-reload race and frontend staleness with one field.
-
-**Anti-patterns to refuse:**
-- Sharing a mutable engine across requests (serialize + stale-after-reload).
-- Routing through the `environment::Engine` stub (`execute_forward` returns "Forward chaining not yet implemented").
-- Per-request rule parsing (push parse cost onto the hot path).
-- Persisting sessions to PostgreSQL (`ExecutionEngine` is not serializable).
+1. `engine/src/dmn/model.rs` — DMN 1.5 in-memory model; canonical IR for round-trip.
+2. `engine/src/dmn/parser.rs` — `.dmn` XML → model via `quick-xml` `NsReader`; namespace-aware, XXE-hardened, CDATA-handled.
+3. `engine/src/dmn/exporter.rs` — model → `.dmn` XML via `quick-xml::Writer`; preserves annotations, DMNDI, IDs, element order.
+4. `engine/src/dmn/feel/{ast,parser,eval,builtins,temporal,coercion}.rs` — FEEL parser (hand-written RD + Pratt), evaluator (three-valued, type lattice, ~70 builtins), temporal, coercion.
+5. `engine/src/dmn/decision_table.rs` — hit-policy engine (U/A/P/F/C/R/O + aggregators + allowed-values + default outputs).
+6. `engine/src/dmn/evaluator.rs` — decision orchestrator + DRD topological resolution (single-decision for v6.0 MVP).
+7. `api/src/v1/decisions.rs` — REST surface (evaluate + CRUD + import/export); `DecisionCounters`; WS broadcast; OpenAPI.
+8. `frontend/src/features/rules/dmnSerializer.ts` + `frontend/src/api/decisions.ts` — editor-shape ↔ DMN-model mapper; API client; results/trace panel reuse.
 
 ### Critical Pitfalls
 
-See `.planning/research/PITFALLS.md` for full warning signs and prevention strategies.
+1. **Three-valued-logic leak** — Never reuse Rust `==`/`compare_values` for FEEL. Implement `feel_equals(a,b) -> Option<bool>` and `feel_compare(a,b) -> Option<Ordering>` in `dmn/feel/eval.rs`; map `None` to `Value::Null`. Encode FEEL truth tables for `and`/`or`/`not` explicitly. Conformance tests: `"a"=1`→null, `null<3`→null, `null=null`→true, `not(null)`→null. **Prevent in Phase 31.**
 
-1. **`&mut self` engines shared across actix workers serialize all execution** — Do NOT run execution against `EngineState.engine` (the stub). Treat `EngineState.engine` as a read-only compiled-rule-base cache; construct a fresh `ReteEngine` per request from the cached `RuleSet`. Keep the batch `Semaphore + JoinSet` intact. `ExecutionEngine: Send + Sync` does NOT imply `execute(&mut self)` is safe to share — `Sync` only makes `&self` shareable.
-2. **`RuleExecutionTracker` is not a singleton — `GET /v1/metrics/dead-rules` always returns `[]`** — `dead_rules_endpoint` does `RuleExecutionTracker::new()` at `metrics.rs:214` and `ReteEngine` never calls `record_fire` on it. Convert to `LazyLock<Mutex<…>>` (mirroring `CoverageTracking`), add `record_*` calls next to `CoverageTracking` calls in `rete/mod.rs`. Pin with an integration test: after one `/v1/execute` firing rule `r1`, dead-rules must NOT contain `r1` and coverage must show `r1.fired == true`.
-3. **Coverage double-counting at `rete/mod.rs:332`** — `record_rule_fire` is called inside the per-nagram inner loop, so one logical firing is recorded as many. Three independent counters (`CoverageTracking`, `RuleExecutionTracker.total_fires`, per-engine `metrics.record_rule_fired`) drift. Define one canonical "fire" semantics: once per rule per execution, outside the inner loop (collect `HashSet<rule_id>` during the loop, record after). Add a `record_coverage: bool` flag on `BatchExecuteRequest` (default `false`) so batch doesn't pollute production coverage.
-4. **`reload_engine` is a no-op** — Acquires + drops write lock at `execution.rs:163-166`, never recompiles, never writes `ReloadJob` to `JobStore`, so `GET /v1/jobs/{id}` 404s. The moment wiring replaces `_engine` with real recompilation, two races appear (read-vs-write on shared Engine; coverage/tracker corruption mid-fire with ghost rule_ids). Make reload **swap-in-place**, not in-place mutation: build the new `RuleSet` fully off to the side, then under the write-lock do a single `*self.engine = new`. Add a generation counter on `Engine` and include `engine_generation` in `ExecuteResponse`.
-5. **`facts_after` echoes the input JSON** — `execution.rs:327` clones the request facts into `facts_after` regardless of engine mutation; users will see "facts unchanged" even when rules demonstrably modified facts. After wiring, build `facts_after` from the engine's post-execution `WorkingMemory` via a reverse `engine_value_to_json` mapping. Test: a rule that sets `score := score + 10` must show the incremented `score`.
-6. **Two colliding `EngineState` structs** — `execution.rs:75` (shared `Arc<RwLock<environment::Engine>>`) and `metrics.rs:12` (broadcast payload) share a name and are both passed via `web::Data`. Rename the metrics one to `MetricsSnapshot` early as a prep commit, before adding logic.
-7. **Feature-gating** — `register_default_engines` only registers `ReteEngineFactory` under `#[cfg(feature = "engine-rete")]`; the `treat`/`leaps`/`phreak` modules are gated by their own cargo features but `register_default_engines` does NOT register them even when those features are on. Enable all four engine cargo features in the `api` crate build, and verify the other three `EngineFactory` impls exist before promising >1 engine in the API.
-8. **Per-request engine construction cost** (moderate) — The stub builds `EngineBuilder::new().build()` per call; wiring naively re-compiles the Rete network on every request. Construction is O(1) today because `load_rules` is a stub, but a Phase 1 spike must measure compile cost on a representative ruleset; if it's >1ms, ship an engine pool (keyed by `(engine_name, ruleset_version)`) in Phase 1, not Phase 2. `Engine::clone()` saves the rule parse but not the network compile — confirm by inspection which engines are `Clone`.
+2. **PRIORITY-as-first-match** — PRIORITY selects by the output column's `allowedValues` enumeration order (decreasing priority), NOT by row. Validate at load that P tables have an enumerated `allowedValues`; build `{output_value → rank}`; select lowest rank among matches; emit warnings for "misleading rules." OUTPUT ORDER is the multi-result counterpart. **Prevent in Phase 32.**
+
+3. **FEEL re-parsing on every evaluation** — The #1 documented DMN performance bug (4–6× throughput loss). Pre-parse all cell FEEL into `Arc<FeelExpression>` ASTs at DMN load time; evaluator takes `&FeelExpression`, never `&str`. Benchmark: 30-cell table × 10k evals ≈ 30 parses, not 300k. **Prevent in Phase 31 (cache primitive) + Phase 32 (pre-parse at load).**
+
+4. **Round-trip fidelity loss** — The existing frontend `DecisionTableRow`/`DecisionTableColumn` shape is NOT DMN. Make the **DMN XML IR the canonical store**; the frontend is a projection. On export, mutate the IR with frontend edits — never reconstruct DMN from the frontend model. **Prevent in Phase 29 (canonical IR) + Phase 34 (edit through projection) + Phase 35 (exporter round-trip).**
+
+5. **False Level 3 claim** — Level 3 is binary. Track conformance as a checklist (one item per built-in family, grammar rule, boxed expression type); **do not tag v6.0 as Level 3 until the checklist is complete and TCK vectors pass.** If scope must be cut, cut the claim to Level 2, not the checklist. **Make the conformance checklist a phase-exit criterion (Phase 35).**
+
+**Additional high-impact pitfalls:** ANY conflict detection must error (not silently pick first); COLLECT aggregators must reject multi-output tables, return `null` for empty SUM/MIN/MAX and `0` for empty COUNT; boxed contexts evaluate in dependency (topological) order with cycle detection; DMN XML parser must accept namespaces 1.1–1.5, hard-disable XXE, handle CDATA, default `hitPolicy` to UNIQUE; `HitPolicySelector` must be refactored to `{policy, aggregator?}` with FIRST + OUTPUT ORDER added.
 
 ## Implications for Roadmap
 
-Based on research, suggested 6-phase structure (mirrors ARCHITECTURE.md §7 build order, ordered connect-before-build so each phase ends with a verifiable vertical slice):
+The dependency graph in FEATURES.md and the build order in ARCHITECTURE.md force a specific phase sequence. PITFALLS.md's phase mapping (29–34) aligns. The FEEL evaluator is the dominant scope and the critical path. Suggested 7-phase structure (continuing from v5.0 Phase 28):
 
-### Phase 1: Execute wiring core (route through EngineRegistry)
-**Rationale:** This is the keystone — six table-stakes and four differentiators are downstream of it; until `execute_single` actually fires rules, nothing else has live data. It also fixes the engine-ownership contract before any handler is wired, avoiding the serialization anti-pattern.
-**Delivers:** `POST /v1/execute` returns non-zero `rules_fired` from a real `ReteEngine` (start with empty RuleSet — proves wiring). Adds `engine: Option<String>` to `ExecuteRequest`. Builds + shares `Arc<EngineRegistry>` + `EngineSelector` as `web::Data` in `main.rs`. Enables `engine-rete` feature on the `api` crate.
-**Addresses features:** Real single-execute wiring, per-request engine selection (scaffolding), stateless one-shot mode, `CoverageTracker` auto-populated (free, since ReteEngine already calls it).
-**Avoids pitfalls:** `&mut self` engine sharing (Pitfall 1 — factory-shared/instance-per-request), engine selector misroute (Pitfall 2 — capability-check scaffolding), tracker singleton unification (Pitfall 3 — must land alongside the first real execute), canonical fire semantics (Pitfall 6 — record once-per-rule outside the nagram loop), `facts_after` echo bug (Pitfall 11), `EngineState` name collision (Pitfall 10 — prep rename), per-request compile cost spike (Pitfall 7).
-**Research flag:** YES — `register_default_engines` extension (verify the three other `EngineFactory` impls exist), `RuleSet` → `ExecutionEngine` bridging API (the trait does not expose `load_ruleset`), `inference_trace` population source (ReteEngine vs. derived from coverage).
+### Phase 29: DMN 1.5 Model + XML Parser + Canonical IR
+**Rationale:** No upstream deps. The canonical IR is the foundation for round-trip fidelity (Pitfall 11) and every downstream phase parses into or evaluates against it.
+**Delivers:** `engine/src/dmn/{model.rs, parser.rs, exporter.rs (skeleton)}`; DMN 1.5 model structs; `quick-xml` namespace-aware parse; XXE hardening; CDATA handling; `hitPolicy` defaults to UNIQUE; annotation/description preservation; import corpus (1.1/1.3/1.5 files) passes.
+**Addresses:** DMN XML parser, item definitions, DMN XML exporter (skeleton), Clause 6/7 acceptance.
+**Avoids:** Pitfall 10 (parser bugs), Pitfall 11 (round-trip — IR is canonical from day 1).
+**Stack:** `quick-xml 0.40`.
 
-### Phase 2: Execution counters + metrics broadcast (live monitoring)
-**Rationale:** Phase 2's counters are incremented by Phase 1's `execute_single`; without Phase 1, this reads zeros forever. Independent of RuleSet loading (Phase 3) — dashboards light up even with an empty rule set ("0 fired, 0 dead" — still live, not hardcoded).
-**Delivers:** `ExecutionCounters` (`AtomicU64`) as `web::Data`. `metrics_endpoint` (Prometheus) and `get_engine_state` read counters; broadcast `EngineState` via `metrics_tx` after each execution. The three frontend dashboards (Engine, Coverage, DeadRule) display live data with **zero protocol/UI changes** — their existing adapters already tolerate the real shapes.
-**Uses stack:** `prometheus` 0.13 (promote into `api/Cargo.toml`); `tokio` broadcast channel (existing `metrics_tx`).
-**Implements components:** `ExecutionCounters`, `metrics_tx` producer.
-**Addresses features:** Prometheus metrics emission per execute, coverage/dead-rule fed by real runs (CoverageTracker portion — RuleExecutionTracker comes in Phase 4).
-**Avoids pitfalls:** Stale polling race (Pitfall 8 — extend `ExecuteResponse` with fired-rule list + `execution_id` correlation + `engine_generation`).
+### Phase 30: FEEL Value Types + Type Lattice + Temporal Domain
+**Rationale:** FEEL's semantic domain is normative and the type lattice is the backbone every evaluator feature depends on. Co-locating the `Value` extension with the type lattice avoids a churn-later retrofit.
+**Delivers:** `Value` extended additively with `Date(NaiveDate)`, `Time(NaiveTime)`, `DaysTimeDuration(TimeDelta)`, `YearsMonthsDuration{years,months}`, `Range{...}`, `Function{...}`; `rust_decimal::Decimal` numeric path for FEEL; FEEL type lattice + conformance (`<:`) + equivalence (`≡`) + to/from-singleton-list conversions; temporal lexical formats (ISO 8601 `@""` literals); `0.1 + 0.2 = 0.3` passes.
+**Addresses:** Decimal128 + date/time/duration types, FEEL type lattice, implicit conversions.
+**Avoids:** Pitfall 3 (Value gaps), the `f64`-precision trap, the `bigdecimal`-vs-`rust_decimal` ambiguity (validate against TCK here).
+**Stack:** `rust_decimal 1.42` (`serde`, `macros`, `maths`), `chrono-tz 0.10`, existing `chrono 0.4`.
+**Research flag:** Validate 28–29-digit precision against OMG TCK numeric vectors; if any fail, switch to `bigdecimal` before Phase 31 builds operators on top.
 
-### Phase 3: Real reload + JobStore (execute against refreshed rules)
-**Rationale:** Phase 3 adds RuleSet loading into the `execute_single` that Phase 1 made real. Doing Phase 3 first would load rules into a stub that never fires them. Reload currently is a no-op (acquires + drops write lock at `execution.rs:163-166`) and `JobStore` is never written, so `GET /v1/jobs/{id}` 404s.
-**Delivers:** Shared `Arc<RwLock<RuleSet>>` (or `ArcSwap<RuleSet>`) built at startup from `RULE_STORAGE_PATH`; `execute_single` loads it into each request's engine. `reload_engine` actually rebuilds the shared RuleSet and **swaps-in-place** (not in-place mutation). Async reload branch writes `ReloadJob{Pending→Running→Completed/Failed}` to `JobStore` so `GET /v1/jobs/{id}` works. Generation counter on `Engine`, included in `ExecuteResponse`.
-**Implements components:** Shared `RuleSet` snapshot, real `reload_engine`, `JobStore` population.
-**Addresses features:** Async reload-then-execute (swap engine), batch-execute drives real execution (inherits for free — verify only).
-**Avoids pitfalls:** Hot-reload race (Pitfall 4 — swap-don't-mutate + generation tag + in-flight drain/generation coordination), no-op `reload_engine` (Pitfall 12), stub `start_file_watcher` (Pitfall 13 — implement or drop claim), async job not stored (Pitfall 14).
-**Research flag:** YES — `RuleSet` → Rete network bridging (read `rete/mod.rs` network construction in full); `ArcSwap` vs `Arc<RwLock<RuleSet>>` perf trade-off (measure, don't guess).
+### Phase 31: FEEL Parser + Evaluator + Built-in Function Library
+**Rationale:** The dominant scope and the critical path. The parser (grammar 1–65), the evaluator (three-valued logic, all operators, all boxed expressions), the ~70+ built-in function library, and the AST cache all land here. The largest single phase — likely to need `/gsd-plan-phase --research-phase 31` and possibly sub-phase splitting.
+**Delivers:** `engine/src/dmn/feel/{ast.rs, parser.rs, eval.rs, builtins.rs, temporal.rs, coercion.rs}`; `FeelExpression` enum distinct from `Expression`; `evaluate(&Scope)` signature; ternary logic (`feel_equals`/`feel_compare` returning `Option<_>`); arithmetic/comparison/boolean/if/for/some/every/path/filter/instance-of; all 10 boxed expressions; boxed-context dependency-order evaluation with cycle detection; user-defined FEEL lambdas; AST cache primitive (`DashMap<String, Arc<FeelExpression>>`); full built-in library.
+**Addresses:** FEEL lexer/parser, FEEL evaluator, type lattice usage, built-in library, boxed expressions, user-defined functions, ternary logic propagation.
+**Avoids:** Pitfall 1 (three-valued logic leak), Pitfall 2 (AST reuse/duplication), Pitfall 8 (no AST cache — primitive lands here), Pitfall 9 (context textual-order eval), Pitfall 12 (Level 3 conformance surface — bulk lands here).
+**Stack:** Hand-written recursive descent + Pratt precedence; `proptest` for coercion fuzzing.
 
-### Phase 4: RuleExecutionTracker singleton + dead-rule hooks
-**Rationale:** Phase 4's `record_*` calls are added next to Phase 1's existing `CoverageTracking::record_*` calls in the same `rete/mod.rs:293,332` lines. Must land after Phase 1 (tracker needs real firings to record) but before Phase 6 (frontend test-runner's dead-rules panel depends on it). Pin with the end-to-end integration test (single `/v1/execute` → coverage shows `r1.fired == true` → dead-rules excludes `r1`).
-**Delivers:** `RuleExecutionTracker` converted to `LazyLock<Mutex<…>>` singleton with associated `record_evaluation`/`record_fire` functions. `record_*` calls added in `rete/mod.rs` alongside `CoverageTracking` calls. `dead_rules_endpoint` reads from the singleton (optionally upgraded to `DeadRuleInfo[]` via `DeadRuleReport::generate` with adapter update).
-**Implements components:** Singleton-ized `RuleExecutionTracker`, dead-rule live data.
-**Addresses features:** Coverage/dead-rule detection fed by real runs (the dead-rule portion).
-**Avoids pitfalls:** Stale tracker data (Pitfall 3 — single source of truth), three-counter drift (Pitfall 6 — unify counters around `CoverageTracking` as canonical, or delegate).
+### Phase 32: Decision-Table Engine + Hit Policies
+**Rationale:** Depends on Phase 31 (input entries are FEEL unary tests; output entries are FEEL expressions). Hit-policy semantics are the highest-bug-yield surface after ternary logic.
+**Delivers:** `engine/src/dmn/decision_table.rs`; all 7 hit policies (U/A/P/F/C/R/O) + COLLECT aggregators (SUM/MIN/MAX/COUNT); `allowedValues` validation for P/O; default output values; `HitPolicyViolation` error type for ANY conflicts and UNIQUE violations; multi-output rejection for aggregator tables; empty-match semantics (`C+`→null, `C#`→0); pre-parse all cell FEEL into ASTs at table-load time.
+**Addresses:** All Clause 8 hit-policy features, COLLECT aggregators, default outputs, allowed-values lists, input-entry unary-test evaluation.
+**Avoids:** Pitfall 4 (PRIORITY-as-first-match), Pitfall 5 (ANY no-conflict), Pitfall 6 (COLLECT aggregator bugs), Pitfall 8 (pre-parse at load closes the cache loop).
 
-### Phase 5: Stateful sessions
-**Rationale:** Sessions wrap the per-request engine that Phase 1 built. A separate session-lifecycle subsystem (store, TTL, dispose), high-value but separable from P1 — schedule for v5.x once P1 is stable. Must ship the registry + TTL + LRU + sweep **together** with the session endpoint, not as a follow-up (the OOM failure mode is silent and only manifests in production).
-**Delivers:** NEW `api/src/v1/sessions.rs` with `Session` + `SessionManager` (`Arc<DashMap<String, StatefulSession>>`, TTL, LRU, max session count). `execute_single` upserts/looks-up session by `session_id`; stateless path unchanged. NEW routes `DELETE /v1/execute/session/{id}`, `POST /v1/execute/session/{id}/reset`. Background `tokio::time::interval` sweep task. `rrules_sessions_active` Prometheus gauge. Server-generated session IDs returned in response (treat client-supplied IDs as idempotency keys, not primary keys).
-**Uses stack:** `dashmap` 6.2.1 (NEW).
-**Implements components:** `SessionManager`.
-**Addresses features:** Stateful KIE-session-style sessions, multi-interaction test-runner scenarios.
-**Avoids pitfalls:** Session leaks (Pitfall 5 — TTL + LRU + sweep + max count + Prometheus gauge + RBAC-gated `/v1/sessions` admin endpoint).
-**Research flag:** Light — TTL/sweep defaults are config knobs, not architecturally load-bearing.
+### Phase 33: Decision Evaluator + DRD Resolution + REST API + Metrics
+**Rationale:** Depends on Phase 32. The orchestrator + API wire the evaluator to the outside world and to rRules' v5.0 observability surfaces. Single-decision evaluation per call for v6.0 MVP (decision chaining deferred).
+**Delivers:** `engine/src/dmn/evaluator.rs` (decision orchestrator + topological DRD resolution for single-decision scope); `api/src/v1/decisions.rs` (`POST /v1/decisions/{id}/evaluate` + CRUD + import/export); `DecisionCounters` on the existing dedicated Prometheus registry (`rrules_dmn_evaluations_total`, `rrules_dmn_decision_duration_seconds`, `rrules_dmn_hit_policy_violations_total`); `SharedDmnModel{model, generation}` under `Arc<RwLock>` with file-watcher reload; WS `MetricsSnapshot` broadcast reuse; `TraceEvent` emission with new `event_type` constants; `utoipa` OpenAPI schemas; `DMN_HIT_POLICY_VIOLATION` error code; `web::block` per-request pattern.
+**Addresses:** `POST /v1/decisions/{id}/evaluate`, decision CRUD + persistence, Prometheus/trace integration, OpenAPI.
+**Avoids:** Pitfall 5 (ANY conflict surfaced as `DMN_HIT_POLICY_VIOLATION`), the Anti-Pattern of routing DMN through `/v1/execute`, the Anti-Pattern of a second Prometheus registry, `RuleExecutionTracker`/`CoverageTracking` contamination (separate `DmnDecisionTracker` or `source` tag).
+**Stack:** Existing actix-web, utoipa, Prometheus, `web::block` patterns — all reused.
 
-### Phase 6: Frontend test-runner
-**Rationale:** Phase 6 depends on Phases 1–4 being real so the UI shows meaningful data. Could be done in parallel with Phase 5 if the `session_id` path is deferred. The monitoring dashboards need NO frontend changes — Phase 6 is pure new UI over already-working APIs. Consume `ExecuteResponse` fired-rule list; do NOT poll for per-run results (the race is visible to users from day one).
-**Delivers:** NEW `frontend/src/api/execution.ts` (`executeRule`, `batchExecute`, `getJobStatus`, `listJobs`) + `ExecuteRequest`/`ExecuteResponse`/`InferenceTrace`/`BatchExecute*` types in `frontend/src/api/types.ts`. NEW `TestRunner` component (facts editor, engine selector dropdown populated from a new `GET /v1/engines` or hardcoded `["rete"]` initially, Run/Test buttons, results panel with `rules_fired`/`rules_not_fired`/`facts_after`/`inference_trace`). Optional "Reload then Run" → `reloadRules({async:true})` + poll `getJobStatus` + `executeRule`.
-**Implements components:** Frontend `api/execution.ts`, `TestRunner` panel.
-**Addresses features:** Frontend Run button + fired-rules/results panel, inference trace surfaced on demand, run-panel engine selector dropdown.
-**Avoids pitfalls:** Stale polling race (Pitfall 8 — drive refresh from the execute response, not from polling; keep polling only for the long-term monitoring dashboard), dead-rules panel empty (Phase 4 fix first).
+### Phase 34: Frontend Wiring + Hit-Policy Model Refactor
+**Rationale:** Depends on Phase 33 (the API contract). The editor exists (v4.0); this phase wires it to the backend and refactors the hit-policy data model to DMN canonical. The model refactor is the first task — the backend enum from Phase 32 is canonical, the frontend maps TO it.
+**Delivers:** `HitPolicySelector` refactor to `{policy, aggregator?}` with FIRST + OUTPUT ORDER added and spec-accurate descriptions; `dmnSerializer.ts` (editor shape ↔ backend DMN model); `api/decisions.ts` client; "Evaluate Decision" button + results/trace panel (reuse v5.0 `InferenceTrace` rendering); allowed-values editor for output columns; engine-dropdown hidden on DMN view; edit-through-IR-projection.
+**Addresses:** Frontend wiring (PROJECT.md explicit scope), allowed-values editor, HitPolicySelector alignment.
+**Avoids:** Pitfall 7 (frontend hit-policy vocabulary mismatch), Pitfall 11 (round-trip fidelity — frontend edits through projection), the UX pitfalls (ANY conflict surfaced distinctly, `null` shown explicitly, FIRST/OUTPUT ORDER selectable).
+
+### Phase 35: Conformance Verification + Round-trip + Monitoring Close-out
+**Rationale:** The Level 3 claim gate. Depends on Phases 29–34. The conformance checklist must be 100% before the v6.0 tag; the exporter round-trip closes the loop started in Phase 29; monitoring surfaces parallel the v5.0 production surfaces.
+**Delivers:** OMG DMN TCK test vectors as the acceptance suite (import + eval); exporter round-trip byte/DOM-compare preserving annotations, DMNDI, IDs, element order; XSD-valid output; `DmnDecisionTracker` + dead-decision-row detection + coverage extension; conformance checklist (one item per built-in family, grammar rule, boxed expression type) as phase-exit criterion; documented known divergences (DMN15-31 Collect distinct-sum, `sum([])`) if any.
+**Addresses:** Conformance test suite, DMN XML exporter (round-trip close), monitoring/trace/coverage wiring, Level 3 claim verification.
+**Avoids:** Pitfall 12 (false Level 3 claim — checklist is the gate), Pitfall 11 (round-trip fidelity — exporter closes the loop), monitoring contamination (separate `DmnDecisionTracker`).
 
 ### Phase Ordering Rationale
 
-- **Phase 1 before 2:** Phase 2's counters are incremented by Phase 1's `execute_single`. Without Phase 1, Phase 2 reads zeros forever.
-- **Phase 1 before 3:** Phase 3 adds RuleSet loading into the `execute_single` that Phase 1 made real. Doing Phase 3 first would load rules into a stub that never fires them.
-- **Phase 2 independent of 3/4:** Dashboards light up as soon as executions run, even with an empty rule set (they show "0 fired, 0 dead" — still live, not hardcoded).
-- **Phase 4 after 1:** Phase 4's `record_*` calls are added next to Phase 1's existing `CoverageTracking::record_*` calls in the same `rete/mod.rs` lines.
-- **Phase 5 after 1:** Sessions wrap the per-request engine that Phase 1 built.
-- **Phase 6 last:** It depends on Phases 1–4 being real so the UI shows meaningful data. Could be done in parallel with Phase 5 if the `session_id` path is deferred.
-- **Connect-before-build grouping:** Every phase ends with a verifiable vertical slice. The cheapest end-to-end path is made real first.
+- **Dependencies force the order:** FEEL (Phase 31) requires the Value extension + type lattice (Phase 30), which requires nothing but the model (Phase 29). Hit policies (Phase 32) require FEEL to evaluate input entries. The API (Phase 33) requires the evaluator. Frontend (Phase 34) requires the API contract. Conformance (Phase 35) requires everything.
+- **Grouping by architecture pattern:** Phase 29 is the IR foundation; Phases 30–31 are the FEEL semantic core (split because the type-lattice decision is load-bearing and co-locating `Value` extension with operators risks a churn-later retrofit); Phase 32 is the decision-table semantics; Phase 33 is the integration layer; Phase 34 is the presentation layer; Phase 35 is the verification gate.
+- **Pitfall avoidance:** Three-valued logic (Pitfall 1), AST shape (Pitfall 2), Value gaps (Pitfall 3), AST cache primitive (Pitfall 8), context dependency order (Pitfall 9) all land in Phase 30–31 where they are cheap to fix. PRIORITY/ANY/COLLECT (Pitfalls 4–6) land in Phase 32. Round-trip fidelity (Pitfall 11) is structural: the IR is canonical from Phase 29, the frontend edits through projection in Phase 34, the exporter closes in Phase 35. The Level 3 claim (Pitfall 12) is gated in Phase 35.
+- **Splitting FEEL into two phases (30 + 31):** FEEL is the dominant cost. Splitting the type-system foundation (Phase 30) from the parser+evaluator+builtins (Phase 31) keeps each phase verifiable in isolation and isolates the `rust_decimal`-vs-`bigdecimal` decision to Phase 30, where it can be researched against TCK vectors before operators are built on top. If the roadmapper prefers a single FEEL phase, merge 30+31 — but the type-lattice work must precede the operator work within the merged phase.
 
 ### Research Flags
 
 Phases likely needing deeper research during planning:
-- **Phase 1 (wiring core):** `register_default_engines` extension — verify the three other `EngineFactory` impls exist in `engine/src/engine/{treat,leaps,phreak}/mod.rs` before promising >1 engine in the API. `RuleSet` → `ExecutionEngine` bridging — the trait does not expose `load_ruleset`; rete/mod.rs builds its own network; define how `RuleSet` rules become Rete network nodes. `inference_trace` population source — `ReteEngine::execute_rules` does not emit a trace; decide whether to populate from ReteEngine or derive from coverage data. Per-request compile-cost spike (Pitfall 7) — measure on a representative ruleset; if >1ms, ship an engine pool in Phase 1.
-- **Phase 3 (real reload + JobStore):** `ArcSwap` vs `Arc<RwLock<RuleSet>>` perf trade-off — measure under realistic read concurrency; `ArcSwap` adds a dep but is lock-free. In-flight execution coordination (drain vs. generation-accept) — pick one and document.
+- **Phase 30 (FEEL Value Types + Type Lattice):** The `rust_decimal`-vs-`bigdecimal` decision must be validated against OMG TCK numeric conformance vectors before Phase 31 builds operators. Run `/gsd-plan-phase --research-phase 30`.
+- **Phase 31 (FEEL Parser + Evaluator + Builtins):** The largest phase; FEEL grammar 1–65, ~70 builtins, 10 boxed expressions, ternary logic, scope/longest-match QN resolution. Likely needs `/gsd-plan-phase --research-phase 31` and may warrant sub-phase splitting during planning.
+- **Phase 35 (Conformance Verification):** Acquiring and integrating the OMG DMN TCK test vectors (TC archive) and mapping them to `engine/tests/` fixtures may need research if the TCK distribution format is non-trivial.
 
 Phases with standard patterns (skip research-phase):
-- **Phase 2 (counters + metrics broadcast):** straightforward `AtomicU64` + `prometheus::TextEncoder` extension; the engine-side exporter at `engine/src/metrics/prometheus.rs:45` is the reference impl.
-- **Phase 4 (RuleExecutionTracker singleton):** direct mirror of the existing `CoverageTracking` `LazyLock<Mutex<…>>` pattern; the callsites are already known (`rete/mod.rs:293,332`).
-- **Phase 5 (stateful sessions):** `DashMap` + TTL sweep is a well-trodden Rust pattern; `SessionManager` mirrors the existing `job_store`/`user_store` shape.
-- **Phase 6 (frontend test-runner):** thin client over already-working REST; the monitoring dashboards are unchanged.
+- **Phase 29 (DMN Model + Parser):** `quick-xml` patterns are well-documented (Context7 `/tafia/quick-xml`, 577 snippets); DMN XSD is normative.
+- **Phase 32 (Decision-Table Engine):** Hit-policy semantics are spec-clear (DMN §8.2.12); Pitfalls 4–6 give precise prevention strategies.
+- **Phase 33 (API + Metrics):** Direct mirror of v5.0 `/v1/execute` wiring patterns (already shipped + audit-passed).
+- **Phase 34 (Frontend):** Existing editor + standard React/TS API-client work; the `HitPolicySelector` refactor is a small, well-specified model change.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Minimal additions (`dashmap`, `prometheus` promote); both verified against the actual workspace `Cargo.toml` and the existing `engine/src/metrics/prometheus.rs` reference impl. |
-| Features | MEDIUM | BRMS execution-API patterns cross-checked against Drools/KIE, DMN/Kogito, and five rule-engine test-runner UIs; grounded in the current rRules code. Competitor patterns are web-sourced (MEDIUM); rRules code grounding is HIGH. |
-| Architecture | HIGH | Direct reading of the codebase; every integration point cited to file:line. The two-engine-surface discovery, per-request construction recommendation, engine resolution algorithm, CoverageTracking auto-population, RuleExecutionTracker bug, reload-engine no-op, JobStore gap, and frontend-already-wired finding are all HIGH confidence. |
-| Pitfalls | HIGH | Derived from reading the actual codebase at cited file:lines. The `EngineState` name collision, `facts_after` echo bug, nagram-loop double-counting, and feature-gating pitfalls are confirmed by direct inspection. |
+| Stack | HIGH | Core deps verified via Context7 + crates.io/docs.rs cross-check. The `dsntk-*` rejection is robust to embedding-suitability uncertainty. MEDIUM on the 28–29-digit sufficiency (domain call — TCK validation flagged). |
+| Features | HIGH | Authoritative: OMG DMN 1.5 plain-text spec Clause 10, §2.1 conformance, §8 hit policies. Corroborated by Camunda 8 + Drools FEEL handbook. Level 3 = full FEEL is normative. |
+| Architecture | HIGH | Integration points verified by reading rRules source. The "new parallel evaluation surface" decision is settled by DMN's stateless/side-effect-free/three-valued nature vs Rete's forward-chaining/two-valued/working-memory-mutating nature. |
+| Pitfalls | HIGH | Cross-verified against OMG spec, Camunda feel-scala issue tracker (#1149, #814, #6, #8571), Drools handbook, bpmn.io/kie-tools issue trackers (#3594, #1017), and live rRules source inspection. |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **TREAT/LEAPS/PHREAK factory registration:** `register_default_engines` only registers Rete. If v5.0 promises all four engines via the `engine` param, verify the three other `EngineFactory` impls exist and register them under their respective `cfg` blocks. Read `engine/src/engine/{treat,leaps,phreak}/mod.rs` before committing to >1 engine in the API. **Address in Phase 1 planning.**
-- **RuleSet → ExecutionEngine bridging API:** The exact API for loading a `RuleSet` into a `ReteEngine` — the `ExecutionEngine` trait does not expose `load_ruleset`; `rete/mod.rs` builds its own network. Phase 3 must define how `RuleSet` rules become Rete network nodes. Read `rete/mod.rs` network construction in full. **Address in Phase 3 planning.**
-- **`inference_trace` population:** `ExecuteResponse.inference_trace` is `Option<InferenceTrace>` and currently always `None`. `ReteEngine::execute_rules` does not emit a trace. Phase 6's "see fired rules" relies on either the trace or on `rules_not_fired`/`CoverageTracking` data. Decide whether to populate the trace from ReteEngine or derive the display from coverage data. **Address in Phase 6 planning.**
-- **Per-request compile cost:** Construction is O(1) today because `load_rules` is a stub, but a Phase 1 spike must measure compile cost on a representative ruleset. If >1ms, ship an engine pool (keyed by `(engine_name, ruleset_version)`) in Phase 1, not Phase 2. `Engine::clone()` saves the rule parse but not the network compile — confirm which engines are `Clone`. **Address in Phase 1 spike.**
-- **`ArcSwap` vs `Arc<RwLock<RuleSet>>`:** Both viable; choice is a perf trade-off not yet measured. Prefer `Arc<RwLock<RuleSet>>` to avoid a new dep unless contention shows up under realistic read concurrency. **Address in Phase 3 planning.**
-- **Session TTL/sweep defaults:** Not architecturally load-bearing but needs a config knob. Pick values (default ~15 min idle TTL, ~24 h max lifetime, ~1024 max sessions). **Address in Phase 5 planning.**
+- **Decimal128 precision (28–29 vs 34 digits):** `rust_decimal` provides 28–29 digits; FEEL mandates Decimal128 (34 digits). 28–29 exceeds every real-world BRMS requirement, but strict OMG TCK vectors may demand 34. **Handle in Phase 30:** run TCK numeric vectors early; switch to `bigdecimal` if any fail. Do not build Phase 31 operators on an unvalidated numeric domain.
+- **OMG DMN TCK availability + format:** The TCK distribution format (TC archive vs public repo) needs confirmation during Phase 35 planning. If unavailable, fall back to DMN 1.5 spec examples + Camunda feel-scala test corpus and document the gap.
+- **Decision-service execution semantics (§10.4):** Level 3 mandates decision-service support, but v6.0 MVP scopes to single-decision evaluation per API call. The Phase 35 conformance checklist must decide whether single-decision-only is a defensible Level 3 interpretation or a known divergence that downgrades the claim.
+- **DMN 1.5 vs 1.6 edge cases:** DMN15-31 (Collect distinct-sum, `sum([])`) is deferred to 1.6. Pick a defensible behavior (recommend `0` for empty SUM, `null` for empty MIN/MAX, `0` for empty COUNT), document as a known divergence, verify the TCK does not penalize it.
+- **FEEL `external` functions:** Parser-recognized but unsupported-at-eval (returns null + logged warning) for v6.0. Confirm this is a defensible Level 3 interpretation (the spec says FEEL "completely defines the meaning of expressions that do not invoke externally-defined functions") — likely yes, but the conformance checklist should note it.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- rRules codebase (direct reads): `api/src/v1/execution.rs` (stub at 307–343; `EngineState` at 75; `reload_engine` no-op at 163–166; `execute_with_session` stub at 561; `start_file_watcher` stub at 529; `json_to_engine_value` at 533; batch semaphore at 379–395), `api/src/main.rs` (app state wiring 32–124; routes 152–217; file watcher spawn 79), `engine/src/engine/{registry,selector,rete/mod}.rs` (`EngineRegistry`, `ExecutionEngine: Send + Sync` at 69, `execute(&mut self)` at 66, `register_default_engines` at 158, `ReteEngine::execute_rules` at 321, `CoverageTracking` calls at 293/332, `ReteEngineFactory` at 392), `engine/src/environment.rs` (`EngineBuilder::build` 59; `create_session` ~88; `Engine` derives `Clone` 81; `load_rules` stub 122; `execute_forward` stub 132; `Session` stub 152), `engine/src/monitoring/{coverage,detection}.rs` (`CoverageTracking` singleton at 86; `RuleExecutionTracker` plain struct at 64), `api/src/metrics.rs` (Prometheus at 188; fresh `RuleExecutionTracker::new()` at 214; `CoverageTracking` read at 233; `metrics_tx` 22), `api/src/v1/routes/monitoring.rs` (hardcoded zeros at 30), `Cargo.toml` (workspace + per-crate), `frontend/src/api/{client,rules}.ts`, `frontend/src/hooks/useEngineMetrics.ts`, `frontend/src/features/monitoring/dashboards/*` (adapters present).
+- OMG DMN 1.5 plain-text spec, Clause 10 — https://github.com/omg-dmn-taskforce/plain-text-spec/blob/main/10-expression-language-FEEL.adoc
+- OMG DMN 1.3/1.5 §2.1 conformance — https://www.omg.org/spec/DMN/1.3/PDF
+- OMG DMN XSD schemas (DMN15.xsd) — https://github.com/omg-dmn-taskforce/omg-dmn-spec
+- OMG Issue DMN15-31 — https://issues.omg.org/issues/DMN15-31
+- Camunda feel-scala issues #1149, #814, #6, #8571 — https://github.com/camunda/feel-scala/issues
+- apache/kie-tools issue #3594, apache/kie-issues #1017 — https://github.com/apache/incubator-kie-tools/issues
+- Flowable `DmnXMLConverter.java` — https://github.com/flowable/flowable-engine
+- rRules codebase (source-verified integration points)
+- Context7 `/tafia/quick-xml`, `/websites/rs_rust_decimal`, `/chronotope/chrono`, `/chronotope/chrono-tz`
 
 ### Secondary (MEDIUM confidence)
-- Drools / KIE Server REST execution (BatchExecutionCommand, lookup, stateless vs stateful, DisposeCommand): Red Hat PAM 7.9 Runtime Commands; Red Hat Decision Manager 7.13 KIE Server REST API.
-- DMN decision-service REST endpoints (business-domain vs `dmnresult`, no native batch, no rule-level trace): KIE docs GitHub; KIE Community blog.
-- Rule-engine test-runner UI patterns (fired-rules, working-memory deltas, inference trace, coverage, timing, diff highlighting): GoRules, IBM ODM, OpenRules, Progress Corticon, DecisionRules docs.
-- crates.io: `dashmap` v6.2.1 stable, MSRV 1.65, ~292M downloads.
-- docs.rs: `deadpool` v0.13.0 — evaluated and **rejected for v5.0** (premature; engine construction is O(1)).
+- Drools DMN FEEL Handbook — https://kiegroup.github.io/dmn-feel-handbook/
+- Camunda 8 hit-policy docs — https://docs.camunda.io/docs/components/best-practices/modeling/choosing-the-dmn-hit-policy/
+- KIE Community ANC blog — https://blog.kie.org/2021/04/demystifying-the-alpha-network-compiler-anc.html
+- Camunda blog — DMN performance improvements — https://camunda.com/blog/2016/08/dmn-performance-improvements/
+- Method & Style (Bruce Silver) — https://www.methodandstyle.com/blog/decision-table-hit-policy-explained/
+- Operaton DMN Compatibility — https://iou-architectuur.open-regels.nl/linked-data-explorer/reference/operaton-dmn-compatibility/
+- `dsntk` crate family (reference, NOT a dependency) — https://crates.io/crates/dsntk
+- `pbinitiative/feel` (Go hand-written RD reference) — https://github.com/pbinitiative/feel
 
-### Tertiary (LOW confidence)
-- None. All findings are grounded in either the codebase (HIGH) or external BRMS/rule-engine docs (MEDIUM).
+### Tertiary (LOW confidence, needs validation)
+- Trisotech — "Make Way for B-FEEL" — https://www.trisotech.com/make-way-for-b-feel/
+- CEUR-WS — "The Effectiveness of DMN Portability" — https://ceur-ws.org/Vol-1875/paper14.pdf
+- ScratchyDisk.DmnEngine — https://github.com/Scratchydisk/ScratchyDisk.DmnEngine
+- bpmn.io — DMN 1.3 migration — https://bpmn.io/blog/posts/2020-dmn-js-8-0-0.html
 
 ---
-*Research completed: 2026-07-02*
+*Research completed: 2026-07-06*
 *Ready for roadmap: yes*
