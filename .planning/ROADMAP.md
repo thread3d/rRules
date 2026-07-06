@@ -276,7 +276,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 3. With `trace: true`, the results panel shows the inference trace; with `trace` absent/false, the trace is omitted and latency is unaffected
 4. After "Reload then Run", the results panel reflects the edited rule (correlated via `engine_generation`)
 
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans complete
 
 **Wave 0** *(parallel — RED scaffolds + frontend infra enablers)*
 
@@ -290,7 +290,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 28-05-PLAN.md — TestRunner.tsx component (facts editor, engine dropdown, Run + Reload-then-Run, stacked results, trace toggle — D-04/D-06/D-07/D-08/D-09) + mount in $id.edit.tsx + minimal Save enabler (D-05) + human-verify SC-1..SC-4 keystone — flips 28-02 RED→GREEN — FRONTEND-03/FRONTEND-04/EXEC-04
+- [x] 28-05-PLAN.md — TestRunner.tsx component (facts editor, engine dropdown, Run + Reload-then-Run, stacked results, trace toggle — D-04/D-06/D-07/D-08/D-09) + mount in $id.edit.tsx + minimal Save enabler (D-05) + human-verify SC-1..SC-4 keystone — flips 28-02 RED→GREEN — FRONTEND-03/FRONTEND-04/EXEC-04
 
 **UI hint**: yes
 
@@ -319,7 +319,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 | 25. Real reload + JobStore | v5.0 | 3/3 | Complete    | 2026-07-03 |
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 2/2 | Complete    | 2026-07-03 |
 | 27. Stateful sessions | v5.0 | 1/1 | Complete    | 2026-07-06 |
-| 28. Frontend test-runner | v5.0 | 4/5 | In Progress|  |
+| 28. Frontend test-runner | v5.0 | 5/5 | Complete   | 2026-07-06 |
 
 ---
 *Roadmap last updated: 2026-07-02 — v5.0 Live Execution milestone added (Phases 23–28)*
