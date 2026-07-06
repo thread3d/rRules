@@ -111,10 +111,13 @@ fn emit_definitions(
 ) -> Result<(), DmnExportError> {
     // Resolve the xmlns value: prefer the parser-captured source namespace,
     // fall back to the `namespace` attribute, then the DMN MODEL default.
-    let xmlns = source_namespace
-        .filter(|s| !s.is_empty())
-        .or_else(|| (!defs.namespace.is_empty()).then(|| defs.namespace.as_str()))
-        .unwrap_or(DEFAULT_DMN_NS);
+    let xmlns = if let Some(ns) = source_namespace.filter(|s| !s.is_empty()) {
+        ns
+    } else if !defs.namespace.is_empty() {
+        defs.namespace.as_str()
+    } else {
+        DEFAULT_DMN_NS
+    };
 
     let mut start = BytesStart::new("definitions");
     start.push_attribute(("xmlns", xmlns));
