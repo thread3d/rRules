@@ -37,7 +37,7 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 
 ### Active
 
-v5.0 Live Execution shipped 2026-07-06 — all 13 requirements validated. No active requirements yet for the next milestone; run `/gsd-new-milestone` to define the next scope (candidate thesis: address the pre-existing engine `--all-features` build debt surfaced in the v5.0 audit, or pursue a new feature milestone).
+**v6.0 DMN Level 3 Compliance** (started 2026-07-06) — make DMN real: deliver a DMN 1.5 parser, a complete FEEL expression-language evaluator, and a decision-table engine with all hit policies, exposed via a decision-evaluation API and wired to the existing frontend decision-table editor. This genuinely delivers `DMN-01..03`, which were marked "validated v1.0" below but shipped as a stub (no `dmn` module exists in source). See `.planning/REQUIREMENTS.md` for the scoped v6.0 requirements.
 
 ### Out of Scope
 
@@ -72,28 +72,24 @@ v5.0 Live Execution shipped 2026-07-06 — all 13 requirements validated. No act
 - **v2.0:** Testing Framework Foundation — Rust testing stack, working memory fixtures, forward/backward chaining verification, snapshot testing, deterministic firing mode
 - **v3.0:** Pluggable Engine Architecture — multiple Rete-family algorithms (Rete, TREAT, LEAPS, PHREAK) with runtime selection and engine-specific metrics
 
-## Current Milestone: v5.0 Live Execution
+## Current Milestone: v6.0 DMN Level 3 Compliance
 
-**Goal:** Make rule execution real end-to-end so the v4.0 monitoring surfaces read live data — close the `execute_rules` stub and wire execution → trackers → metrics.
+**Goal:** Make DMN real — deliver a DMN 1.5 parser, a complete FEEL expression-language evaluator, and a decision-table engine with all hit policies, exposed via a decision-evaluation API and wired to the existing frontend editor. Closes the stubbed Phase 6 / `DMN-01..03` gap.
 
 **Target features:**
-- Real execution wiring for `POST /v1/execute` (single), `batch-execute`, and async reload (execute against refreshed rules)
-- Pluggable engine selection per request (`engine` param) with a config-defined default, exercising the v3.0 Rete/TREAT/LEAPS/PHREAK selector
-- Stateless one-shot **and** stateful session execution modes
-- Auto-populate `RuleExecutionTracker` + `CoverageTracking` so Prometheus `/metrics`, the monitoring dashboard, dead-rule detection, and coverage reporting show live data
-- Frontend test-runner UI in the rule IDE: run/test a rule, see fired rules, results, and coverage
+- DMN 1.5 model + parser (standard `.dmn` XML import) and exporter for round-trip
+- Full FEEL expression-language evaluator — boxed expressions (literal/context/list/relation/function invocation), if/for/quantified, arithmetic/comparison/boolean/string/date-time operators, the DMN built-in function library, and formal semantics (coercion, null, three-valued logic)
+- Decision-table engine with all hit policies (UNIQUE, ANY, PRIORITY, FIRST, RULE ORDER, OUTPUT ORDER, COLLECT) and COLLECT aggregators (SUM/MIN/MAX/COUNT)
+- Decision evaluation API (`POST /v1/decisions/{id}/evaluate`) integrated with the existing engine registry / metrics / inference-trace surfaces from v5.0
+- Wire the existing frontend `DecisionTable.tsx` + `HitPolicySelector.tsx` (built in v4.0) to the real backend DMN evaluator; surface results + trace in the UI
 
-**Progress (6/6 phases — SHIPPED 2026-07-06, audit `passed`):**
-- ✅ **Phase 23 — Execute evaluator + wiring** (complete 2026-07-03, verified PASS): fixed the v3.0 `engine::`→`crate::` E0433 import bug across all four engine modules; built a minimal direct rule evaluator on `ReteEngine` (mirrored onto TREAT/LEAPS/PHREAK); wired `POST /v1/execute` through `EngineRegistry` with a fresh `Box<dyn ExecutionEngine>` per request; `ExecuteRequest.engine` validated against `available_engines()` (400 on unknown) with `RRULES_DEFAULT_ENGINE` default; `facts_after` from post-execution working memory; `CoverageTracking` recorded once per fired rule. Requirements met: EXEC-01, EXEC-02, ENGINE-07, ENGINE-08, MON-05
-- ✅ **Phase 24 — Execution counters + metrics broadcast** (complete 2026-07-03, verified PASS): added `ExecutionCounters` (`AtomicU64` mirrors + three labeled Prometheus metrics on a dedicated `Registry`) held as `web::Data`; `execute_single` times via `Instant`, increments counters + broadcasts a `MetricsSnapshot` over the existing WS channel AFTER `web::block` (Pitfalls 24-A/B/C); `/metrics` rewritten with `TextEncoder::encode` over the dedicated registry; `ExecuteResponse.engine_generation: u64` added (Pitfall 8). Nyquist RED→GREEN closure (4 RED tests now GREEN); api 96/0, engine 241/0. Frontend dashboards render live numbers with zero frontend changes (SC-3 structural proof). Requirements met: MON-07
-- ✅ **Phase 25 — Real reload + JobStore** (complete 2026-07-03, verified PASS, 17/17 must-haves): introduced `SharedRuleSet{ruleset, generation}` under the existing `Arc<RwLock>` (D-02) and migrated the execute-path handlers; implemented the real `.rules` JSON parser in `build_ruleset_from_dir` (R1 — was empty); added `reload_and_swap` (D-04 — builds off-to-side, single write-lock assignment with `generation.wrapping_add(1)`, no I/O under lock); wired `reload_rules` with sync (inline swap) + async (`ReloadJob` Pending→Running→Completed/Failed in `JobStore`, Pending inserted before spawn — Pitfall 14) so `GET /v1/jobs/{id}` returns real status; fixed batch truthful aggregation via a `Result<ExecuteResponse,String>` three-arm collector (Ok(Ok)→succeeded, Ok(Err)→failed+error, Err(JoinError)→failed — L-06) and refactored `execute_single` to `Result<ExecuteResponse,(StatusCode,String)>` (R4). Nyquist RED→GREEN closure: all 7 Wave 0 RED tests now GREEN (8th `#[ignore]`d, passes with `--include-ignored`); api 103/0/1, engine 241/0/3. Requirements met: DEPLOY-05, EXEC-03
-- ✅ **Phase 26 — RuleExecutionTracker singleton + dead-rule live data** (complete 2026-07-03, verified PASS, 10/10 must-haves): converted `RuleExecutionTracker` to a `LazyLock<Mutex<TrackerState>>` singleton mirroring `CoverageTracking` (associated-function API, `#[deprecated] new()`, `clear()` for test isolation); wired `record_evaluation`/`record_fire` at BOTH post-fixpoint recording blocks — `direct_eval.rs` (Treat/Leaps/Phreak) and `rete/mod.rs` (C1 — Rete's inlined `execute_rules`); rewrote `dead_rules_endpoint` to read `RuleExecutionTracker::find_dead_rules()` from the singleton (no `new()` per call — no longer always returns `[]`); pinned with 3 `#[serial]` keystone e2e tests (SC-1 dead-rules excludes fired `r1`, SC-2 coverage shows `r1.fired`, SC-3 three surfaces agree — no counter drift). C1 (both evaluator sites) + C4 (engine `metrics.rs` untouched) prohibitions honored. Requirements met: MON-06
-- ✅ **Phase 27 — Stateful sessions** (complete 2026-07-06, verified PASS, 12/12 must-haves): `SessionManager` (`Arc<DashMap<String, Arc<Mutex<StatefulSessionEntry>>>>` + alias→UUID DashMap, DashMap 6.2.1 pinned) with per-session `Box<dyn ExecutionEngine>`; `execute_single` branches on `session_id` (D-05 — stateless path unchanged when absent); server UUID v4 primary key + client `session_id` as idempotency alias (D-04); engine fixed at creation, 400 on conflicting resume engine (D-06); snapshot retained with `engine_generation` tag (D-07); four OOM controls shipped together — idle/max-lifetime TTL + LRU + max-count(1024) + 60s `tokio::time::interval` sweep + `rrules_sessions_active` IntGauge on the Phase-24 dedicated Prometheus `Registry` (D-08, Pitfall 24-A); `MetricsSnapshot.active_sessions` from `SessionManager::len()`; `DELETE /v1/execute/session/{id}` + `POST /v1/execute/session/{id}/reset` (reset rebuilds fresh engine — `ReteEngine::reset()` clears rules too, Open Q#1); Pitfall 7 web::block closure (std::mem::replace engine out, drop guard, move into web::block, re-lock to write back). Four `#[serial]` keystone tests (SC-1 score:10→20 accumulation, SC-2 TTL eviction, SC-3 LRU+gauge capped count, SC-4 delete/reset lifecycle) GREEN; api 110/0/1, engine 242/0/3. Requirements met: SESS-01
-- ✅ **Phase 28 — Frontend test-runner** (complete 2026-07-06, verified PASS, 4/4 must-haves): `frontend/src/api/execution.ts` (6 typed API functions incl. `reloadRules`) + 9 snake_case TS types in `types.ts`; `TestRunner.tsx` component (facts JSON editor via CodeMirror `javascript({json:true})`, engine dropdown from `GET /v1/engines`, Run + Reload-then-Run buttons, stacked Fired/Not-fired/Facts-after/Trace results, trace toggle off-by-default) mounted in `$id.edit.tsx`; backend `TraceEvent`/`TraceData` two-site emission + `GET /v1/engines`; `ExecuteRequest.trace` opt-in. Vitest 5/5; 3 human-verify items performed 2026-07-06 (headless-Chromium click-through + live latency). Requirements met: FRONTEND-03, FRONTEND-04, EXEC-04
+**Key context:** The frontend decision-table editor already exists (v4.0) — this milestone wires it to a real backend, it does **not** rebuild the editor. `DMN-01..03` are marked "validated v1.0" above but are stubs (no `dmn` module in source); v6.0 makes that claim genuinely true. Phase numbering continues from 29 (v5.0 ended at Phase 28). "Full DMN Level 3 FEEL" was selected → complete FEEL semantics, larger scope.
+
+**Progress:** Planning — requirements + roadmap in progress.
 
 ---
 
-**Milestone v5.0 complete.** Next: run `/gsd-new-milestone` to plan the next milestone (candidate thesis: address the pre-existing engine `--all-features` build debt surfaced in the v5.0 audit, or pursue a new feature milestone). Optionally add a git remote and push tags `v1.0`–`v5.0` (currently local-only).
+**Milestone v5.0 shipped 2026-07-06** (audit `passed`). Per-phase detail archived in `.planning/milestones/v5.0-ROADMAP.md`. Optionally add a git remote and push tags `v1.0`–`v5.0` (currently local-only).
 
 ## Context
 
@@ -148,4 +144,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-06 — v5.0 Live Execution milestone shipped (Phases 23–28 complete, audit `passed`); REQUIREMENTS.md archived to `milestones/v5.0-REQUIREMENTS.md` (fresh requirements created by the next `/gsd-new-milestone`)*
+*Last updated: 2026-07-06 — v6.0 DMN Level 3 Compliance milestone started (PROJECT.md Current Milestone set to v6.0; v5.0 per-phase detail archived in `milestones/v5.0-ROADMAP.md`); fresh v6.0 requirements created by this `/gsd-new-milestone`*
