@@ -531,30 +531,30 @@ const { data: job } = useQuery({
 
 **All other claims were verified against the codebase this session (file:line cited inline).**
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **How does `collect_trace` reach the engine's `execute()`?**
    - What we know: `ExecutionEngine::execute(&mut self) -> EngineResult` takes no params (`registry.rs:66`); `execute_single` calls `engine.execute()` inside `web::block` (`execution.rs:632`).
    - What's unclear: whether to add a `set_collect_trace(&mut self, bool)` trait method (default noop) or set a field directly on each engine before `execute()`.
-   - Recommendation: Add `fn set_collect_trace(&mut self, _enabled: bool) {}` to the trait with a default noop; `ReteEngine` and the `direct_execute` callers override. This mirrors `set_config` (`registry.rs:87`). For the shared `direct_execute` helper, pass `collect_trace: bool` as a third arg directly (cleaner than a field since the helper is a free function).
+   - RESOLVED: Add `fn set_collect_trace(&mut self, _enabled: bool) {}` to the trait with a default noop; `ReteEngine` and the `direct_execute` callers override. This mirrors `set_config` (`registry.rs:87`). For the shared `direct_execute` helper, pass `collect_trace: bool` as a third arg directly (cleaner than a field since the helper is a free function). → Plan 28-03 Task 1.
 
 2. **Does the edit page's missing fetch/save wiring block "Run an edited rule" (SC-4)?**
    - What we know: `$id.edit.tsx:10` has `TODO(22-05/22-06)` — no fetch/save; `/v1/execute` runs the on-disk shared `RuleSet` (Phase 25).
    - What's unclear: whether D-05's "minimal Save enabler" is strictly required for SC-4 or whether documenting "save via management UI first" suffices.
-   - Recommendation: Wire a minimal Save button to `updateRule(id, ...)` (`rules.ts:33`) — it's a 1-call wiring reusing the existing Phase-20 endpoint, and SC-4's "edit → reload → run → see edited result" honesty check is otherwise unverifiable from the edit page. The planner should include it as a small enabler task.
+   - RESOLVED: Wire a minimal Save button to `updateRule(id, ...)` (`rules.ts:33`) — it's a 1-call wiring reusing the existing Phase-20 endpoint, and SC-4's "edit → reload → run → see edited result" honesty check is otherwise unverifiable from the edit page. Included as a small enabler task. → Plan 28-05 Task 3.
 
 3. **`rule_filter` scoping — scope Run to the edited rule or run the whole ruleset?**
    - What we know: `ExecuteRequest.rule_filter: Option<RuleFilter>` with `name_pattern: Option<String>` (`execution.rs:27-44`); `/v1/execute` supports it.
    - What's unclear: whether the TestRunner sends `rule_filter: { name_pattern: id }` to isolate the edited rule.
-   - Recommendation: Scope to the edited rule via `name_pattern` for the "test this rule" UX (cleaner results panel, fewer `rules_not_fired`). The planner decides; both are honest.
+   - RESOLVED: Scope to the edited rule via `name_pattern` for the "test this rule" UX (cleaner results panel, fewer `rules_not_fired`). → Plan 28-05 Task 1.
 
 4. **Trace `data` payload size vs SC-3 latency.**
    - What we know: D-01 leaves `data` to the planner; a rich payload risks latency.
-   - Recommendation: `data: None` for Phase 28 (lean). A rich fact/action snapshot is explicitly deferred. This keeps SC-3 honest.
+   - RESOLVED: `data: None` for Phase 28 (lean). A rich fact/action snapshot is explicitly deferred. This keeps SC-3 honest. → Plan 28-03 Task 2.
 
 5. **Does `available_engines()` return a deterministic order?**
    - What we know: `registry.rs:234` iterates `self.factories.keys()` (a `HashMap`) — order is NOT guaranteed. The dropdown may reorder between requests.
-   - Recommendation: Sort the `engines` array in the handler (`engines.sort()`) so the dropdown is stable. Low-effort, good UX.
+   - RESOLVED: Sort the `engines` array in the handler (`engines.sort()`) so the dropdown is stable. Low-effort, good UX. → Plan 28-03 Task 2.
 
 ## Environment Availability
 
