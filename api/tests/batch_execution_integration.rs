@@ -22,6 +22,7 @@ use serde_json::{json, Value};
 
 use api::metrics::{create_metrics_channel, ExecutionCounters, MetricsTx};
 use api::v1::execution::{batch_execute_rules, execute_rules, SharedRuleSet};
+use api::v1::sessions::{read_session_config, SessionManager};
 use engine::engine::registry::EngineRegistry;
 use engine::engine::selector::EngineSelector;
 use engine::rules::RuleSet;
@@ -107,10 +108,22 @@ fn shared_metrics_tx() -> web::Data<MetricsTx> {
     web::Data::new(tx)
 }
 
-/// Initialize the test service with the full Plan 23-05 + Plan 24-03
-/// app_data stack (registry + selector + shared ruleset + counters +
-/// metrics_tx). Mirrors `execute_integration.rs`. Inlined per-test via macro
-/// because `test::init_service` yields an unnameable `impl Service` type.
+/// Phase 27 (SESS-01): shared SessionManager for the test App —
+/// `execute_rules` / `batch_execute_rules` now extract
+/// `web::Data<Arc<SessionManager>>` as a required param, so the test App
+/// must install it or the handlers return 500 on the missing extractor.
+fn shared_session_manager() -> web::Data<std::sync::Arc<SessionManager>> {
+    web::Data::new(std::sync::Arc::new(SessionManager::new(
+        read_session_config(),
+        prometheus::IntGauge::new("rrules_sessions_active_batch", "test").unwrap(),
+    )))
+}
+
+/// Initialize the test service with the full Plan 23-05 + Plan 24-03 +
+/// Plan 27-01 app_data stack (registry + selector + shared ruleset +
+/// counters + metrics_tx + session_manager). Mirrors `execute_integration.rs`.
+/// Inlined per-test via macro because `test::init_service` yields an
+/// unnameable `impl Service` type.
 macro_rules! init_test_app {
     () => {
         test::init_service(
@@ -120,6 +133,7 @@ macro_rules! init_test_app {
                 .app_data(shared_ruleset())
                 .app_data(shared_counters())
                 .app_data(shared_metrics_tx())
+                .app_data(shared_session_manager())
                 .configure(configure_test_routes),
         )
         .await

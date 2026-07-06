@@ -516,7 +516,22 @@ pub async fn execute_single(
     ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
     counters: web::Data<ExecutionCounters>,
     metrics_tx: web::Data<MetricsTx>,
+    session_manager: web::Data<Arc<SessionManager>>,
 ) -> Result<ExecuteResponse, (actix_web::http::StatusCode, String)> {
+    // Phase 27 (D-05): branch on session_id — sessionful path is additive,
+    // stateless path unchanged. The sessionful path delegates to
+    // `execute_sessionful`; the stateless path continues below.
+    if req.session_id.is_some() {
+        return execute_sessionful(
+            req,
+            registry,
+            ruleset,
+            counters,
+            metrics_tx,
+            session_manager,
+        )
+        .await;
+    }
     let execution_id = Uuid::new_v4().to_string();
 
     // 1. Resolve engine name: request override > RRULES_DEFAULT_ENGINE env >
@@ -660,9 +675,9 @@ pub async fn execute_single(
         engine_name: engine_name.clone(),
         rules_fired: counters.snapshot_rules_fired.load(Ordering::Relaxed),
         facts_inserted: counters.snapshot_facts_inserted.load(Ordering::Relaxed),
-        // Open Q3: active_sessions and memory_bytes are 0 in Phase 24;
-        // Phase 27 populates active_sessions.
-        active_sessions: 0,
+        // Phase 27 (D-08): populate active_sessions from SessionManager::len()
+        // so the WS monitoring channel reflects the true live session count.
+        active_sessions: session_manager.len(),
         memory_bytes: 0,
         last_updated: chrono::Utc::now().to_rfc3339(),
     };
@@ -719,6 +734,226 @@ pub async fn execute_single(
     })
 }
 
+/// Phase 27 (D-05): sessionful execution path — called by `execute_single`
+/// when `req.session_id` is `Some(alias)`. The session's `Box<dyn
+/// ExecutionEngine>` holds accumulated working memory across calls (SC-1's
+/// keystone honesty anchor). Engine is fixed at session creation (D-06);
+/// `engine_generation` reflects the creation generation (D-07).
+///
+/// Pitfall 7 (web::block closure shape): `std::sync::MutexGuard` is `!Send`,
+/// so the closure cannot capture the guard. The engine is moved OUT of the
+/// session under the lock (via `std::mem::replace` with a placeholder), the
+/// guard is dropped, and `web::block` owns the engine by value. After
+/// `web::block` returns, the entry is re-locked to write the engine back +
+/// update `last_used`. No DashMap shard guard is held across `web::block`
+/// (Pitfall 1 — `lookup_or_create` clones the `Arc<Mutex<Entry>>` out).
+async fn execute_sessionful(
+    req: ExecuteRequest,
+    registry: web::Data<EngineRegistry>,
+    ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
+    counters: web::Data<ExecutionCounters>,
+    metrics_tx: web::Data<MetricsTx>,
+    session_manager: web::Data<Arc<SessionManager>>,
+) -> Result<ExecuteResponse, (actix_web::http::StatusCode, String)> {
+    let client_alias = req.session_id.clone().unwrap_or_default();
+
+    // 1. Lookup or create the session (D-04/D-06). Conflicting engine on
+    //    resume → 400 surfaces here from lookup_or_create's Err.
+    let (server_uuid, entry_arc) = session_manager.lookup_or_create(
+        &client_alias,
+        req.engine.as_deref(),
+        &registry,
+        &ruleset,
+    )?;
+
+    // 2. Insert request facts into the session's engine. Lock the per-session
+    //    Mutex (the Arc was cloned out by lookup_or_create — no DashMap shard
+    //    guard is held).
+    {
+        let mut guard = entry_arc.lock().map_err(|e| {
+            (
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("session lock poisoned: {}", e),
+            )
+        })?;
+        for (fact_type, fact_value) in &req.facts {
+            if let serde_json::Value::Object(fields) = fact_value.clone() {
+                let mut payload = HashMap::new();
+                for (key, value) in fields {
+                    payload.insert(key, json_to_engine_value(value));
+                }
+                let fact = engine::fact::Fact::new(fact_type.clone(), payload);
+                guard.engine.insert_fact(fact).map_err(|e| {
+                    (
+                        actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("insert_fact failed: {}", e),
+                    )
+                })?;
+            }
+        }
+    }
+
+    // 3. Pitfall 7: move engine out, drop guard, web::block owns the engine,
+    //    re-lock to write back. The placeholder is a throwaway fresh engine
+    //    created from the same factory — it's discarded after the real engine
+    //    is written back.
+    //
+    // The guard is scoped to its own block so the compiler proves it's
+    // dropped BEFORE the `web::block(...).await` — `std::sync::MutexGuard`
+    // is `!Send` and cannot be held across an `.await` point.
+    let engine_name_str;
+    let engine_generation;
+    let start = Instant::now();
+
+    // Extract the engine + metadata from the session, dropping the guard
+    // before web::block (Pitfall 7).
+    let mut engine = {
+        let mut guard = entry_arc.lock().map_err(|e| {
+            (
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("session lock poisoned: {}", e),
+            )
+        })?;
+        engine_name_str = guard.engine_name.clone();
+        engine_generation = guard.engine_generation;
+
+        // Create a placeholder engine to swap with (Pitfall 7).
+        let placeholder = match registry.create_engine_by_name(&guard.engine_name) {
+            Some(Ok(e)) => e,
+            _ => {
+                return Err((
+                    actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "failed to create placeholder engine for web::block".to_string(),
+                ))
+            }
+        };
+
+        // Move the real engine out, put placeholder in. The guard is dropped
+        // at the end of this block.
+        std::mem::replace(&mut guard.engine, placeholder)
+    };
+
+    // web::block owns the engine by value — no MutexGuard captured across
+    // the .await (Pitfall 7 / Open Q#3).
+    let (returned_engine, engine_result, post_facts) = match web::block(move || {
+        let result = engine.execute();
+        let facts = engine.get_facts();
+        (engine, result, facts)
+    })
+    .await
+    {
+        Ok(tuple) => tuple,
+        Err(e) => {
+            return Err((
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("engine execution panicked: {}", e),
+            ))
+        }
+    };
+
+    // Re-lock to write the engine back + update last_used.
+    {
+        let mut guard = entry_arc.lock().map_err(|e| {
+            (
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("session lock poisoned: {}", e),
+            )
+        })?;
+        guard.engine = returned_engine;
+        guard.last_used = Instant::now();
+    }
+
+    // 4. Prometheus counters + MetricsSnapshot (mirror stateless path).
+    let elapsed = start.elapsed().as_secs_f64();
+    counters
+        .requests_total
+        .with_label_values(&[&engine_name_str])
+        .inc();
+    counters
+        .rules_fired_total
+        .with_label_values(&[&engine_name_str])
+        .inc_by(engine_result.rules_fired as u64);
+    counters
+        .duration_seconds
+        .with_label_values(&[&engine_name_str])
+        .observe(elapsed);
+    counters.snapshot_requests.fetch_add(1, Ordering::Relaxed);
+    counters
+        .snapshot_rules_fired
+        .fetch_add(engine_result.rules_fired as u64, Ordering::Relaxed);
+    counters
+        .snapshot_facts_inserted
+        .fetch_add(req.facts.len() as u64, Ordering::Relaxed);
+
+    // D-08: update the gauge + populate active_sessions in the snapshot.
+    session_manager
+        .sessions_active
+        .set(session_manager.len() as i64);
+    let snapshot = MetricsSnapshot {
+        engine_name: engine_name_str.clone(),
+        rules_fired: counters.snapshot_rules_fired.load(Ordering::Relaxed),
+        facts_inserted: counters.snapshot_facts_inserted.load(Ordering::Relaxed),
+        active_sessions: session_manager.len(),
+        memory_bytes: 0,
+        last_updated: chrono::Utc::now().to_rfc3339(),
+    };
+    let _ = metrics_tx.send(snapshot);
+
+    // 5. Serialize facts_after from post-execution working memory (Pitfall 11).
+    let mut facts_after: HashMap<String, serde_json::Value> = HashMap::new();
+    for fact in post_facts {
+        let obj: serde_json::Map<String, serde_json::Value> = fact
+            .payload
+            .into_iter()
+            .map(|(k, v)| (k, engine_value_to_json(v)))
+            .collect();
+        let fact_json = serde_json::Value::Object(obj);
+        facts_after
+            .entry(fact.fact_type_id)
+            .and_modify(|existing| {
+                if let serde_json::Value::Object(existing_map) = existing {
+                    if let serde_json::Value::Object(new_map) = &fact_json {
+                        for (k, v) in new_map {
+                            existing_map.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+            })
+            .or_insert(fact_json);
+    }
+
+    // 6. Compute rules_not_fired from the shared ruleset.
+    let all_rule_ids: Vec<String> = {
+        let guard = ruleset.read().map_err(|e| {
+            (
+                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("ruleset lock poisoned: {}", e),
+            )
+        })?;
+        guard.ruleset.rules.iter().map(|r| r.id.clone()).collect()
+    };
+    let fired_set: std::collections::HashSet<String> =
+        engine_result.fired_rule_ids.iter().cloned().collect();
+    let rules_not_fired: Vec<String> = all_rule_ids
+        .iter()
+        .filter(|id| !fired_set.contains(*id))
+        .cloned()
+        .collect();
+
+    // 7. Build ExecuteResponse with the server UUID (D-04) + creation gen (D-07).
+    let execution_id = Uuid::new_v4().to_string();
+    Ok(ExecuteResponse {
+        execution_id,
+        rules_fired: engine_result.rules_fired,
+        rules_not_fired,
+        facts_after,
+        inference_trace: None,
+        engine_generation,
+        // Phase 27 (D-04): server-generated UUID v4 primary key.
+        session_id: Some(server_uuid.to_string()),
+    })
+}
+
 /// Execute rules - POST /v1/execute
 #[utoipa::path(
     post,
@@ -737,8 +972,9 @@ pub async fn execute_rules(
     ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
     counters: web::Data<ExecutionCounters>,
     metrics_tx: web::Data<MetricsTx>,
+    session_manager: web::Data<Arc<SessionManager>>,
 ) -> impl Responder {
-    match execute_single(req.into_inner(), registry, selector, ruleset, counters, metrics_tx).await {
+    match execute_single(req.into_inner(), registry, selector, ruleset, counters, metrics_tx, session_manager).await {
         Ok(resp) => HttpResponse::Ok().json(resp),
         Err((code, msg)) => HttpResponse::build(code).json(serde_json::json!({ "error": msg })),
     }
@@ -769,6 +1005,7 @@ pub async fn batch_execute_rules(
     ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
     counters: web::Data<ExecutionCounters>,
     metrics_tx: web::Data<MetricsTx>,
+    session_manager: web::Data<Arc<SessionManager>>,
 ) -> impl Responder {
     let inner = req.into_inner();
     let max_concurrency = inner.max_concurrency.unwrap_or(8).max(1);
@@ -789,6 +1026,9 @@ pub async fn batch_execute_rules(
         // = N increments + N broadcasts.
         let counters = counters.clone();
         let metrics_tx = metrics_tx.clone();
+        // Phase 27 (D-12): clone the SessionManager into each JoinSet task
+        // so sessionful batch items can call execute_single with session_id.
+        let session_manager = session_manager.clone();
         join_set.spawn(async move {
             // Acquire a concurrency permit before running. The semaphore is
             // never explicitly closed, so this only errors if the runtime shuts
@@ -807,7 +1047,7 @@ pub async fn batch_execute_rules(
             // `HttpResponse` body. The Err-mask placeholder (hardcoded
             // zero-fired `ExecuteResponse`) is GONE — an `execute_single` Err
             // is now a per-item FAILURE, not a masked success (SC-2).
-            execute_single(request, registry, selector, ruleset, counters, metrics_tx)
+            execute_single(request, registry, selector, ruleset, counters, metrics_tx, session_manager)
                 .await
                 .map_err(|(_code, msg)| msg)
         });
@@ -1086,19 +1326,4 @@ fn engine_value_to_json(value: engine::Value) -> serde_json::Value {
             serde_json::Value::Object(obj)
         }
     }
-}
-
-/// Execute with session - POST /v1/execute/session
-pub async fn execute_with_session(
-    session_id: web::Path<String>,
-    _req: web::Json<ExecuteRequest>,
-) -> impl Responder {
-    let execution_id = Uuid::new_v4().to_string();
-
-    HttpResponse::Ok().json(serde_json::json!({
-        "execution_id": execution_id,
-        "session_id": session_id.into_inner(),
-        "status": "executed",
-        "rules_fired": 0
-    }))
 }

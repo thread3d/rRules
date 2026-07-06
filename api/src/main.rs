@@ -22,6 +22,8 @@ pub mod v1;
 // Import execution endpoints for hot reload job tracking
 use crate::v1::execution::{get_job_status, list_jobs, SharedRuleSet};
 use crate::v1::routes::monitoring::configure_monitoring;
+// Phase 27 (SESS-01): stateful session manager + background sweep task.
+use crate::v1::sessions::{read_session_config, run_session_sweep, SessionManager};
 
 // Phase 23 (D-03 / L-07): real engine registry + selector + shared ruleset
 // wired into the execute path. `EngineRegistry` carries all four factories
@@ -101,6 +103,28 @@ async fn main() -> std::io::Result<()> {
     // increment/render them.
     let counters = web::Data::new(metrics::ExecutionCounters::new());
 
+    // Phase 27 (SESS-01 / D-02 / D-03 / D-08 / D-12): construct the shared
+    // SessionManager once at startup. The `rrules_sessions_active` IntGauge
+    // registers on the Phase-24 dedicated Prometheus Registry (NOT
+    // default_registry — Pitfall 24-A: register() panics on duplicate names).
+    // The manager is wrapped in Arc and shared across actix workers via
+    // web::Data; a clone is moved into the background sweep task (D-10).
+    let session_config = read_session_config();
+    let sessions_active = prometheus::IntGauge::new(
+        "rrules_sessions_active",
+        "Active stateful session count",
+    )
+    .expect("construct rrules_sessions_active gauge");
+    counters
+        .registry
+        .register(Box::new(sessions_active.clone()))
+        .expect("register rrules_sessions_active on dedicated Registry");
+    let session_manager = std::sync::Arc::new(SessionManager::new(
+        session_config,
+        sessions_active,
+    ));
+    let sweep_manager = session_manager.clone();
+
     // Initialize in-memory stores
     let rule_store = v1::rules::init_store();
     let category_store = v1::categories::init_store();
@@ -146,6 +170,14 @@ async fn main() -> std::io::Result<()> {
         tokio::spawn(v1::execution::start_file_watcher(rules_dir));
     }
 
+    // Phase 27 (D-10): spawn the background session sweep task alongside
+    // start_file_watcher. Loops on tokio::time::interval(sweep_interval) and
+    // calls SessionManager::sweep_expired (evicts by TTL/max-lifetime/LRU +
+    // updates the gauge). Lives for the process lifetime (no explicit
+    // CancellationToken — matches start_file_watcher).
+    println!("Starting session sweep task (interval: {:?})", session_manager.sweep_interval);
+    tokio::spawn(run_session_sweep(sweep_manager));
+
     // CORS allowed origins (D-22-05). Default: the vite dev origin
     // (http://localhost:5173). Override with `CORS_ALLOWED_ORIGINS` (comma-
     // separated) to support a separate API host in prod, e.g.
@@ -187,6 +219,9 @@ async fn main() -> std::io::Result<()> {
             // Phase 24 (Plan 24-02): inject ExecutionCounters as web::Data
             // alongside metrics_tx. Inert until Plan 24-03 wires the handlers.
             .app_data(counters.clone())
+            // Phase 27 (D-12): inject the shared SessionManager as web::Data
+            // so execute_rules / dispose_session / reset_session can extract it.
+            .app_data(web::Data::new(session_manager.clone()))
             .app_data(web::Data::new(rule_store.clone()))
             .app_data(web::Data::new(category_store.clone()))
             .app_data(web::Data::new(tag_store.clone()))
@@ -224,6 +259,18 @@ async fn main() -> std::io::Result<()> {
                     .route("/auth/refresh", web::post().to(auth::refresh))
                     // Execution endpoint
                     .route("/execute", web::post().to(v1::execution::execute_rules))
+                    // Phase 27 (D-05): sessionful lifecycle routes — dispose
+                    // and reset. Registered before any wildcard /execute/{...}
+                    // route (none currently exists, but the discipline holds
+                    // per PATTERNS.md line 372).
+                    .route(
+                        "/execute/session/{id}",
+                        web::delete().to(v1::sessions::dispose_session),
+                    )
+                    .route(
+                        "/execute/session/{id}/reset",
+                        web::post().to(v1::sessions::reset_session),
+                    )
                     // Rules CRUD endpoints (Phase 20-01)
                     .route("/rules", web::get().to(v1::rules::get_rules))
                     .route("/rules", web::post().to(v1::rules::create_rule))

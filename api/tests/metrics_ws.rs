@@ -22,6 +22,7 @@ use actix_test::start;
 use actix_web::{web, App};
 use api::metrics::{create_metrics_channel, ExecutionCounters, MetricsSnapshot, MetricsTx};
 use api::v1::execution::{execute_rules, SharedRuleSet};
+use api::v1::sessions::{read_session_config, SessionManager};
 use api::websocket::configure_metrics_ws;
 use engine::data_types::Value as EngineValue;
 use engine::engine::registry::EngineRegistry;
@@ -142,6 +143,12 @@ fn spawn_server_with_execute() -> (
             // web::Data<ExecutionCounters>; inject it so extraction succeeds
             // in the broadcasts_snapshot_after_execute test.
             .app_data(web::Data::new(ExecutionCounters::default()))
+            // Phase 27 (SESS-01): execute_rules now extracts
+            // web::Data<Arc<SessionManager>>; inject it so extraction succeeds.
+            .app_data(web::Data::new(std::sync::Arc::new(SessionManager::new(
+                read_session_config(),
+                prometheus::IntGauge::new("rrules_sessions_active_ws", "test").unwrap(),
+            ))))
             .service(
                 web::scope("/v1")
                     .route("/execute", web::post().to(execute_rules))
