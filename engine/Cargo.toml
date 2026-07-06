@@ -14,6 +14,13 @@ sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "chrono", "
 git2 = "0.21.0"
 prometheus = { workspace = true, optional = true }
 utoipa = { version = "4", features = ["chrono", "uuid"] }
+# DMN 1.5 XML parser/exporter (Phase 29+) — streaming NsReader/Writer, multi-namespace.
+# Supply-chain verified 2026-07-06 (Task 1 gate): repo tafia/quick-xml, 322M downloads.
+quick-xml = { version = "0.40", features = ["serialize"] }
+# FEEL Decimal128 numeric domain (Phase 29+). Supply-chain verified 2026-07-06 (Task 1 gate):
+# repo paupino/rust-decimal, 115M downloads. Features: serde (IR (de)serialization),
+# macros (decimal! literals), maths (sqrt/ln/... for Phase 31 built-ins).
+rust_decimal = { version = "1.42", features = ["serde", "macros", "maths"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }

@@ -18,6 +18,10 @@ pub mod forward_chaining;
 // Validation module for syntax and semantic checks
 pub mod validation;
 
+// DMN 1.5 model + parser + exporter — canonical IR for round-trip (Phase 29+).
+// Parallel evaluation surface, NOT routed through engine::engine / EngineRegistry.
+pub mod dmn;
+
 // Testing framework for rule engine verification
 pub mod testing;
 
