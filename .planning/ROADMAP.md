@@ -132,7 +132,17 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
   3. FEEL type-lattice conformance (`<:`), equivalence (`≡`), and implicit conversions (number↔string, singleton-list↔value) behave per spec, with null propagating through the lattice.
   4. `engine::data_types::Value` is extended additively (not forked) and the existing Rete rule-execution path is unchanged (zero regression).
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+**Wave 1**
+
+- [ ] 30-01-PLAN.md — Foundation: chrono-tz dep + feel/ module skeleton + Value additive extension (8 variants) + TCK vendoring + precision-audit gate (DMN-08 gate, DMN-10 setup)
+
+**Wave 2** *(blocked on Wave 1 completion; 02/03/04 parallel, no file overlap)*
+
+- [ ] 30-02-PLAN.md — FEEL Decimal128 numeric domain: feel_numeric_eq + 0.1+0.2=0.3 proof + vendored TCK numeric vectors (DMN-08)
+- [ ] 30-03-PLAN.md — FEEL temporal domain: parse_at_literal/format_value/add_months_zoned (IANA tz, DST-correct) + vendored TCK temporal vectors (DMN-09)
+- [ ] 30-04-PLAN.md — FEEL type lattice (conforms/equivalent/3 implicit conversions, 1+"2"→null prohibition) + additive-extension regression audit (DMN-10, Success Criterion 4)
 
 ### Phase 31: FEEL Parser + Evaluator + Built-in Function Library
 
