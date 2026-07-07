@@ -1,8 +1,8 @@
 ---
 phase: 31
 slug: feel-parser-evaluator-built-in-function-library
-status: draft
-nyquist_compliant: false
+status: signed-off
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-07-07
 ---
@@ -53,8 +53,8 @@ created: 2026-07-07
 | 31-05-02 | 05 | 3 | DMN-15 | — | Cycle detection | unit + property | `cargo test -p engine --lib dmn::feel::eval::context_topo` | ❌ W0 | ⬜ pending |
 | 31-06-01 | 06 | 3 | DMN-16 | — | `external` rejected → null + warning | unit | `cargo test -p engine --lib dmn::feel::eval::external_rejected` | ❌ W0 | ⬜ pending |
 | 31-06-02 | 06 | 3 | DMN-16 | — | N/A | unit | `cargo test -p engine --lib dmn::feel::eval::lambdas` | ❌ W0 | ⬜ pending |
-| 31-07-01 | 07 | 4 | DMN-17 (part 1) | — | N/A | unit + property | `cargo test -p engine --lib dmn::feel::builtins::conversion dmn::feel::builtins::string dmn::feel::builtins::list dmn::feel::builtins::numeric` | ❌ W0 | ⬜ pending |
-| 31-08-01 | 08 | 4 | DMN-17 (part 2) | — | N/A | unit | `cargo test -p engine --lib dmn::feel::builtins::datetime dmn::feel::builtins::context dmn::feel::builtins::boolean dmn::feel::builtins::range dmn::feel::builtins::equality` | ❌ W0 | ⬜ pending |
+| 31-07-01 | 07 | 4 | DMN-17 (part 1) | — | N/A | unit + property | `cargo test -p engine --lib -- dmn::feel::builtins::conversion dmn::feel::builtins::string dmn::feel::builtins::list dmn::feel::builtins::numeric` | ❌ W0 | ⬜ pending |
+| 31-08-01 | 08 | 4 | DMN-17 (part 2) | — | N/A | unit | `cargo test -p engine --lib -- dmn::feel::builtins::datetime dmn::feel::builtins::context dmn::feel::builtins::boolean dmn::feel::builtins::range dmn::feel::builtins::equality` | ❌ W0 | ⬜ pending |
 | 31-08-02 | 08 | 4 | DMN-17 | — | `is` never returns null (Pitfall 6) | unit | `cargo test -p engine --lib dmn::feel::builtins::is_never_null` | ❌ W0 | ⬜ pending |
 | 31-09-01 | 09 | 4 | DMN-18 | — | 30-cell × 10k = ~30 parses not 300k | bench | `cargo test -p engine --lib dmn::feel::cache::perf -- --nocapture` | ❌ W0 | ⬜ pending |
 | 31-09-02 | 09 | 4 | DMN-18 | — | Evaluator takes `&FeelExpression`, never `&str` | compile | `cargo build -p engine` (no `evaluate(&str,...)` overload) | ❌ W0 | ⬜ pending |
@@ -75,7 +75,7 @@ created: 2026-07-07
 - [ ] `engine/src/dmn/feel/builtins.rs` — `BuiltinFn` type + `HashMap<&str, BuiltinFn>` registry skeleton (DMN-17)
 - [ ] `engine/src/dmn/feel/coercion.rs` — explicit FEEL operator/builtin coercions (DMN-13)
 - [ ] `engine/src/dmn/feel/cache.rs` (or fold into `parser.rs`) — `FeelAstCache = DashMap<String, Arc<FeelExpression>>` (DMN-18)
-- [ ] `engine/src/dmn/feel/types.rs` — extend `FeelFunction` with `body`/`captured`/`param_names` (DMN-16)
+- [ ] `engine/src/dmn/feel/types.rs` — extend `FeelFunction` with `body`/`captured`/`param_names` (DMN-16; fields declared in 31-01 as a data-model decision, populated by 31-05/31-06)
 - [ ] `engine/tests/fixtures/tck/feel/` — vendored OMG TCK FEEL subset (loader + runner scaffold)
 - [ ] `engine/tests/feel_tck_subset.rs` — TCK harness scaffold (full passage deferred to Phase 35)
 - [ ] `engine/tests/feel_cache_wiring.rs` — IR loader pre-parse integration test
@@ -92,11 +92,11 @@ created: 2026-07-07
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 180s (full suite)
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 180s (full suite)
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** signed-off (2026-07-07). Every implementation task across all 9 plans has an automated `<verify>` block; no window of 3 consecutive tasks without automated verify. Cargo-test multi-filter syntax corrected (`--` separator before the first substring filter). FeelFunction carrier field declarations moved to 31-01 (resolves the Wave-5-before-Wave-6 E0063 ordering blocker).
