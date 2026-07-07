@@ -19,7 +19,7 @@ Requirements for the v6.0 milestone. Each maps to roadmap phases 29–35.
 ### FEEL Value System
 
 - [x] **DMN-08**: FEEL Decimal128 numeric domain (`rust_decimal`) — `0.1 + 0.2 = 0.3`; precision validated against OMG TCK numeric vectors (fallback to `bigdecimal` if 28–29 digits prove insufficient)
-- [ ] **DMN-09**: FEEL date/time/duration value types — `date`, `time`, `date and time` (IANA timezones via `chrono-tz`), `days and time duration`, `years and months duration`; ISO 8601 `@""` lexical literals parse and round-trip
+- [x] **DMN-09**: FEEL date/time/duration value types — `date`, `time`, `date and time` (IANA timezones via `chrono-tz`), `days and time duration`, `years and months duration`; ISO 8601 `@""` lexical literals parse and round-trip
 - [x] **DMN-10**: FEEL type lattice — conformance (`<:`), equivalence (`≡`), implicit conversions (number↔string, singleton-list↔value), null propagation through the lattice
 
 ### FEEL Expression Language
@@ -98,7 +98,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DMN-06 | Phase 29 | Complete |
 | DMN-07 | Phase 35 | Pending |
 | DMN-08 | Phase 30 | Complete |
-| DMN-09 | Phase 30 | Pending |
+| DMN-09 | Phase 30 | Complete |
 | DMN-10 | Phase 30 | Complete |
 | DMN-11 | Phase 31 | Pending |
 | DMN-12 | Phase 31 | Pending |

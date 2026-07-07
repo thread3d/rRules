@@ -2,14 +2,17 @@
 gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: DMN Level 3 Compliance
+current_phase: 30
+current_phase_name: feel-value-types-type-lattice-temporal-domain
 status: executing
-last_updated: "2026-07-07T04:37:59.888Z"
+stopped_at: Completed 29-02-PLAN.md
+last_updated: "2026-07-07T04:50:31.777Z"
 last_activity: 2026-07-07
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 14
 ---
 
@@ -25,7 +28,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-06)
 ## Current Position
 
 Phase: 30 (feel-value-types-type-lattice-temporal-domain) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-07-07
 
@@ -267,6 +270,9 @@ From v2.0 milestone:
 - [Phase ?]: D-30-02a: feel_numeric_eq returns Option<bool> (null-propagating) for Phase 31 three-valued logic
 - [Phase ?]: D-30-02b: Number<->Integer cross-type equality via Decimal::from(i) (spec 10.3.2.2); Number<->String returns None (no implicit conversion, Phase 31 built-in)
 - [Phase ?]: D-30-02d: Division-by-zero TCK vectors skipped with documented reason, NOT mapped to null (Err->null is Phase 31 Security Domain)
+- [Phase ?]: D-30-03a: parse_at_literal dispatches by first-separator position (colon vs dash) to handle negative-offset times correctly
+- [Phase ?]: D-30-03c: DST re-attachment policy via reattach_zone helper — None to null, Ambiguous to earliest (Pitfall 5, Open Question 2 RESOLVED)
+- [Phase ?]: D-30-03d: TCK string wrapper stripped before parsing — the @Zone/Name suffix preservation is what the TCK string() expectation tests
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -298,7 +304,7 @@ From v3.0 milestone:
 
 **Stopped at:** Completed 29-02-PLAN.md
 
-Last session: 2026-07-07T04:37:38.201Z
+Last session: 2026-07-07T04:50:31.763Z
 
 **Completed Phases:**
 
@@ -336,3 +342,4 @@ Last session: 2026-07-07T04:37:38.201Z
 | Phase 29 P03 | 15min | 2 tasks | 2 files |
 | Phase 30 P01 | 12min | 2 tasks | 16 files |
 | Phase 30 P02 | 10min | 2 tasks | 2 files |
+| Phase 30 P03 | 9min | 2 tasks | 2 files |
