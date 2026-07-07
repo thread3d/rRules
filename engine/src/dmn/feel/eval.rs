@@ -25,6 +25,7 @@ use std::collections::HashMap;
 use std::cmp::Ordering;
 
 use super::ast::{FeelExpression, BinOpKind};
+use super::coercion::{coerce_to_number, coerce_to_string};
 use super::numeric::feel_numeric_eq;
 use super::temporal::parse_at_literal;
 use super::types::FeelRange;
@@ -481,8 +482,13 @@ fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope:
         let bv = evaluate(b, scope);
         let cv = evaluate(c, scope);
         // `a between b and c` ≡ `a >= b and a <= c`.
-        let ge = cmp::feel_compare(&l, &bv).map(|o| o != Ordering::Greater);
-        let le = cmp::feel_compare(&l, &cv).map(|o| o != Ordering::Less);
+        // `feel_compare(a, b)` returns the ordering of `a` relative to `b`,
+        // so `a >= b` ↔ `o != Ordering::Less`; `a <= c` ↔ `o != Ordering::Greater`.
+        // (Rule 1 fix: the prior code had the ge/le operands swapped —
+        // `o != Greater` for ge and `o != Less` for le, which inverted the
+        // `between` range check. Corrected here.)
+        let ge = cmp::feel_compare(&l, &bv).map(|o| o != Ordering::Less);
+        let le = cmp::feel_compare(&l, &cv).map(|o| o != Ordering::Greater);
         return opt_bool(cmp::and_3vl(ge, le));
     }
     let l = evaluate(lhs, scope);
@@ -496,14 +502,28 @@ fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope:
         BinOpKind::Ge => opt_bool(cmp::feel_compare(&l, &r).map(|o| o != Ordering::Less)),
         BinOpKind::And => opt_bool(cmp::and_3vl(to_bool(&l), to_bool(&r))),
         BinOpKind::Or => opt_bool(cmp::or_3vl(to_bool(&l), to_bool(&r))),
-        // Stubs — 31-03 (arithmetic coercion) and 31-03 (positive unary
-        // test `in`). The exhaustive match on BinOpKind is the safety net.
-        BinOpKind::Add => Value::Null,
-        BinOpKind::Sub => Value::Null,
-        BinOpKind::Mul => Value::Null,
-        BinOpKind::Div => Value::Null,
-        BinOpKind::Pow => Value::Null,
-        BinOpKind::In => Value::Null,
+        // Arithmetic (DMN-13). All via Decimal128; div-by-zero / overflow →
+        // Value::Null (CONTEXT.md locked numeric-edge rule; no Result/panic).
+        // No implicit number↔string conversion: Number+String → Null
+        // (Pitfall 6); the explicit string()/number() built-ins (31-07) are
+        // the only such path.
+        BinOpKind::Add => eval_add(l, r),
+        BinOpKind::Sub => numeric_binop(l, r, |x, y| Some(x - y)),
+        BinOpKind::Mul => numeric_binop(l, r, |x, y| Some(x * y)),
+        BinOpKind::Div => numeric_binop(l, r, |x, y| {
+            if y.is_zero() {
+                None
+            } else {
+                x.checked_div(y)
+            }
+        }),
+        BinOpKind::Pow => eval_pow(l, r),
+        // `in` (DMN-13 range membership): `a in <range>` checks that `a`
+        // lies within the range's endpoints per the inclusivity flags. The
+        // full unary-test `in` semantics (`a in <positive unary test>`, `a
+        // in (tests)`, `-`, `not(...)`) land in 31-04 alongside the
+        // SimpleUnaryTests evaluator.
+        BinOpKind::In => eval_in(l, r),
         // Between is handled above; this arm is unreachable but kept for
         // exhaustiveness (BinOpKind is a closed enum — no `_ =>` wildcard).
         BinOpKind::Between => unreachable!("between handled above"),
@@ -518,6 +538,117 @@ fn opt_bool(b: Option<bool>) -> Value {
         Some(v) => Value::Bool(v),
         None => Value::Null,
     }
+}
+
+// =====================================================================
+// Plan 31-03: arithmetic / string-concat / in-range helpers.
+// =====================================================================
+
+/// FEEL `+` (DMN-13). Two semantics, distinguished by operand kind:
+/// - `String + String` → `String` (concatenation). Either operand `Null` →
+///   `Null`.
+/// - `Number`/`Integer` `+` `Number`/`Integer` → `Number` (Decimal128 add;
+///   integers promoted via `Decimal::from`).
+/// - `Number + String` / `String + Number` / any other mixed kind → `Null`
+///   (NO implicit number↔string conversion — Phase 30 Pitfall 6; the explicit
+///   `string()`/`number()` built-ins in 31-07 are the only such path).
+fn eval_add(l: Value, r: Value) -> Value {
+    // Null operand short-circuit (both the concat and numeric arms propagate
+    // null for a null operand).
+    if matches!(l, Value::Null) || matches!(r, Value::Null) {
+        return Value::Null;
+    }
+    // String concatenation — both operands must be Strings. This is the ONLY
+    // `+` overload for the String kind; Number+String falls through to the
+    // numeric arm and yields Null (coerce_to_number(String) = None).
+    if let (Some(a), Some(b)) = (coerce_to_string(&l), coerce_to_string(&r)) {
+        let mut s = a;
+        s.push_str(&b);
+        return Value::String(s);
+    }
+    // Numeric add (Number/Integer → Decimal).
+    numeric_binop(l, r, |x, y| Some(x + y))
+}
+
+/// Apply a Decimal128 binary op to two `Value`s. Either operand not coercible
+/// to a number (String, Bool, Null, …) → `Value::Null`. The op closure
+/// returns `None` for div-by-zero / overflow / invalid → `Value::Null`
+/// (CONTEXT.md locked numeric-edge rule; no `Result`, no panic). No `f64` is
+/// constructed in this path (prohibition 2).
+fn numeric_binop<F>(l: Value, r: Value, op: F) -> Value
+where
+    F: FnOnce(rust_decimal::Decimal, rust_decimal::Decimal) -> Option<rust_decimal::Decimal>,
+{
+    let Some(x) = coerce_to_number(&l) else {
+        return Value::Null;
+    };
+    let Some(y) = coerce_to_number(&r) else {
+        return Value::Null;
+    };
+    match op(x, y) {
+        Some(result) => Value::Number(result),
+        None => Value::Null,
+    }
+}
+
+/// FEEL `**` (DMN-13). Uses `rust_decimal::MathematicalOps::checked_powd`,
+/// which: handles non-negative integer exponents exactly via
+/// `checked_powu`; handles negative integer exponents via `checked_powi`
+/// (1/base^n); and approximates non-integer exponents via
+/// `exp(y·ln(x))`. Returns `None` on overflow → `Value::Null`. The
+/// right-associativity is in the AST shape (the parser produced
+/// `BinOp(Pow, 2, BinOp(Pow, 3, 2))`); eval just walks the tree, so
+/// `2 ** 3 ** 2 = 2 ** 9 = 512` (Pitfall 2).
+fn eval_pow(l: Value, r: Value) -> Value {
+    use rust_decimal::MathematicalOps;
+    let Some(base) = coerce_to_number(&l) else {
+        return Value::Null;
+    };
+    let Some(exp) = coerce_to_number(&r) else {
+        return Value::Null;
+    };
+    match base.checked_powd(exp) {
+        Some(result) => Value::Number(result),
+        None => Value::Null,
+    }
+}
+
+/// FEEL `in` (DMN-13 range membership). For a `Value::Range` RHS, checks
+/// that `l` lies within the range's endpoints per the inclusivity flags via
+/// `feel_compare` + `and_3vl`. A null operand or incomparable endpoint →
+/// `None` propagates to `Value::Null`. For any non-Range RHS, returns
+/// `Value::Null` — the full unary-test `in` semantics (`a in <positive
+/// unary test>`, `a in (tests)`, `-`, `not(...)`) land in 31-04.
+fn eval_in(l: Value, r: Value) -> Value {
+    let Value::Range(range) = r else {
+        // TODO(31-04): full unary-test `in` semantics (positive unary test,
+        // comma-list, `-`, `not(...)`).
+        return Value::Null;
+    };
+    let mut ok: Option<bool> = Some(true);
+    if let Some(start) = &range.start {
+        let in_lower = match cmp::feel_compare(&l, start) {
+            Some(o) => Some(if range.start_incl {
+                o != Ordering::Less
+            } else {
+                o == Ordering::Greater
+            }),
+            None => None,
+        };
+        ok = cmp::and_3vl(ok, in_lower);
+    }
+    if let Some(end) = &range.end {
+        let in_upper = match cmp::feel_compare(&l, end) {
+            Some(o) => Some(if range.end_incl {
+                o != Ordering::Greater
+            } else {
+                o == Ordering::Less
+            }),
+            None => None,
+        };
+        ok = cmp::and_3vl(ok, in_upper);
+    }
+    opt_bool(ok)
 }
 
 /// `Value` → `Option<bool>` for boolean operator operands: `Bool(b)` →
@@ -974,6 +1105,7 @@ fn eval_takes_borrowed_ast_not_str() {
     let e = parse_expression("1");
     let _ = _accepts(&e, &Scope::empty());
 }
+
 
 // =====================================================================
 // Plan 31-03 Task 1: arithmetic + string-concat + numeric-edge tests.

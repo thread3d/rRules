@@ -285,8 +285,17 @@ impl<'a> Lexer<'a> {
         // decimal). A leading `-` is part of the numeric literal ONLY when
         // it is not in operator position — handled at the parser level via
         // unary-neg, so the lexer emits `Minus` for `-` and lets the parser
-        // disambiguate. A `.` followed by a digit is a leading-dot decimal.
-        if b.is_ascii_digit() || (b == b'.' && self.peek_at(1).map_or(false, |c| c.is_ascii_digit())) {
+        // disambiguate. A `.` followed by a digit is a leading-dot decimal
+        // — UNLESS that `.` is the second dot of `..` (range separator,
+        // rule 8): `1..10` must tokenize as `Number(1), Dot, Dot,
+        // Number(10)`, not `Number(1), Dot, Number(0.10)`. The check
+        // `prev != b'.'` prevents the second `.` of `..` from being
+        // consumed as a leading-dot decimal when followed by digits.
+        if b.is_ascii_digit()
+            || (b == b'.'
+                && self.peek_at(1).map_or(false, |c| c.is_ascii_digit())
+                && !(self.cursor > 0 && self.src[self.cursor - 1] == b'.'))
+        {
             return self.lex_number();
         }
         // Name (rule 25): starts with a letter, `_`, or `?`.
@@ -1137,6 +1146,25 @@ impl Parser {
                 if matches!(inner, FeelExpression::Err(_, _)) {
                     return inner;
                 }
+                // If inner is a Range from parse_postfix's `..` handling,
+                // fix `start_inclusive` to `false` (because `(` = exclusive
+                // start) and `end_inclusive` from the closing bracket
+                // (`)` → exclusive, `]` → inclusive). This handles the
+                // `(a..b)` and `(a..b]` range syntaxes (rule 8).
+                if let FeelExpression::Range { start, end, .. } = inner {
+                    let end_inclusive = matches!(self.peek(), Token::RBracket);
+                    if !matches!(self.peek(), Token::RParen | Token::RBracket) {
+                        self.sync_to_boundary();
+                        return self.err_here("expected ')' or ']' after range");
+                    }
+                    self.advance(); // consume ) or ]
+                    return FeelExpression::Range {
+                        start,
+                        end,
+                        start_inclusive: false,
+                        end_inclusive,
+                    };
+                }
                 if !matches!(self.peek(), Token::RParen) {
                     self.sync_to_boundary();
                     return self.err_here("expected ')' after parenthesized expression");
@@ -1185,6 +1213,15 @@ impl Parser {
     }
 
     /// Parse `[e1, e2, ...]` (list, rule 54) or `[a..b]` (bracketed range).
+    ///
+    /// `parse_postfix` greedily consumes `..` as a postfix range operator
+    /// (for standalone `a..b` in `for`/`some`/`every` iteration sources),
+    /// so `parse_expr(0)` for the first element may already return a
+    /// [`FeelExpression::Range`]. When that happens, this function unwraps
+    /// it and fixes `end_inclusive` from the closing bracket (`]` →
+    /// inclusive, `)` → exclusive). `start_inclusive` stays `true`
+    /// because `[` is always inclusive (this function is only called from
+    /// the `LBracket` arm of `parse_primary`).
     fn parse_list_or_range(&mut self) -> FeelExpression {
         self.advance(); // consume [
         if matches!(self.peek(), Token::RBracket) {
@@ -1192,7 +1229,28 @@ impl Parser {
             return FeelExpression::List(vec![]);
         }
         let first = self.parse_expr(0);
-        // Check for range: `..` after first element
+
+        // If parse_postfix already consumed `..` and produced a Range,
+        // unwrap it and fix end_inclusivity from the closing bracket.
+        // `start_inclusive` is always `true` (opening `[` is inclusive).
+        if let FeelExpression::Range { start, end, start_inclusive, .. } = first {
+            let end_inclusive = matches!(self.peek(), Token::RBracket);
+            if !matches!(self.peek(), Token::RBracket | Token::RParen) {
+                self.sync_to_boundary();
+                return self.err_here("expected ']' or ')' after range");
+            }
+            self.advance(); // consume closing bracket
+            return FeelExpression::Range {
+                start,
+                end,
+                start_inclusive,
+                end_inclusive,
+            };
+        }
+
+        // Check for range: `..` after first element (fallback for when
+        // parse_postfix did not consume `..`, e.g. if the first element
+        // is a complex expression that stopped before the `..`).
         let next_is_dot = self
             .tokens
             .get(self.pos)
@@ -1208,10 +1266,10 @@ impl Parser {
             self.advance(); // second .
             let end = self.parse_expr(0);
             let end_inclusive = matches!(self.peek(), Token::RBracket);
-            if !matches!(self.peek(), Token::RBracket) {
+            if !matches!(self.peek(), Token::RBracket | Token::RParen) {
                 self.sync_to_boundary();
             }
-            self.advance(); // consume ] or whatever
+            self.advance(); // consume ] or )
             return FeelExpression::Range {
                 start: Box::new(first),
                 end: Box::new(end),
