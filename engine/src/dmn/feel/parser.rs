@@ -31,4 +31,323 @@
 //! **DoS guards** (T-31-01-01 / T-31-01-02): `max_tokens` cap on the lexer
 //! (default 10_000); `max_depth` cap on the parser recursion (default 256).
 //!
-//! *(Task 1 skeleton — lexer + parser implemented in Tasks 2 + 3)*
+//! *(Task 2 implements the lexer; Task 3 implements the parser.)*
+
+use rust_decimal::Decimal;
+use super::ast::Span;
+
+/// A FEEL lexical token (grammar rules 25, 33, 34, 35, 64, 65 + punctuators).
+///
+/// **Pitfall 3 (keyword-as-name):** the lexer does NOT have a `Keyword`
+/// variant. Keyword-shaped strings (`for`, `if`, `some`, `every`, `in`,
+/// `between`, `and`, `or`, `return`, `function`, `instance`, `of`, `not`,
+/// `null`, `true`, `false`) all emit [`Token::Name`] — the parser
+/// disambiguates by position (31-RESEARCH.md Pitfall 3). Booleans and
+/// `null` are likewise contextually-resolved names, not distinct token
+/// kinds.
+///
+/// Numeric literals construct [`Token::Number`] with a
+/// `rust_decimal::Decimal` — **never `f64`** (prohibition 2). String
+/// literals carry the decoded content (rule-64 escapes already expanded).
+/// At-literals carry the inner string (temporal dispatch to
+/// `feel::temporal::parse_at_literal` happens at evaluation time, not lex
+/// time).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Token {
+    /// A name (rule 25) — identifier chars including keyword-shaped strings.
+    /// The parser disambiguates keyword-vs-name by position (Pitfall 3).
+    Name(String),
+    /// A numeric literal (rule 35) → `Decimal` (Decimal128, never `f64`).
+    Number(Decimal),
+    /// A string literal (rule 33) with rule-64 escapes already decoded.
+    String(String),
+    /// An `@"..."` at-literal (rule 65) — carries the inner string.
+    AtLiteral(String),
+    // Punctuators.
+    /// `(` (rule 38/39 parameter list, rule 17 parenthesized expression).
+    LParen,
+    /// `)`.
+    RParen,
+    /// `[` (rule 50 filter, rule 54 list, rule 8 interval open-start).
+    LBracket,
+    /// `]`.
+    RBracket,
+    /// `{` (rule 57 context).
+    LBrace,
+    /// `}`.
+    RBrace,
+    /// `,` (rule 3 expression list, rule 44 multiple iteration contexts).
+    Comma,
+    /// `.` (rule 43 path, rule 8 interval `..` start, rule 18 QN separator).
+    /// A standalone `.` (not part of `..`) is a path/number-dot token.
+    Dot,
+    /// `:` (rule 58 context entry key-separator, rule 56 formal param type
+    /// annotation).
+    Colon,
+    /// `+` (rule 19 addition; also a name-part char per rule 25, but the
+    /// lexer resolves `+` as this punctuator after whitespace/operator
+    /// positions).
+    Plus,
+    /// `-` (rule 20 subtraction, rule 24 unary negation, rule 35 numeric
+    /// literal sign — handled at lex time for literals, here for operator).
+    Minus,
+    /// `*` (rule 21 multiplication).
+    Star,
+    /// `/` (rule 22 division).
+    Slash,
+    /// `**` (rule 23 exponentiation — RIGHT-associative, Pitfall 2).
+    DoubleStar,
+    /// `=` (rule 49 equality — three-valued via `feel_equals`).
+    Eq,
+    /// `!=` (rule 49 inequality).
+    NotEq,
+    /// `<` (rule 49).
+    Lt,
+    /// `<=` (rule 49).
+    Le,
+    /// `>` (rule 49).
+    Gt,
+    /// `>=` (rule 49).
+    Ge,
+    /// `?` (rule 25 name-part char; also the filter predicate placeholder
+    /// convention — the lexer emits `?` as its own token when it appears
+    /// standalone, but inside a name it is part of a Name).
+    Question,
+    /// End of input — the parser's stop signal.
+    Eof,
+    /// An error marker token (T-31-01-01 DoS guard: emitted when
+    /// `max_tokens` is exceeded, or when a numeric literal fails to parse
+    /// as `Decimal`). Carries a message.
+    LexError(String),
+}
+
+/// A token paired with its source [`Span`] (byte offset + length + line/col).
+///
+/// Every token carries a span so the parser can construct
+/// `FeelExpression::Err(span, msg)` nodes for error recovery (CONTEXT.md
+/// user override) and the Phase 34 editor can display per-cell errors.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TokenSpan {
+    /// The token.
+    pub token: Token,
+    /// The source span of the token's first character.
+    pub span: Span,
+}
+
+/// FEEL lexer — produces a `Vec<TokenSpan>` for the grammar's lexical forms.
+///
+/// Lexing rules (31-RESEARCH.md grammar-rule-to-parser-method table):
+/// - Whitespace (rules 61–62): skip; track line/col.
+/// - Numbers (rule 35): `["-"]? (digits ["." digits] | "." digits)` →
+///   `Token::Number(Decimal)` via `Decimal::from_str_exact`. NEVER `f64`.
+/// - Strings (rule 33): `"..."` with rule-64 escapes (`\'`, `\"`, `\\`,
+///   `\n`, `\r`, `\t`, `\u{...}`). Emits the decoded content.
+/// - At-literals (rule 65): `@"..."` → `Token::AtLiteral` carrying the
+///   inner string (temporal dispatch at eval time, not lex time).
+/// - Names (rule 25): identifier chars including `?`, letters, `_`, digits,
+///   and the additional name symbols `.`/`/`/`-`/`'`/`+`/`*` BUT `.`/`+`/
+///   `*`/`-` are ambiguous with operators — resolved by position: a name
+///   *start* char (letter, `_`, `?`) begins a Name; subsequent name-part
+///   chars extend it; a standalone `.`/`+`/`*`/`-` after whitespace or an
+///   operator is a punct token. Keyword strings emit `Token::Name(keyword)`
+///   — the parser disambiguates (Pitfall 3).
+/// - Punctuators: `(`, `)`, `[`, `]`, `{`, `}`, `,`, `.`, `:`, `?`, `+`,
+///   `-`, `*`, `/`, `**`, `=`, `!=`, `<`, `<=`, `>`, `>=`.
+/// - DoS guard (T-31-01-01): if token count exceeds `max_tokens` (default
+///   10_000), emit a single `Token::LexError` and stop.
+pub struct Lexer<'a> {
+    src: &'a [u8],
+    cursor: usize,
+    line: u32,
+    col: u32,
+    max_tokens: usize,
+}
+
+impl<'a> Lexer<'a> {
+    /// Construct a new lexer over `src` with the default `max_tokens`
+    /// cap (10_000 — T-31-01-01 mitigation).
+    pub fn new(src: &'a str) -> Self {
+        Self {
+            src: src.as_bytes(),
+            cursor: 0,
+            line: 1,
+            col: 1,
+            max_tokens: 10_000,
+        }
+    }
+
+    /// Construct a lexer with a custom `max_tokens` cap (used by the DoS
+    /// guard test).
+    pub fn with_max_tokens(src: &'a str, max_tokens: usize) -> Self {
+        Self {
+            src: src.as_bytes(),
+            cursor: 0,
+            line: 1,
+            col: 1,
+            max_tokens,
+        }
+    }
+
+    /// Tokenize the source into a `Vec<TokenSpan>`.
+    ///
+    /// **RED stub** — returns `vec![]` so the behavior tests fail. The GREEN
+    /// implementation lands in the next commit.
+    pub fn tokenize(&mut self) -> Vec<TokenSpan> {
+        // (RED — implemented in the GREEN commit)
+        unimplemented!("Lexer::tokenize — GREEN implementation pending")
+    }
+}
+
+#[cfg(test)]
+mod lexer_tests {
+    use super::*;
+    use rust_decimal::dec;
+
+    /// lex("1 + 2.5") yields tokens [Number, Plus, Number, Eof] with correct
+    /// spans (behavior test 1).
+    #[test]
+    fn lex_number_plus_number() {
+        let toks = Lexer::new("1 + 2.5").tokenize();
+        assert!(toks.len() >= 4, "expected at least 4 tokens, got {}", toks.len());
+        assert_eq!(toks[0].token, Token::Number(dec!(1)));
+        assert_eq!(toks[1].token, Token::Plus);
+        assert_eq!(toks[2].token, Token::Number(dec!(2.5)));
+        // Trailing Eof.
+        assert_eq!(toks.last().unwrap().token, Token::Eof);
+        // Span of the first token covers "1" at offset 0, length 1.
+        assert_eq!(toks[0].span.start, 0);
+        assert_eq!(toks[0].span.len, 1);
+        assert_eq!(toks[0].span.line, 1);
+        assert_eq!(toks[0].span.col, 1);
+    }
+
+    /// lex(r#""hello \"world\"""#) yields a String token with the escaped
+    /// quote preserved per rule 64 (behavior test 2).
+    #[test]
+    fn lex_string_with_escaped_quote() {
+        let toks = Lexer::new(r#""hello \"world\"""#).tokenize();
+        assert_eq!(toks[0].token, Token::String("hello \"world\"".to_string()));
+    }
+
+    /// lex("@\"2021-01-31\"") yields an AtLiteral token (behavior test 3).
+    #[test]
+    fn lex_at_literal() {
+        let toks = Lexer::new(r#"@"2021-01-31""#).tokenize();
+        assert_eq!(toks[0].token, Token::AtLiteral("2021-01-31".to_string()));
+    }
+
+    /// lex("for x in list return x") yields [Name("for"), Name("x"),
+    /// Name("in"), Name("list"), Name("return"), Name("x")] — keyword
+    /// strings emit Name tokens (Pitfall 3: disambiguation is the parser's
+    /// job, not the lexer's) (behavior test 4).
+    #[test]
+    fn lex_keywords_emit_name_tokens() {
+        let toks = Lexer::new("for x in list return x").tokenize();
+        let names: Vec<&Token> = toks.iter().map(|ts| &ts.token).collect();
+        assert_eq!(
+            names,
+            vec![
+                &Token::Name("for".to_string()),
+                &Token::Name("x".to_string()),
+                &Token::Name("in".to_string()),
+                &Token::Name("list".to_string()),
+                &Token::Name("return".to_string()),
+                &Token::Name("x".to_string()),
+                &Token::Eof,
+            ]
+        );
+    }
+
+    /// lex("null true false") yields Name("null"), Name("true"), Name("false")
+    /// — booleans/null are contextually-resolved names, not distinct token
+    /// kinds (parser resolves them) (behavior test 5).
+    #[test]
+    fn lex_null_true_false_are_names() {
+        let toks = Lexer::new("null true false").tokenize();
+        assert_eq!(toks[0].token, Token::Name("null".to_string()));
+        assert_eq!(toks[1].token, Token::Name("true".to_string()));
+        assert_eq!(toks[2].token, Token::Name("false".to_string()));
+    }
+
+    /// lex("a.b.c") yields [Name("a"), Dot, Name("b"), Dot, Name("c")] —
+    /// the lexer does NOT pre-merge qualified names (behavior test 6).
+    #[test]
+    fn lex_qualified_name_not_merged() {
+        let toks = Lexer::new("a.b.c").tokenize();
+        assert_eq!(toks[0].token, Token::Name("a".to_string()));
+        assert_eq!(toks[1].token, Token::Dot);
+        assert_eq!(toks[2].token, Token::Name("b".to_string()));
+        assert_eq!(toks[3].token, Token::Dot);
+        assert_eq!(toks[4].token, Token::Name("c".to_string()));
+    }
+
+    /// lex with a token count exceeding MAX_TOKENS (e.g. 10_000) yields an
+    /// Err token (DoS guard per research Security Domain V5) (behavior
+    /// test 7).
+    #[test]
+    fn lex_max_tokens_dos_guard() {
+        // A string of 5 single-char names separated by spaces yields 9
+        // tokens per "a a a a a" — set max_tokens low (4) so the cap trips.
+        let mut lexer = Lexer::with_max_tokens("a a a a a", 4);
+        let toks = lexer.tokenize();
+        assert!(
+            toks.iter().any(|ts| matches!(ts.token, Token::LexError(_))),
+            "expected a LexError token when max_tokens is exceeded, got {:?}",
+            toks
+        );
+    }
+
+    /// lex("**" yields DoubleStar (right-associative exponentiation,
+    /// Pitfall 2).
+    #[test]
+    fn lex_double_star() {
+        let toks = Lexer::new("2 ** 3").tokenize();
+        assert_eq!(toks[1].token, Token::DoubleStar);
+    }
+
+    /// lex("<=" / ">=" / "!=" comparison operators.
+    #[test]
+    fn lex_comparison_operators() {
+        let toks = Lexer::new("a <= b >= c != d").tokenize();
+        assert_eq!(toks[1].token, Token::Le);
+        assert_eq!(toks[3].token, Token::Ge);
+        assert_eq!(toks[5].token, Token::NotEq);
+    }
+
+    /// lex a numeric literal ".5" (leading-dot decimal per rule 35).
+    #[test]
+    fn lex_leading_dot_decimal() {
+        let toks = Lexer::new(".5").tokenize();
+        assert_eq!(toks[0].token, Token::Number(dec!(0.5)));
+    }
+
+    /// lex never produces `f64` — numeric tokens are `Decimal`.
+    #[test]
+    fn lex_number_is_decimal_not_f64() {
+        let toks = Lexer::new("0.1 + 0.2").tokenize();
+        // Both Number tokens must be Decimal (the Token::Number variant
+        // carries Decimal by construction; this test guards against a
+        // future refactor adding an f64 variant).
+        match &toks[0].token {
+            Token::Number(d) => assert_eq!(*d, dec!(0.1)),
+            other => panic!("expected Token::Number, got {:?}", other),
+        }
+    }
+
+    /// lex rule-64 escape sequences: \n, \t, \\, \u{...}.
+    #[test]
+    fn lex_string_escapes() {
+        let toks = Lexer::new(r#""a\nb\tc\\d\u{0041}""#).tokenize();
+        assert_eq!(toks[0].token, Token::String("a\nb\tc\\dA".to_string()));
+    }
+
+    /// lex tracks line and column across newlines.
+    #[test]
+    fn lex_line_col_tracking() {
+        let toks = Lexer::new("a\nb").tokenize();
+        assert_eq!(toks[0].span.line, 1);
+        assert_eq!(toks[0].span.col, 1);
+        assert_eq!(toks[1].span.line, 2);
+        assert_eq!(toks[1].span.col, 1);
+    }
+}
