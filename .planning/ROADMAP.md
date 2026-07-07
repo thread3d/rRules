@@ -256,7 +256,7 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 27. Stateful sessions | v5.0 | 1/1 | Complete | 2026-07-06 |
 | 28. Frontend test-runner | v5.0 | 5/5 | Complete | 2026-07-06 |
 | 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 3/3 | Complete   | 2026-07-06 |
-| 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 4/4 | Complete   | 2026-07-07 |
+| 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 4/4 | Complete    | 2026-07-07 |
 | 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 0/TBD | Not started | - |
 | 32. Decision-Table Engine + Hit Policies | v6.0 | 0/TBD | Not started | - |
 | 33. Decision Evaluator + DRD Resolution + REST API + Metrics | v6.0 | 0/TBD | Not started | - |
