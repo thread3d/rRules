@@ -468,7 +468,7 @@ pub fn implicit_convert(v: Value, target: &FeelType, ctx: ConvertCtx) -> Option<
 ### Phase Requirements → Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| DMN-08 | `0.1 + 0.2 = 0.3` in `Decimal` | unit | `cargo test -p engine --lib dmn::feel::types::test_decimal_add` | ❌ Wave 0 |
+| DMN-08 | `0.1 + 0.2 = 0.3` in `Decimal` | unit | `cargo test -p engine --lib dmn::feel::numeric::test_decimal_add` | ❌ Wave 0 |
 | DMN-08 | TCK numeric vectors pass (subset: `0100-arithmetic`, `1100-decimal`) | integration | `cargo test -p engine --test feel_tck_numeric` | ❌ Wave 0 (TCK XML checked into `engine/tests/fixtures/tck/`) |
 | DMN-08 | No TCK value vector exceeds 29 significant digits (A1 confirmation) | smoke (Wave 0 gate) | `cargo test -p engine --test tck_precision_audit` | ❌ Wave 0 |
 | DMN-09 | `@""` literals for all 5 types parse + round-trip | property | `cargo test -p engine --lib dmn::feel::temporal::tests -- --nocapture` + `cargo test -p engine --lib temporal_proptest` | ❌ Wave 0 |
