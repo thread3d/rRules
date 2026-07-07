@@ -419,19 +419,19 @@ pub fn implicit_convert(v: Value, target: &FeelType, ctx: ConvertCtx) -> Option<
 
 **If this table is empty:** N/A — five assumptions logged, all with mitigation tasks for the planner.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does any TCK vector demand >29 significant digits in a *value* (not a `scale` argument)?**
+1. **Does any TCK vector demand >29 significant digits in a *value* (not a `scale` argument)?** — RESOLVED: Wave-0 `tck_precision_audit` gate in Plan 01 Task 2 confirms assumption A1 for the vendored subset (scans for >29-digit literals); if any hit is found, the plan documents the `bigdecimal` fallback before Phase 31.
    - What we know: `0100-arithmetic`, `1100-decimal`, `1141`–`1144`, `0002-input-data-number` inspected — max 8 fractional digits.
    - What's unclear: `0058-feel-number-function`, `0008-LX-arithmetic`, `0009-invocation-arithmetic`, `0061-feel-median`, `0063-feel-stddev` were not exhaustively scanned for >29-digit literals.
    - Recommendation: Wave-0 task — `grep -rhE 'xsd:(decimal|double)">-?[0-9]{30,}' TestCases/` and `grep -rhE '<text>[^<]*[0-9]{30,}' TestCases/` over the full TCK clone. If zero hits, A1 is confirmed and `rust_decimal` is locked.
 
-2. **DST gap/overlap FEEL result policy**
+2. **DST gap/overlap FEEL result policy** — RESOLVED: Plan 03 Task 1 implements a documented policy — return `null` for non-existent local times (`LocalResult::None`) and earliest for ambiguous (`LocalResult::Ambiguous`); Phase 31 confirms against TCK if a vector exercises it.
    - What we know: spec says local times without offset are "only sometimes comparable to UTC"; chrono-tz returns `LocalResult::None`/`Ambiguous`.
    - What's unclear: what does FEEL say the result of `@"2021-01-01T02:30:00@America/Sao_Paulo" + @"P1D"` is when the result lands in a DST gap? Return null? Earlier? Later?
    - Recommendation: Phase 30 picks a documented policy (return null for non-existent; earliest for ambiguous) and records it; Phase 31 confirms against TCK if a vector exercises it.
 
-3. **`FeelFunction` variant payload in Phase 30**
+3. **`FeelFunction` variant payload in Phase 30** — RESOLVED: Plan 01 Task 1 adds `Value::Function(FeelFunction)` where `FeelFunction` is a placeholder struct carrying arity + param/return `FeelType`s ONLY (enough for lattice `conforms`/`equivalent`). The closure body is Phase 31.
    - What we know: Phase 31 defines `FeelExpression` (the AST) and lambda closures.
    - What's unclear: what should `Value::Function` carry in Phase 30 — just a placeholder for the type lattice, or a full closure?
    - Recommendation: Phase 30 adds `Value::Function(FeelFunction)` where `FeelFunction` is a placeholder struct carrying arity + param/return `FeelType`s ONLY (enough for lattice `conforms`/`equivalent`). The closure body is Phase 31.
