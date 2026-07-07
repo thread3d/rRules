@@ -464,12 +464,33 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
         }
         FeelExpression::FunctionInvocation { callee, args, named } => {
             // DMN-15 boxed function invocation. Evaluate callee and args, then
-            // dispatch: built-in registry (31-07) or lambda application (31-06).
-            // Both are not yet implemented — stub to Null with TODO markers.
-            let _callee_val = evaluate(callee, scope);
-            let _arg_vals: Vec<Value> = args.iter().map(|a| evaluate(a, scope)).collect();
-            // TODO(31-06/31-07): lambda application + built-in registry dispatch.
-            Value::Null
+            // dispatch: lambda application (31-06) or built-in registry (31-07).
+            let callee_val = evaluate(callee, scope);
+
+            match callee_val {
+                Value::Function(func) => {
+                    if func.body.is_none() {
+                        // Built-in function pointer — not yet registered (31-07).
+                        // Structure the code so 31-07 can populate a registry.
+                        eprintln!("unregistered built-in function: arity={} param_names={:?}", func.arity, func.param_names);
+                        Value::Null
+                    } else if func.external {
+                        // Non-external constraint (CONTEXT.md): external functions are rejected at invocation.
+                        eprintln!(
+                            "external function invocation rejected: arity={} param_names={:?} — only non-external user lambdas supported",
+                            func.arity, func.param_names
+                        );
+                        Value::Null
+                    } else {
+                        // Lambda application (31-06): merge captured scope + params, evaluate body.
+                        lambda_apply(&func, args, named.as_deref(), scope)
+                    }
+                }
+                _ => {
+                    // Callee is not a function — return Null.
+                    Value::Null
+                }
+            }
         }
         FeelExpression::FunctionDefinition { params, body, external } => {
             // DMN-15 boxed function definition: construct a FeelFunction carrier.
@@ -489,6 +510,60 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
             Value::Function(func)
         }
     }
+}
+
+/// Apply a user-defined lambda: merge captured scope + param bindings, evaluate body.
+///
+/// DMN-16 lambda application (grammar rule 55):
+/// - Zip `func.param_names` with evaluated positional args (or named args if provided).
+/// - If arity != arg count → return `Value::Null`.
+/// - Construct a working Scope: start from `func.captured.clone()` (the definition-site scope),
+///   then bind each param name -> arg value. Params override captured names of the same key.
+/// - Evaluate `func.body` against the merged Scope.
+/// - Lexical capture: the closure sees its definition site's bindings, NOT the caller's.
+fn lambda_apply(
+    func: &crate::dmn::feel::types::FeelFunction,
+    args_ast: &[FeelExpression],
+    named: Option<&[(String, FeelExpression)]>,
+    call_scope: &Scope,
+) -> Value {
+    // Evaluate positional arguments.
+    let arg_vals: Vec<Value> = args_ast.iter().map(|a| evaluate(a, call_scope)).collect();
+
+    // Determine the effective argument list (positional or named).
+    let effective_args: Vec<(String, Value)> = if let Some(named_args) = named {
+        // Named arguments — zip param_names with named values in declaration order.
+        func.param_names
+            .iter()
+            .map(|name| {
+                let val = named_args
+                    .iter()
+                    .find(|(n, _)| n == name)
+                    .map(|(_, v)| evaluate(v, call_scope))
+                    .unwrap_or(Value::Null); // Missing named arg → Null.
+                (name.clone(), val)
+            })
+            .collect()
+    } else {
+        // Positional arguments — zip with param_names.
+        func.param_names.iter().zip(arg_vals.iter()).map(|(n, v)| (n.clone(), v.clone())).collect()
+    };
+
+    // Arity check: if positional args were provided and arity mismatches → Null.
+    if !args_ast.is_empty() && arg_vals.len() != func.param_names.len() {
+        return Value::Null;
+    }
+
+    // Construct working Scope: start from captured (definition-site), then bind params.
+    let mut working_scope = func.captured.clone().map(|arc| (*arc).clone()).unwrap_or_else(Scope::empty);
+
+    for (name, val) in effective_args {
+        working_scope.bind(name, val, vec![]); // Params have no deps.
+    }
+
+    // Evaluate the body against the merged scope.
+    let body = func.body.as_ref().expect("body.is_some() checked at call site");
+    evaluate(&**body, &working_scope)
 }
 
 /// Collect free variable names from a [`FeelExpression`] AST.
@@ -3126,5 +3201,196 @@ mod lambdas {
         let result = evaluate(&invocation, &Scope::empty());
         // Without lambda application logic, this returns Null (the stub). This test verifies the future behavior.
         assert_eq!(result, Value::Null, "arity mismatch should return Null");
+    }
+}
+
+// ----- Lambda invocation (DMN-16) -----
+
+#[cfg(test)]
+mod external_rejected {
+    use super::*;
+    use crate::dmn::feel::ast::{FeelExpression, BinOpKind};
+
+    /// Test: external function invocation returns Null + warning logged.
+    #[test]
+    fn lambda_external_invocation_returns_null() {
+        let func_def = FeelExpression::FunctionDefinition {
+            params: vec![("a".to_string(), None)],
+            body: Box::new(FeelExpression::Literal(Value::Integer(42))),
+            external: true, // Marked as external.
+        };
+
+        let invocation = FeelExpression::FunctionInvocation {
+            callee: Box::new(func_def),
+            args: vec![FeelExpression::Literal(Value::Integer(5))],
+            named: None,
+        };
+
+        let result = evaluate(&invocation, &Scope::empty());
+        // External functions are rejected at invocation time.
+        assert_eq!(result, Value::Null, "external function invocation should return Null");
+    }
+
+    /// Test: non-external lambda application works (merge captured + params, evaluate body).
+    #[test]
+    fn lambda_application_merges_scope_and_evaluates() {
+        use crate::dmn::feel::ast::{FeelExpression as FE, BinOpKind as BOK};
+
+        // Build a function that adds its parameter to x from the enclosing scope.
+        let func_def = FeelExpression::FunctionDefinition {
+            params: vec![("y".to_string(), None)],
+            body: Box::new(FeelExpression::BinOp {
+                op: BOK::Add,
+                lhs: Box::new(FE::Name("x".into())),
+                rhs: Box::new(FE::Name("y".into())),
+            }),
+            external: false,
+        };
+
+        // Wrap in a context where x is bound.
+        let ctx = FeelExpression::Context(vec![
+            ("f".to_string(), func_def),
+            ("x".to_string(), FE::Literal(Value::Integer(10))),
+        ]);
+
+        let result = evaluate(&ctx, &Scope::empty());
+        match result {
+            Value::Object(map) => {
+                let f_val = map.get("f").unwrap();
+                if let Value::Function(f) = f_val {
+                    // Invoke the function with arg 5.
+                    let invocation = FeelExpression::FunctionInvocation {
+                        callee: Box::new(FE::Literal(f_val.clone())),
+                        args: vec![FE::Literal(Value::Integer(5))],
+                        named: None,
+                    };
+
+                    // The result should be x + y = 10 + 5 = 15.
+                    let eval_result = evaluate(&invocation, &Scope::empty());
+                    assert_eq!(eval_result, Value::Number(rust_decimal::dec!(15)), "lambda application should return 10+5=15");
+                } else {
+                    panic!("expected Function value");
+                }
+            }
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    /// Test: named args work (merge captured + named params, evaluate body).
+    #[test]
+    fn lambda_named_args_work() {
+        use crate::dmn::feel::ast::{FeelExpression as FE, BinOpKind as BOK};
+
+        let func_def = FeelExpression::FunctionDefinition {
+            params: vec![("a".to_string(), None), ("b".to_string(), None)],
+            body: Box::new(FeelExpression::BinOp {
+                op: BOK::Add,
+                lhs: Box::new(FE::Name("a".into())),
+                rhs: Box::new(FE::Name("b".into())),
+            }),
+            external: false,
+        };
+
+        // Invoke with named args (b=2, a=1) — order doesn't matter.
+        let invocation = FeelExpression::FunctionInvocation {
+            callee: Box::new(func_def),
+            args: vec![],
+            named: Some(vec![
+                ("b".to_string(), FE::Literal(Value::Integer(2))),
+                ("a".to_string(), FE::Literal(Value::Integer(1))),
+            ]),
+        };
+
+        let result = evaluate(&invocation, &Scope::empty());
+        // a=1 + b=2 = 3.
+        assert_eq!(result, Value::Number(rust_decimal::dec!(3)), "named args: a+b should be 3");
+    }
+
+    /// Test: lexical capture verified — closure sees definition-site x=10 even when called from scope with x=99.
+    #[test]
+    fn lambda_lexical_capture_verified_at_invocation() {
+        use crate::dmn::feel::ast::{FeelExpression as FE, BinOpKind as BOK};
+
+        // Define function in context where x=10; invoke from a scope where x=99.
+        let func_def = FeelExpression::FunctionDefinition {
+            params: vec![("y".to_string(), None)],
+            body: Box::new(FeelExpression::BinOp {
+                op: BOK::Add,
+                lhs: Box::new(FE::Name("x".into())),
+                rhs: Box::new(FE::Literal(Value::Integer(0))),
+            }),
+            external: false,
+        };
+
+        // context1 defines f with x=10 captured.
+        let ctx1 = FeelExpression::Context(vec![
+            ("f".to_string(), func_def),
+            ("x".to_string(), FE::Literal(Value::Integer(10))),
+        ]);
+
+        let result1 = evaluate(&ctx1, &Scope::empty());
+        match result1 {
+            Value::Object(map) => {
+                let f_val = map.get("f").unwrap();
+                if let Value::Function(f) = f_val {
+                    // Invoke from a scope where x=99.
+                    let invocation = FeelExpression::FunctionInvocation {
+                        callee: Box::new(FE::Literal(f_val.clone())),
+                        args: vec![FE::Literal(Value::Integer(5))],
+                        named: None,
+                    };
+
+                    let mut outer_scope = Scope::empty();
+                    outer_scope.bind("x".to_string(), Value::Integer(99), vec![]);
+
+                    // The result should still use captured x=10 (lexical).
+                    let eval_result = evaluate(&invocation, &outer_scope);
+                    assert_eq!(eval_result, Value::Number(rust_decimal::dec!(10)), "lexical capture: closure sees definition-site x=10, not call-site x=99");
+                } else {
+                    panic!("expected Function value");
+                }
+            }
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    /// Test: arity mismatch returns Null (no lambda application logic yet).
+    #[test]
+    fn lambda_arity_mismatch_invocation_returns_null() {
+        use crate::dmn::feel::ast::{FeelExpression as FE, BinOpKind as BOK};
+
+        let func_def = FeelExpression::FunctionDefinition {
+            params: vec![("a".to_string(), None), ("b".to_string(), None)],
+            body: Box::new(FeelExpression::BinOp {
+                op: BOK::Add,
+                lhs: Box::new(FE::Name("a".into())),
+                rhs: Box::new(FE::Name("b".into())),
+            }),
+            external: false,
+        };
+
+        // Invoke with only 1 arg (arity mismatch).
+        let invocation = FeelExpression::FunctionInvocation {
+            callee: Box::new(func_def),
+            args: vec![FE::Literal(Value::Integer(5))],
+            named: None,
+        };
+
+        let result = evaluate(&invocation, &Scope::empty());
+        // Arity mismatch → Null.
+        assert_eq!(result, Value::Null, "arity mismatch should return Null");
+    }
+
+    /// Test: callee is not a function → returns Null.
+    #[test]
+    fn lambda_invocation_non_function_callee_returns_null() {
+        let invocation = FeelExpression::FunctionInvocation {
+            callee: Box::new(crate::dmn::feel::ast::FeelExpression::Literal(Value::Integer(42))), // Number, not a function!
+            args: vec![],
+            named: None,
+        };
+
+        let result = evaluate(&invocation, &Scope::empty());
+        assert_eq!(result, Value::Null, "non-function callee should return Null");
     }
 }
