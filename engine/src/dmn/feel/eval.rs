@@ -610,7 +610,7 @@ pub fn eval_context_topo(
         deps.insert(key.clone(), intra);
     }
 
-    // 2. DFS color-marking cycle detection.
+    // 2. DFS color-marking cycle detection with full cycle-path tracking.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Color { White, Gray, Black }
 
@@ -619,8 +619,10 @@ pub fn eval_context_topo(
         colors.insert(key.clone(), Color::White);
     }
 
-    // 3. DFS post-order gives topological order (reverse of finishing times).
+    // 3. DFS post-order gives topological order. Track the DFS path so we can
+    //    identify all nodes in a cycle when Gray→Gray is detected.
     let mut topo_order = Vec::new();
+    let mut dfs_path: Vec<String> = Vec::new();
     let mut cycle_entries: Vec<String> = Vec::new();
 
     fn dfs_visit(
@@ -628,14 +630,25 @@ pub fn eval_context_topo(
         deps: &HashMap<String, Vec<String>>,
         colors: &mut HashMap<String, Color>,
         topo_order: &mut Vec<String>,
+        dfs_path: &mut Vec<String>,
         cycle_entries: &mut Vec<String>,
     ) {
         match colors.get(node).copied() {
             Some(Color::Black) => return, // Already fully processed.
             Some(Color::Gray) => {
-                // Cycle detected — mark this node as cyclic.
-                if !cycle_entries.contains(&node.to_string()) {
-                    cycle_entries.push(node.to_string());
+                // Cycle detected — collect all nodes in the cycle path.
+                let start = dfs_path.iter().position(|n| n == node);
+                if let Some(pos) = start {
+                    for cyclic_node in &dfs_path[pos..] {
+                        if !cycle_entries.contains(cyclic_node) {
+                            cycle_entries.push(cyclic_node.clone());
+                        }
+                    }
+                } else {
+                    // Fallback: just mark the current node.
+                    if !cycle_entries.contains(&node.to_string()) {
+                        cycle_entries.push(node.to_string());
+                    }
                 }
                 return;
             }
@@ -643,13 +656,15 @@ pub fn eval_context_topo(
         }
 
         colors.insert(node.to_string(), Color::Gray);
+        dfs_path.push(node.to_string());
 
         if let Some(neighbors) = deps.get(node) {
             for dep in neighbors {
-                dfs_visit(dep, deps, colors, topo_order, cycle_entries);
+                dfs_visit(dep, deps, colors, topo_order, dfs_path, cycle_entries);
             }
         }
 
+        dfs_path.pop();
         colors.insert(node.to_string(), Color::Black);
         topo_order.push(node.to_string());
     }
@@ -658,7 +673,7 @@ pub fn eval_context_topo(
     for (key, _) in entries {
         if colors.get(key) == Some(&Color::White) {
             dfs_visit(
-                key, &deps, &mut colors, &mut topo_order, &mut cycle_entries,
+                key, &deps, &mut colors, &mut topo_order, &mut dfs_path, &mut cycle_entries,
             );
         }
     }
@@ -2744,6 +2759,163 @@ mod boxed {
         match &result {
             Value::Array(arr) => assert_eq!(arr.len(), 3),
             other => panic!("expected Array, got {:?}", other),
+        }
+    }
+
+    // ----- Context cycle detection (Task 2) -----
+
+    /// Helper: build a context AST with the given entries and evaluate it.
+    #[cfg(test)]
+    fn eval_ctx(entries: Vec<(&str, FeelExpression)>) -> Value {
+        let ast_entries: Vec<(String, FeelExpression)> = entries
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        evaluate(&FeelExpression::Context(ast_entries), &Scope::empty())
+    }
+
+    /// 2-cycle: `{a: b+1, b: a+1}` — both entries are cyclic → Null.
+    #[test]
+    fn context_topo_2_cycle() {
+        let result = eval_ctx(vec![
+            ("a", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("b".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            ("b", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+        ]);
+        match &result {
+            Value::Object(map) => {
+                assert_eq!(map.get("a"), Some(&Value::Null), "cyclic 'a' should be Null");
+                assert_eq!(map.get("b"), Some(&Value::Null), "cyclic 'b' should be Null");
+            }
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    /// 3-cycle: `{a: b+1, b: c+1, c: a+1}` — all three are cyclic → Null.
+    #[test]
+    fn context_topo_3_cycle() {
+        let result = eval_ctx(vec![
+            ("a", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("b".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            ("b", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("c".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            ("c", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+        ]);
+        match &result {
+            Value::Object(map) => {
+                assert_eq!(map.get("a"), Some(&Value::Null), "cyclic 'a' should be Null");
+                assert_eq!(map.get("b"), Some(&Value::Null), "cyclic 'b' should be Null");
+                assert_eq!(map.get("c"), Some(&Value::Null), "cyclic 'c' should be Null");
+            }
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    /// Self-reference: `{a: a+1}` — a depends on itself → cycle → Null.
+    #[test]
+    fn context_topo_self_reference() {
+        let result = eval_ctx(vec![
+            ("a", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+        ]);
+        match &result {
+            Value::Object(map) => {
+                assert_eq!(map.get("a"), Some(&Value::Null), "self-referential 'a' should be Null");
+            }
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    /// Out-of-order DAG: `{b: a+1, a: 1}` — topo order should put `a` first → Object({a:1, b:2}).
+    #[test]
+    fn context_topo_out_of_order_dag() {
+        let result = eval_ctx(vec![
+            ("b", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            ("a", FeelExpression::Literal(Value::Integer(1))),
+        ]);
+        assert_eq!(result, Value::Object(std::collections::HashMap::from([
+            ("a".to_string(), Value::Integer(1)),
+            ("b".to_string(), Value::Number(rust_decimal::dec!(2))),
+        ])));
+    }
+
+    /// DAG with chain: `{a: 1, b: a+1, c: b+1}` → Object({a:1, b:2, c:3}).
+    #[test]
+    fn context_topo_chain() {
+        let result = eval_ctx(vec![
+            ("c", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("b".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            ("b", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            ("a", FeelExpression::Literal(Value::Integer(1))),
+        ]);
+        assert_eq!(result, Value::Object(std::collections::HashMap::from([
+            ("a".to_string(), Value::Integer(1)),
+            ("b".to_string(), Value::Number(rust_decimal::dec!(2))),
+            ("c".to_string(), Value::Number(rust_decimal::dec!(3))),
+        ])));
+    }
+
+    /// Mixed: some entries cyclic, others not — non-cyclic entries still evaluate.
+    #[test]
+    fn context_topo_mixed_cycle_and_dag() {
+        let result = eval_ctx(vec![
+            ("a", FeelExpression::Literal(Value::Integer(10))),
+            ("b", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("c".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            ("c", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("b".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+        ]);
+        match &result {
+            Value::Object(map) => {
+                assert_eq!(map.get("a"), Some(&Value::Integer(10)), "non-cyclic 'a' should evaluate to 10");
+                assert_eq!(map.get("b"), Some(&Value::Null), "cyclic 'b' should be Null");
+                assert_eq!(map.get("c"), Some(&Value::Null), "cyclic 'c' should be Null");
+            }
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    // ----- Proptest: DAG-order invariance (seeded) -----
+
+    /// Property: a random DAG of context entries evaluates to the same result
+    /// regardless of source order. This verifies that topological evaluation is
+    /// canonical (not dependent on declaration order).
+    #[cfg(test)]
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config {
+            cases: 32,
+            ..proptest::test_runner::Config::default()
+        })]
+
+        /// Random DAG of context entries: shuffling entry order should not change result.
+        #[test]
+        fn context_topo_dag_order_invariance(
+            n in 1usize..=5,
+            base_val in 0i32..100,
+        ) {
+            // Build two contexts with the same entries but different order.
+            // Both should evaluate identically since topo sort canonicalizes order.
+
+            // Generate n entries: entry i references the previous one (chain).
+            let mut entries_forward = Vec::new();
+            for i in 0..n {
+                if i == 0 {
+                    entries_forward.push(("e0", FeelExpression::Literal(Value::Integer(base_val as i64))));
+                } else {
+                    // e_i = e_{i-1} + 1
+                    let prev_name = format!("e{}", i - 1);
+                    entries_forward.push((
+                        format!("e{i}").leak(),
+                        FeelExpression::BinOp {
+                            op: BinOpKind::Add,
+                            lhs: Box::new(FeelExpression::Name(prev_name)),
+                            rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                        },
+                    ));
+                }
+            }
+
+            // Reverse order — same entries, different source order.
+            let mut entries_reverse = entries_forward.clone();
+            entries_reverse.reverse();
+
+            let result_fwd = eval_ctx(entries_forward);
+            let result_rev = eval_ctx(entries_reverse);
+
+            prop_assert_eq!(result_fwd, result_rev, "DAG evaluation should be order-invariant");
         }
     }
 }
