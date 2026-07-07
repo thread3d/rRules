@@ -464,7 +464,22 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
         }
         FeelExpression::FunctionInvocation { callee, args, named } => {
             // DMN-15 boxed function invocation. Evaluate callee and args, then
-            // dispatch: lambda application (31-06) or built-in registry (31-07).
+            // dispatch: built-in registry (31-07), lambda application (31-06).
+
+            // 1. Built-in lookup: if the callee AST is a `Name(s)`, check the
+            //    registry BEFORE evaluating. This handles FEEL-style invocations
+            //    like `sqrt(4)` where `sqrt` is a built-in name, not a scope binding.
+            //    The registry uses FEEL canonical names (with spaces).
+            if let FeelExpression::Name(name) = callee.as_ref() {
+                let reg = crate::dmn::feel::builtins::builtin_registry();
+                if let Some(f) = reg.get(name.as_str()) {
+                    // Evaluate args and call the built-in.
+                    let evaluated_args: Vec<Value> = args.iter().map(|a| evaluate(a, scope)).collect();
+                    return f(&evaluated_args);
+                }
+            }
+
+            // 2. Evaluate callee normally (for path expressions like `obj.fn`, etc.).
             let callee_val = evaluate(callee, scope);
 
             match callee_val {
