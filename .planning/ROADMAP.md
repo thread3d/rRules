@@ -159,7 +159,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
   4. The ~70+ FEEL built-in functions are available across conversion/string/list/numeric/date-time/context/boolean/range/equality families, and user-defined lambdas (grammar rule 55) evaluate.
   5. Cell/expression FEEL is pre-parsed to `Arc<FeelExpression>` at load time; the evaluator takes `&FeelExpression` and never re-parses (a 30-cell table × 10k evals ≈ 30 parses, not 300k).
 
-**Plans**: 2/9 plans executed
+**Plans**: 5/9 plans executed
 
 Plans:
 **Wave 1**
@@ -172,15 +172,15 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 31-03-PLAN.md — DMN-13: Operators (arithmetic, comparison, boolean, string concat, date-time arithmetic, duration) + coercion.rs; div-by-zero/overflow → Null (wave 3)
+- [x] 31-03-PLAN.md — DMN-13: Operators (arithmetic, comparison, boolean, string concat, date-time arithmetic, duration) + coercion.rs; div-by-zero/overflow → Null (wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 31-04-PLAN.md — DMN-14: Control + quantified (if, for, some/every, path, filter, instance of against Phase 30 FeelType lattice) (wave 4)
+- [x] 31-04-PLAN.md — DMN-14: Control + quantified (if, for, some/every, path, filter, instance of against Phase 30 FeelType lattice) (wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 31-05-PLAN.md — DMN-15: All 10 boxed expressions (recursive); boxed-context topological (dependency-order) evaluation with DFS color-marking cycle detection via flat Scope + deps map (wave 5)
+- [x] 31-05-PLAN.md — DMN-15: All 10 boxed expressions (recursive); boxed-context topological (dependency-order) evaluation with DFS color-marking cycle detection via flat Scope + deps map (wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -294,7 +294,7 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 28. Frontend test-runner | v5.0 | 5/5 | Complete | 2026-07-06 |
 | 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 3/3 | Complete   | 2026-07-06 |
 | 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 4/4 | Complete    | 2026-07-07 |
-| 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 2/9 | In Progress|  |
+| 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 5/9 | In Progress|  |
 | 32. Decision-Table Engine + Hit Policies | v6.0 | 0/TBD | Not started | - |
 | 33. Decision Evaluator + DRD Resolution + REST API + Metrics | v6.0 | 0/TBD | Not started | - |
 | 34. Frontend Wiring + Hit-Policy Model Refactor | v6.0 | 0/TBD | Not started | - |
