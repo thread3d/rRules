@@ -22,7 +22,8 @@ pub enum Value {
     Float(f64),
     /// String value
     String(String),
-    /// Date/time value
+    /// Date/time value (LEGACY Rete variant — `NaiveDateTime`, no offset).
+    /// NOT repurposed for FEEL date-time; FEEL uses [`Value::DateTimeTz`].
     DateTime(chrono::NaiveDateTime),
     /// Nested object with dynamic fields
     Object(HashMap<String, Value>),
@@ -30,6 +31,30 @@ pub enum Value {
     Array(Vec<Value>),
     /// Null/undefined value
     Null,
+    // --- Phase 30 FEEL additions (additive; legacy variants unchanged) ---
+    /// FEEL `number` — Decimal128 numeric domain (`rust_decimal::Decimal`).
+    /// Distinct from the Rete-path [`Value::Float`] (`f64`): FEEL `0.1 + 0.2`
+    /// must equal `0.3`, which `f64` cannot guarantee.
+    Number(rust_decimal::Decimal),
+    /// FEEL `date`.
+    Date(chrono::NaiveDate),
+    /// FEEL `time` — offset-less, fixed-offset, or local.
+    Time(crate::dmn::feel::temporal::TimeValue),
+    /// FEEL `date and time` — fixed-offset, IANA-zone, or local. Distinct from
+    /// the legacy [`Value::DateTime`] (`NaiveDateTime`) which carries no
+    /// offset/zone.
+    DateTimeTz(crate::dmn::feel::temporal::DateTimeValue),
+    /// FEEL `days and time duration` — a fixed number of seconds.
+    DaysTimeDuration(chrono::TimeDelta),
+    /// FEEL `years and months duration` — total months.
+    YearsMonthsDuration(crate::dmn::feel::temporal::YearsMonthsDuration),
+    /// FEEL `range`. Boxed because [`FeelRange`] holds `Option<Value>` and
+    /// `Value` holds `Box<FeelRange>` — the `Box` breaks the infinite size
+    /// cycle.
+    Range(Box<crate::dmn::feel::types::FeelRange>),
+    /// FEEL `function` — placeholder carrier (arity + param/return types).
+    /// The closure body is Phase 31.
+    Function(crate::dmn::feel::types::FeelFunction),
 }
 
 impl Value {
@@ -154,6 +179,18 @@ impl DynamicCast for Value {
             Value::Array(_) => info.type_class == TypeClass::Collection,
             Value::Null => info.type_class == TypeClass::Null,
             Value::DateTime(_) => info.type_class == TypeClass::Scalar && info.name == "datetime",
+            // FEEL variants are not Rete-path values; they never route through
+            // DynamicCast (30-RESEARCH.md Pitfall 1). Return false so the
+            // exhaustive-match safety net is preserved (a future new variant
+            // still triggers a compiler error here).
+            Value::Number(_)
+            | Value::Date(_)
+            | Value::Time(_)
+            | Value::DateTimeTz(_)
+            | Value::DaysTimeDuration(_)
+            | Value::YearsMonthsDuration(_)
+            | Value::Range(_)
+            | Value::Function(_) => false,
         }
     }
 }

@@ -1495,5 +1495,18 @@ fn engine_value_to_json(value: engine::Value) -> serde_json::Value {
                 .collect();
             serde_json::Value::Object(obj)
         }
+        // FEEL variants (Phase 30) never legitimately reach this Rete-path
+        // reverse mapping (30-RESEARCH.md Pitfall 1: the FEEL path does not
+        // route through execution.rs). Map them to a debug-string so any stray
+        // FEEL value is visibly traceable rather than silently nulled. Explicit
+        // arms (no wildcard) preserve the exhaustive-match safety net.
+        engine::Value::Number(d) => serde_json::Value::String(format!("{:?}", d)),
+        engine::Value::Date(d) => serde_json::Value::String(format!("{:?}", d)),
+        engine::Value::Time(t) => serde_json::Value::String(format!("{:?}", t)),
+        engine::Value::DateTimeTz(dt) => serde_json::Value::String(format!("{:?}", dt)),
+        engine::Value::DaysTimeDuration(td) => serde_json::Value::String(format!("{:?}", td)),
+        engine::Value::YearsMonthsDuration(ymd) => serde_json::Value::String(format!("{:?}", ymd)),
+        engine::Value::Range(r) => serde_json::Value::String(format!("{:?}", r)),
+        engine::Value::Function(f) => serde_json::Value::String(format!("{:?}", f)),
     }
 }

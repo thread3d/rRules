@@ -99,6 +99,35 @@ impl ValueSnapshot {
                         .collect(),
                 )
             }
+            // FEEL variants (Phase 30) — no natural ValueSnapshot
+            // representation. Map to a readable string marker via Debug so the
+            // snapshot carries a human-readable value rather than panicking.
+            // The compiler forces these arms (no wildcard — exhaustive match
+            // is the safety net, 30-RESEARCH.md Pitfall 1).
+            crate::data_types::Value::Number(d) => {
+                ValueSnapshot::String(format!("{:?}", d))
+            }
+            crate::data_types::Value::Date(d) => {
+                ValueSnapshot::String(format!("{:?}", d))
+            }
+            crate::data_types::Value::Time(t) => {
+                ValueSnapshot::String(format!("{:?}", t))
+            }
+            crate::data_types::Value::DateTimeTz(dt) => {
+                ValueSnapshot::String(format!("{:?}", dt))
+            }
+            crate::data_types::Value::DaysTimeDuration(td) => {
+                ValueSnapshot::String(format!("{:?}", td))
+            }
+            crate::data_types::Value::YearsMonthsDuration(ymd) => {
+                ValueSnapshot::String(format!("{:?}", ymd))
+            }
+            crate::data_types::Value::Range(r) => {
+                ValueSnapshot::String(format!("{:?}", r))
+            }
+            crate::data_types::Value::Function(f) => {
+                ValueSnapshot::String(format!("{:?}", f))
+            }
         }
     }
 }
