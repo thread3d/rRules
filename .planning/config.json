@@ -11,7 +11,9 @@
     "nyquist_validation": true,
     "auto_advance": false,
     "_auto_chain_active": false,
-    "use_worktrees": true
+    "use_worktrees": true,
+    "build_command": "cargo build -p engine --features engine-rete,engine-treat,engine-leaps,engine-phreak",
+    "test_command": "cargo test -p engine --features engine-rete,engine-treat,engine-leaps,engine-phreak"
   },
   "ship": {
     "pr_body_sections": [
