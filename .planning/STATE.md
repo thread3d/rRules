@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: DMN Level 3 Compliance
 status: executing
-last_updated: "2026-07-07T04:09:51.522Z"
-last_activity: 2026-07-07 -- Phase 30 planning complete
+last_updated: "2026-07-07T04:27:20.544Z"
+last_activity: 2026-07-07
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 7
-  completed_plans: 3
+  completed_plans: 4
   percent: 14
 ---
 
@@ -20,14 +20,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-06)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** v6.0 DMN Level 3 Compliance — Phase 29 (DMN model + XML parser + canonical IR) complete; next: `/gsd-plan-phase 30` (research-needed)
+**Current focus:** Phase 30 — feel-value-types-type-lattice-temporal-domain
 
 ## Current Position
 
-Phase: 29 — DMN 1.5 Model + XML Parser + Canonical IR (complete — all 3 plans done)
-Plan: 29-03 complete; Phase 29 fully delivered (29-01 IR + 29-02 parser + 29-03 exporter/round-trip)
+Phase: 30 (feel-value-types-type-lattice-temporal-domain) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-07-07 -- Phase 30 planning complete
+Last activity: 2026-07-07
 
 ### Milestone v6.0 Phases
 
@@ -258,6 +258,12 @@ From v2.0 milestone:
 - [Phase ?]: DMN parser uses quick-xml NsReader streaming pull parser
 - [Phase ?]: Event::GeneralRef resolved explicitly — quick-xml 0.40 emits entity refs as separate events, not inlined into Event::Text
 - [Phase ?]: hitPolicy absent defaults to HitPolicy::Unique (DMN-04); FEEL stored as String, parsed in Phase 31
+- [Phase ?]: D-30-01a: chrono-tz added with serde feature (DateTimeValue Iana arm requires Tz: Serialize+Deserialize)
+- [Phase ?]: D-30-01b: Manual serde for DateTimeValue via (NaiveDateTime, chrono_tz::Tz) repr
+- [Phase ?]: D-30-01c: FeelType derives Serialize+Deserialize (FeelFunction serde bound propagates)
+- [Phase ?]: D-30-01d: Exhaustive-match FEEL-variant arms preserve the safety net
+- [Phase ?]: D-30-01e: TCK precision-audit tokenizer is boundary-aware to exclude hex-hash ID fragments
+- [Phase ?]: D-30-01f: A1 CONFIRMED — no TCK value-domain literal exceeds 29 sig digits; rust_decimal locked
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -289,7 +295,7 @@ From v3.0 milestone:
 
 **Stopped at:** Completed 29-02-PLAN.md
 
-Last session: 2026-07-06T21:26:36.615Z
+Last session: 2026-07-07T04:27:14.082Z
 
 **Completed Phases:**
 
@@ -325,3 +331,4 @@ Last session: 2026-07-06T21:26:36.615Z
 | Phase 29 P01 | 4min | 3 tasks | 7 files |
 | Phase 29 P02 | 45min | 2 tasks | 8 files |
 | Phase 29 P03 | 15min | 2 tasks | 2 files |
+| Phase 30 P01 | 12min | 2 tasks | 16 files |
