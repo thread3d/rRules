@@ -84,7 +84,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 - Build FEEL from scratch (no `dsntk` dependency); stack: `quick-xml 0.40`, `rust_decimal 1.42`, `chrono-tz 0.10`, hand-written recursive-descent FEEL parser.
 
 - [x] **Phase 29: DMN 1.5 Model + XML Parser + Canonical IR** — DMN 1.1–1.5 `.dmn` import into a canonical IR (round-trip foundation) (completed 2026-07-06)
-- [ ] **Phase 30: FEEL Value Types + Type Lattice + Temporal Domain** — Decimal128, date/time/duration types, type lattice (research-needed)
+- [x] **Phase 30: FEEL Value Types + Type Lattice + Temporal Domain** — Decimal128, date/time/duration types, type lattice (research-needed) (completed 2026-07-07)
 - [ ] **Phase 31: FEEL Parser + Evaluator + Built-in Function Library** — Full FEEL grammar 1–65, ternary logic, 10 boxed expressions, ~70 builtins, AST cache (research-needed; largest phase)
 - [ ] **Phase 32: Decision-Table Engine + Hit Policies** — All 7 hit policies + COLLECT aggregators + allowed-values validation
 - [ ] **Phase 33: Decision Evaluator + DRD Resolution + REST API + Metrics** — `POST /v1/decisions/{id}/evaluate` (multi-output decision services + DRD chaining), metrics, trace, hot-reload
@@ -132,7 +132,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
   3. FEEL type-lattice conformance (`<:`), equivalence (`≡`), and implicit conversions (number↔string, singleton-list↔value) behave per spec, with null propagating through the lattice.
   4. `engine::data_types::Value` is extended additively (not forked) and the existing Rete rule-execution path is unchanged (zero regression).
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans complete
 
 **Wave 1**
 
@@ -142,7 +142,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 
 - [x] 30-02-PLAN.md — FEEL Decimal128 numeric domain: feel_numeric_eq + 0.1+0.2=0.3 proof + vendored TCK numeric vectors (DMN-08)
 - [x] 30-03-PLAN.md — FEEL temporal domain: parse_at_literal/format_value/add_months_zoned (IANA tz, DST-correct) + vendored TCK temporal vectors (DMN-09)
-- [ ] 30-04-PLAN.md — FEEL type lattice (conforms/equivalent/3 implicit conversions, 1+"2"→null prohibition) + additive-extension regression audit (DMN-10, Success Criterion 4)
+- [x] 30-04-PLAN.md — FEEL type lattice (conforms/equivalent/3 implicit conversions, 1+"2"→null prohibition) + additive-extension regression audit (DMN-10, Success Criterion 4)
 
 ### Phase 31: FEEL Parser + Evaluator + Built-in Function Library
 
@@ -256,7 +256,7 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 27. Stateful sessions | v5.0 | 1/1 | Complete | 2026-07-06 |
 | 28. Frontend test-runner | v5.0 | 5/5 | Complete | 2026-07-06 |
 | 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 3/3 | Complete   | 2026-07-06 |
-| 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 3/4 | In Progress|  |
+| 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 4/4 | Complete   | 2026-07-07 |
 | 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 0/TBD | Not started | - |
 | 32. Decision-Table Engine + Hit Policies | v6.0 | 0/TBD | Not started | - |
 | 33. Decision Evaluator + DRD Resolution + REST API + Metrics | v6.0 | 0/TBD | Not started | - |
