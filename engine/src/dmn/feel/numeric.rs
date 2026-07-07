@@ -15,14 +15,39 @@
 //! this module only proves the value domain and equality.
 
 use crate::data_types::Value;
+use rust_decimal::Decimal;
 
 /// FEEL numeric equality — `Option<bool>` (null-propagating).
 ///
-/// **RED STUB** — implementation lands in the GREEN commit of Plan 30-02
-/// Task 1. The body is intentionally wrong (always `None`) so the tests
-/// below fail and the RED gate is genuine.
-pub fn feel_numeric_eq(_a: &Value, _b: &Value) -> Option<bool> {
-    None
+/// Semantics (DMN 1.5 §10.3.2.2 — the numeric domain treats integers and
+/// numbers as one domain):
+///
+/// - If either operand is [`Value::Null`], returns `None` (null propagates;
+///   the three-valued logic operators that consume this land in Phase 31).
+/// - If both operands are [`Value::Number`], compares the inner
+///   [`rust_decimal::Decimal`] values via `Decimal::PartialEq` (decimal
+///   comparison — NOT `f64`).
+/// - If one operand is [`Value::Number`] and the other is [`Value::Integer`],
+///   promotes the integer to `Decimal` (`Decimal::from(i)`) and compares.
+/// - For any other type pairing (String, Bool, Float, Date, …), returns
+///   `None` — there is NO number↔string implicit conversion here. That is a
+///   Phase 31 explicit `string()` / `number()` built-in, NOT a lattice
+///   conversion (30-RESEARCH.md Pitfall 6).
+///
+/// The FEEL numeric path NEVER routes through [`Value::Float`] (`f64`):
+/// `0.1_f64 + 0.2_f64 = 0.30000000000000004` (research Anti-Pattern).
+pub fn feel_numeric_eq(a: &Value, b: &Value) -> Option<bool> {
+    match (a, b) {
+        (Value::Null, _) | (_, Value::Null) => None,
+        (Value::Number(x), Value::Number(y)) => Some(x == y),
+        (Value::Number(x), Value::Integer(i)) | (Value::Integer(i), Value::Number(x)) => {
+            Some(*x == Decimal::from(*i))
+        }
+        // No cross-type numeric equality for String/Bool/Float/Date/Time/… —
+        // number↔string is a Phase 31 explicit built-in, not an implicit
+        // lattice conversion (Pitfall 6).
+        _ => None,
+    }
 }
 
 #[cfg(test)]
