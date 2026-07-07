@@ -751,3 +751,430 @@ mod lexer_tests {
         assert_eq!(toks[1].span.col, 1);
     }
 }
+
+// ======================================================================
+// Recursive-descent + Pratt parser (grammar rules 1–65) — Task 3.
+// ======================================================================
+//
+// The parser consumes the lexer's `Vec<TokenSpan>` and produces a
+// `FeelExpression`. Two public entry points:
+//   - `parse_expression(src)` (grammar rule 1) — output cells / general FEEL.
+//   - `parse_simple_unary_tests(src)` (grammar rule 15) — input cells.
+//
+// **Error recovery (CONTEXT.md user override):** on a parse error, emit a
+// `FeelExpression::Err(span, msg)` node at the error site, advance to the
+// next synchronization token (`,`, `)`, `]`, `}`, `then`, `else`,
+// `return`, `satisfies`, `in`, end-of-input), and continue. Never `?`-
+// propagate or panic on untrusted FEEL text (T-31-01-03 mitigation).
+//
+// **DoS guard (T-31-01-02):** `max_depth` cap (default 256) on the
+// recursive-descent stack; past the cap emit
+// `FeelExpression::Err(span, "max recursion depth exceeded")`.
+
+use super::ast::{FeelExpression, BinOpKind, QuantKind};
+
+/// The default maximum recursion depth for the parser (T-31-01-02).
+const DEFAULT_MAX_DEPTH: u32 = 256;
+
+/// The recursive-descent + Pratt parser over `Vec<TokenSpan>`.
+struct Parser {
+    tokens: Vec<TokenSpan>,
+    pos: usize,
+    depth: u32,
+    max_depth: u32,
+}
+
+impl Parser {
+    fn new(tokens: Vec<TokenSpan>) -> Self {
+        Self {
+            tokens,
+            pos: 0,
+            depth: 0,
+            max_depth: DEFAULT_MAX_DEPTH,
+        }
+    }
+
+    /// The current token (or `Token::Eof` past end).
+    fn peek(&self) -> &Token {
+        self.tokens.get(self.pos).map(|ts| &ts.token).unwrap_or(&Token::Eof)
+    }
+
+    /// The current token's span (or a zero span at end).
+    fn peek_span(&self) -> super::ast::Span {
+        self.tokens
+            .get(self.pos)
+            .map(|ts| ts.span)
+            .unwrap_or_else(|| super::ast::Span::zero(0, 1, 1))
+    }
+
+    /// Advance and return the consumed token.
+    fn advance(&mut self) -> Option<TokenSpan> {
+        let ts = self.tokens.get(self.pos).cloned();
+        if ts.is_some() {
+            self.pos += 1;
+        }
+        ts
+    }
+
+    /// True if the current token is a `Name` with the given keyword text.
+    fn is_keyword(&self, kw: &str) -> bool {
+        matches!(self.peek(), Token::Name(s) if s == kw)
+    }
+
+    /// Consume a keyword `Name`; returns true if consumed.
+    fn eat_keyword(&mut self, kw: &str) -> bool {
+        if self.is_keyword(kw) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Emit an `Err` node at the current position.
+    fn err_here(&self, msg: &str) -> FeelExpression {
+        FeelExpression::Err(self.peek_span(), msg.to_string())
+    }
+
+    /// Advance to the next synchronization token (error recovery).
+    fn sync_to_boundary(&mut self) {
+        while !matches!(
+            self.peek(),
+            Token::Eof | Token::Comma | Token::RParen | Token::RBracket | Token::RBrace
+        ) {
+            // Keyword boundaries (then/else/return/satisfies/in) — only
+            // sync when the depth is appropriate; for simplicity, stop at
+            // these names too.
+            if let Token::Name(s) = self.peek() {
+                if matches!(s.as_str(), "then" | "else" | "return" | "satisfies") {
+                    return;
+                }
+            }
+            self.advance();
+        }
+    }
+}
+
+// ---- Public entry points ----
+
+/// Parse a FEEL `Expression` (grammar rule 1) from `src`.
+///
+/// Dispatches on the first token: `[`/`{`/`function` → boxed expression
+/// (rule 53/54/55/57); `for`/`if`/`some`/`every` → textual control form
+/// (rules 44/45/46); else → textual expression via the Pratt loop (rule 2).
+///
+/// **Error recovery:** on a parse error, returns a `FeelExpression::Err`
+/// node — never panics on untrusted input (T-31-01-03 mitigation).
+pub fn parse_expression(src: &str) -> FeelExpression {
+    // RED stub — GREEN implementation in the next commit.
+    let _ = (src,);
+    FeelExpression::Err(super::ast::Span::zero(0, 1, 1), "parse_expression not implemented (RED)".to_string())
+}
+
+/// Parse a FEEL `SimpleUnaryTests` (grammar rule 15) from `src`.
+///
+/// Handles `-` (empty/any → sentinel "always true" node), `not(tests)`, and
+/// a comma-separated Or-chain of positive unary tests (rule 14 → rule 13
+/// → expression).
+pub fn parse_simple_unary_tests(src: &str) -> FeelExpression {
+    // RED stub — GREEN implementation in the next commit.
+    let _ = (src,);
+    FeelExpression::Err(super::ast::Span::zero(0, 1, 1), "parse_simple_unary_tests not implemented (RED)".to_string())
+}
+
+#[cfg(test)]
+mod parser_tests {
+    use super::*;
+    use crate::data_types::Value;
+    use crate::dmn::feel::ast::{FeelExpression, BinOpKind, QuantKind};
+
+    /// Helper: assert a `FeelExpression` matches a literal number.
+    fn assert_num(expr: &FeelExpression, n: i64) {
+        match expr {
+            FeelExpression::Literal(Value::Number(d)) => assert_eq!(*d, Decimal::from(n)),
+            other => panic!("expected Literal(Number({})), got {:?}", n, other),
+        }
+    }
+
+    /// Test: parse_expression("1 + 2 * 3") yields BinOp(Add, 1, BinOp(Mul, 2, 3)) (precedence).
+    #[test]
+    fn parse_precedence_add_mul() {
+        let expr = parse_expression("1 + 2 * 3");
+        match expr {
+            FeelExpression::BinOp { op: BinOpKind::Add, lhs, rhs } => {
+                assert_num(&lhs, 1);
+                match rhs.as_ref() {
+                    FeelExpression::BinOp { op: BinOpKind::Mul, .. } => {}
+                    other => panic!("expected BinOp(Mul) on rhs, got {:?}", other),
+                }
+            }
+            other => panic!("expected BinOp(Add), got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("2 ** 3 ** 2") yields BinOp(Pow, 2, BinOp(Pow, 3, 2)) (right-assoc, Pitfall 2).
+    #[test]
+    fn parse_pow_right_associative() {
+        let expr = parse_expression("2 ** 3 ** 2");
+        match expr {
+            FeelExpression::BinOp { op: BinOpKind::Pow, lhs, rhs } => {
+                assert_num(&lhs, 2);
+                match rhs.as_ref() {
+                    FeelExpression::BinOp { op: BinOpKind::Pow, .. } => {}
+                    other => panic!("expected BinOp(Pow) on rhs (right-assoc), got {:?}", other),
+                }
+            }
+            other => panic!("expected BinOp(Pow), got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("a or b and c") yields BinOp(Or, a, BinOp(And, b, c)) (or < and).
+    #[test]
+    fn parse_or_and_precedence() {
+        let expr = parse_expression("a or b and c");
+        match expr {
+            FeelExpression::BinOp { op: BinOpKind::Or, lhs, rhs } => {
+                match lhs.as_ref() {
+                    FeelExpression::Name(n) => assert_eq!(n, "a"),
+                    other => panic!("expected Name(a) on lhs, got {:?}", other),
+                }
+                match rhs.as_ref() {
+                    FeelExpression::BinOp { op: BinOpKind::And, .. } => {}
+                    other => panic!("expected BinOp(And) on rhs, got {:?}", other),
+                }
+            }
+            other => panic!("expected BinOp(Or), got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("a.b[i]") yields Filter(Path(a, b), i) (path < filter, A2 verification).
+    #[test]
+    fn parse_path_filter_precedence_a2() {
+        let expr = parse_expression("a.b[i]");
+        match expr {
+            FeelExpression::Filter { target, predicate } => {
+                match target.as_ref() {
+                    FeelExpression::Path { target: inner, name } => {
+                        match inner.as_ref() {
+                            FeelExpression::Name(n) => assert_eq!(n, "a"),
+                            other => panic!("expected Name(a) inside Path, got {:?}", other),
+                        }
+                        assert_eq!(name, "b");
+                    }
+                    other => panic!("expected Path(a, b) as filter target, got {:?}", other),
+                }
+                match predicate.as_ref() {
+                    FeelExpression::Name(n) => assert_eq!(n, "i"),
+                    other => panic!("expected Name(i) as predicate, got {:?}", other),
+                }
+            }
+            other => panic!("expected Filter, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("1 + 2 instance of number") yields InstanceOf(BinOp(Add, 1, 2), Number) (A3 verification).
+    #[test]
+    fn parse_instance_of_precedence_a3() {
+        let expr = parse_expression("1 + 2 instance of number");
+        match expr {
+            FeelExpression::InstanceOf { expr: inner, ty } => {
+                match inner.as_ref() {
+                    FeelExpression::BinOp { op: BinOpKind::Add, .. } => {}
+                    other => panic!("expected BinOp(Add) inside InstanceOf, got {:?}", other),
+                }
+                assert_eq!(ty, crate::dmn::feel::types::FeelType::Number);
+            }
+            other => panic!("expected InstanceOf, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("{ for: 1, if: 2 }") yields Context([("for", 1), ("if", 2)]) (keyword-as-name, Pitfall 3).
+    #[test]
+    fn parse_context_keyword_keys_pitfall3() {
+        let expr = parse_expression("{ for: 1, if: 2 }");
+        match expr {
+            FeelExpression::Context(entries) => {
+                assert_eq!(entries.len(), 2);
+                assert_eq!(entries[0].0, "for");
+                assert_eq!(entries[1].0, "if");
+                assert_num(&entries[0].1, 1);
+                assert_num(&entries[1].1, 2);
+            }
+            other => panic!("expected Context, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("function(for, in, between) for + in + between") parses (keyword param names + keyword body names).
+    #[test]
+    fn parse_function_keyword_params_and_body() {
+        let expr = parse_expression("function(for, in, between) for + in + between");
+        match expr {
+            FeelExpression::FunctionDefinition { params, external, .. } => {
+                assert_eq!(params.len(), 3);
+                assert_eq!(params[0].0, "for");
+                assert_eq!(params[1].0, "in");
+                assert_eq!(params[2].0, "between");
+                assert!(!external, "non-external function definition");
+            }
+            other => panic!("expected FunctionDefinition, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_simple_unary_tests("-") yields a sentinel "always true" node (empty unary tests).
+    #[test]
+    fn parse_unary_tests_dash_sentinel() {
+        let expr = parse_simple_unary_tests("-");
+        // The sentinel is a Literal(Bool(true)) — "always true" for any input.
+        match expr {
+            FeelExpression::Literal(Value::Bool(true)) => {}
+            other => panic!("expected Literal(Bool(true)) sentinel for '-', got {:?}", other),
+        }
+    }
+
+    /// Test: parse_simple_unary_tests("not(< 3)") yields a negation node.
+    #[test]
+    fn parse_unary_tests_not_form() {
+        let expr = parse_simple_unary_tests("not(< 3)");
+        // `not(...)` yields a Neg node over the inner tests.
+        match expr {
+            FeelExpression::Neg(inner) => {
+                // Inner is the positive unary test `< 3` — represented as a
+                // BinOp(Lt, input_marker, 3) or similar. Just assert it's
+                // not an Err.
+                assert!(!matches!(inner.as_ref(), FeelExpression::Err(_, _)));
+            }
+            other => panic!("expected Neg, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_simple_unary_tests("1, 2, 3") yields an Or-chain of positive unary tests (comma list).
+    #[test]
+    fn parse_unary_tests_comma_list() {
+        let expr = parse_simple_unary_tests("1, 2, 3");
+        // Comma-separated positive unary tests desugar to an Or-chain.
+        // Either a nested BinOp(Or) chain or a single literal — assert no Err.
+        assert!(!matches!(expr, FeelExpression::Err(_, _)), "expected non-Err, got {:?}", expr);
+    }
+
+    /// Test: parse_expression("1 + ") yields a FeelExpression::Err(span, msg) node (error recovery, not panic).
+    #[test]
+    fn parse_error_recovery_emits_err_node() {
+        let expr = parse_expression("1 + ");
+        match expr {
+            FeelExpression::Err(_, msg) => {
+                assert!(!msg.is_empty(), "error message should be non-empty");
+            }
+            other => panic!("expected Err node, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression with deeply nested ((((...)))) beyond MAX_DEPTH yields an Err node (DoS guard).
+    #[test]
+    fn parse_max_depth_dos_guard() {
+        let deep = "(".repeat(300) + &")".repeat(300);
+        let expr = parse_expression(&deep);
+        match expr {
+            FeelExpression::Err(_, msg) => {
+                assert!(msg.contains("depth") || msg.contains("recursion") || msg.contains("max"),
+                    "expected depth-related error, got: {}", msg);
+            }
+            other => panic!("expected Err node for deep nesting, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("for x in 1..10 return x * 2") yields For with iteration context range.
+    #[test]
+    fn parse_for_expression() {
+        let expr = parse_expression("for x in 1..10 return x * 2");
+        match expr {
+            FeelExpression::For { iters, .. } => {
+                assert_eq!(iters.len(), 1);
+                assert_eq!(iters[0].0, "x");
+            }
+            other => panic!("expected For, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("some x in [1,2,3] satisfies x > 1") yields Quantified(Some, ...).
+    #[test]
+    fn parse_some_quantified() {
+        let expr = parse_expression("some x in [1,2,3] satisfies x > 1");
+        match expr {
+            FeelExpression::Quantified { kind: QuantKind::Some, .. } => {}
+            other => panic!("expected Quantified(Some), got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("5 instance of number") yields InstanceOf(Literal(5), Number).
+    #[test]
+    fn parse_instance_of_number() {
+        let expr = parse_expression("5 instance of number");
+        match expr {
+            FeelExpression::InstanceOf { ty, .. } => {
+                assert_eq!(ty, crate::dmn::feel::types::FeelType::Number);
+            }
+            other => panic!("expected InstanceOf, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("[1,2,3]") yields List; parse_expression("{a: 1, b: 2}") yields Context.
+    #[test]
+    fn parse_list_and_context() {
+        let list_expr = parse_expression("[1,2,3]");
+        match list_expr {
+            FeelExpression::List(elems) => assert_eq!(elems.len(), 3),
+            other => panic!("expected List, got {:?}", other),
+        }
+        let ctx_expr = parse_expression("{a: 1, b: 2}");
+        match ctx_expr {
+            FeelExpression::Context(entries) => assert_eq!(entries.len(), 2),
+            other => panic!("expected Context, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("function(a, b) a + b") yields FunctionDefinition (non-external).
+    #[test]
+    fn parse_function_definition_non_external() {
+        let expr = parse_expression("function(a, b) a + b");
+        match expr {
+            FeelExpression::FunctionDefinition { params, external, .. } => {
+                assert_eq!(params.len(), 2);
+                assert!(!external);
+            }
+            other => panic!("expected FunctionDefinition, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("function(a, b) external a + b") yields FunctionDefinition with external=true (recognized, NOT rejected at parse time).
+    #[test]
+    fn parse_function_definition_external_recognized() {
+        let expr = parse_expression("function(a, b) external a + b");
+        match expr {
+            FeelExpression::FunctionDefinition { params, external, .. } => {
+                assert_eq!(params.len(), 2);
+                assert!(external, "external flag should be recognized at parse time");
+            }
+            other => panic!("expected FunctionDefinition, got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("a between b and c") yields Between desugaring node (BinOp(Between, a, ...)) — the parser does NOT greedily consume `and` as the boolean operator.
+    #[test]
+    fn parse_between_desugaring() {
+        let expr = parse_expression("a between b and c");
+        match expr {
+            FeelExpression::BinOp { op: BinOpKind::Between, .. } => {}
+            other => panic!("expected BinOp(Between, ...), got {:?}", other),
+        }
+    }
+
+    /// Test: parse_expression("not(null)") parses `not` as a function invocation (not a keyword here).
+    #[test]
+    fn parse_not_as_invocation() {
+        let expr = parse_expression("not(null)");
+        match expr {
+            FeelExpression::FunctionInvocation { .. } => {}
+            other => panic!("expected FunctionInvocation, got {:?}", other),
+        }
+    }
+}
