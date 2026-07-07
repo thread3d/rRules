@@ -416,6 +416,8 @@ use crate::dmn::feel::temporal::DateTimeValue;
 use chrono::NaiveDate;
 #[cfg(test)]
 use rust_decimal::dec;
+#[cfg(test)]
+use crate::dmn::feel::parser::parse_expression;
 
 // ----- MANDATORY DMN-12 conformance cases (the load-bearing tests) -----
 
@@ -708,4 +710,123 @@ fn no_rust_eq() {
     check(&code_after, "after cmp");
 }
 
-// Task 2 dispatch tests are added in the Task 2 RED commit.
+// ----- evaluate dispatch tests (Task 2) -----
+
+#[cfg(test)]
+fn scope_with_x_5() -> Scope {
+    let mut s = Scope::empty();
+    s.bind("x".to_string(), Value::Number(dec!(5)), vec![]);
+    s
+}
+
+/// `null = null` → `Bool(true)` (rule 49.a via the Eq BinOp arm).
+#[cfg(test)]
+#[test]
+fn eval_null_equals_null() {
+    let e = parse_expression("null = null");
+    assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
+}
+
+/// `null < 3` → `Null` (null operand in comparison → None → Null).
+#[cfg(test)]
+#[test]
+fn eval_null_lt_three() {
+    let e = parse_expression("null < 3");
+    assert_eq!(evaluate(&e, &Scope::empty()), Value::Null);
+}
+
+/// `true and false` → `Bool(false)`.
+#[cfg(test)]
+#[test]
+fn eval_true_and_false() {
+    let e = parse_expression("true and false");
+    assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(false));
+}
+
+/// `true or false` → `Bool(true)`.
+#[cfg(test)]
+#[test]
+fn eval_true_or_false() {
+    let e = parse_expression("true or false");
+    assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
+}
+
+/// `not(null)` → `Null`. The `not` keyword parses to a
+/// `FunctionInvocation(callee=Name("not"), args=[null])`. The function
+/// invocation arm is stubbed in this plan, so the stub returns Null; the
+/// behavior block requires `not(null)` → Null, which the stub satisfies.
+/// 31-07 wires the real `not` built-in (which calls `not_3vl`).
+#[cfg(test)]
+#[test]
+fn eval_not_null() {
+    let e = parse_expression("not(null)");
+    assert_eq!(evaluate(&e, &Scope::empty()), Value::Null);
+}
+
+/// `5` → `Number(5)` (Literal arm).
+#[cfg(test)]
+#[test]
+fn eval_literal_number() {
+    let e = parse_expression("5");
+    assert_eq!(evaluate(&e, &Scope::empty()), Value::Number(dec!(5)));
+}
+
+/// `x` → bound value (Name arm via Scope::get); unbound → Null.
+#[cfg(test)]
+#[test]
+fn eval_name() {
+    let e = parse_expression("x");
+    assert_eq!(evaluate(&e, &scope_with_x_5()), Value::Number(dec!(5)));
+    // Unbound name → Null.
+    assert_eq!(evaluate(&e, &Scope::empty()), Value::Null);
+}
+
+/// `@"2021-01-31"` → `Date(...)` (AtLiteral arm via parse_at_literal).
+#[cfg(test)]
+#[test]
+fn eval_at_literal_date() {
+    let e = parse_expression("@\"2021-01-31\"");
+    assert_eq!(
+        evaluate(&e, &Scope::empty()),
+        Value::Date(NaiveDate::from_ymd_opt(2021, 1, 31).unwrap())
+    );
+}
+
+/// `1 = 1` → `Bool(true)` (comparison BinOp arm via feel_equals).
+#[cfg(test)]
+#[test]
+fn eval_one_equals_one() {
+    let e = parse_expression("1 = 1");
+    assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
+}
+
+/// `"a" = 1` → `Null` (type mismatch → None → Null).
+#[cfg(test)]
+#[test]
+fn eval_string_equals_number_yields_null() {
+    let e = parse_expression("\"a\" = 1");
+    assert_eq!(evaluate(&e, &Scope::empty()), Value::Null);
+}
+
+/// `Err(_, _)` → `Null`.
+#[cfg(test)]
+#[test]
+fn eval_err_yields_null() {
+    let e = FeelExpression::Err(
+        super::ast::Span::zero(0, 1, 1),
+        "expected expression".to_string(),
+    );
+    assert_eq!(evaluate(&e, &Scope::empty()), Value::Null);
+}
+
+/// No `evaluate(src: &str, ...)` overload exists (type-level no-re-parse
+/// contract). The sole public evaluator signature takes `&FeelExpression`.
+#[cfg(test)]
+#[test]
+fn eval_takes_borrowed_ast_not_str() {
+    fn _accepts(expr: &FeelExpression, scope: &Scope) -> Value {
+        evaluate(expr, scope)
+    }
+    let e = parse_expression("1");
+    let _ = _accepts(&e, &Scope::empty());
+}
