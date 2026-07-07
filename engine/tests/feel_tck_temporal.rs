@@ -216,8 +216,25 @@ fn parse_test_cases(path: &Path) -> Vec<TckCase> {
 ///   IANA zone preservation, Pitfall 5 DST policy).
 /// - `Fixed` → arithmetic on the naive local + re-attach the fixed offset.
 /// - `Local` → arithmetic on the `NaiveDateTime` directly.
-fn eval_temporal_expr(_expr: &str) -> Option<Value> {
-    None // RED stub — Plan 03 Task 2 GREEN fills this in.
+fn eval_temporal_expr(expr: &str) -> Option<Value> {
+    // Strip the optional `string(...)` wrapper — the string() built-in itself
+    // is Phase 31, but the TCK expectation reduces to format_value of the
+    // inner value-domain result.
+    let s = expr.trim();
+    let s = s
+        .strip_prefix("string(")
+        .and_then(|inner| inner.strip_suffix(")"))
+        .unwrap_or(s);
+    // Split on `" + @"` — the FEEL infix addition between two @"..." literals.
+    let parts: Vec<&str> = s.split("\" + @\"").collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let lhs_str = parts[0].trim_start_matches("@\"");
+    let rhs_str = parts[1].trim_end_matches('"');
+    let lhs = parse_at_literal(lhs_str)?;
+    let rhs = parse_at_literal(rhs_str)?;
+    apply_temporal_add(&lhs, &rhs)
 }
 
 /// Apply a temporal + duration addition, dispatching on the LHS variant.
