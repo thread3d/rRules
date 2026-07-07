@@ -34,6 +34,7 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 - ✓ **MON-06**: Live dead-rule detection — `RuleExecutionTracker` as a process-wide `LazyLock<Mutex<…>>` singleton (mirroring `CoverageTracking`), `record_evaluation`/`record_fire` wired at both evaluator sites (`direct_eval.rs` + `rete/mod.rs`); `/v1/metrics/dead-rules` reads live firings (no longer always `[]`); three surfaces agree on fire count — v5.0 Phase 26
 - ✓ **EXEC-04, FRONTEND-04**: Inference trace (`TraceEvent`/`TraceData`, two-site emission) opt-in via `ExecuteRequest.trace` + `GET /v1/engines` engine registry; trace surfaced in the frontend results panel only when requested (latency unaffected when off) — v5.0 Phase 28
 - ✓ **FRONTEND-03**: Frontend test-runner — `execution.ts` API client + `TestRunner` component (facts editor, engine dropdown, Run + Reload-then-Run, stacked results, trace toggle); `rule_filter` now honored server-side on the stateless path (commit `384b1f17d`) for a true "test this rule" UX — v5.0 Phase 28
+- ✓ **DMN-08, DMN-09, DMN-10**: FEEL semantic value domain — Decimal128 numeric path via `rust_decimal` (`0.1 + 0.2 = 0.3` proven, no f64 in production path); temporal types (date/time/date-and-time/days-time-duration/years-months-duration) with ISO 8601 `@""` lexical round-trip, IANA timezones via `chrono-tz`, DST-correct duration arithmetic (gap→null, ambiguous→earliest); type lattice with conformance (`<:`), equivalence (`≡`), exactly the three spec-defined implicit conversions (to-singleton-list, from-singleton-list, conforms-to — no number↔string; `1 + "2" → null` prohibition) and null propagation; `engine::data_types::Value` extended additively with 8 FEEL variants and zero Rete regression; validated against vendored OMG TCK numeric + temporal vectors — v6.0 Phase 30
 
 ### Active
 
@@ -85,7 +86,7 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 
 **Key context:** The frontend decision-table editor already exists (v4.0) — this milestone wires it to a real backend, it does **not** rebuild the editor. `DMN-01..03` are marked "validated v1.0" above but are stubs (no `dmn` module in source); v6.0 makes that claim genuinely true. Phase numbering continues from 29 (v5.0 ended at Phase 28). "Full DMN Level 3 FEEL" was selected → complete FEEL semantics, larger scope.
 
-**Progress:** Planning — requirements + roadmap in progress.
+**Progress:** Phase 30 complete (2026-07-07) — FEEL value domain in place: Decimal128 numeric path, temporal types with IANA tz + DST-correct arithmetic, type lattice (conformance/equivalence/3 implicit conversions), `Value` extended additively with zero Rete regression; validated against OMG TCK numeric + temporal vectors (verifier 4/4 passed). Next: Phase 31 — FEEL parser + evaluator + built-in function library, which builds the operator/evaluator layer on this value-domain foundation.
 
 ---
 
@@ -144,4 +145,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-06 — v6.0 DMN Level 3 Compliance milestone started (PROJECT.md Current Milestone set to v6.0; v5.0 per-phase detail archived in `milestones/v5.0-ROADMAP.md`); fresh v6.0 requirements created by this `/gsd-new-milestone`*
+*Last updated: 2026-07-07 — Phase 30 (FEEL Value Types + Type Lattice + Temporal Domain) complete; DMN-08/09/10 moved to Validated; v6.0 progress updated. v5.0 per-phase detail archived in `milestones/v5.0-ROADMAP.md`.*
