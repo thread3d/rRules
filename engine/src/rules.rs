@@ -299,6 +299,13 @@ impl Expression {
                 let lv = l.evaluate(facts);
                 let rv = r.evaluate(facts);
                 // Division by zero yields Null (T-23-03 mitigation — do not panic).
+                //
+                // Rete-only — FEEL variants handled in engine/src/dmn/feel/
+                // (30-RESEARCH.md Pitfall 1). The numeric Rete path only
+                // produces Integer/Float; FEEL values (Number/Date/Time/…)
+                // fall through the `as_float()` guard (DynamicCast returns
+                // None for them) and yield `Value::Null` here — correct for
+                // the Rete path, which never legitimately sees FEEL values.
                 match (&lv, &rv) {
                     (Value::Integer(a), Value::Integer(b)) if *b != 0 => Value::Integer(a / b),
                     _ if lv.as_float().is_some() && rv.as_float().is_some() => {
@@ -316,6 +323,12 @@ impl Expression {
             Expression::StringConcat(l, r) => {
                 let lv = l.evaluate(facts);
                 let rv = r.evaluate(facts);
+                // Rete-only — FEEL variants handled in engine/src/dmn/feel/
+                // (30-RESEARCH.md Pitfall 1). `as_string()` (DynamicCast)
+                // returns `None` for every FEEL variant (see data_types.rs
+                // is_compatible_with), so FEEL operands fall through to
+                // `Value::Null` without needing a Value-level wildcard here —
+                // this wildcard is on `Option<&str>`, not on `Value` directly.
                 match (lv.as_string(), rv.as_string()) {
                     (Some(ls), Some(rs)) => Value::String(format!("{}{}", ls, rs)),
                     _ => Value::Null,
@@ -337,6 +350,13 @@ impl Expression {
 /// Apply a binary numeric op to two `Value`s with Integer-preserving
 /// promotion: `Integer + Integer` stays `Integer`; any `Float` operand
 /// promotes both sides to `f64`. Non-numeric operands yield `Value::Null`.
+///
+/// Rete-only — FEEL variants handled in engine/src/dmn/feel/
+/// (30-RESEARCH.md Pitfall 1). The Rete numeric path only produces
+/// Integer/Float; FEEL values (`Number`/`Date`/`Time`/…) fall through the
+/// `as_float()` guard (DynamicCast returns `None` for every FEEL variant) and
+/// yield `Value::Null`. The FEEL numeric path lives in
+/// `engine/src/dmn/feel/numeric.rs` (Plan 02) and never routes through here.
 fn numeric_op(
     left: &Value,
     right: &Value,
@@ -372,6 +392,12 @@ pub fn compare_values(op: ComparisonOp, left: &Value, right: &Value) -> bool {
         ComparisonOp::Ne => left != right,
         ComparisonOp::Lt | ComparisonOp::Le | ComparisonOp::Gt | ComparisonOp::Ge => {
             // Integer + Integer: stay integral (avoid f64 precision loss).
+            // Rete-only — FEEL variants handled in engine/src/dmn/feel/
+            // (30-RESEARCH.md Pitfall 1). The `_ => {}` here lets non-Integer
+            // operands (including FEEL variants) fall through to the
+            // float/string/boolean fallback paths below; FEEL variants return
+            // `false` from those fallbacks (as_float/as_string return None for
+            // them). The FEEL comparison path is Phase 31 DMN-13.
             match (left, right) {
                 (Value::Integer(l), Value::Integer(r)) => return match op {
                     ComparisonOp::Lt => l < r,

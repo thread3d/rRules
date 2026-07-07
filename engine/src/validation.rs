@@ -285,7 +285,17 @@ impl<'a> SemanticValidator<'a> {
         _result: &mut ValidationResult,
     ) {
         // This is a simplified check - full implementation would
-        // look up the actual type of the field and compare with value
+        // look up the actual type of the field and compare with value.
+        //
+        // Rete-only — FEEL variants handled in engine/src/dmn/feel/
+        // (30-RESEARCH.md Pitfall 1). This validator runs on the Rete
+        // rule-execution path; FEEL values never route through it. The
+        // wildcard catches the legacy `DateTime` variant + the 8 Phase 30
+        // FEEL variants; every arm is a no-op (this is a stub), so there is
+        // no behavioural difference. Kept as a wildcard (rather than an
+        // explicit arm list) because the function body is a no-op and adding
+        // arms would be dead code; a future non-noop implementation MUST
+        // replace this with an exhaustive match or explicit FEEL arms.
         match value {
             Value::Bool(_) => {}
             Value::Integer(_) => {}
