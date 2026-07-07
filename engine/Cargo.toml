@@ -21,6 +21,12 @@ quick-xml = { version = "0.40", features = ["serialize"] }
 # repo paupino/rust-decimal, 115M downloads. Features: serde (IR (de)serialization),
 # macros (decimal! literals), maths (sqrt/ln/... for Phase 31 built-ins).
 rust_decimal = { version = "1.42", features = ["serde", "macros", "maths"] }
+# FEEL IANA timezone database (Phase 30+). Supply-chain verified 2026-07-07 per
+# 30-RESEARCH.md Package Legitimacy Audit: repo chronotope/chrono-tz (same
+# maintainer org as chrono), ~9 yrs, tens of M downloads, OK/Approved — not
+# [SUS]/[SLOP]. `serde` feature enables Serialize/Deserialize for `chrono_tz::Tz`
+# so `DateTimeValue::Iana(DateTime<chrono_tz::Tz>)` can derive serde.
+chrono-tz = { version = "0.10.4", features = ["serde"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
