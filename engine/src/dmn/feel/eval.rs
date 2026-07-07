@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::cmp::Ordering;
 
-use super::ast::{FeelExpression, BinOpKind};
+use super::ast::{FeelExpression, BinOpKind, QuantKind};
 use super::coercion::{coerce_to_number, coerce_to_string};
 use super::numeric::feel_numeric_eq;
 use super::temporal::parse_at_literal;
@@ -417,17 +417,10 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
         // expressions are stubbed to Value::Null here. The exhaustive
         // match (NO `_ =>` wildcard) is the safety net: adding a new
         // FeelExpression variant forces an evaluator-arm update.
-        FeelExpression::If { .. } => {
-            // TODO(31-05): 3VL condition dispatch.
-            Value::Null
-        }
-        FeelExpression::For { .. } => {
-            // TODO(31-05): cartesian-product iteration → Array.
-            Value::Null
-        }
-        FeelExpression::Quantified { .. } => {
-            // TODO(31-05): some/every fold via or_3vl/and_3vl.
-            Value::Null
+        FeelExpression::If { cond, then, else_ } => evaluate_if(cond, then, else_, scope),
+        FeelExpression::For { iters, body } => evaluate_for(iters, body, scope),
+        FeelExpression::Quantified { kind, iters, satisfies } => {
+            evaluate_quantified(kind, iters, satisfies, scope)
         }
         FeelExpression::Path { .. } => {
             // TODO(31-05): context/list path navigation via path_nav.
@@ -441,9 +434,10 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
             // TODO(31-04): feel::types::conforms(type_of(v), T).
             Value::Null
         }
-        FeelExpression::List(_) => {
-            // TODO(31-05): evaluate each element → Array.
-            Value::Null
+        FeelExpression::List(elems) => {
+            // Evaluate each element (needed for iteration sources in Task 1).
+            let evaluated: Vec<Value> = elems.iter().map(|e| evaluate(e, scope)).collect();
+            Value::Array(evaluated)
         }
         FeelExpression::Relation { .. } => {
             // TODO(31-05): relation → list of contexts.
@@ -666,6 +660,238 @@ fn eval_in(l: Value, r: Value) -> Value {
         ok = cmp::and_3vl(ok, in_upper);
     }
     opt_bool(ok)
+}
+
+// =====================================================================
+// Plan 31-04: control + quantified evaluators (if / for / some / every).
+// =====================================================================
+
+/// Maximum iterations for range materialization (DoS guard — T-31-04-01).
+const MAX_RANGE_ITERATIONS: i64 = 1_000_000;
+
+/// Materialize a `FeelRange` into a `Vec<Value>` for iteration contexts.
+///
+/// - Both endpoints present (inclusive/exclusive per flags): iterate from start
+///   to end, stepping by 1 (for Numbers and Integers). Yields Null if the
+///   range spans more than [`MAX_RANGE_ITERATIONS`] steps (DoS guard).
+/// - `start` is None → open-started range yields Null.
+/// - `end` is None → open-ended range yields Null (unbounded iteration would
+///   be a DoS vector — rule 49.a: unbounded ranges are not valid iteration
+///   contexts per DMN spec).
+/// - Non-numeric endpoints (Date, String, …) yield Null — only numeric ranges
+///   support integer stepping in FEEL.
+fn range_to_values(range: &FeelRange) -> Option<Vec<Value>> {
+    let start = range.start.as_ref()?;
+    let end = range.end.as_ref()?;
+
+    // Numeric range iteration (Numbers and Integers).
+    match (start, end) {
+        (Value::Number(s), Value::Number(e)) => {
+            if *s > *e {
+                return None; // empty range: start > end yields nothing
+            }
+            // DoS guard: count iterations by stepping and checking cap.
+            let mut cur = *s;
+            let mut count: u128 = 0;
+            while cur <= *e {
+                count += 1;
+                if count > MAX_RANGE_ITERATIONS as u128 {
+                    return None; // DoS guard: range too large
+                }
+                cur += rust_decimal::Decimal::ONE;
+            }
+            // Re-iterate to build the result.
+            let mut result = Vec::new();
+            cur = *s;
+            while cur <= *e {
+                result.push(Value::Number(cur));
+                cur += rust_decimal::Decimal::ONE;
+            }
+            Some(result)
+        }
+        (Value::Integer(s), Value::Integer(e)) => {
+            if s > e {
+                return None;
+            }
+            let count = (*e - *s) as i64 + 1;
+            if count > MAX_RANGE_ITERATIONS {
+                return None; // DoS guard
+            }
+            Some(((*s)..=(*e)).map(Value::Integer).collect())
+        }
+        _ => None, // non-numeric range → null (not a valid iteration context)
+    }
+}
+
+/// `if cond then a else b` — 3VL condition dispatch.
+///
+/// - [`Value::Bool(true)`] → evaluate and return `then`.
+/// - [`Value::Bool(false)`] → evaluate and return `else_`.
+/// - [`Value::Null`] → [`Value::Null`] (A4: null cond → null). Documented as
+///   an explicit assumption in 31-RESEARCH.md Open Question A4.
+/// - Any other kind → [`Value::Null`] (a non-bool condition is a type error
+///   → null, per 3VL semantics).
+fn evaluate_if(cond: &FeelExpression, then: &FeelExpression, else_: &FeelExpression, scope: &Scope) -> Value {
+    let c = evaluate(cond, scope);
+    match c {
+        Value::Bool(true) => evaluate(then, scope),
+        Value::Bool(false) => evaluate(else_, scope),
+        _ => Value::Null, // A4: null cond → null; non-bool → null (type error)
+    }
+}
+
+/// Iterate over a single iteration source and yield values.
+///
+/// - [`Value::Array`] → iterate elements directly.
+/// - [`Value::Range`] → materialize via `range_to_values`.
+/// - [`Value::Null`] or anything else → empty iterator (no elements).
+fn iter_source_values(src: &Value) -> Vec<Value> {
+    match src {
+        Value::Array(elems) => elems.clone(),
+        Value::Range(range) => range_to_values(range).unwrap_or_default(),
+        _ => vec![], // null or non-iterable → no elements (not null — just empty)
+    }
+}
+
+/// `for x in iter1, y in iter2 return body` — cartesian-product iteration.
+///
+/// Iteration variables bind into a scoped copy of the flat Scope (the user's
+/// locked flat-Scope model permits a child scope with parent bindings + new
+/// vars). Multiple iters produce a cartesian product: each combination yields
+/// one body evaluation, collected into [`Value::Array`].
+///
+/// Null short-circuit: if any iteration source evaluates to `null`, the entire
+/// for-expression yields `null` (a null source is not iterable — per DMN spec).
+fn evaluate_for(iters: &[(String, FeelExpression)], body: &FeelExpression, scope: &Scope) -> Value {
+    // Evaluate all sources first; if any is Null → Null.
+    let sources: Vec<Value> = iters
+        .iter()
+        .map(|(_, expr)| evaluate(expr, scope))
+        .collect();
+    if sources.iter().any(|v| matches!(v, Value::Null)) {
+        return Value::Null;
+    }
+
+    // Materialize each source into a Vec<Value>.
+    let materialized: Vec<Vec<Value>> = sources.into_iter().map(|v| iter_source_values(&v)).collect();
+
+    // Empty any source → empty array result (not null — just no iterations).
+    if materialized.is_empty() || materialized.iter().any(|v: &Vec<Value>| v.is_empty()) {
+        return Value::Array(vec![]);
+    }
+
+    // Build cartesian product via recursive DFS.
+    let mut results = Vec::new();
+    cartesian_iterate(0, &materialized, iters, body, scope, &[], &mut results);
+    Value::Array(results)
+}
+
+/// Recursive helper: iterate over `materialized[idx..]`, binding iter vars as we go.
+/// `current` carries the values bound so far for iters[0..idx].
+fn cartesian_iterate(
+    idx: usize,
+    materialized: &[Vec<Value>],
+    iters: &[(String, FeelExpression)],
+    body: &FeelExpression,
+    parent_scope: &Scope,
+    current: &[Value],
+    results: &mut Vec<Value>,
+) {
+    if idx == materialized.len() {
+        // All vars bound — evaluate the body with all bindings.
+        let mut scope = parent_scope.clone();
+        for (i, (name, _)) in iters.iter().enumerate() {
+            scope.bind(name.clone(), current[i].clone(), vec![]);
+        }
+        results.push(evaluate(body, &scope));
+        return;
+    }
+
+    // For the current iter var, iterate over all values of this source.
+    let name = iters[idx].0.clone();
+    for val in &materialized[idx] {
+        let mut new_current = current.to_vec();
+        new_current.push(val.clone());
+        cartesian_iterate(idx + 1, materialized, iters, body, parent_scope, &new_current, results);
+    }
+}
+
+/// `some x in list satisfies pred` / `every x in list satisfies pred`.
+///
+/// - Iteration sources evaluated like [`evaluate_for`] (Null short-circuit).
+/// - For each element, bind iter var into a scoped copy and evaluate predicate.
+/// - Fold results: `Some` → `or_3vl`, `Every` → `and_3vl`.
+/// - Empty list base cases: `some` → `Bool(false)`, `every` → `Bool(true)`.
+fn evaluate_quantified(
+    kind: &QuantKind,
+    iters: &[(String, FeelExpression)],
+    satisfies: &FeelExpression,
+    scope: &Scope,
+) -> Value {
+    // Evaluate all sources; if any is Null → Null.
+    let sources: Vec<Value> = iters
+        .iter()
+        .map(|(_, expr)| evaluate(expr, scope))
+        .collect();
+    if sources.iter().any(|v| matches!(v, Value::Null)) {
+        return Value::Null;
+    }
+
+    let materialized: Vec<Vec<Value>> = sources.into_iter().map(|v| iter_source_values(&v)).collect();
+
+    // Empty any source → base case.
+    if materialized.is_empty() || materialized.iter().any(|v: &Vec<Value>| v.is_empty()) {
+        return match kind {
+            QuantKind::Some => Value::Bool(false),
+            QuantKind::Every => Value::Bool(true),
+        };
+    }
+
+    // Collect all predicate results via cartesian product.
+    let mut pred_results: Vec<Option<bool>> = Vec::new();
+    collect_quant_predicates(0, &materialized, iters, satisfies, scope, &[], &mut pred_results);
+
+    // Fold the predicate results using or_3vl (Some) or and_3vl (Every).
+    let fold_fn: fn(Option<bool>, Option<bool>) -> Option<bool> = match kind {
+        QuantKind::Some => cmp::or_3vl,
+        QuantKind::Every => cmp::and_3vl,
+    };
+
+    // Initial value: false for some (needs at least one true), true for every.
+    let init: Option<bool> = match kind {
+        QuantKind::Some => Some(false),
+        QuantKind::Every => Some(true),
+    };
+
+    opt_bool(pred_results.into_iter().fold(init, fold_fn))
+}
+
+/// DFS: evaluate predicate for every combination of iter var bindings.
+fn collect_quant_predicates(
+    idx: usize,
+    materialized: &[Vec<Value>],
+    iters: &[(String, FeelExpression)],
+    satisfies: &FeelExpression,
+    parent_scope: &Scope,
+    current: &[Value],
+    results: &mut Vec<Option<bool>>,
+) {
+    if idx == materialized.len() {
+        let mut scope = parent_scope.clone();
+        for (i, (name, _)) in iters.iter().enumerate() {
+            scope.bind(name.clone(), current[i].clone(), vec![]);
+        }
+        let pred = evaluate(satisfies, &scope);
+        results.push(to_bool(&pred));
+        return;
+    }
+
+    let name = iters[idx].0.clone();
+    for val in &materialized[idx] {
+        let mut new_current = current.to_vec();
+        new_current.push(val.clone());
+        collect_quant_predicates(idx + 1, materialized, iters, satisfies, parent_scope, &new_current, results);
+    }
 }
 
 // =====================================================================
@@ -1193,6 +1419,183 @@ fn no_rust_eq() {
     };
     check(&code_before, "before cmp");
     check(&code_after, "after cmp");
+}
+
+// =====================================================================
+// Plan 31-04 Task 1: if / for / some / every evaluators.
+// =====================================================================
+
+#[cfg(test)]
+mod control {
+    use super::*;
+    use crate::dmn::feel::ast::{FeelExpression, QuantKind};
+
+    /// Helper: parse + evaluate with empty scope.
+    #[cfg(test)]
+    fn ev(src: &str) -> Value {
+        evaluate(&parse_expression(src), &Scope::empty())
+    }
+
+    // ----- if / else -----
+
+    /// `if true then 1 else 2` → Number(1).
+    #[test]
+    fn if_true_then_branch() {
+        assert_eq!(ev("if true then 1 else 2"), Value::Number(dec!(1)));
+    }
+
+    /// `if false then 1 else 2` → Number(2).
+    #[test]
+    fn if_false_else_branch() {
+        assert_eq!(ev("if false then 1 else 2"), Value::Number(dec!(2)));
+    }
+
+    /// A4: `if null then 1 else 2` → Null (null cond -> null result).
+    #[test]
+    fn if_null_cond_yields_null() {
+        assert_eq!(ev("if null then 1 else 2"), Value::Null);
+    }
+
+    /// Non-bool condition → Null (type error in 3VL).
+    #[test]
+    fn if_non_bool_cond_yields_null() {
+        assert_eq!(ev("if 5 then 1 else 2"), Value::Null);
+        assert_eq!(ev("if \"a\" then 1 else 2"), Value::Null);
+    }
+
+    /// Nested if: `if true then (if false then 1 else 2) else 3` → Number(2).
+    #[test]
+    fn if_nested() {
+        assert_eq!(ev("if true then (if false then 1 else 2) else 3"), Value::Number(dec!(2)));
+    }
+
+    // ----- for -----
+
+    /// `for x in [1,2,3] return x * 2` → Array([2,4,6]).
+    #[test]
+    fn for_array_iteration() {
+        assert_eq!(ev("for x in [1,2,3] return x * 2"), Value::Array(vec![Value::Number(dec!(2)), Value::Number(dec!(4)), Value::Number(dec!(6))]));
+    }
+
+    /// `for x in 1..3 return x` → Array([Number(1), Number(2), Number(3)]) (range iteration).
+    /// Parser emits Number literals for integer values; range iteration preserves that type.
+    #[test]
+    fn for_range_iteration() {
+        assert_eq!(ev("for x in 1..3 return x"), Value::Array(vec![Value::Number(dec!(1)), Value::Number(dec!(2)), Value::Number(dec!(3))]));
+    }
+
+    /// Cartesian product: `for x in [1,2], y in [3,4] return x + y` → Array([4,5,5,6]).
+    #[test]
+    fn for_cartesian_product() {
+        assert_eq!(ev("for x in [1,2], y in [3,4] return x + y"), Value::Array(vec![Value::Number(dec!(4)), Value::Number(dec!(5)), Value::Number(dec!(5)), Value::Number(dec!(6))]));
+    }
+
+    /// `for x in null return x` → Null (null source short-circuits).
+    #[test]
+    fn for_null_source_yields_null() {
+        assert_eq!(ev("for x in null return x"), Value::Null);
+    }
+
+    /// Empty list: `for x in [] return x` → Array([]).
+    #[test]
+    fn for_empty_list_yields_empty_array() {
+        assert_eq!(ev("for x in [] return x"), Value::Array(vec![]));
+    }
+
+    // ----- some / every -----
+
+    /// `some x in [1,2,3] satisfies x > 2` → Bool(true).
+    #[test]
+    fn some_satisfies_true() {
+        assert_eq!(ev("some x in [1,2,3] satisfies x > 2"), Value::Bool(true));
+    }
+
+    /// `some x in [1,2,3] satisfies x > 5` → Bool(false).
+    #[test]
+    fn some_satisfies_false() {
+        assert_eq!(ev("some x in [1,2,3] satisfies x > 5"), Value::Bool(false));
+    }
+
+    /// `every x in [1,2,3] satisfies x > 0` → Bool(true).
+    #[test]
+    fn every_satisfies_all_true() {
+        assert_eq!(ev("every x in [1,2,3] satisfies x > 0"), Value::Bool(true));
+    }
+
+    /// `every x in [1,2,3] satisfies x > 1` → Bool(false).
+    #[test]
+    fn every_satisfies_one_false() {
+        assert_eq!(ev("every x in [1,2,3] satisfies x > 1"), Value::Bool(false));
+    }
+
+    /// `some x in null satisfies true` → Null (null source short-circuits).
+    #[test]
+    fn some_null_source_yields_null() {
+        assert_eq!(ev("some x in null satisfies true"), Value::Null);
+    }
+
+    /// Empty list: `some x in [] satisfies true` → Bool(false) (base case).
+    #[test]
+    fn some_empty_list_yields_false() {
+        assert_eq!(ev("some x in [] satisfies true"), Value::Bool(false));
+    }
+
+    /// Empty list: `every x in [] satisfies true` → Bool(true) (vacuously true).
+    #[test]
+    fn every_empty_list_yields_true() {
+        assert_eq!(ev("every x in [] satisfies true"), Value::Bool(true));
+    }
+
+    // ----- range_to_values helper -----
+
+    /// `range_to_values` with valid numeric range.
+    #[test]
+    fn range_to_values_numeric() {
+        let range = FeelRange {
+            start: Some(Value::Number(dec!(1))),
+            end: Some(Value::Number(dec!(3))),
+            start_incl: true,
+            end_incl: true,
+        };
+        let vals = range_to_values(&range).unwrap();
+        assert_eq!(vals, vec![Value::Number(dec!(1)), Value::Number(dec!(2)), Value::Number(dec!(3))]);
+    }
+
+    /// `range_to_values` with empty range (start > end) → None.
+    #[test]
+    fn range_to_values_empty() {
+        let range = FeelRange {
+            start: Some(Value::Number(dec!(5))),
+            end: Some(Value::Number(dec!(3))),
+            start_incl: true,
+            end_incl: true,
+        };
+        assert_eq!(range_to_values(&range), None);
+    }
+
+    /// `range_to_values` with open endpoint → None.
+    #[test]
+    fn range_to_values_open_endpoint() {
+        let range = FeelRange {
+            start: None,
+            end: Some(Value::Number(dec!(3))),
+            start_incl: true,
+            end_incl: true,
+        };
+        assert_eq!(range_to_values(&range), None);
+    }
+
+    /// `range_to_values` DoS guard: > 1M iterations → None.
+    #[test]
+    fn range_to_values_dos_guard() {
+        let range = FeelRange {
+            start: Some(Value::Integer(0)),
+            end: Some(Value::Integer(MAX_RANGE_ITERATIONS + 1)),
+            start_incl: true,
+            end_incl: true,
+        };
+        assert_eq!(range_to_values(&range), None);
+    }
 }
 
 // ----- evaluate dispatch tests (Task 2) -----
