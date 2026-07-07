@@ -140,9 +140,14 @@ pub enum ConvertCtx {
 /// the equivalence-implies-conformance rule). The one-directional
 /// `Date <: DateTime` rule lives in [`conforms`].
 pub fn equivalent(a: &FeelType, b: &FeelType) -> bool {
-    // RED stub — fails reflexivity. GREEN replaces this.
-    let _ = (a, b);
-    false
+    // §10.3.2.9.1: reflexive, symmetric, transitive. At the *type* level,
+    // equivalence is structural equality (PartialEq). The spec's value-level
+    // equivalences (e.g. a specific date ≡ a datetime at UTC midnight) are a
+    // Phase 31 value-equality concern — at the type level `Date ≡ DateTime`
+    // must NOT hold, or `conforms(DateTime, Date)` would wrongly be true via
+    // the equivalence-implies-conformance rule. The one-directional
+    // `Date <: DateTime` rule lives in [`conforms`] below.
+    a == b
 }
 
 /// DMN 1.5 §10.3.2.9.2 — type conformance (`<:`, the subtype relation).
@@ -164,9 +169,57 @@ pub fn equivalent(a: &FeelType, b: &FeelType) -> bool {
 ///   (contravariant args), and `U <: V` (covariant return).
 /// - Conformance is transitive (the recursive calls give transitivity).
 pub fn conforms(a: &FeelType, b: &FeelType) -> bool {
-    // RED stub — fails every rule. GREEN replaces this.
-    let _ = (a, b);
-    false
+    // §10.3.2.9.2 verbatim (see 30-RESEARCH.md Code Examples). Transitivity
+    // comes for free from the recursive calls.
+    match (a, b) {
+        // T <: Any for every T.
+        (_, FeelType::Any) => true,
+        // Null <: T for every T.
+        (FeelType::Null, _) => true,
+        // Nothing conforms to Null except Null itself (handled above + via
+        // the equivalence arm below).
+        (_, FeelType::Null) => false,
+        // Equivalence implies conformance (T ≡ S ⇒ T <: S).
+        (x, y) if equivalent(x, y) => true,
+        // §10.3.2.3.5: a date is a date-time at UTC midnight → Date <: DateTime.
+        (FeelType::Date, FeelType::DateTime) => true,
+        // list<T> <: list<S> iff T <: S.
+        (FeelType::List(t), FeelType::List(s)) => conforms(t, s),
+        // range<T> <: range<S> iff T <: S.
+        (FeelType::Range(t), FeelType::Range(s)) => conforms(t, s),
+        // context<k1:T1..kn:Tn> <: context<l1:S1..lm:Sm> iff n ≥ m and for
+        // every (li, Si) there is a unique (kj, Tj) with li=kj and Tj <: Si.
+        (FeelType::Context(ae), FeelType::Context(be)) => context_conforms(ae, be),
+        // function (T1..Tn)->U <: (S1..Sm)->V iff n=m, Si <: Ti (contravariant
+        // args), and U <: V (covariant return). Here `a` is the source
+        // (params=Ti, ret=U), `b` is the target (params=Si, ret=V).
+        (FeelType::Function { params: ap, ret: ar }, FeelType::Function { params: bp, ret: br }) => {
+            ap.len() == bp.len()
+                && bp.iter().zip(ap).all(|(s, t)| conforms(s, t))
+                && conforms(ar, br)
+        }
+        _ => false,
+    }
+}
+
+/// §10.3.2.9.2 context conformance helper.
+///
+/// `ae` is the source context's `(key, type)` entries (n of them), `be` is the
+/// target's (m of them). Conformance holds iff `n ≥ m` and for every
+/// `(li, Si)` in `be` there is a *unique* `(kj, Tj)` in `ae` with `kj == li`
+/// and `Tj <: Si` (i.e. `conforms(Tj, Si)`).
+fn context_conforms(ae: &[(String, FeelType)], be: &[(String, FeelType)]) -> bool {
+    if ae.len() < be.len() {
+        return false;
+    }
+    be.iter().all(|(l, s)| {
+        let matches: Vec<&(String, FeelType)> = ae
+            .iter()
+            .filter(|(k, _)| k == l)
+            .filter(|(_, t)| conforms(t, s))
+            .collect();
+        matches.len() == 1
+    })
 }
 
 /// DMN 1.5 §10.3.2.9.4 — the THREE implicit conversions.
@@ -178,9 +231,54 @@ pub fn conforms(a: &FeelType, b: &FeelType) -> bool {
 /// is the load-bearing prohibition: `1 + "2"` therefore yields `null` (the
 /// `+` operator is Phase 31; the lattice provides no escape hatch).
 pub fn implicit_convert(v: Value, target: &FeelType, ctx: ConvertCtx) -> Option<Value> {
-    // RED stub — always None. GREEN replaces this.
-    let _ = (v, target, ctx);
-    None
+    match ctx {
+        // §10.3.2.9.4 to-singleton-list: T → List<T>. Wrap `v` in a singleton
+        // list when `type_of(v) <: target.inner`.
+        ConvertCtx::Filter => to_singleton_list(v, target),
+        // §10.3.2.9.4 from-singleton-list: singleton List<T> → T. Unwrap the
+        // single element when it conforms to `target`.
+        ConvertCtx::Invocation => from_singleton_list(v, target),
+        // §10.3.2.9.4 conforms-to: T1 binds to T2 iff T1 <: T2; else None.
+        ConvertCtx::Binding => {
+            if conforms(&type_of(&v), target) {
+                Some(v)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// §10.3.2.9.4 *to singleton list* (Filter context).
+///
+/// If `target` is `List(inner)` and `type_of(v) <: inner`, wrap `v` in a
+/// singleton `Value::Array`. Otherwise return `None`. There is no
+/// number↔string conversion — `conforms` returns false for those pairings, so
+/// the wrapping is rejected (Pitfall 6).
+fn to_singleton_list(v: Value, target: &FeelType) -> Option<Value> {
+    match target {
+        FeelType::List(inner) if conforms(&type_of(&v), inner) => Some(Value::Array(vec![v])),
+        _ => None,
+    }
+}
+
+/// §10.3.2.9.4 *from singleton list* (Invocation context).
+///
+/// If `v` is a singleton `Value::Array([elem])` and `type_of(elem) <: target`,
+/// unwrap to `elem`. Otherwise return `None`. No number↔string conversion —
+/// the `conforms` check rejects cross-type unwrapping (Pitfall 6).
+fn from_singleton_list(v: Value, target: &FeelType) -> Option<Value> {
+    match v {
+        Value::Array(ref xs) if xs.len() == 1 => {
+            let elem = &xs[0];
+            if conforms(&type_of(elem), target) {
+                Some(elem.clone())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Map a [`Value`] to its [`FeelType`] lattice node.
@@ -189,25 +287,58 @@ pub fn implicit_convert(v: Value, target: &FeelType, ctx: ConvertCtx) -> Option<
 /// wildcard. The compiler enforces a new arm if `Value` gains a variant (the
 /// exhaustive-match safety net, 30-RESEARCH.md Pitfall 1).
 pub fn type_of(v: &Value) -> FeelType {
-    // RED stub — returns Any for every variant. GREEN replaces this.
+    // Exhaustive over all 16 Value variants — NO wildcard. The compiler
+    // forces a new arm if Value gains a variant (Pitfall 1 safety net).
     match v {
-        Value::Bool(_) => FeelType::Any,
-        Value::Integer(_) => FeelType::Any,
-        Value::Float(_) => FeelType::Any,
-        Value::String(_) => FeelType::Any,
-        Value::DateTime(_) => FeelType::Any,
-        Value::Object(_) => FeelType::Any,
-        Value::Array(_) => FeelType::Any,
-        Value::Null => FeelType::Any,
-        Value::Number(_) => FeelType::Any,
-        Value::Date(_) => FeelType::Any,
-        Value::Time(_) => FeelType::Any,
-        Value::DateTimeTz(_) => FeelType::Any,
-        Value::DaysTimeDuration(_) => FeelType::Any,
-        Value::YearsMonthsDuration(_) => FeelType::Any,
-        Value::Range(_) => FeelType::Any,
-        Value::Function(_) => FeelType::Any,
+        // Legacy Rete variants.
+        Value::Bool(_) => FeelType::Boolean,
+        // FEEL treats integers and numbers as one numeric domain (§10.3.2.2);
+        // the legacy f64 Float maps to Number here too (FEEL path should not
+        // produce Float, but if it appears it is a number).
+        Value::Integer(_) => FeelType::Number,
+        Value::Float(_) => FeelType::Number,
+        Value::String(_) => FeelType::String,
+        // Legacy DateTime (NaiveDateTime, no offset) → DateTime type.
+        Value::DateTime(_) => FeelType::DateTime,
+        Value::Object(obj) => FeelType::Context(
+            obj.iter()
+                .map(|(k, val)| (k.clone(), type_of(val)))
+                .collect(),
+        ),
+        Value::Array(xs) => {
+            let inner = if xs.is_empty() {
+                FeelType::Any
+            } else {
+                type_of(&xs[0])
+            };
+            FeelType::List(Box::new(inner))
+        }
+        Value::Null => FeelType::Null,
+        // Phase 30 FEEL variants.
+        Value::Number(_) => FeelType::Number,
+        Value::Date(_) => FeelType::Date,
+        Value::Time(_) => FeelType::Time,
+        Value::DateTimeTz(_) => FeelType::DateTime,
+        Value::DaysTimeDuration(_) => FeelType::DaysTimeDuration,
+        Value::YearsMonthsDuration(_) => FeelType::YearsMonthsDuration,
+        Value::Range(r) => FeelType::Range(Box::new(range_inner_type(r))),
+        Value::Function(f) => FeelType::Function {
+            params: f.param_types.clone(),
+            ret: f.ret_type.clone(),
+        },
     }
+}
+
+/// Infer the inner element type of a [`FeelRange`] from its endpoints.
+///
+/// Uses the start endpoint's type, falling back to the end endpoint, then
+/// [`FeelType::Any`] when both are unbounded.
+fn range_inner_type(r: &FeelRange) -> FeelType {
+    r.start
+        .as_ref()
+        .or(r.end.as_ref())
+        .map(type_of)
+        .unwrap_or(FeelType::Any)
 }
 
 /// Map an IR `feel:` type_ref string to a [`FeelType`] lattice node.
@@ -219,9 +350,82 @@ pub fn type_of(v: &Value) -> FeelType {
 /// `feel:context<k1:T1, ...>` forms. Returns `None` for unrecognized strings
 /// (fail-closed — T-30-04-01 mitigation).
 pub fn resolve_type_ref(s: &str) -> Option<FeelType> {
-    // RED stub — always None. GREEN replaces this.
-    let _ = s;
-    None
+    let s = s.trim();
+    let inner = s.strip_prefix("feel:")?;
+    // Recursive nested forms first (list<...> / context<...>), then flat names.
+    if let Some(rest) = inner.strip_prefix("list<").and_then(|r| r.strip_suffix('>')) {
+        let inner_t = resolve_type_ref(rest)?;
+        return Some(FeelType::List(Box::new(inner_t)));
+    }
+    if let Some(rest) = inner
+        .strip_prefix("context<")
+        .and_then(|r| r.strip_suffix('>'))
+    {
+        let entries = parse_context_entries(rest)?;
+        return Some(FeelType::Context(entries));
+    }
+    match inner {
+        "number" => Some(FeelType::Number),
+        "string" => Some(FeelType::String),
+        "boolean" => Some(FeelType::Boolean),
+        "date" => Some(FeelType::Date),
+        "date and time" => Some(FeelType::DateTime),
+        "time" => Some(FeelType::Time),
+        "days and time duration" => Some(FeelType::DaysTimeDuration),
+        "years and months duration" => Some(FeelType::YearsMonthsDuration),
+        "Any" | "any" => Some(FeelType::Any),
+        "Null" | "null" => Some(FeelType::Null),
+        _ => None, // fail-closed (T-30-04-01)
+    }
+}
+
+/// Parse the `k1:T1, k2:T2, ...` body of a `feel:context<...>` ref.
+///
+/// Splits on top-level commas (depth-aware so a nested `context<...>` or
+/// `list<...>` containing commas/`<` is not split prematurely). Each entry is
+/// `key : type_ref` where `type_ref` is forwarded to [`resolve_type_ref`].
+/// Returns `None` on any malformed entry (fail-closed).
+fn parse_context_entries(body: &str) -> Option<Vec<(String, FeelType)>> {
+    let mut entries = Vec::new();
+    for raw in split_top_level_commas(body) {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let (key, type_ref) = raw.split_once(':')?;
+        let key = key.trim().to_string();
+        let t = resolve_type_ref(type_ref.trim())?;
+        entries.push((key, t));
+    }
+    Some(entries)
+}
+
+/// Split `s` on top-level commas, respecting `<` / `>` nesting depth so that
+/// commas inside a nested `list<...>` / `context<...>` are not split.
+fn split_top_level_commas(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut buf = String::new();
+    for c in s.chars() {
+        match c {
+            '<' => {
+                depth += 1;
+                buf.push(c);
+            }
+            '>' => {
+                depth -= 1;
+                buf.push(c);
+            }
+            ',' if depth == 0 => {
+                out.push(std::mem::take(&mut buf));
+            }
+            other => buf.push(other),
+        }
+    }
+    if !buf.is_empty() {
+        out.push(buf);
+    }
+    out
 }
 
 #[cfg(test)]
