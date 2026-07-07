@@ -190,11 +190,411 @@ impl<'a> Lexer<'a> {
 
     /// Tokenize the source into a `Vec<TokenSpan>`.
     ///
-    /// **RED stub** — returns `vec![]` so the behavior tests fail. The GREEN
-    /// implementation lands in the next commit.
+    /// Walks `src` byte-by-byte, skipping whitespace (rules 61–62),
+    /// emitting one [`TokenSpan`] per token. A trailing [`Token::Eof`] is
+    /// always appended. On `max_tokens` overflow (T-31-01-01), a single
+    /// [`Token::LexError`] is emitted and tokenization stops.
     pub fn tokenize(&mut self) -> Vec<TokenSpan> {
-        // (RED — implemented in the GREEN commit)
-        unimplemented!("Lexer::tokenize — GREEN implementation pending")
+        let mut out = Vec::new();
+        while self.cursor < self.src.len() {
+            if out.len() >= self.max_tokens {
+                // T-31-01-01 DoS guard: emit a LexError and stop.
+                let span = self.current_span(0);
+                out.push(TokenSpan {
+                    token: Token::LexError(format!(
+                        "max_tokens ({}) exceeded",
+                        self.max_tokens
+                    )),
+                    span,
+                });
+                return out;
+            }
+            let b = self.src[self.cursor];
+            // Whitespace (rules 61–62): skip, track line/col.
+            if b == b' ' || b == b'\t' || b == b'\r' {
+                self.advance_byte();
+                continue;
+            }
+            if b == b'\n' {
+                self.line += 1;
+                self.col = 1;
+                self.cursor += 1;
+                continue;
+            }
+            let start = self.cursor;
+            let span_line = self.line;
+            let span_col = self.col;
+            let tok = self.lex_one();
+            let len = self.cursor - start;
+            out.push(TokenSpan {
+                token: tok,
+                span: Span {
+                    start,
+                    len,
+                    line: span_line,
+                    col: span_col,
+                },
+            });
+        }
+        // Trailing Eof.
+        out.push(TokenSpan {
+            token: Token::Eof,
+            span: Span {
+                start: self.cursor,
+                len: 0,
+                line: self.line,
+                col: self.col,
+            },
+        });
+        out
+    }
+
+    /// Build a span of length `len` at the current cursor position.
+    fn current_span(&self, len: usize) -> Span {
+        Span {
+            start: self.cursor,
+            len,
+            line: self.line,
+            col: self.col,
+        }
+    }
+
+    /// Advance one byte, updating line/col.
+    fn advance_byte(&mut self) {
+        self.cursor += 1;
+        self.col += 1;
+    }
+
+    /// Lex a single token starting at `self.cursor`. Advances the cursor
+    /// past the token. Assumes `self.cursor < self.src.len()` and the
+    /// current byte is not whitespace.
+    fn lex_one(&mut self) -> Token {
+        let b = self.src[self.cursor];
+        // String literal (rule 33): "..." with rule-64 escapes.
+        if b == b'"' {
+            return self.lex_string();
+        }
+        // At-literal (rule 65): @"...".
+        if b == b'@' && self.peek_at(1) == Some(b'"') {
+            self.cursor += 1;
+            self.col += 1;
+            let inner = self.lex_string_inner();
+            return Token::AtLiteral(inner);
+        }
+        // Numeric literal (rule 35): digits or ".digits" (leading-dot
+        // decimal). A leading `-` is part of the numeric literal ONLY when
+        // it is not in operator position — handled at the parser level via
+        // unary-neg, so the lexer emits `Minus` for `-` and lets the parser
+        // disambiguate. A `.` followed by a digit is a leading-dot decimal.
+        if b.is_ascii_digit() || (b == b'.' && self.peek_at(1).map_or(false, |c| c.is_ascii_digit())) {
+            return self.lex_number();
+        }
+        // Name (rule 25): starts with a letter, `_`, or `?`.
+        if b == b'?' || b == b'_' || b.is_ascii_alphabetic() || b.is_ascii_digit() {
+            return self.lex_name();
+        }
+        // Punctuators.
+        self.lex_punct()
+    }
+
+    /// Lex a `"..."` string literal (rule 33) with rule-64 escapes.
+    /// The opening `"` is at `self.cursor`. Returns the decoded inner
+    /// content. The closing `"` is consumed.
+    fn lex_string(&mut self) -> Token {
+        Token::String(self.lex_string_inner())
+    }
+
+    /// Lex the inner content of a `"..."` string (used by both `lex_string`
+    /// and the at-literal inner string). The opening `"` is at `self.cursor`
+    /// on entry; the closing `"` is consumed.
+    fn lex_string_inner(&mut self) -> String {
+        // Consume the opening quote.
+        self.cursor += 1;
+        self.col += 1;
+        let mut out = String::new();
+        while self.cursor < self.src.len() {
+            let c = self.src[self.cursor];
+            if c == b'"' {
+                // Closing quote.
+                self.cursor += 1;
+                self.col += 1;
+                return out;
+            }
+            if c == b'\\' {
+                // Rule-64 escape sequence.
+                self.cursor += 1;
+                self.col += 1;
+                if self.cursor >= self.src.len() {
+                    // Unterminated escape — emit nothing, stop.
+                    return out;
+                }
+                let esc = self.src[self.cursor];
+                self.cursor += 1;
+                self.col += 1;
+                match esc {
+                    b'\'' => out.push('\''),
+                    b'"' => out.push('"'),
+                    b'\\' => out.push('\\'),
+                    b'n' => out.push('\n'),
+                    b'r' => out.push('\r'),
+                    b't' => out.push('\t'),
+                    b'u' => {
+                        // \u{XXXX} — Unicode code point escape.
+                        if self.peek_at(0) == Some(b'{') {
+                            self.cursor += 1;
+                            self.col += 1;
+                            let mut hex = String::new();
+                            while self.cursor < self.src.len() && self.src[self.cursor] != b'}' {
+                                hex.push(self.src[self.cursor] as char);
+                                self.cursor += 1;
+                                self.col += 1;
+                            }
+                            if self.cursor < self.src.len() && self.src[self.cursor] == b'}' {
+                                self.cursor += 1;
+                                self.col += 1;
+                            }
+                            if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                                if let Some(ch) = char::from_u32(code) {
+                                    out.push(ch);
+                                }
+                            }
+                        }
+                    }
+                    other => {
+                        // Unknown escape — push the char literally.
+                        out.push(other as char);
+                    }
+                }
+                continue;
+            }
+            // Regular char. Handle ASCII fast; for multi-byte UTF-8, read
+            // the full char from the source slice to avoid corrupting it.
+            if c < 0x80 {
+                out.push(c as char);
+                self.cursor += 1;
+                self.col += 1;
+            } else {
+                let ch_len = utf8_len(c).min(self.src.len() - self.cursor);
+                if let Ok(s) = std::str::from_utf8(&self.src[self.cursor..self.cursor + ch_len]) {
+                    if let Some(ch) = s.chars().next() {
+                        out.push(ch);
+                    }
+                }
+                self.cursor += ch_len;
+                self.col += 1;
+            }
+        }
+        out
+    }
+
+    /// Lex a numeric literal (rule 35) into `Token::Number(Decimal)`.
+    /// The first byte at `self.cursor` is a digit or `.`. NEVER `f64`.
+    fn lex_number(&mut self) -> Token {
+        let start = self.cursor;
+        // Optional integer digits.
+        while self.cursor < self.src.len() && self.src[self.cursor].is_ascii_digit() {
+            self.cursor += 1;
+            self.col += 1;
+        }
+        // Optional fractional part: "." followed by digits.
+        if self.peek_at(0) == Some(b'.')
+            && self.peek_at(1).map_or(false, |c| c.is_ascii_digit())
+        {
+            self.cursor += 1;
+            self.col += 1;
+            while self.cursor < self.src.len() && self.src[self.cursor].is_ascii_digit() {
+                self.cursor += 1;
+                self.col += 1;
+            }
+        }
+        let text = std::str::from_utf8(&self.src[start..self.cursor]).unwrap_or("");
+        match Decimal::from_str_exact(text) {
+            Ok(d) => Token::Number(d),
+            Err(_) => Token::LexError(format!("invalid numeric literal: {:?}", text)),
+        }
+    }
+
+    /// Lex a name (rule 25). The first byte is a letter, `_`, `?`, or
+    /// digit. Name-part chars extend it: letters, digits, `_`, `?`, and
+    /// the additional name symbols `.`/`/`/`-`/`'`/`+`/`*` — BUT `.`/`+`/
+    /// `*`/`-` are ambiguous with operators. Resolution by position:
+    /// after a name *start* char, these symbols are name-part chars ONLY
+    /// when they are immediately adjacent (no whitespace) and followed by
+    /// another name char. A `.` followed by a digit is a numeric `.` (not
+    /// a name-part) — handled by the caller (lex_number for leading-dot).
+    fn lex_name(&mut self) -> Token {
+        let start = self.cursor;
+        // Consume the start char.
+        self.cursor += 1;
+        self.col += 1;
+        // Consume name-part chars. Be conservative: only consume `.`, `+`,
+        // `*`, `-`, `/`, `'` when they are immediately followed by a name
+        // char (letter, digit, `_`, `?`). This prevents greedy consumption
+        // of `a.b.c` as one name (we WANT `a`, `.`, `b`, `.`, `c` — Pitfall
+        // 3 / behavior test 6) — so do NOT include `.` here. The grammar
+        // rule 25 allows `.` as a name-part symbol, but the parser builds
+        // qualified names by combining Name + Dot + Name (rule 18). The
+        // lexer therefore splits on `.`.
+        while self.cursor < self.src.len() {
+            let c = self.src[self.cursor];
+            if c.is_ascii_alphanumeric() || c == b'_' || c == b'?' {
+                self.cursor += 1;
+                self.col += 1;
+                continue;
+            }
+            // Additional name symbols `/`, `'` are always name-part (no
+            // operator ambiguity). `+`, `*`, `-` are name-part ONLY when
+            // immediately followed by a name char (no whitespace) AND we
+            // are mid-name (start != cursor). Do NOT include `.` (split on
+            // it for qualified-name handling).
+            if (c == b'/' || c == b'\'' || c == b'+' || c == b'*' || c == b'-')
+                && start != self.cursor
+                && self.peek_at(1).map_or(false, |nc| nc.is_ascii_alphanumeric() || nc == b'_' || nc == b'?')
+            {
+                self.cursor += 1;
+                self.col += 1;
+                continue;
+            }
+            break;
+        }
+        let text = std::str::from_utf8(&self.src[start..self.cursor]).unwrap_or("");
+        Token::Name(text.to_string())
+    }
+
+    /// Lex a punctuator / operator starting at `self.cursor`. Handles `**`,
+    /// `<=`, `>=`, `!=`, and single-char punctuators.
+    fn lex_punct(&mut self) -> Token {
+        let b = self.src[self.cursor];
+        let tok = match b {
+            b'(' => {
+                self.advance_byte();
+                Token::LParen
+            }
+            b')' => {
+                self.advance_byte();
+                Token::RParen
+            }
+            b'[' => {
+                self.advance_byte();
+                Token::LBracket
+            }
+            b']' => {
+                self.advance_byte();
+                Token::RBracket
+            }
+            b'{' => {
+                self.advance_byte();
+                Token::LBrace
+            }
+            b'}' => {
+                self.advance_byte();
+                Token::RBrace
+            }
+            b',' => {
+                self.advance_byte();
+                Token::Comma
+            }
+            b':' => {
+                self.advance_byte();
+                Token::Colon
+            }
+            b'?' => {
+                self.advance_byte();
+                Token::Question
+            }
+            b'+' => {
+                self.advance_byte();
+                Token::Plus
+            }
+            b'-' => {
+                self.advance_byte();
+                Token::Minus
+            }
+            b'*' => {
+                if self.peek_at(1) == Some(b'*') {
+                    self.cursor += 2;
+                    self.col += 2;
+                    Token::DoubleStar
+                } else {
+                    self.advance_byte();
+                    Token::Star
+                }
+            }
+            b'/' => {
+                self.advance_byte();
+                Token::Slash
+            }
+            b'=' => {
+                self.advance_byte();
+                Token::Eq
+            }
+            b'!' => {
+                if self.peek_at(1) == Some(b'=') {
+                    self.cursor += 2;
+                    self.col += 2;
+                    Token::NotEq
+                } else {
+                    self.advance_byte();
+                    Token::LexError(format!("unexpected character: '!'"))
+                }
+            }
+            b'<' => {
+                if self.peek_at(1) == Some(b'=') {
+                    self.cursor += 2;
+                    self.col += 2;
+                    Token::Le
+                } else {
+                    self.advance_byte();
+                    Token::Lt
+                }
+            }
+            b'>' => {
+                if self.peek_at(1) == Some(b'=') {
+                    self.cursor += 2;
+                    self.col += 2;
+                    Token::Ge
+                } else {
+                    self.advance_byte();
+                    Token::Gt
+                }
+            }
+            b'.' => {
+                // `..` is the interval separator (rule 8) — emit two Dot
+                // tokens so the parser can pair them. A single `.` is a
+                // path/QN separator or a leading-dot decimal (handled in
+                // lex_one before reaching here).
+                self.advance_byte();
+                Token::Dot
+            }
+            other => {
+                self.advance_byte();
+                Token::LexError(format!("unexpected character: {:?}", other as char))
+            }
+        };
+        tok
+    }
+
+    /// Peek at the byte `offset` positions ahead of the cursor (0 = next
+    /// byte after the current one). Returns `None` past end-of-input.
+    fn peek_at(&self, offset: usize) -> Option<u8> {
+        self.src.get(self.cursor + offset).copied()
+    }
+}
+
+/// Return the UTF-8 byte length of the char whose first byte is `b`.
+/// Used to advance past multi-byte chars in string literals.
+fn utf8_len(b: u8) -> usize {
+    if b < 0x80 {
+        1
+    } else if b >> 5 == 0b110 {
+        2
+    } else if b >> 4 == 0b1110 {
+        3
+    } else if b >> 3 == 0b11110 {
+        4
+    } else {
+        // Invalid continuation byte — treat as 1 to avoid infinite loop.
+        1
     }
 }
 
