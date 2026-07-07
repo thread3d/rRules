@@ -27,6 +27,15 @@ rust_decimal = { version = "1.42", features = ["serde", "macros", "maths"] }
 # [SUS]/[SLOP]. `serde` feature enables Serialize/Deserialize for `chrono_tz::Tz`
 # so `DateTimeValue::Iana(DateTime<chrono_tz::Tz>)` can derive serde.
 chrono-tz = { version = "0.10.4", features = ["serde"] }
+# FEEL AST cache (Phase 31+). Supply-chain verified 2026-07-07 per
+# 31-RESEARCH.md Package Legitimacy Audit: repo xacrimon/dashmap, ~7 yrs,
+# ~5M downloads/wk, OK/Approved. Already used in v5.0 SessionManager.
+dashmap = "6.2.1"
+# FEEL string built-ins (Phase 31+): `replace`/`matches`/`split` (DMN 1.5
+# §10.3.4.2.2). FEEL regex is XQuery 1.0 / XPath 2.0 FO; the Rust `regex`
+# crate covers the TCK-exercised subset (31-RESEARCH.md Pitfall 7).
+# Supply-chain verified: repo rust-lang/regex, ~12 yrs, ~15M downloads/wk, OK.
+regex = "1.12.4"
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }

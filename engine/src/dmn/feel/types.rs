@@ -21,6 +21,10 @@
 
 use crate::data_types::Value;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+use super::ast::FeelExpression;
+use super::eval::Scope;
 
 /// The FEEL type lattice nodes (DMN 1.5 §10.3.2.9).
 ///
@@ -94,10 +98,30 @@ pub struct FeelRange {
 
 /// FEEL function value carrier — the payload of [`Value::Function`].
 ///
-/// Plan 30-01 ships a *placeholder* carrying only arity + parameter/return
+/// Plan 30-01 shipped a *placeholder* carrying only arity + parameter/return
 /// `FeelType`s — enough for the lattice `conforms`/`equivalent` relations.
-/// The closure body (the `FeelExpression` AST + environment capture) is
-/// Phase 31 (research Open Question 3 resolution).
+/// Phase 31-01 (this file) extends the carrier with the closure body and
+/// captured-environment fields as a **data-model decision** (CONTEXT.md
+/// FeelFunction carrier extension guidance; 31-RESEARCH.md §DMN-16): the
+/// fields are DECLARED here with safe defaults so that existing Phase 30
+/// construction sites still compile. 31-05 POPULATES `body` (the closure
+/// body AST); 31-06 POPULATES `captured` (the definition-site scope
+/// snapshot) and adds the lambda invocation logic. Neither 31-05 nor 31-06
+/// re-declares these fields.
+///
+/// The `body`/`captured` fields use `Arc<…>` so that cloning a closure is
+/// cheap (the AST and the scope snapshot are shared, not deep-copied). This
+/// mirrors the AST cache (`Arc<FeelExpression>`, DMN-18) and the
+/// `FeelRange` carrier's `Box<FeelRange>` cycle-break pattern (the
+/// `FeelFunction` ⇄ `FeelExpression` ⇄ `FeelFunction` cycle is broken by
+/// `Arc` + `Box`: `FeelExpression::FunctionInvocation` holds
+/// `Box<FeelExpression>` for the callee, and `FeelFunction.body` holds
+/// `Option<Arc<FeelExpression>>` for the closure body).
+///
+/// `Serialize`/`Deserialize` are derived (Phase 30 D-30-01c serde bound
+/// propagates): `Arc<T>` is serde-serializable when `T: Serialize`, which
+/// holds for both `FeelExpression` (this Phase 31-01) and the `Scope` stub
+/// (31-02 retains the derives).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeelFunction {
     /// Number of parameters the function accepts.
@@ -106,6 +130,43 @@ pub struct FeelFunction {
     pub param_types: Vec<FeelType>,
     /// Return type.
     pub ret_type: Box<FeelType>,
+    // --- Phase 31 additions (declared here as a data-model decision;
+    // populated by 31-05/31-06; safe defaults so Phase 30 construction
+    // sites still compile) ---
+    /// Parameter names (for positional→named binding in 31-06). Length ==
+    /// `arity`. Defaults to `Vec::new()` for built-in function pointers
+    /// (which have no parameter names) and for legacy Phase 30 construction
+    /// sites that do not yet populate the carrier.
+    pub param_names: Vec<String>,
+    /// The closure body AST. `None` for built-ins (which are `BuiltinFn`
+    /// pointers resolved via the `builtins` registry in 31-07/31-08);
+    /// `Some(Arc<FeelExpression>)` for user-defined lambdas — populated in
+    /// 31-05 when a `FunctionDefinition` evaluates to a `FeelFunction`
+    /// value. The `Arc` shares the AST with the cache (31-09).
+    pub body: Option<Arc<FeelExpression>>,
+    /// Captured lexical scope (flat `Scope` snapshot at function-definition
+    /// time). `None` for built-ins; `Some(Arc<Scope>)` for user-defined
+    /// lambdas — populated in 31-06 (lexical capture, NOT dynamic capture:
+    /// the closure sees its definition site's bindings). The `Arc` shares
+    /// the snapshot cheaply across closure clones.
+    pub captured: Option<Arc<Scope>>,
+}
+
+impl FeelFunction {
+    /// Construct a placeholder carrier with the given arity + param/return
+    /// types and safe defaults for the Phase 31 fields (`param_names: []`,
+    /// `body: None`, `captured: None`). Used by Phase 30 construction sites
+    /// that do not yet populate the closure fields.
+    pub fn placeholder(arity: usize, param_types: Vec<FeelType>, ret_type: FeelType) -> Self {
+        Self {
+            arity,
+            param_types,
+            ret_type: Box::new(ret_type),
+            param_names: Vec::new(),
+            body: None,
+            captured: None,
+        }
+    }
 }
 
 /// The three DMN 1.5 §10.3.2.9.4 conversion contexts.
@@ -809,9 +870,20 @@ mod tests {
             arity: 1,
             param_types: vec![FeelType::Number],
             ret_type: Box::new(FeelType::Boolean),
+            param_names: vec!["x".to_string()],
+            body: None,
+            captured: None,
         };
         assert_eq!(f.arity, 1);
+        assert_eq!(f.param_names, vec!["x".to_string()]);
+        assert!(f.body.is_none());
+        assert!(f.captured.is_none());
         assert_eq!(f, f.clone());
+        // The placeholder constructor yields safe defaults.
+        let p = FeelFunction::placeholder(0, vec![], FeelType::Any);
+        assert!(p.param_names.is_empty());
+        assert!(p.body.is_none());
+        assert!(p.captured.is_none());
     }
 
     #[test]
