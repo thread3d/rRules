@@ -159,12 +159,12 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
   4. The ~70+ FEEL built-in functions are available across conversion/string/list/numeric/date-time/context/boolean/range/equality families, and user-defined lambdas (grammar rule 55) evaluate.
   5. Cell/expression FEEL is pre-parsed to `Arc<FeelExpression>` at load time; the evaluator takes `&FeelExpression` and never re-parses (a 30-cell table × 10k evals ≈ 30 parses, not 300k).
 
-**Plans**: 9 plans (sequential waves 1-9 — `eval.rs`/`builtins.rs` shared file overlap forces sequential execution matching the verify-each-plan cadence)
+**Plans**: 1/9 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 31-01-PLAN.md — DMN-11: Lexer + recursive-descent Pratt parser (grammar 1-65), dual entry points, error-recovery partial AST, FeelExpression enum skeleton (wave 1)
+- [x] 31-01-PLAN.md — DMN-11: Lexer + recursive-descent Pratt parser (grammar 1-65), dual entry points, error-recovery partial AST, FeelExpression enum skeleton (wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -294,7 +294,7 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 28. Frontend test-runner | v5.0 | 5/5 | Complete | 2026-07-06 |
 | 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 3/3 | Complete   | 2026-07-06 |
 | 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 4/4 | Complete    | 2026-07-07 |
-| 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 0/TBD | Not started | - |
+| 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 1/9 | In Progress|  |
 | 32. Decision-Table Engine + Hit Policies | v6.0 | 0/TBD | Not started | - |
 | 33. Decision Evaluator + DRD Resolution + REST API + Metrics | v6.0 | 0/TBD | Not started | - |
 | 34. Frontend Wiring + Hit-Policy Model Refactor | v6.0 | 0/TBD | Not started | - |

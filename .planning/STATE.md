@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v6.0
 milestone_name: DMN Level 3 Compliance
 current_phase: 31
-current_phase_name: FEEL Parser + Evaluator + Built-in Function Library
+current_phase_name: feel-parser-evaluator-built-in-function-library
 status: executing
 stopped_at: Completed 29-02-PLAN.md
-last_updated: "2026-07-07T06:16:21.997Z"
+last_updated: "2026-07-07T06:27:53.544Z"
 last_activity: 2026-07-07
-last_activity_desc: Phase 30 complete, transitioned to Phase 31
+last_activity_desc: Phase 31 execution started
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 16
+  completed_plans: 8
   percent: 29
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-06)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** Phase 30 — feel-value-types-type-lattice-temporal-domain
+**Current focus:** Phase 31 — feel-parser-evaluator-built-in-function-library
 
 ## Current Position
 
-Phase: 31 — FEEL Parser + Evaluator + Built-in Function Library
-Plan: Not started
+Phase: 31 (feel-parser-evaluator-built-in-function-library) — EXECUTING
+Plan: 2 of 9
 Status: Ready to execute
-Last activity: 2026-07-07 — Phase 30 complete, transitioned to Phase 31
+Last activity: 2026-07-07 — Phase 31 execution started
 
 ### Milestone v6.0 Phases
 
@@ -279,6 +279,10 @@ From v2.0 milestone:
 - [Phase ?]: D-30-04c: implicit_convert EXACTLY three §10.3.2.9.4 conversions; NO number↔string in any ConvertCtx (Pitfall 6)
 - [Phase ?]: D-30-04d: type_of exhaustive over all 16 Value variants (no wildcard); Integer/Float→Number per §10.3.2.2
 - [Phase ?]: D-30-04f: regression audit documented every Value wildcard in validation.rs/rules.rs as Rete-only (Pitfall 1 citations); testing/mod.rs confirmed exhaustive
+- [Phase ?]: Single FeelExpression enum (not non_exhaustive) — exhaustive match is safety net
+- [Phase ?]: Pratt precedence ladder: or=10 and=20 comparison=30 instance-of=35 additive=40 mult=50 **=60 RIGHT-assoc
+- [Phase ?]: Error recovery: partial AST with Err nodes carrying spans (user override, not fail-fast)
+- [Phase ?]: FeelFunction carrier extended with param_names/body/captured (Arc-backed data-model decision)
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -310,7 +314,7 @@ From v3.0 milestone:
 
 **Stopped at:** Completed 29-02-PLAN.md
 
-Last session: 2026-07-07T05:04:33.980Z
+Last session: 2026-07-07T06:27:53.529Z
 
 **Completed Phases:**
 
@@ -350,3 +354,4 @@ Last session: 2026-07-07T05:04:33.980Z
 | Phase 30 P02 | 10min | 2 tasks | 2 files |
 | Phase 30 P03 | 9min | 2 tasks | 2 files |
 | Phase 30 P04 | 7min | 2 tasks | 4 files |
+| Phase 31 P01 | 9m | 3 tasks | 11 files |
