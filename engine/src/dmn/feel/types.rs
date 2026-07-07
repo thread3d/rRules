@@ -235,13 +235,11 @@ pub fn conforms(a: &FeelType, b: &FeelType) -> bool {
     match (a, b) {
         // T <: Any for every T.
         (_, FeelType::Any) => true,
-        // Null <: T for every T.
-        (FeelType::Null, _) => true,
-        // Nothing conforms to Null except Null itself (handled above + via
-        // the equivalence arm below).
-        (_, FeelType::Null) => false,
-        // Equivalence implies conformance (T ≡ S ⇒ T <: S).
+        // Equivalence implies conformance (T ≡ S ⇒ T <: S). Must come BEFORE
+        // the Null-exclusion arm so that `conforms(Null, Null)` returns true.
         (x, y) if equivalent(x, y) => true,
+        // Nothing conforms to Null except itself (handled above via equivalence).
+        (_, FeelType::Null) => false,
         // §10.3.2.3.5: a date is a date-time at UTC midnight → Date <: DateTime.
         (FeelType::Date, FeelType::DateTime) => true,
         // list<T> <: list<S> iff T <: S.
@@ -500,15 +498,18 @@ mod tests {
 
     proptest::proptest! {
         /// §10.3.2.9.2: conforms is reflexive (T <: T), transitive, and
-        /// `Null <: T <: Any` for every T.
+        /// `Null <: Any` only (DMN-14 instance of semantics).
         #[test]
         fn conformance_proptest(depth in 0u32..=3) {
             let ts = arb_feeltypes(depth);
             for t in &ts {
                 // Reflexive: T <: T.
                 prop_assert!(conforms(t, t), "reflexivity failed for {:?}", t);
-                // Null <: T <: Any.
-                prop_assert!(conforms(&FeelType::Null, t), "Null <: T failed for {:?}", t);
+                // Null <: Any only (DMN-14 instance of semantics), plus reflexive.
+                prop_assert!(conforms(&FeelType::Null, &FeelType::Any), "Null <: Any failed");
+                prop_assert!(!conforms(&FeelType::Null, t) || *t == FeelType::Any || equivalent(&FeelType::Null, t),
+                    "Null should only conform to Any (or itself via equivalence), not {:?}", t);
+                // T <: Any for every T.
                 prop_assert!(conforms(t, &FeelType::Any), "T <: Any failed for {:?}", t);
             }
             // Transitive: T <: S and S <: U implies T <: U.
@@ -710,14 +711,17 @@ mod tests {
 
     #[test]
     fn test_null_propagation() {
-        // Null conforms to every type.
+        // Null <: Any only (DMN-14 instance of semantics).
         assert!(conforms(&FeelType::Null, &FeelType::Any));
-        assert!(conforms(&FeelType::Null, &FeelType::Number));
-        assert!(conforms(
+        // Per DMN-14: null does NOT conform to other types.
+        // (The Phase 30 implementation had a bug where it treated Null as
+        // conforming to everything; evaluate_instance_of special-cases this.)
+        assert!(!conforms(&FeelType::Null, &FeelType::Number));
+        assert!(!conforms(
             &FeelType::Null,
             &FeelType::List(Box::new(FeelType::String))
         ));
-        assert!(conforms(&FeelType::Null, &FeelType::DateTime));
+        assert!(!conforms(&FeelType::Null, &FeelType::DateTime));
     }
 
     // ---- resolve_type_ref ----

@@ -422,18 +422,9 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
         FeelExpression::Quantified { kind, iters, satisfies } => {
             evaluate_quantified(kind, iters, satisfies, scope)
         }
-        FeelExpression::Path { .. } => {
-            // TODO(31-05): context/list path navigation via path_nav.
-            Value::Null
-        }
-        FeelExpression::Filter { .. } => {
-            // TODO(31-05): list filter predicate.
-            Value::Null
-        }
-        FeelExpression::InstanceOf { .. } => {
-            // TODO(31-04): feel::types::conforms(type_of(v), T).
-            Value::Null
-        }
+        FeelExpression::Path { target, name } => evaluate_path(target, name, scope),
+        FeelExpression::Filter { target, predicate } => evaluate_filter(target, predicate, scope),
+        FeelExpression::InstanceOf { expr, ty } => evaluate_instance_of(expr, &ty, scope),
         FeelExpression::List(elems) => {
             // Evaluate each element (needed for iteration sources in Task 1).
             let evaluated: Vec<Value> = elems.iter().map(|e| evaluate(e, scope)).collect();
@@ -512,12 +503,9 @@ fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope:
             }
         }),
         BinOpKind::Pow => eval_pow(l, r),
-        // `in` (DMN-13 range membership): `a in <range>` checks that `a`
-        // lies within the range's endpoints per the inclusivity flags. The
-        // full unary-test `in` semantics (`a in <positive unary test>`, `a
-        // in (tests)`, `-`, `not(...)`) land in 31-04 alongside the
-        // SimpleUnaryTests evaluator.
-        BinOpKind::In => eval_in(l, r),
+        // `in` (DMN-13/DMN-14): positive unary test membership.
+        // Handles Range values and unary-test AST patterns (Or-chains, Name("?") comparisons).
+        BinOpKind::In => eval_in_with_ast(l, rhs),
         // Between is handled above; this arm is unreachable but kept for
         // exhaustiveness (BinOpKind is a closed enum — no `_ =>` wildcard).
         BinOpKind::Between => unreachable!("between handled above"),
@@ -891,6 +879,142 @@ fn collect_quant_predicates(
         let mut new_current = current.to_vec();
         new_current.push(val.clone());
         collect_quant_predicates(idx + 1, materialized, iters, satisfies, parent_scope, &new_current, results);
+    }
+}
+
+/// `target.name` — path navigation (rule 43).
+/// - Object → key lookup; Array → map semantics; Null/other → Null.
+fn evaluate_path(target: &FeelExpression, name: &str, scope: &Scope) -> Value {
+    let t = evaluate(target, scope);
+    match t {
+        Value::Object(map) => map.get(name).cloned().unwrap_or(Value::Null),
+        Value::Array(elems) => Value::Array(elems.into_iter().map(|e| path_nav(e, name)).collect()),
+        _ => Value::Null,
+    }
+}
+
+/// `target[predicate]` — filter expression (rule 50).
+fn evaluate_filter(target: &FeelExpression, predicate: &FeelExpression, scope: &Scope) -> Value {
+    let t = evaluate(target, scope);
+    match t {
+        Value::Array(elems) => {
+            let mut result = Vec::new();
+            for elem in elems {
+                let mut scoped = scope.clone();
+                scoped.bind("item".to_string(), elem.clone(), vec![]);
+                if matches!(evaluate(predicate, &scoped), Value::Bool(true)) {
+                    result.push(elem);
+                }
+            }
+            Value::Array(result)
+        }
+        Value::Null => Value::Null,
+        other => {
+            let mut scoped = scope.clone();
+            scoped.bind("item".to_string(), other.clone(), vec![]);
+            if matches!(evaluate(predicate, &scoped), Value::Bool(true)) {
+                Value::Array(vec![other])
+            } else {
+                Value::Array(vec![])
+            }
+        }
+    }
+}
+
+/// `expr instance of T` — type conformance check (rule 51).
+///
+/// Per DMN-14: `null instance of Any → true`; `null instance of other types → false`.
+/// The Phase 30 `conforms` function treats Null as conforming to everything,
+/// so we special-case null here to match the DMN-14 requirement.
+fn evaluate_instance_of(expr: &FeelExpression, ty: &super::types::FeelType, scope: &Scope) -> Value {
+    let v = evaluate(expr, scope);
+    // Special case for null: only conforms to Any per DMN-14 instance of semantics.
+    if matches!(v, Value::Null) && !matches!(ty, crate::dmn::feel::types::FeelType::Any) {
+        return Value::Bool(false);
+    }
+    Value::Bool(crate::dmn::feel::types::conforms(&crate::dmn::feel::types::type_of(&v), ty))
+}
+
+/// `a in <test>` — full unary-test semantics (DMN-13/DMN-14).
+///
+/// - RHS evaluates to a Range value → range membership check.
+/// - RHS is an Or-chain AST → fold via or_3vl.
+/// - RHS has Name("?") placeholder → substitute input and evaluate comparison.
+/// - Empty tests (literal true) → always true.
+fn eval_in_with_ast(l: Value, rhs_expr: &FeelExpression) -> Value {
+    // First try evaluating RHS to a value — if it's a Range, use range membership.
+    let r_val = evaluate(rhs_expr, &Scope::empty());
+    match r_val {
+        Value::Range(range) => {
+            let mut ok: Option<bool> = Some(true);
+            if let Some(s) = &range.start {
+                let o = match cmp::feel_compare(&l, s) {
+                    Some(o) => o, None => return Value::Null,
+                };
+                let in_lower = if range.start_incl { o != Ordering::Less } else { o == Ordering::Greater };
+                ok = cmp::and_3vl(ok, Some(in_lower));
+            }
+            if let Some(e) = &range.end {
+                let o = match cmp::feel_compare(&l, e) {
+                    Some(o) => o, None => return Value::Null,
+                };
+                let in_upper = if range.end_incl { o != Ordering::Greater } else { o == Ordering::Less };
+                ok = cmp::and_3vl(ok, Some(in_upper));
+            }
+            opt_bool(ok)
+        }
+        _ => opt_bool(eval_in_unary_test(l, rhs_expr)),
+    }
+}
+
+/// Evaluate a positive unary test against an input value.
+fn eval_in_unary_test(input: Value, test: &FeelExpression) -> Option<bool> {
+    match test {
+        // Or-chain (comma-list): fold via or_3vl.
+        FeelExpression::BinOp { op: BinOpKind::Or, lhs, rhs } => {
+            let left = eval_in_unary_test(input.clone(), lhs);
+            let right = eval_in_unary_test(input, rhs);
+            // Three-valued OR over the two test results.
+            match (left, right) {
+                (Some(true), _) | (_, Some(true)) => Some(true),
+                (Some(false), Some(false)) => Some(false),
+                _ => None, // null propagates if either side is null and no true found
+            }
+        }
+        // Comparison with Name("?") on left: `? < 10` → substitute input for ?.
+        FeelExpression::BinOp { op, lhs, rhs } if matches!(lhs.as_ref(), FeelExpression::Name(n) if n == "?") => {
+            let r_val = evaluate(rhs, &Scope::empty());
+            feel_compare_with_op(&input, &r_val, op)
+        }
+        // Comparison with Name("?") on right: `10 > ?` → invert operator.
+        FeelExpression::BinOp { op, lhs, rhs } if matches!(rhs.as_ref(), FeelExpression::Name(n) if n == "?") => {
+            let l_val = evaluate(lhs, &Scope::empty());
+            let inverted = match *op {
+                BinOpKind::Lt => BinOpKind::Gt,
+                BinOpKind::Le => BinOpKind::Ge,
+                BinOpKind::Gt => BinOpKind::Lt,
+                BinOpKind::Ge => BinOpKind::Le,
+                BinOpKind::Eq => BinOpKind::Eq,
+                BinOpKind::NotEq => BinOpKind::NotEq,
+                _ => return None,
+            };
+            feel_compare_with_op(&l_val, &input, &inverted)
+        }
+        FeelExpression::Literal(Value::Bool(true)) => Some(true), // empty tests → always true
+        _ => None,
+    }
+}
+
+/// Apply a comparison operator to two values.
+fn feel_compare_with_op(a: &Value, b: &Value, op: &BinOpKind) -> Option<bool> {
+    match op {
+        BinOpKind::Eq => cmp::feel_equals(a, b),
+        BinOpKind::NotEq => cmp::feel_equals(a, b).map(|v| !v),
+        BinOpKind::Lt => cmp::feel_compare(a, b).map(|o| o == Ordering::Less),
+        BinOpKind::Le => cmp::feel_compare(a, b).map(|o| o != Ordering::Greater),
+        BinOpKind::Gt => cmp::feel_compare(a, b).map(|o| o == Ordering::Greater),
+        BinOpKind::Ge => cmp::feel_compare(a, b).map(|o| o != Ordering::Less),
+        _ => None,
     }
 }
 
@@ -1599,6 +1723,121 @@ mod control {
 }
 
 // ----- evaluate dispatch tests (Task 2) -----
+
+// =====================================================================
+// Plan 31-04 Task 2: path / filter / instance-of / in unary-test completion.
+// =====================================================================
+
+#[cfg(test)]
+mod control_t2 {
+    use super::*;
+    use crate::dmn::feel::ast::FeelExpression;
+    use crate::dmn::feel::types::FeelType;
+
+    #[cfg(test)] fn ev(src: &str) -> Value { evaluate(&parse_expression(src), &Scope::empty()) }
+
+    // ----- Path navigation -----
+    /// `{"a": {"b": 1}}.a.b` → Number(1). Built AST manually (no context literal in parser).
+    /// NOTE: Context evaluation is stubbed (TODO 31-05), so this test is deferred.
+    #[test] #[ignore = "Context evaluation stubbed until Phase 31-05"]
+    fn path_on_context() {
+        let inner_ctx = FeelExpression::Context(vec![("b".to_string(), FeelExpression::Literal(Value::Number(dec!(1))))]);
+        let ctx = FeelExpression::Context(vec![("a".to_string(), inner_ctx)]);
+        let path = FeelExpression::Path { target: Box::new(ctx), name: "b".into() };
+        assert_eq!(evaluate(&path, &Scope::empty()), Value::Number(dec!(1)));
+    }
+
+    /// `[{"x":1}, {"x":2}].x` → Array([1, 2]) (list map semantics).
+    #[test] #[ignore = "Context evaluation stubbed until Phase 31-05"]
+    fn path_on_list_map() {
+        let list = FeelExpression::List(vec![
+            FeelExpression::Context(vec![("x".into(), FeelExpression::Literal(Value::Number(dec!(1))))]),
+            FeelExpression::Context(vec![("x".into(), FeelExpression::Literal(Value::Number(dec!(2))))]),
+        ]);
+        let path = FeelExpression::Path { target: Box::new(list), name: "x".into() };
+        assert_eq!(evaluate(&path, &Scope::empty()), Value::Array(vec![Value::Number(dec!(1)), Value::Number(dec!(2))]));
+    }
+
+    /// `null.x` → Null.
+    #[test] fn path_on_null() {
+        let path = FeelExpression::Path { target: Box::new(FeelExpression::Literal(Value::Null)), name: "x".into() };
+        assert_eq!(evaluate(&path, &Scope::empty()), Value::Null);
+    }
+
+    // ----- Filter -----
+    /// `[1,2,3,4][?item > 2]` → Array([3, 4]).
+    #[test] fn filter_list() {
+        let list = FeelExpression::List(vec![
+            FeelExpression::Literal(Value::Number(dec!(1))), FeelExpression::Literal(Value::Number(dec!(2))),
+            FeelExpression::Literal(Value::Number(dec!(3))), FeelExpression::Literal(Value::Number(dec!(4))),
+        ]);
+        let pred = FeelExpression::BinOp { op: BinOpKind::Gt, lhs: Box::new(FeelExpression::Name("item".into())), rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(2)))) };
+        let filter = FeelExpression::Filter { target: Box::new(list), predicate: Box::new(pred) };
+        assert_eq!(evaluate(&filter, &Scope::empty()), Value::Array(vec![Value::Number(dec!(3)), Value::Number(dec!(4))]));
+    }
+
+    /// `null[?true]` → Null.
+    #[test] fn filter_on_null() {
+        let filter = FeelExpression::Filter { target: Box::new(FeelExpression::Literal(Value::Null)), predicate: Box::new(FeelExpression::Literal(Value::Bool(true))) };
+        assert_eq!(evaluate(&filter, &Scope::empty()), Value::Null);
+    }
+
+    // ----- Instance of -----
+    #[test] fn instance_of_number() {
+        let e = FeelExpression::InstanceOf { expr: Box::new(FeelExpression::Literal(Value::Number(dec!(5)))), ty: FeelType::Number };
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
+    }
+    #[test] fn instance_of_string() {
+        let e = FeelExpression::InstanceOf { expr: Box::new(FeelExpression::Literal(Value::Number(dec!(5)))), ty: FeelType::String };
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(false));
+    }
+    /// `null instance of Any` → Bool(true) (Null <: Any).
+    #[test] fn instance_of_null_any() {
+        let e = FeelExpression::InstanceOf { expr: Box::new(FeelExpression::Literal(Value::Null)), ty: FeelType::Any };
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
+    }
+    /// `null instance of number` → Bool(false) (only Null <: Any).
+    #[test] fn instance_of_null_not_number() {
+        let e = FeelExpression::InstanceOf { expr: Box::new(FeelExpression::Literal(Value::Null)), ty: FeelType::Number };
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(false));
+    }
+
+    // ----- In unary-test completion -----
+    /// `5 in [1..10]` → Bool(true) (range membership).
+    #[test] fn in_range_membership() { assert_eq!(ev("5 in [1..10]"), Value::Bool(true)); }
+    /// `0 in [1..10]` → Bool(false).
+    #[test] fn in_range_outside() { assert_eq!(ev("0 in [1..10]"), Value::Bool(false)); }
+
+    /// Test `eval_in_unary_test` with constructed AST: `? < 10`.
+    #[test] fn in_unary_test_lt() {
+        let test = FeelExpression::BinOp { op: BinOpKind::Lt, lhs: Box::new(FeelExpression::Name("?".into())), rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(10)))) };
+        assert_eq!(eval_in_unary_test(Value::Number(dec!(5)), &test), Some(true));
+        assert_eq!(eval_in_unary_test(Value::Number(dec!(15)), &test), Some(false));
+    }
+
+    /// Test `eval_in` with Or-chain (comma-list unary tests).
+    #[test] fn in_or_chain() {
+        let test = FeelExpression::BinOp { op: BinOpKind::Or,
+            lhs: Box::new(FeelExpression::BinOp { op: BinOpKind::Eq, lhs: Box::new(FeelExpression::Name("?".into())), rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(1)))) }),
+            rhs: Box::new(FeelExpression::BinOp { op: BinOpKind::Eq, lhs: Box::new(FeelExpression::Name("?".into())), rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(3)))) }),
+        };
+        let e = FeelExpression::BinOp { op: BinOpKind::In, lhs: Box::new(FeelExpression::Literal(Value::Number(dec!(1)))), rhs: Box::new(test) };
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
+    }
+
+    /// Empty unary tests (always true).
+    #[test] fn in_always_true() {
+        let e = FeelExpression::BinOp { op: BinOpKind::In, lhs: Box::new(FeelExpression::Literal(Value::Number(dec!(99)))), rhs: Box::new(FeelExpression::Literal(Value::Bool(true))) };
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
+    }
+
+    // ----- conforms/type_of integration -----
+    #[test] fn type_of_number() { assert_eq!(crate::dmn::feel::types::type_of(&Value::Number(dec!(5))), FeelType::Number); }
+    #[test] fn type_of_null() { assert_eq!(crate::dmn::feel::types::type_of(&Value::Null), FeelType::Null); }
+    #[test] fn conforms_null_any() { assert!(crate::dmn::feel::types::conforms(&FeelType::Null, &FeelType::Any)); }
+    #[test] fn conforms_number_number() { assert!(crate::dmn::feel::types::conforms(&FeelType::Number, &FeelType::Number)); }
+    #[test] fn conforms_null_not_number() { assert!(!crate::dmn::feel::types::conforms(&FeelType::Null, &FeelType::Number)); }
+}
 
 #[cfg(test)]
 fn scope_with_x_5() -> Scope {
