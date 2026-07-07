@@ -188,7 +188,40 @@ pub struct YearsMonthsDuration {
 /// rejected (Pitfall 4 — documented limitation; TCK vectors use 4-digit
 /// years).
 pub fn parse_at_literal(s: &str) -> Option<Value> {
-    None // RED stub — Plan 03 Task 1 GREEN fills this in.
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // Duration? starts with 'P' (positive) or '-P' (negative) — XDM
+    // dayTimeDuration / yearMonthDuration lexical form.
+    if s.starts_with('P') || s.starts_with("-P") {
+        return parse_duration(s);
+    }
+    // Date-time? contains 'T' (only the date-time form has 'T').
+    if s.contains('T') {
+        return parse_date_time(s).map(Value::DateTimeTz);
+    }
+    // Date or time? disambiguate by the first separator:
+    //  - ':' before '-' (or '-' absent) → time (HH:mm:ss[+/-HH:mm])
+    //  - '-' before ':' (or ':' absent) → date (YYYY-MM-DD)
+    let first_colon = s.find(':');
+    let first_dash = s.find('-');
+    let is_time = match (first_colon, first_dash) {
+        (Some(c), Some(d)) => c < d,
+        (Some(_), None) => true,
+        (None, Some(_)) => false,
+        (None, None) => return None,
+    };
+    if is_time {
+        return parse_time(s).map(Value::Time);
+    }
+    // Date: reject years > 9999 (Pitfall 4 — documented limitation; the
+    // TCK vectors use 4-digit years).
+    let year_part = s.split('-').next().unwrap_or("");
+    if year_part.len() > 4 {
+        return None;
+    }
+    NaiveDate::parse_from_str(s, "%Y-%m-%d").ok().map(Value::Date)
 }
 
 /// Format a temporal [`Value`] back to its `@""` lexical form.
@@ -200,7 +233,15 @@ pub fn parse_at_literal(s: &str) -> Option<Value> {
 ///
 /// Returns `None` for non-temporal `Value` variants.
 pub fn format_value(v: &Value) -> Option<String> {
-    None // RED stub — Plan 03 Task 1 GREEN fills this in.
+    match v {
+        Value::Date(d) => Some(d.format("%Y-%m-%d").to_string()),
+        Value::Time(tv) => Some(format_time_value(tv)),
+        Value::DateTimeTz(dtv) => Some(format_date_time_value(dtv)),
+        Value::DaysTimeDuration(td) => Some(format_days_time_duration(*td)),
+        Value::YearsMonthsDuration(ymd) => Some(format_years_months_duration(ymd)),
+        // Non-temporal variants are not this function's responsibility.
+        _ => None,
+    }
 }
 
 /// Add a [`YearsMonthsDuration`] to a zoned datetime (IANA zone preserved).
@@ -211,10 +252,19 @@ pub fn format_value(v: &Value) -> Option<String> {
 /// `TimeZone::from_local_datetime`. DST gap → `None` (null); overlap →
 /// earliest (Pitfall 5 documented policy). **Never** unwraps `LocalResult`.
 pub fn add_months_zoned(
-    _dt: DateTime<chrono_tz::Tz>,
-    _ymd: &YearsMonthsDuration,
+    dt: DateTime<chrono_tz::Tz>,
+    ymd: &YearsMonthsDuration,
 ) -> Option<DateTime<chrono_tz::Tz>> {
-    None // RED stub — Plan 03 Task 1 GREEN fills this in.
+    let tz = dt.timezone();
+    let naive = dt.naive_local();
+    let new_naive = if ymd.months >= 0 {
+        naive.checked_add_months(Months::new(ymd.months.unsigned_abs() as u32))?
+    } else {
+        naive.checked_sub_months(Months::new(ymd.months.unsigned_abs() as u32))?
+    };
+    // Re-attach the IANA zone. DST gap → None (null), Ambiguous → earliest
+    // (Pitfall 5 documented policy). NEVER unwrap LocalResult.
+    reattach_zone(&tz, &new_naive)
 }
 
 /// Add a `TimeDelta` (days-and-time duration) to a zoned datetime.
@@ -224,22 +274,325 @@ pub fn add_months_zoned(
 /// [`add_months_zoned`] (None → null, Ambiguous → earliest). **Never**
 /// unwraps `LocalResult` (Pitfall 5).
 pub fn add_days_time_zoned(
-    _dt: DateTime<chrono_tz::Tz>,
-    _dur: TimeDelta,
+    dt: DateTime<chrono_tz::Tz>,
+    dur: TimeDelta,
 ) -> Option<DateTime<chrono_tz::Tz>> {
-    None // RED stub — Plan 03 Task 1 GREEN fills this in.
+    let tz = dt.timezone();
+    let naive = dt.naive_local();
+    // TimeDelta addition on a NaiveDateTime can overflow; map to None.
+    let new_naive = naive.checked_add_signed(dur)?;
+    // Re-attach the IANA zone with the same DST policy as add_months_zoned.
+    reattach_zone(&tz, &new_naive)
 }
 
-// Silence unused-import warnings in the RED stub phase; the imports are used
-// by the GREEN implementation that follows.
-#[allow(dead_code)]
-fn _red_imports_anchor() {
-    let _ = (NaiveDate::default(), NaiveTime::default(), NaiveDateTime::default());
-    let _ = Months::new(0);
-    let _ = FixedOffset::east_opt(0);
-    let _: DateTime<FixedOffset> = DateTime::<FixedOffset>::default();
-    let _: Option<DateTime<chrono_tz::Tz>> = None;
-    let _: TimeDelta = TimeDelta::zero();
+// ----- parse helpers -----
+
+/// Parse an XDM duration literal (`P…` / `-P…`) into a years-months or
+/// days-time duration [`Value`].
+///
+/// Dispatch: if the body (after `P`) contains `T`, `D`, `H`, or `S` it is a
+/// dayTimeDuration (TimeDelta); otherwise (only `Y`/`M` markers) it is a
+/// yearMonthDuration. The `M` marker is disambiguated by the presence of `T`
+/// — without `T`, `M` means months; with `T`, `M` means minutes.
+fn parse_duration(s: &str) -> Option<Value> {
+    let (neg, body) = if let Some(rest) = s.strip_prefix('-') {
+        (true, rest)
+    } else {
+        (false, s)
+    };
+    let body = body.strip_prefix('P')?;
+    if body.is_empty() {
+        return None;
+    }
+    let is_day_time = body.contains('T')
+        || body.contains('D')
+        || body.contains('H')
+        || body.contains('S');
+    if is_day_time {
+        let td = parse_day_time_duration(body, neg)?;
+        Some(Value::DaysTimeDuration(td))
+    } else {
+        let ymd = parse_year_month_duration(body, neg)?;
+        Some(Value::YearsMonthsDuration(ymd))
+    }
+}
+
+/// Parse the body of a yearMonthDuration (the part after `P`, sign handled
+/// separately) into total months. Body shape: `[n]Y[n]M` with at least one
+/// field present.
+fn parse_year_month_duration(body: &str, neg: bool) -> Option<YearsMonthsDuration> {
+    let mut months: i64 = 0;
+    let mut seen = false;
+    let mut num = String::new();
+    for ch in body.chars() {
+        if ch.is_ascii_digit() {
+            num.push(ch);
+        } else if ch == 'Y' {
+            let y: i64 = num.parse().ok()?;
+            months += y * 12;
+            num.clear();
+            seen = true;
+        } else if ch == 'M' {
+            let m: i64 = num.parse().ok()?;
+            months += m;
+            num.clear();
+            seen = true;
+        } else {
+            return None; // unexpected character
+        }
+    }
+    if !seen || !num.is_empty() {
+        return None; // need at least one field, no trailing digits
+    }
+    Some(YearsMonthsDuration {
+        months: if neg { -months } else { months },
+    })
+}
+
+/// Parse the body of a dayTimeDuration (the part after `P`, sign handled
+/// separately) into a `TimeDelta`. Body shape: `[n]D` and/or `T[n]H[n]M[n]S`.
+fn parse_day_time_duration(body: &str, neg: bool) -> Option<TimeDelta> {
+    let mut days: i64 = 0;
+    let mut hours: i64 = 0;
+    let mut minutes: i64 = 0;
+    let mut seconds: i64 = 0;
+    let mut seen = false;
+    let mut num = String::new();
+    let mut after_t = false;
+    for ch in body.chars() {
+        if ch.is_ascii_digit() {
+            num.push(ch);
+        } else if ch == 'T' {
+            after_t = true;
+        } else if ch == 'D' {
+            if after_t {
+                return None;
+            }
+            days = num.parse().ok()?;
+            num.clear();
+            seen = true;
+        } else if ch == 'H' {
+            if !after_t {
+                return None;
+            }
+            hours = num.parse().ok()?;
+            num.clear();
+            seen = true;
+        } else if ch == 'M' {
+            if !after_t {
+                return None;
+            }
+            minutes = num.parse().ok()?;
+            num.clear();
+            seen = true;
+        } else if ch == 'S' {
+            if !after_t {
+                return None;
+            }
+            seconds = num.parse().ok()?;
+            num.clear();
+            seen = true;
+        } else {
+            return None;
+        }
+    }
+    if !seen || !num.is_empty() {
+        return None;
+    }
+    let total_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds;
+    let td = TimeDelta::seconds(if neg { -total_seconds } else { total_seconds });
+    Some(td)
+}
+
+/// Parse an XML Schema time literal (`HH:mm:ss` or `HH:mm:ss+HH:mm`) into a
+/// [`TimeValue`].
+fn parse_time(s: &str) -> Option<TimeValue> {
+    // Try offset form first (HH:mm:ss+HH:mm).
+    if let Some(pos) = s.find('+').or_else(|| s.find('-').filter(|&p| p > 0)) {
+        let (time_part, off_part) = s.split_at(pos);
+        let naive = NaiveTime::parse_from_str(time_part, "%H:%M:%S").ok()?;
+        let dt_naive = NaiveDate::from_ymd_opt(1970, 1, 1)?.and_time(naive);
+        let off = parse_fixed_offset(off_part)?;
+        let dt = off.from_local_datetime(&dt_naive).single()?;
+        return Some(TimeValue::Offset(dt));
+    }
+    // Local time (no offset).
+    let naive = NaiveTime::parse_from_str(s, "%H:%M:%S").ok()?;
+    Some(TimeValue::Local(naive))
+}
+
+/// Parse a date-time literal (`YYYY-MM-DDTHH:mm:ss` + optional `@Zone/Name` or
+/// `+HH:mm` suffix) into a [`DateTimeValue`].
+fn parse_date_time(s: &str) -> Option<DateTimeValue> {
+    // IANA zone suffix? split at '@' (the FEEL @Zone/Name marker).
+    if let Some(at_pos) = s.find('@') {
+        let (dt_part, zone_part) = s.split_at(at_pos);
+        let zone_part = &zone_part[1..]; // strip '@'
+        let naive = NaiveDateTime::parse_from_str(dt_part, "%Y-%m-%dT%H:%M:%S").ok()?;
+        let tz: chrono_tz::Tz = zone_part.parse().ok()?;
+        let dt = tz.from_local_datetime(&naive).single().or_else(|| {
+            // Ambiguous → earliest (Pitfall 5 documented policy).
+            tz.from_local_datetime(&naive).earliest()
+        })?;
+        return Some(DateTimeValue::Iana(dt));
+    }
+    // Fixed-offset suffix? `+HH:mm` or `-HH:mm` after the time part.
+    // NaiveDateTime::parse_from_str with "%+" handles RFC3339; but the
+    // FEEL form is YYYY-MM-DDTHH:mm:ss+HH:mm (no seconds on the offset).
+    // Try parsing the naive part + offset separately for robustness.
+    let offset_pos = s
+        .char_indices()
+        .rev()
+        .find(|(_, c)| *c == '+' || *c == '-')
+        .map(|(i, _)| i);
+    if let Some(pos) = offset_pos {
+        let after_t = s.find('T').map(|t| t < pos).unwrap_or(false);
+        if after_t {
+            let (dt_part, off_part) = s.split_at(pos);
+            if let (Ok(naive), Some(off)) = (
+                NaiveDateTime::parse_from_str(dt_part, "%Y-%m-%dT%H:%M:%S"),
+                parse_fixed_offset(off_part),
+            ) {
+                let dt = off.from_local_datetime(&naive).single()?;
+                return Some(DateTimeValue::Fixed(dt));
+            }
+        }
+    }
+    // Local date-time (no offset, no zone).
+    let naive = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S").ok()?;
+    Some(DateTimeValue::Local(naive))
+}
+
+/// Parse a fixed UTC offset string (`+HH:mm` / `-HH:mm` / `+HH:mm:ss`) into a
+/// `chrono::FixedOffset`. Returns `None` on any malformed input — never
+/// panics (T-30-03-01).
+fn parse_fixed_offset(s: &str) -> Option<FixedOffset> {
+    let (sign, rest) = if let Some(r) = s.strip_prefix('+') {
+        (1, r)
+    } else if let Some(r) = s.strip_prefix('-') {
+        (-1, r)
+    } else {
+        return None;
+    };
+    let mut parts = rest.split(':');
+    let h: i32 = parts.next()?.parse().ok()?;
+    let m: i32 = parts.next().unwrap_or("0").parse().ok()?;
+    if parts.next().is_some() {
+        // optional seconds field — accept and ignore if 0, reject otherwise
+        let _s: i32 = parts.next().unwrap_or("0").parse().ok()?;
+    }
+    let secs = sign * (h * 3600 + m * 60);
+    FixedOffset::east_opt(secs)
+}
+
+// ----- format helpers -----
+
+fn format_time_value(tv: &TimeValue) -> String {
+    match tv {
+        TimeValue::Fixed(t) | TimeValue::Local(t) => t.format("%H:%M:%S").to_string(),
+        TimeValue::Offset(dt) => format!(
+            "{}{}",
+            dt.format("%H:%M:%S"),
+            format_fixed_offset(dt.offset())
+        ),
+    }
+}
+
+fn format_date_time_value(dtv: &DateTimeValue) -> String {
+    match dtv {
+        DateTimeValue::Fixed(dt) => format!(
+            "{}{}",
+            dt.format("%Y-%m-%dT%H:%M:%S"),
+            format_fixed_offset(dt.offset())
+        ),
+        DateTimeValue::Iana(dt) => {
+            // Pitfall 3: re-emit the IANA zone name, NOT the fixed offset.
+            format!(
+                "{}@{}",
+                dt.naive_local().format("%Y-%m-%dT%H:%M:%S"),
+                dt.timezone().name()
+            )
+        }
+        DateTimeValue::Local(ndt) => ndt.format("%Y-%m-%dT%H:%M:%S").to_string(),
+    }
+}
+
+fn format_fixed_offset(off: &FixedOffset) -> String {
+    let secs = off.local_minus_utc();
+    let sign = if secs >= 0 { '+' } else { '-' };
+    let abs = secs.unsigned_abs() as i64;
+    let h = abs / 3600;
+    let m = (abs % 3600) / 60;
+    format!("{}{:02}:{:02}", sign, h, m)
+}
+
+fn format_days_time_duration(td: TimeDelta) -> String {
+    let total_secs = td.num_seconds();
+    let neg = total_secs < 0;
+    let abs = total_secs.unsigned_abs() as i64;
+    let days = abs / 86400;
+    let rem = abs % 86400;
+    let hours = rem / 3600;
+    let rem = rem % 3600;
+    let minutes = rem / 60;
+    let seconds = rem % 60;
+    let mut s = String::from("P");
+    if days > 0 {
+        s.push_str(&format!("{}D", days));
+    }
+    if hours > 0 || minutes > 0 || seconds > 0 || days == 0 {
+        s.push('T');
+        if hours > 0 {
+            s.push_str(&format!("{}H", hours));
+        }
+        if minutes > 0 {
+            s.push_str(&format!("{}M", minutes));
+        }
+        if seconds > 0 {
+            s.push_str(&format!("{}S", seconds));
+        }
+        if days == 0 && hours == 0 && minutes == 0 && seconds == 0 {
+            // Zero duration → "PT0S" (XDM canonical form).
+            s.push_str("0S");
+        }
+    }
+    if neg {
+        format!("-{}", s)
+    } else {
+        s
+    }
+}
+
+fn format_years_months_duration(ymd: &YearsMonthsDuration) -> String {
+    let neg = ymd.months < 0;
+    let abs = ymd.months.unsigned_abs() as i64;
+    let years = abs / 12;
+    let months = abs % 12;
+    let mut s = String::from("P");
+    if years > 0 {
+        s.push_str(&format!("{}Y", years));
+    }
+    if months > 0 || years == 0 {
+        s.push_str(&format!("{}M", months));
+    }
+    if neg {
+        format!("-{}", s)
+    } else {
+        s
+    }
+}
+
+// ----- DST re-attachment helper -----
+
+/// Re-attach an IANA zone to a naive local datetime. DST gap → `None` (null),
+/// Ambiguous → earliest (Pitfall 5 documented policy). Never unwraps
+/// `LocalResult`.
+fn reattach_zone(tz: &chrono_tz::Tz, naive: &NaiveDateTime) -> Option<DateTime<chrono_tz::Tz>> {
+    match tz.from_local_datetime(naive) {
+        chrono::LocalResult::Single(dt) => Some(dt),
+        chrono::LocalResult::Ambiguous(dt, _) => Some(dt),
+        chrono::LocalResult::None => None,
+    }
 }
 
 #[cfg(test)]
@@ -473,37 +826,32 @@ mod tests {
 
     #[test]
     fn test_dst_gap_no_panic() {
-        // America/Sao_Paulo springs forward at 2021-10-17 00:00 → 01:00
-        // (the local time 00:00-00:59 does not exist on that date). A
-        // days-and-time-duration addition that lands in the gap must return
-        // None (null) — never panic (Pitfall 5).
-        //
-        // Construct a datetime just before the gap and add a duration that
-        // lands inside it. (Sao_Paulo's 2021 spring-forward: midnight-1am
-        // skipped on 2021-10-17.)
-        let before = chrono_tz::America::Sao_Paulo
-            .with_ymd_and_hms(2021, 10, 16, 23, 30, 0)
+        // America/New_York springs forward at 2021-03-14 02:00 → 03:00 (the
+        // local time 02:00-02:59 does not exist on that date). A duration
+        // addition that lands in the gap must return None (null) — never
+        // panic (Pitfall 5).
+        let before_gap = chrono_tz::America::New_York
+            .with_ymd_and_hms(2021, 3, 14, 1, 30, 0)
             .single()
             .unwrap();
-        // Add 30 minutes → lands at 00:00 on 2021-10-17 which does not exist.
-        let gap = add_days_time_zoned(before, TimeDelta::minutes(30));
-        assert_eq!(
-            gap, None,
-            "DST gap → null (Pitfall 5 documented policy)"
-        );
+        // 01:30 EST + 1 hour = 02:30 (which does not exist — gap).
+        let gap = add_days_time_zoned(before_gap, TimeDelta::hours(1));
+        assert_eq!(gap, None, "DST gap → null (Pitfall 5 documented policy)");
 
-        // DST overlap: Sao_Paulo 2021-02-20 23:00-23:59 occurs twice (fall
-        // back). A datetime landing in the overlap returns the EARLIEST.
-        // Construct a naive datetime in the overlap and add 0 to exercise
-        // from_local_datetime's Ambiguous branch via add_days_time_zoned.
-        let in_overlap = chrono_tz::America::Sao_Paulo
-            .with_ymd_and_hms(2021, 2, 20, 23, 30, 0)
+        // DST overlap: America/New_York falls back at 2021-11-07 02:00 →
+        // 01:00 (the local time 01:00-01:59 occurs twice). A duration
+        // addition that lands in the overlap returns the EARLIEST occurrence
+        // (Pitfall 5 documented policy).
+        let before_overlap = chrono_tz::America::New_York
+            .with_ymd_and_hms(2021, 11, 7, 0, 30, 0)
             .single()
             .unwrap();
-        let zero = add_days_time_zoned(in_overlap, TimeDelta::zero());
-        // Earliest is returned — single() would have returned None for an
-        // ambiguous time, so Some(...) confirms the earliest policy.
-        assert!(zero.is_some(), "DST overlap → earliest (not None)");
+        // 00:30 EDT + 1 hour = 01:30 (overlap — occurs twice in EDT/EST).
+        let overlap = add_days_time_zoned(before_overlap, TimeDelta::hours(1));
+        assert!(
+            overlap.is_some(),
+            "DST overlap → earliest (not None)"
+        );
     }
 
     proptest::proptest! {
