@@ -558,6 +558,10 @@ use chrono::NaiveDate;
 use rust_decimal::dec;
 #[cfg(test)]
 use crate::dmn::feel::parser::parse_expression;
+#[cfg(test)]
+use proptest::prop_assert_eq;
+#[cfg(test)]
+use proptest::strategy::Strategy;
 
 // ----- MANDATORY DMN-12 conformance cases (the load-bearing tests) -----
 
@@ -969,4 +973,206 @@ fn eval_takes_borrowed_ast_not_str() {
     }
     let e = parse_expression("1");
     let _ = _accepts(&e, &Scope::empty());
+}
+
+// =====================================================================
+// Plan 31-03 Task 1: arithmetic + string-concat + numeric-edge tests.
+// =====================================================================
+
+#[cfg(test)]
+fn eval_src(src: &str) -> Value {
+    evaluate(&parse_expression(src), &Scope::empty())
+}
+
+#[cfg(test)]
+fn eval_src_scope(src: &str, scope: &Scope) -> Value {
+    evaluate(&parse_expression(src), scope)
+}
+
+// ----- arithmetic -----
+
+#[cfg(test)]
+#[test]
+fn arithmetic_add() {
+    assert_eq!(eval_src("1 + 2"), Value::Number(dec!(3)));
+}
+
+#[cfg(test)]
+#[test]
+fn arithmetic_sub() {
+    assert_eq!(eval_src("1 - 2"), Value::Number(dec!(-1)));
+}
+
+#[cfg(test)]
+#[test]
+fn arithmetic_mul() {
+    assert_eq!(eval_src("2 * 3"), Value::Number(dec!(6)));
+}
+
+#[cfg(test)]
+#[test]
+fn arithmetic_div() {
+    assert_eq!(eval_src("6 / 2"), Value::Number(dec!(3)));
+}
+
+#[cfg(test)]
+#[test]
+fn arithmetic_div_decimal() {
+    // 7 / 2 = 3.5 — Decimal division, NOT integer truncation.
+    assert_eq!(eval_src("7 / 2"), Value::Number(dec!(3.5)));
+}
+
+#[cfg(test)]
+#[test]
+fn arithmetic_pow_right_associative_512() {
+    // Pitfall 2: 2 ** 3 ** 2 = 2 ** (3 ** 2) = 2 ** 9 = 512 (NOT 64).
+    assert_eq!(eval_src("2 ** 3 ** 2"), Value::Number(dec!(512)));
+}
+
+#[cfg(test)]
+#[test]
+fn arithmetic_pow_2_to_10() {
+    assert_eq!(eval_src("2 ** 10"), Value::Number(dec!(1024)));
+}
+
+#[cfg(test)]
+#[test]
+fn arithmetic_unary_neg() {
+    assert_eq!(eval_src("- 5"), Value::Number(dec!(-5)));
+}
+
+#[cfg(test)]
+#[test]
+fn arithmetic_unary_neg_integer_value() {
+    // An Integer-typed value (via a bound name) negates to Integer.
+    let mut s = Scope::empty();
+    s.bind("i".to_string(), Value::Integer(7), vec![]);
+    assert_eq!(eval_src_scope("- i", &s), Value::Integer(-7));
+}
+
+// ----- numeric_edge (div-by-zero, overflow → Null) -----
+
+#[cfg(test)]
+#[test]
+fn numeric_edge_div_by_zero_integer() {
+    assert_eq!(eval_src("1.0 / 0"), Value::Null);
+}
+
+#[cfg(test)]
+#[test]
+fn numeric_edge_div_by_zero_decimal() {
+    assert_eq!(eval_src("1.0 / 0.0"), Value::Null);
+}
+
+#[cfg(test)]
+#[test]
+fn numeric_edge_null_operand() {
+    assert_eq!(eval_src("null + 1"), Value::Null);
+    assert_eq!(eval_src("null - 1"), Value::Null);
+    assert_eq!(eval_src("null * 1"), Value::Null);
+    assert_eq!(eval_src("null / 1"), Value::Null);
+    assert_eq!(eval_src("1 + null"), Value::Null);
+}
+
+#[cfg(test)]
+#[test]
+fn numeric_edge_type_mismatch_yields_null() {
+    // Number + Bool → Null (no implicit conversion).
+    assert_eq!(eval_src("1 + true"), Value::Null);
+}
+
+// ----- string_concat -----
+
+#[cfg(test)]
+#[test]
+fn string_concat_two_strings() {
+    assert_eq!(eval_src("\"a\" + \"b\""), Value::String("ab".to_string()));
+}
+
+#[cfg(test)]
+#[test]
+fn string_concat_number_plus_string_yields_null() {
+    // Pitfall 6: NO implicit number<->string conversion; 1 + "2" → null.
+    assert_eq!(eval_src("1 + \"2\""), Value::Null);
+    assert_eq!(eval_src("\"2\" + 1"), Value::Null);
+}
+
+#[cfg(test)]
+#[test]
+fn string_concat_null_operand() {
+    assert_eq!(eval_src("null + \"a\""), Value::Null);
+    assert_eq!(eval_src("\"a\" + null"), Value::Null);
+}
+
+// ----- between (desugaring — already real in 31-02; reaffirm here) -----
+
+#[cfg(test)]
+#[test]
+fn between_in_range_true() {
+    assert_eq!(eval_src("5 between 1 and 10"), Value::Bool(true));
+}
+
+#[cfg(test)]
+#[test]
+fn between_out_of_range_false() {
+    assert_eq!(eval_src("0 between 1 and 10"), Value::Bool(false));
+}
+
+// ----- in (range-membership desugaring; full unary-test `in` → 31-04) -----
+
+#[cfg(test)]
+#[test]
+fn in_range_inclusive_true() {
+    // 5 in [1..10] → true (inclusive range).
+    assert_eq!(eval_src("5 in [1..10]"), Value::Bool(true));
+}
+
+#[cfg(test)]
+#[test]
+fn in_range_inclusive_boundary() {
+    assert_eq!(eval_src("1 in [1..10]"), Value::Bool(true));
+    assert_eq!(eval_src("10 in [1..10]"), Value::Bool(true));
+}
+
+#[cfg(test)]
+#[test]
+fn in_range_exclusive_false() {
+    // 5 in (1..10) → true (interior); 1 in (1..10) → false (excl start).
+    assert_eq!(eval_src("5 in (1..10)"), Value::Bool(true));
+    assert_eq!(eval_src("1 in (1..10)"), Value::Bool(false));
+    assert_eq!(eval_src("10 in (1..10)"), Value::Bool(false));
+}
+
+#[cfg(test)]
+#[test]
+fn in_range_outside_false() {
+    assert_eq!(eval_src("0 in [1..10]"), Value::Bool(false));
+    assert_eq!(eval_src("11 in [1..10]"), Value::Bool(false));
+}
+
+#[cfg(test)]
+#[test]
+fn in_range_null_operand_yields_null() {
+    assert_eq!(eval_src("null in [1..10]"), Value::Null);
+}
+
+// ----- property test: Decimal128 division invariants -----
+
+proptest::proptest! {
+    #![proptest_config(proptest::test_runner::Config {
+        cases: 64,
+        ..proptest::test_runner::Config::default()
+    })]
+
+    /// For any non-zero Decimal `d`, `d / d == Number(1)` — no f64 drift,
+    /// no div-by-zero panic (the div-by-zero guard returns Null when d==0,
+    /// excluded here). Regression seed committed by the proptest harness.
+    #[test]
+    fn arithmetic_div_identity(d in (-100_000_000i64..100_000_000i64).prop_filter("nonzero", |x| *x != 0)) {
+        let dec = rust_decimal::Decimal::from(d);
+        let mut s = Scope::empty();
+        s.bind("d".to_string(), Value::Number(dec), vec![]);
+        let r = eval_src_scope("d / d", &s);
+        prop_assert_eq!(r, Value::Number(rust_decimal::Decimal::ONE));
+    }
 }
