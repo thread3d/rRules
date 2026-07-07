@@ -772,6 +772,8 @@ mod lexer_tests {
 // `FeelExpression::Err(span, "max recursion depth exceeded")`.
 
 use super::ast::{FeelExpression, BinOpKind, QuantKind};
+use super::types::FeelType;
+use crate::data_types::Value;
 
 /// The default maximum recursion depth for the parser (T-31-01-02).
 const DEFAULT_MAX_DEPTH: u32 = 256;
@@ -800,11 +802,11 @@ impl Parser {
     }
 
     /// The current token's span (or a zero span at end).
-    fn peek_span(&self) -> super::ast::Span {
+    fn peek_span(&self) -> Span {
         self.tokens
             .get(self.pos)
             .map(|ts| ts.span)
-            .unwrap_or_else(|| super::ast::Span::zero(0, 1, 1))
+            .unwrap_or_else(|| Span::zero(0, 1, 1))
     }
 
     /// Advance and return the consumed token.
@@ -836,15 +838,13 @@ impl Parser {
         FeelExpression::Err(self.peek_span(), msg.to_string())
     }
 
-    /// Advance to the next synchronization token (error recovery).
+    /// Advance to the next synchronization token (error recovery,
+    /// CONTEXT.md user override — not fail-fast).
     fn sync_to_boundary(&mut self) {
         while !matches!(
             self.peek(),
             Token::Eof | Token::Comma | Token::RParen | Token::RBracket | Token::RBrace
         ) {
-            // Keyword boundaries (then/else/return/satisfies/in) — only
-            // sync when the depth is appropriate; for simplicity, stop at
-            // these names too.
             if let Token::Name(s) = self.peek() {
                 if matches!(s.as_str(), "then" | "else" | "return" | "satisfies") {
                     return;
@@ -852,6 +852,665 @@ impl Parser {
             }
             self.advance();
         }
+    }
+
+    /// DoS depth guard (T-31-01-02): returns false if max depth exceeded.
+    fn enter(&mut self) -> bool {
+        self.depth += 1;
+        self.depth <= self.max_depth
+    }
+
+    fn leave(&mut self) {
+        self.depth -= 1;
+    }
+
+    /// True if the current position is `instance of` (two-token lookahead).
+    fn is_instance_of(&self) -> bool {
+        if !self.is_keyword("instance") {
+            return false;
+        }
+        match self.tokens.get(self.pos + 1) {
+            Some(ts) => matches!(&ts.token, Token::Name(s) if s == "of"),
+            None => false,
+        }
+    }
+
+    // ================================================================
+    // Pratt-precedence loop (grammar rules 2, 19–23, 47–49, 51).
+    // ================================================================
+
+    /// The main Pratt loop. Parses a textual expression at `min_bp` or
+    /// higher. Binding powers:
+    ///   or=10, and=20, comparison/between/in=30, instance of=35,
+    ///   additive=40, mult=50, **=60 (RIGHT-assoc),
+    ///   unary=70, postfix=80, primary=90.
+    fn parse_expr(&mut self, min_bp: u8) -> FeelExpression {
+        if !self.enter() {
+            return self.err_here("max recursion depth exceeded");
+        }
+        let mut lhs = self.parse_unary();
+        loop {
+            // --- Special: `between` (bp 30, ternary: a between b and c)
+            if self.is_keyword("between") && 30 >= min_bp {
+                self.advance(); // consume "between"
+                let lower = self.parse_expr(31); // bp>20 → `and` not consumed
+                if matches!(lower, FeelExpression::Err(_, _)) {
+                    self.leave();
+                    return lower;
+                }
+                if !self.eat_keyword("and") {
+                    self.leave();
+                    self.sync_to_boundary();
+                    return self.err_here("expected 'and' in 'between' expression");
+                }
+                let upper = self.parse_expr(31);
+                if matches!(upper, FeelExpression::Err(_, _)) {
+                    self.leave();
+                    return upper;
+                }
+                lhs = FeelExpression::BinOp {
+                    op: BinOpKind::Between,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(FeelExpression::List(vec![lower, upper])),
+                };
+                continue;
+            }
+
+            // --- Special: `instance of` (bp 35, A3 verification)
+            if self.is_instance_of() && 35 >= min_bp {
+                self.advance(); // "instance"
+                self.advance(); // "of"
+                let ty = self.parse_type_ref();
+                lhs = FeelExpression::InstanceOf {
+                    expr: Box::new(lhs),
+                    ty,
+                };
+                continue;
+            }
+
+            // --- Regular binary operators
+            let (op, bp, rassoc) = match self.classify_binary() {
+                Some(c) => c,
+                None => break,
+            };
+            if bp < min_bp {
+                break;
+            }
+            self.advance(); // consume operator
+            let next_min = if rassoc { bp } else { bp + 1 };
+            let rhs = self.parse_expr(next_min);
+            // Error recovery: propagate Err nodes from the RHS (error
+            // recovery model — don't wrap errors in more AST nodes).
+            if matches!(rhs, FeelExpression::Err(_, _)) {
+                self.leave();
+                return rhs;
+            }
+            lhs = FeelExpression::BinOp {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            };
+        }
+        self.leave();
+        lhs
+    }
+
+    /// Classify the current token as a binary operator with binding power
+    /// and associativity. Returns `None` for non-operators (including
+    /// `between` and `instance`, which are handled specially in `parse_expr`).
+    fn classify_binary(&self) -> Option<(BinOpKind, u8, bool)> {
+        match self.peek() {
+            Token::Plus => Some((BinOpKind::Add, 40, false)),
+            Token::Minus => Some((BinOpKind::Sub, 40, false)),
+            Token::Star => Some((BinOpKind::Mul, 50, false)),
+            Token::Slash => Some((BinOpKind::Div, 50, false)),
+            Token::DoubleStar => Some((BinOpKind::Pow, 60, true)), // right-assoc (Pitfall 2)
+            Token::Eq => Some((BinOpKind::Eq, 30, false)),
+            Token::NotEq => Some((BinOpKind::NotEq, 30, false)),
+            Token::Lt => Some((BinOpKind::Lt, 30, false)),
+            Token::Le => Some((BinOpKind::Le, 30, false)),
+            Token::Gt => Some((BinOpKind::Gt, 30, false)),
+            Token::Ge => Some((BinOpKind::Ge, 30, false)),
+            Token::Name(s) => match s.as_str() {
+                "or" => Some((BinOpKind::Or, 10, false)),
+                "and" => Some((BinOpKind::And, 20, false)),
+                "in" => Some((BinOpKind::In, 30, false)),
+                _ => None, // `between`/`instance` handled in parse_expr
+            },
+            _ => None,
+        }
+    }
+
+    // ================================================================
+    // Prefix / postfix / primary
+    // ================================================================
+
+    /// Parse unary prefix operators (rule 24: `-expr`).
+    fn parse_unary(&mut self) -> FeelExpression {
+        match self.peek() {
+            Token::Minus => {
+                self.advance();
+                let operand = self.parse_unary();
+                FeelExpression::Neg(Box::new(operand))
+            }
+            _ => self.parse_postfix(),
+        }
+    }
+
+    /// Parse postfix operators: `.path` (rule 43), `[filter]` (rule 50),
+    /// `(invocation)` (rule 38). Processed left-to-right so `a.b[i]`
+    /// naturally yields `Filter(Path(a, b), i)` (A2: path < filter <
+    /// invocation).
+    fn parse_postfix(&mut self) -> FeelExpression {
+        let mut base = self.parse_primary();
+        // Don't apply postfix operators to Err nodes — propagate the error
+        // (error recovery model: don't wrap errors in more AST nodes).
+        if matches!(base, FeelExpression::Err(_, _)) {
+            return base;
+        }
+        loop {
+            match self.peek() {
+                Token::Dot => {
+                    // Check for `..` (range operator)
+                    let next_is_dot = self
+                        .tokens
+                        .get(self.pos + 1)
+                        .map(|ts| matches!(ts.token, Token::Dot))
+                        .unwrap_or(false);
+                    if next_is_dot {
+                        self.advance(); // first .
+                        self.advance(); // second .
+                        let end = self.parse_expr(0);
+                        base = FeelExpression::Range {
+                            start: Box::new(base),
+                            end: Box::new(end),
+                            start_inclusive: true,
+                            end_inclusive: true,
+                        };
+                        continue;
+                    }
+                    // Regular path: `target.name`
+                    self.advance();
+                    let name = match self.advance() {
+                        Some(TokenSpan { token: Token::Name(n), .. }) => n,
+                        _ => {
+                            self.sync_to_boundary();
+                            return self.err_here("expected name after '.'");
+                        }
+                    };
+                    base = FeelExpression::Path {
+                        target: Box::new(base),
+                        name,
+                    };
+                }
+                Token::LBracket => {
+                    self.advance();
+                    let pred = self.parse_expr(0);
+                    if !matches!(self.peek(), Token::RBracket) {
+                        self.sync_to_boundary();
+                        return self.err_here("expected ']' after filter predicate");
+                    }
+                    self.advance();
+                    base = FeelExpression::Filter {
+                        target: Box::new(base),
+                        predicate: Box::new(pred),
+                    };
+                }
+                Token::LParen => {
+                    self.advance();
+                    let (args, named) = self.parse_arg_list();
+                    if !matches!(self.peek(), Token::RParen) {
+                        self.sync_to_boundary();
+                        return self.err_here("expected ')' after function arguments");
+                    }
+                    self.advance();
+                    base = FeelExpression::FunctionInvocation {
+                        callee: Box::new(base),
+                        args,
+                        named,
+                    };
+                }
+                _ => break,
+            }
+        }
+        base
+    }
+
+    /// Parse comma-separated arguments inside `(...)`. Returns
+    /// `(positional_args, Option<named_args>)`.
+    fn parse_arg_list(&mut self) -> (Vec<FeelExpression>, Option<Vec<(String, FeelExpression)>>) {
+        let mut args = Vec::new();
+        let mut named: Option<Vec<(String, FeelExpression)>> = None;
+        if matches!(self.peek(), Token::RParen) {
+            return (args, named);
+        }
+        loop {
+            // Check for named arg: Name : expr
+            let is_named = match (self.tokens.get(self.pos), self.tokens.get(self.pos + 1)) {
+                (Some(ts), Some(next)) if matches!(ts.token, Token::Name(_)) => {
+                    matches!(next.token, Token::Colon)
+                }
+                _ => false,
+            };
+            if is_named {
+                let name = match self.advance() {
+                    Some(TokenSpan { token: Token::Name(n), .. }) => n,
+                    _ => unreachable!(),
+                };
+                self.advance(); // consume :
+                let val = self.parse_expr(0);
+                named.get_or_insert_with(Vec::new).push((name, val));
+            } else {
+                let arg = self.parse_expr(0);
+                args.push(arg);
+            }
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        (args, named)
+    }
+
+    /// Parse a primary expression (rules 17, 25, 31–32, 54–57).
+    fn parse_primary(&mut self) -> FeelExpression {
+        let tok = self.peek().clone();
+        match tok {
+            Token::Number(n) => {
+                self.advance();
+                FeelExpression::Literal(Value::Number(n))
+            }
+            Token::String(s) => {
+                self.advance();
+                FeelExpression::Literal(Value::String(s))
+            }
+            Token::AtLiteral(s) => {
+                self.advance();
+                FeelExpression::AtLiteral(s)
+            }
+            Token::LParen => {
+                self.advance();
+                let inner = self.parse_expr(0);
+                // Propagate Err nodes (e.g. depth-guard errors) without
+                // wrapping them in a "expected ')'" error.
+                if matches!(inner, FeelExpression::Err(_, _)) {
+                    return inner;
+                }
+                if !matches!(self.peek(), Token::RParen) {
+                    self.sync_to_boundary();
+                    return self.err_here("expected ')' after parenthesized expression");
+                }
+                self.advance();
+                inner
+            }
+            Token::LBracket => self.parse_list_or_range(),
+            Token::LBrace => self.parse_context(),
+            Token::Name(s) => {
+                match s.as_str() {
+                    "true" => {
+                        self.advance();
+                        FeelExpression::Literal(Value::Bool(true))
+                    }
+                    "false" => {
+                        self.advance();
+                        FeelExpression::Literal(Value::Bool(false))
+                    }
+                    "null" => {
+                        self.advance();
+                        FeelExpression::Literal(Value::Null)
+                    }
+                    "for" => self.parse_for(),
+                    "if" => self.parse_if(),
+                    "some" => self.parse_quantified(QuantKind::Some),
+                    "every" => self.parse_quantified(QuantKind::Every),
+                    "function" => self.parse_function_definition(),
+                    // Keyword-as-name (Pitfall 3): any other keyword-shaped
+                    // string is a Name reference. Disambiguation by position
+                    // (the Pratt loop decides if `or`/`and`/`between`/`in`/
+                    // `instance` are operators vs names).
+                    _ => {
+                        self.advance();
+                        FeelExpression::Name(s)
+                    }
+                }
+            }
+            Token::LexError(msg) => {
+                self.advance();
+                FeelExpression::Err(self.peek_span(), format!("lex error: {}", msg))
+            }
+            Token::Eof => self.err_here("unexpected end of input"),
+            other => self.err_here(&format!("unexpected token: {:?}", other)),
+        }
+    }
+
+    /// Parse `[e1, e2, ...]` (list, rule 54) or `[a..b]` (bracketed range).
+    fn parse_list_or_range(&mut self) -> FeelExpression {
+        self.advance(); // consume [
+        if matches!(self.peek(), Token::RBracket) {
+            self.advance();
+            return FeelExpression::List(vec![]);
+        }
+        let first = self.parse_expr(0);
+        // Check for range: `..` after first element
+        let next_is_dot = self
+            .tokens
+            .get(self.pos)
+            .map(|ts| matches!(ts.token, Token::Dot))
+            .unwrap_or(false);
+        let next_next_is_dot = self
+            .tokens
+            .get(self.pos + 1)
+            .map(|ts| matches!(ts.token, Token::Dot))
+            .unwrap_or(false);
+        if next_is_dot && next_next_is_dot {
+            self.advance(); // first .
+            self.advance(); // second .
+            let end = self.parse_expr(0);
+            let end_inclusive = matches!(self.peek(), Token::RBracket);
+            if !matches!(self.peek(), Token::RBracket) {
+                self.sync_to_boundary();
+            }
+            self.advance(); // consume ] or whatever
+            return FeelExpression::Range {
+                start: Box::new(first),
+                end: Box::new(end),
+                start_inclusive: true,
+                end_inclusive,
+            };
+        }
+        // It's a list
+        let mut elems = vec![first];
+        while matches!(self.peek(), Token::Comma) {
+            self.advance();
+            elems.push(self.parse_expr(0));
+        }
+        if !matches!(self.peek(), Token::RBracket) {
+            self.sync_to_boundary();
+            return self.err_here("expected ']' after list elements");
+        }
+        self.advance(); // consume ]
+        FeelExpression::List(elems)
+    }
+
+    /// Parse `{ k: v, ... }` (context, rule 57). Keys may be keyword-shaped
+    /// strings (Pitfall 3: `for`, `if`, `in` are valid context keys).
+    fn parse_context(&mut self) -> FeelExpression {
+        self.advance(); // consume {
+        let mut entries = Vec::new();
+        if matches!(self.peek(), Token::RBrace) {
+            self.advance();
+            return FeelExpression::Context(entries);
+        }
+        loop {
+            let key = match self.advance() {
+                Some(TokenSpan { token: Token::Name(n), .. }) => n,
+                Some(TokenSpan { token: Token::String(s), .. }) => s,
+                _ => {
+                    self.sync_to_boundary();
+                    return self.err_here("expected context key (name or string)");
+                }
+            };
+            if !matches!(self.peek(), Token::Colon) {
+                self.sync_to_boundary();
+                return self.err_here("expected ':' after context key");
+            }
+            self.advance(); // consume :
+            let val = self.parse_expr(0);
+            entries.push((key, val));
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        if !matches!(self.peek(), Token::RBrace) {
+            self.sync_to_boundary();
+            return self.err_here("expected '}' after context entries");
+        }
+        self.advance(); // consume }
+        FeelExpression::Context(entries)
+    }
+
+    /// Parse `function(params) [external] body` (rule 55).
+    fn parse_function_definition(&mut self) -> FeelExpression {
+        self.advance(); // consume "function"
+        if !matches!(self.peek(), Token::LParen) {
+            self.sync_to_boundary();
+            return self.err_here("expected '(' after 'function'");
+        }
+        self.advance(); // consume (
+        let mut params = Vec::new();
+        if !matches!(self.peek(), Token::RParen) {
+            loop {
+                let name = match self.advance() {
+                    Some(TokenSpan { token: Token::Name(n), .. }) => n,
+                    _ => {
+                        self.sync_to_boundary();
+                        return self.err_here("expected parameter name");
+                    }
+                };
+                let ty = if matches!(self.peek(), Token::Colon) {
+                    self.advance();
+                    Some(self.parse_type_ref())
+                } else {
+                    None
+                };
+                params.push((name, ty));
+                if matches!(self.peek(), Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        if !matches!(self.peek(), Token::RParen) {
+            self.sync_to_boundary();
+            return self.err_here("expected ')' after parameter list");
+        }
+        self.advance(); // consume )
+        let external = self.eat_keyword("external");
+        let body = self.parse_expr(0);
+        FeelExpression::FunctionDefinition {
+            params,
+            body: Box::new(body),
+            external,
+        }
+    }
+
+    /// Parse `for x in iter, y in iter2 return body` (rule 44).
+    fn parse_for(&mut self) -> FeelExpression {
+        self.advance(); // consume "for"
+        let mut iters = Vec::new();
+        loop {
+            let var = match self.advance() {
+                Some(TokenSpan { token: Token::Name(n), .. }) => n,
+                _ => {
+                    self.sync_to_boundary();
+                    return self.err_here("expected iteration variable name");
+                }
+            };
+            if !self.eat_keyword("in") {
+                self.sync_to_boundary();
+                return self.err_here("expected 'in' after iteration variable");
+            }
+            let source = self.parse_expr(0);
+            iters.push((var, source));
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        if !self.eat_keyword("return") {
+            self.sync_to_boundary();
+            return self.err_here("expected 'return' in for expression");
+        }
+        let body = self.parse_expr(0);
+        FeelExpression::For {
+            iters,
+            body: Box::new(body),
+        }
+    }
+
+    /// Parse `if cond then a else b` (rule 45).
+    fn parse_if(&mut self) -> FeelExpression {
+        self.advance(); // consume "if"
+        let cond = self.parse_expr(0);
+        if !self.eat_keyword("then") {
+            self.sync_to_boundary();
+            return self.err_here("expected 'then' in if expression");
+        }
+        let then = self.parse_expr(0);
+        if !self.eat_keyword("else") {
+            self.sync_to_boundary();
+            return self.err_here("expected 'else' in if expression");
+        }
+        let else_ = self.parse_expr(0);
+        FeelExpression::If {
+            cond: Box::new(cond),
+            then: Box::new(then),
+            else_: Box::new(else_),
+        }
+    }
+
+    /// Parse `some/every x in list satisfies pred` (rule 46).
+    fn parse_quantified(&mut self, kind: QuantKind) -> FeelExpression {
+        self.advance(); // consume "some" or "every"
+        let mut iters = Vec::new();
+        loop {
+            let var = match self.advance() {
+                Some(TokenSpan { token: Token::Name(n), .. }) => n,
+                _ => {
+                    self.sync_to_boundary();
+                    return self.err_here("expected iteration variable name");
+                }
+            };
+            if !self.eat_keyword("in") {
+                self.sync_to_boundary();
+                return self.err_here("expected 'in' after iteration variable");
+            }
+            let source = self.parse_expr(0);
+            iters.push((var, source));
+            if matches!(self.peek(), Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        if !self.eat_keyword("satisfies") {
+            self.sync_to_boundary();
+            return self.err_here("expected 'satisfies' in quantified expression");
+        }
+        let satisfies = self.parse_expr(0);
+        FeelExpression::Quantified {
+            kind,
+            iters,
+            satisfies: Box::new(satisfies),
+        }
+    }
+
+    /// Parse a FEEL type reference for `instance of T` (rule 51).
+    /// Handles simple types, multi-word types (`date and time`,
+    /// `days and time duration`, `years and months duration`), and
+    /// parametric types (`list<T>`, etc. — simplified to `Any` element
+    /// type for now; 31-04 extends this).
+    fn parse_type_ref(&mut self) -> FeelType {
+        let name = match self.advance() {
+            Some(TokenSpan { token: Token::Name(n), .. }) => n,
+            _ => return FeelType::Any,
+        };
+        // Multi-word types: check for `and` following the first word
+        if self.is_keyword("and") {
+            match name.as_str() {
+                "date" => {
+                    self.advance(); // and
+                    self.eat_keyword("time");
+                    return FeelType::DateTime;
+                }
+                "days" => {
+                    self.advance(); // and
+                    self.eat_keyword("time");
+                    self.eat_keyword("duration");
+                    return FeelType::DaysTimeDuration;
+                }
+                "years" => {
+                    self.advance(); // and
+                    self.eat_keyword("months");
+                    self.eat_keyword("duration");
+                    return FeelType::YearsMonthsDuration;
+                }
+                _ => {} // fall through to simple type
+            }
+        }
+        match name.as_str() {
+            "number" => FeelType::Number,
+            "string" => FeelType::String,
+            "boolean" => FeelType::Boolean,
+            "null" => FeelType::Null,
+            "date" => FeelType::Date,
+            "time" => FeelType::Time,
+            "Any" => FeelType::Any,
+            "list" => FeelType::List(Box::new(FeelType::Any)),
+            "context" => FeelType::Context(vec![]),
+            "function" => FeelType::Function {
+                params: vec![],
+                ret: Box::new(FeelType::Any),
+            },
+            "range" => FeelType::Range(Box::new(FeelType::Any)),
+            _ => FeelType::Any,
+        }
+    }
+
+    // ================================================================
+    // SimpleUnaryTests (rule 15) helpers
+    // ================================================================
+
+    /// Parse a single positive unary test (rule 11/12).
+    /// Leading comparison operators (`<`, `<=`, `>`, `>=`, `=`, `!=`)
+    /// produce `BinOp(op, Name("?"), endpoint)` — the `?` placeholder
+    /// is the input-cell marker (evaluator resolves it, 31-02).
+    fn parse_positive_unary_test(&mut self) -> FeelExpression {
+        let placeholder = FeelExpression::Name("?".to_string());
+        let op = match self.peek() {
+            Token::Lt => Some(BinOpKind::Lt),
+            Token::Le => Some(BinOpKind::Le),
+            Token::Gt => Some(BinOpKind::Gt),
+            Token::Ge => Some(BinOpKind::Ge),
+            Token::Eq => Some(BinOpKind::Eq),
+            Token::NotEq => Some(BinOpKind::NotEq),
+            _ => None,
+        };
+        if let Some(op) = op {
+            self.advance();
+            let rhs = self.parse_expr(31);
+            return FeelExpression::BinOp {
+                op,
+                lhs: Box::new(placeholder),
+                rhs: Box::new(rhs),
+            };
+        }
+        self.parse_expr(0)
+    }
+
+    /// Parse comma-separated positive unary tests (rule 13), desugared
+    /// to a nested `Or` chain (left-folded).
+    fn parse_positive_unary_tests(&mut self) -> FeelExpression {
+        let first = self.parse_positive_unary_test();
+        if !matches!(self.peek(), Token::Comma) {
+            return first;
+        }
+        let mut result = first;
+        while matches!(self.peek(), Token::Comma) {
+            self.advance();
+            let next = self.parse_positive_unary_test();
+            result = FeelExpression::BinOp {
+                op: BinOpKind::Or,
+                lhs: Box::new(result),
+                rhs: Box::new(next),
+            };
+        }
+        result
     }
 }
 
@@ -866,20 +1525,54 @@ impl Parser {
 /// **Error recovery:** on a parse error, returns a `FeelExpression::Err`
 /// node — never panics on untrusted input (T-31-01-03 mitigation).
 pub fn parse_expression(src: &str) -> FeelExpression {
-    // RED stub — GREEN implementation in the next commit.
-    let _ = (src,);
-    FeelExpression::Err(super::ast::Span::zero(0, 1, 1), "parse_expression not implemented (RED)".to_string())
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize();
+    let mut p = Parser::new(tokens);
+    p.parse_expr(0)
 }
 
 /// Parse a FEEL `SimpleUnaryTests` (grammar rule 15) from `src`.
 ///
-/// Handles `-` (empty/any → sentinel "always true" node), `not(tests)`, and
-/// a comma-separated Or-chain of positive unary tests (rule 14 → rule 13
-/// → expression).
+/// Handles `-` (empty/any → sentinel `Literal(Bool(true))` "always true"
+/// node), `not(tests)` → `Neg(positiveUnaryTests)`, and a comma-separated
+/// Or-chain of positive unary tests (rule 14 → rule 13 → expression).
 pub fn parse_simple_unary_tests(src: &str) -> FeelExpression {
-    // RED stub — GREEN implementation in the next commit.
-    let _ = (src,);
-    FeelExpression::Err(super::ast::Span::zero(0, 1, 1), "parse_simple_unary_tests not implemented (RED)".to_string())
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize();
+    let mut p = Parser::new(tokens);
+
+    // Lone `-` means "always true" (any input passes). The lexer appends
+    // a trailing `Eof`, so we check: first token is `Minus` and the next
+    // is `Eof` (or absent).
+    if matches!(p.peek(), Token::Minus) {
+        let second_is_eof = p
+            .tokens
+            .get(1)
+            .map(|ts| matches!(ts.token, Token::Eof))
+            .unwrap_or(true);
+        if second_is_eof {
+            return FeelExpression::Literal(Value::Bool(true));
+        }
+    }
+
+    // `not` form (rule 15: `["not"] positiveUnaryTests`).
+    let negated = p.eat_keyword("not");
+    let had_paren = negated && matches!(p.peek(), Token::LParen);
+    if had_paren {
+        p.advance(); // consume (
+    }
+
+    let result = p.parse_positive_unary_tests();
+
+    if had_paren && matches!(p.peek(), Token::RParen) {
+        p.advance();
+    }
+
+    if negated {
+        FeelExpression::Neg(Box::new(result))
+    } else {
+        result
+    }
 }
 
 #[cfg(test)]
