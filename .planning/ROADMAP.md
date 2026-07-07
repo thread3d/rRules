@@ -140,7 +140,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 
 **Wave 2** *(blocked on Wave 1 completion; 02/03/04 parallel, no file overlap)*
 
-- [ ] 30-02-PLAN.md — FEEL Decimal128 numeric domain: feel_numeric_eq + 0.1+0.2=0.3 proof + vendored TCK numeric vectors (DMN-08)
+- [x] 30-02-PLAN.md — FEEL Decimal128 numeric domain: feel_numeric_eq + 0.1+0.2=0.3 proof + vendored TCK numeric vectors (DMN-08)
 - [ ] 30-03-PLAN.md — FEEL temporal domain: parse_at_literal/format_value/add_months_zoned (IANA tz, DST-correct) + vendored TCK temporal vectors (DMN-09)
 - [ ] 30-04-PLAN.md — FEEL type lattice (conforms/equivalent/3 implicit conversions, 1+"2"→null prohibition) + additive-extension regression audit (DMN-10, Success Criterion 4)
 
@@ -256,7 +256,7 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 27. Stateful sessions | v5.0 | 1/1 | Complete | 2026-07-06 |
 | 28. Frontend test-runner | v5.0 | 5/5 | Complete | 2026-07-06 |
 | 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 3/3 | Complete   | 2026-07-06 |
-| 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 1/4 | In Progress|  |
+| 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 2/4 | In Progress|  |
 | 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 0/TBD | Not started | - |
 | 32. Decision-Table Engine + Hit Policies | v6.0 | 0/TBD | Not started | - |
 | 33. Decision Evaluator + DRD Resolution + REST API + Metrics | v6.0 | 0/TBD | Not started | - |
