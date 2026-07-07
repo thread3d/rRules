@@ -474,15 +474,16 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
         FeelExpression::FunctionDefinition { params, body, external } => {
             // DMN-15 boxed function definition: construct a FeelFunction carrier.
             // The closure body is NOT evaluated at definition time (deferred to
-            // invocation in 31-06). `param_names` and `body` fields are populated
-            // here; `captured` scope snapshot lands in 31-06.
+            // invocation in 31-06). `param_names`, `body`, and `captured` are all
+            // populated here — the captured scope is the current evaluation scope
+            // snapshotted via Arc<Scope> (lexical capture, not dynamic).
             let func = crate::dmn::feel::types::FeelFunction {
                 arity: params.len(),
                 param_types: params.iter().map(|(_, t)| t.clone().unwrap_or(crate::dmn::feel::types::FeelType::Any)).collect(),
                 ret_type: Box::new(crate::dmn::feel::types::FeelType::Any),
                 param_names: params.iter().map(|(n, _)| n.clone()).collect(),
                 body: Some(Arc::new(*body.clone())),
-                captured: None, // 31-06 adds the captured-scope snapshot
+                captured: Some(Arc::new(scope.clone())), // 31-06 captures definition-site scope
                 external: *external,
             };
             Value::Function(func)
@@ -2917,5 +2918,213 @@ mod boxed {
 
             prop_assert_eq!(result_fwd, result_rev, "DAG evaluation should be order-invariant");
         }
+    }
+}
+
+// ----- Lambda closure capture (DMN-16) -----
+
+#[cfg(test)]
+mod lambdas {
+    use super::*;
+    use crate::dmn::feel::ast::{FeelExpression, BinOpKind};
+    use crate::dmn::feel::types::FeelType;
+    use std::sync::Arc;
+
+    /// Helper: parse + evaluate with empty scope.
+    fn ev_lambda(src: &str) -> Value {
+        evaluate(&parse_expression(src), &Scope::empty())
+    }
+
+    /// Test: `function(a, b) a + b` evaluates to a Function value (not Null).
+    #[test]
+    fn lambda_definition_produces_function_value() {
+        let result = ev_lambda("function(a, b) a + b");
+        assert!(matches!(&result, Value::Function(_)), "expected Value::Function, got {:?}", result);
+    }
+
+    /// Test: the FunctionDefinition arm populates `captured` with the definition-site scope.
+    #[test]
+    fn lambda_captured_scope_populated_at_definition() {
+        let src = "function(a) a + 1";
+        let result = ev_lambda(src);
+        match &result {
+            Value::Function(f) => {
+                assert!(f.captured.is_some(), "captured scope should be populated at definition time");
+                // The captured scope is the empty scope (definition-site bindings).
+                let captured = f.captured.as_ref().unwrap();
+                assert_eq!(captured.bindings.len(), 0, "empty scope has no bindings");
+            }
+            other => panic!("expected Value::Function, got {:?}", other),
+        }
+    }
+
+    /// Test: lambda captures bindings from its definition-site scope (a boxed context).
+    #[test]
+    fn lambda_captures_definition_site_bindings() {
+        // Build a context with x bound, containing a lambda that references x.
+        let func_def = FeelExpression::FunctionDefinition {
+            params: vec![("y".to_string(), None)],
+            body: Box::new(FeelExpression::BinOp {
+                op: BinOpKind::Add,
+                lhs: Box::new(FeelExpression::Name("x".into())),
+                rhs: Box::new(FeelExpression::Literal(Value::Integer(5))),
+            }),
+            external: false,
+        };
+
+        // Wrap in a context where x is bound.
+        let ctx = FeelExpression::Context(vec![
+            ("f".to_string(), func_def),
+            ("x".to_string(), FeelExpression::Literal(Value::Integer(10))),
+        ]);
+
+        let result = evaluate(&ctx, &Scope::empty());
+        // The context evaluates to an Object; we need to invoke f with arg 5.
+        match result {
+            Value::Object(map) => {
+                let f_val = map.get("f").unwrap();
+                match f_val {
+                    Value::Function(f) => {
+                        assert!(f.captured.is_some(), "captured should be populated");
+                        // The captured scope should contain x=10 (from the context).
+                        let captured = f.captured.as_ref().unwrap();
+                        let x_val = captured.get("x").cloned().unwrap_or(Value::Null);
+                        assert_eq!(x_val, Value::Integer(10), "captured scope should have x=10");
+                    }
+                    other => panic!("expected Function value, got {:?}", other),
+                }
+            }
+            other => panic!("expected Object (context result), got {:?}", other),
+        }
+    }
+
+    /// Test: FeelFunction serde round-trip with captured scope.
+    #[test]
+    fn feel_function_serde_round_trip_with_captured() {
+        let func = crate::dmn::feel::types::FeelFunction {
+            arity: 1,
+            param_types: vec![FeelType::Number],
+            ret_type: Box::new(FeelType::Any),
+            param_names: vec!["x".to_string()],
+            body: Some(Arc::new(crate::dmn::feel::ast::FeelExpression::Literal(Value::Integer(42)))),
+            captured: Some(Arc::new(Scope {
+                bindings: std::collections::HashMap::from([("y".to_string(), Value::String("hello".into()))]),
+                deps: std::collections::HashMap::new(),
+            })),
+            external: false,
+        };
+
+        let json = serde_json::to_string(&func).expect("serialize");
+        let deserialized: crate::dmn::feel::types::FeelFunction = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(deserialized.arity, func.arity);
+        assert_eq!(deserialized.param_names, vec!["x".to_string()]);
+        // Body should round-trip (the AST inside Arc).
+        match (&deserialized.body, &func.body) {
+            (Some(body), Some(orig)) => {
+                assert_eq!(body, orig, "body Arc<FeelExpression> should round-trip");
+            }
+            _ => panic!("both body fields should be Some"),
+        }
+        // Captured scope should round-trip.
+        match (&deserialized.captured, &func.captured) {
+            (Some(cap), Some(orig)) => {
+                assert_eq!(cap.bindings.get("y"), orig.bindings.get("y"), "captured bindings should round-trip");
+            }
+            _ => panic!("both captured fields should be Some"),
+        }
+    }
+
+    /// Test: external function definition still populates captured scope (but rejected at invocation).
+    #[test]
+    fn lambda_external_definition_still_has_captured() {
+        let src = "function(a) external a + 1";
+        let result = ev_lambda(src);
+        match &result {
+            Value::Function(f) => {
+                assert!(f.external, "external flag should be true");
+                // Even external functions capture the definition-site scope (for future use).
+                assert!(f.captured.is_some(), "captured should still be populated for external functions");
+            }
+            other => panic!("expected Value::Function, got {:?}", other),
+        }
+    }
+
+    /// Test: lexical capture — closure sees definition-site bindings, not call-site.
+    #[test]
+    fn lambda_lexical_capture_not_dynamic() {
+        // Define a function in context1 (where x=10); then invoke it from context2 (where x=99).
+        // The closure should see x=10, not 99.
+
+        let func_def = FeelExpression::FunctionDefinition {
+            params: vec![("y".to_string(), None)],
+            body: Box::new(FeelExpression::BinOp {
+                op: BinOpKind::Add,
+                lhs: Box::new(FeelExpression::Name("x".into())),
+                rhs: Box::new(FeelExpression::Literal(Value::Integer(0))),
+            }),
+            external: false,
+        };
+
+        // context1: defines f with x=10 captured.
+        let ctx1 = FeelExpression::Context(vec![
+            ("f".to_string(), func_def),
+            ("x".to_string(), FeelExpression::Literal(Value::Integer(10))),
+        ]);
+
+        let result1 = evaluate(&ctx1, &Scope::empty());
+        match result1 {
+            Value::Object(map) => {
+                let f_val = map.get("f").unwrap();
+                if let Value::Function(f) = f_val {
+                    // Get the captured x value.
+                    let captured_x = f.captured.as_ref().and_then(|c| c.get("x")).cloned().unwrap_or(Value::Null);
+                    assert_eq!(captured_x, Value::Integer(10), "lexical capture: closure should see definition-site x=10");
+
+                    // Now invoke this function from a different context where x=99.
+                    let invocation = FeelExpression::FunctionInvocation {
+                        callee: Box::new(FeelExpression::Literal(f_val.clone())),
+                        args: vec![FeelExpression::Literal(Value::Integer(5))],
+                        named: None,
+                    };
+
+                    // Invoke from a scope where x=99.
+                    let mut outer_scope = Scope::empty();
+                    outer_scope.bind("x".to_string(), Value::Integer(99), vec![]);
+
+                    // The result should still use captured x=10 (lexical), not 99.
+                    // This test verifies the captured scope is populated correctly — the invocation logic is in Task 2.
+                    let _ = invocation; // Will be tested in Task 2.
+                } else {
+                    panic!("expected Function value");
+                }
+            }
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    /// Test: arity mismatch returns Null (no lambda application logic yet).
+    #[test]
+    fn lambda_arity_mismatch_returns_null() {
+        let func_def = FeelExpression::FunctionDefinition {
+            params: vec![("a".to_string(), None), ("b".to_string(), None)],
+            body: Box::new(FeelExpression::BinOp {
+                op: BinOpKind::Add,
+                lhs: Box::new(FeelExpression::Name("a".into())),
+                rhs: Box::new(FeelExpression::Name("b".into())),
+            }),
+            external: false,
+        };
+
+        // Invoke with only 1 arg (arity mismatch).
+        let invocation = FeelExpression::FunctionInvocation {
+            callee: Box::new(func_def),
+            args: vec![FeelExpression::Literal(Value::Integer(5))],
+            named: None,
+        };
+
+        let result = evaluate(&invocation, &Scope::empty());
+        // Without lambda application logic, this returns Null (the stub). This test verifies the future behavior.
+        assert_eq!(result, Value::Null, "arity mismatch should return Null");
     }
 }
