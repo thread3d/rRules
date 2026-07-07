@@ -19,26 +19,15 @@
 //! re-parse performance bug (a 30-cell table × 10k evals ≈ 30 parses at
 //! load, not 300k). The AST cache (31-09) hands the evaluator `&*arc`.
 
-#[allow(unused_imports)]
 use crate::data_types::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-#[allow(unused_imports)]
 use std::cmp::Ordering;
 
-#[allow(unused_imports)]
-use super::ast::FeelExpression;
-#[allow(unused_imports)]
+use super::ast::{FeelExpression, BinOpKind};
 use super::numeric::feel_numeric_eq;
-#[allow(unused_imports)]
 use super::temporal::parse_at_literal;
-#[allow(unused_imports)]
 use super::types::FeelRange;
-
-// During the RED phase some of these imports are not yet consumed by the
-// stub bodies; the GREEN implementation (Task 1 / Task 2) uses them all.
-// `#[allow(unused_imports)]` is scoped here rather than scattered across
-// the stubs.
 
 /// Flat FEEL evaluation scope (CONTEXT.md user override: flat Scope +
 /// explicit dependency tracking — NOT a parent/child chain).
@@ -393,10 +382,161 @@ mod cmp {
 /// to [`Value::Null`] with `TODO(31-NN)` markers; subsequent plans fill
 /// them in.
 pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
-    // RED-phase stub: returns Value::Null for everything. GREEN replaces
-    // this with the exhaustive dispatch.
-    let _ = (expr, scope);
-    Value::Null
+    match expr {
+        // ----- Real arms (31-02) -----
+        FeelExpression::Literal(v) => v.clone(),
+        FeelExpression::Name(name) => scope.get(name).cloned().unwrap_or(Value::Null),
+        FeelExpression::QualifiedName(qn) => scope.resolve_qn(qn),
+        FeelExpression::AtLiteral(inner) => parse_at_literal(inner).unwrap_or(Value::Null),
+        FeelExpression::Range {
+            start,
+            end,
+            start_inclusive,
+            end_inclusive,
+        } => {
+            let s = evaluate(start, scope);
+            let e = evaluate(end, scope);
+            Value::Range(Box::new(FeelRange {
+                start: opt_endpoint(s),
+                end: opt_endpoint(e),
+                start_incl: *start_inclusive,
+                end_incl: *end_inclusive,
+            }))
+        }
+        FeelExpression::BinOp { op, lhs, rhs } => eval_binop(op, lhs, rhs, scope),
+        FeelExpression::Neg(inner) => match evaluate(inner, scope) {
+            Value::Number(x) => Value::Number(-x),
+            Value::Integer(i) => Value::Integer(-i),
+            _ => Value::Null,
+        },
+        FeelExpression::Err(_, _) => Value::Null,
+
+        // ----- Stubbed arms (subsequent plans) -----
+        // Control + quantified + path + filter + instance-of + boxed
+        // expressions are stubbed to Value::Null here. The exhaustive
+        // match (NO `_ =>` wildcard) is the safety net: adding a new
+        // FeelExpression variant forces an evaluator-arm update.
+        FeelExpression::If { .. } => {
+            // TODO(31-05): 3VL condition dispatch.
+            Value::Null
+        }
+        FeelExpression::For { .. } => {
+            // TODO(31-05): cartesian-product iteration → Array.
+            Value::Null
+        }
+        FeelExpression::Quantified { .. } => {
+            // TODO(31-05): some/every fold via or_3vl/and_3vl.
+            Value::Null
+        }
+        FeelExpression::Path { .. } => {
+            // TODO(31-05): context/list path navigation via path_nav.
+            Value::Null
+        }
+        FeelExpression::Filter { .. } => {
+            // TODO(31-05): list filter predicate.
+            Value::Null
+        }
+        FeelExpression::InstanceOf { .. } => {
+            // TODO(31-04): feel::types::conforms(type_of(v), T).
+            Value::Null
+        }
+        FeelExpression::List(_) => {
+            // TODO(31-05): evaluate each element → Array.
+            Value::Null
+        }
+        FeelExpression::Relation { .. } => {
+            // TODO(31-05): relation → list of contexts.
+            Value::Null
+        }
+        FeelExpression::Context(_) => {
+            // TODO(31-05): dependency-ordered context evaluation.
+            Value::Null
+        }
+        FeelExpression::FunctionInvocation { .. } => {
+            // TODO(31-06/31-07): built-in + user-lambda invocation.
+            Value::Null
+        }
+        FeelExpression::FunctionDefinition { .. } => {
+            // TODO(31-06): closure construction (FeelFunction carrier).
+            Value::Null
+        }
+    }
+}
+
+/// Evaluate a binary operator. Comparison (`=`/`!=`/`<`/`<=`/`>`/`>=`) and
+/// boolean (`and`/`or`) operators are real in 31-02; `between` is real
+/// (desugars to `a >= b and a <= c` via `feel_compare` + `and_3vl`).
+/// Arithmetic (`+`/`-`/`*`/`/`/`**`) and `in` (positive unary test) are
+/// stubbed to `Value::Null` — they land in 31-03 (coercion) where the
+/// numeric/string coercion rules live.
+fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope: &Scope) -> Value {
+    // `between` has a `List([b, c])` rhs (parser desugaring); handle it
+    // before evaluating rhs as a value (the List arm is still stubbed).
+    if matches!(op, BinOpKind::Between) {
+        let l = evaluate(lhs, scope);
+        let (b, c) = match rhs {
+            FeelExpression::List(items) if items.len() == 2 => (&items[0], &items[1]),
+            _ => return Value::Null, // malformed AST (parser invariant violation)
+        };
+        let bv = evaluate(b, scope);
+        let cv = evaluate(c, scope);
+        // `a between b and c` ≡ `a >= b and a <= c`.
+        let ge = cmp::feel_compare(&l, &bv).map(|o| o != Ordering::Greater);
+        let le = cmp::feel_compare(&l, &cv).map(|o| o != Ordering::Less);
+        return opt_bool(cmp::and_3vl(ge, le));
+    }
+    let l = evaluate(lhs, scope);
+    let r = evaluate(rhs, scope);
+    match op {
+        BinOpKind::Eq => opt_bool(cmp::feel_equals(&l, &r)),
+        BinOpKind::NotEq => opt_bool(cmp::feel_equals(&l, &r).map(|b| !b)),
+        BinOpKind::Lt => opt_bool(cmp::feel_compare(&l, &r).map(|o| o == Ordering::Less)),
+        BinOpKind::Le => opt_bool(cmp::feel_compare(&l, &r).map(|o| o != Ordering::Greater)),
+        BinOpKind::Gt => opt_bool(cmp::feel_compare(&l, &r).map(|o| o == Ordering::Greater)),
+        BinOpKind::Ge => opt_bool(cmp::feel_compare(&l, &r).map(|o| o != Ordering::Less)),
+        BinOpKind::And => opt_bool(cmp::and_3vl(to_bool(&l), to_bool(&r))),
+        BinOpKind::Or => opt_bool(cmp::or_3vl(to_bool(&l), to_bool(&r))),
+        // Stubs — 31-03 (arithmetic coercion) and 31-03 (positive unary
+        // test `in`). The exhaustive match on BinOpKind is the safety net.
+        BinOpKind::Add => Value::Null,
+        BinOpKind::Sub => Value::Null,
+        BinOpKind::Mul => Value::Null,
+        BinOpKind::Div => Value::Null,
+        BinOpKind::Pow => Value::Null,
+        BinOpKind::In => Value::Null,
+        // Between is handled above; this arm is unreachable but kept for
+        // exhaustiveness (BinOpKind is a closed enum — no `_ =>` wildcard).
+        BinOpKind::Between => unreachable!("between handled above"),
+    }
+}
+
+/// `Option<bool>` → `Value`: `Some(b)` → `Bool(b)`, `None` → `Null`. This is
+/// the evaluator-boundary 3VL rule — the `None` from null-propagating
+/// comparisons/boolean-ops maps to `Value::Null` for the FEEL caller.
+fn opt_bool(b: Option<bool>) -> Value {
+    match b {
+        Some(v) => Value::Bool(v),
+        None => Value::Null,
+    }
+}
+
+/// `Value` → `Option<bool>` for boolean operator operands: `Bool(b)` →
+/// `Some(b)`, `Null` → `None`, any other kind → `None` (a non-boolean in a
+/// boolean context is a type error → null, per 3VL).
+fn to_bool(v: &Value) -> Option<bool> {
+    match v {
+        Value::Bool(b) => Some(*b),
+        _ => None,
+    }
+}
+
+/// `Value` → `Option<Value>` for range endpoints: `Null` → `None` (open
+/// endpoint), any other value → `Some(v)`.
+fn opt_endpoint(v: Value) -> Option<Value> {
+    match v {
+        Value::Null => None,
+        other => Some(other),
+    }
 }
 
 // =====================================================================
