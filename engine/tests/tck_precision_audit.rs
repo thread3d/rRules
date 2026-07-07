@@ -118,15 +118,19 @@ fn tck_precision_audit() {
     );
 }
 
-/// Recursively collect `.xml` files under `dir`.
+/// Recursively collect `.xml` and `.dmn` files under `dir`. Both carry
+/// numeric literals: the test-case XML holds `xsd:decimal`/`xsd:double`
+/// expected values, and the `.dmn` files hold FEEL `<text>` expressions.
 fn collect_xml_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let p = entry.path();
         if p.is_dir() {
             collect_xml_files(&p, out);
-        } else if p.extension().and_then(|e| e.to_str()) == Some("xml") {
-            out.push(p);
+        } else if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+            if ext == "xml" || ext == "dmn" {
+                out.push(p);
+            }
         }
     }
 }
@@ -138,10 +142,14 @@ struct Literal {
 
 /// Iterate over maximal numeric tokens in `s`: optional leading `-`, a run of
 /// digits with an optional single `.` and optional exponent (`e`/`E` with
-/// optional sign and digits). This is a deliberately conservative scanner —
-/// it favours recall over precision so a 30-digit value is never missed. IDs
-/// in the TCK are alphanumeric (e.g. `017_a`), so pure 30-digit runs are
-/// value-domain literals.
+/// optional sign and digits). A token is only extracted when it is bounded on
+/// BOTH sides by non-alphanumeric characters (or string boundaries) — this
+/// excludes digit runs embedded in alphanumeric identifiers (e.g. the hex
+/// hash suffix in TCK test-case IDs like `001_af177e63fc`, where `177e63` is
+/// NOT a scientific-notation number). This is a deliberately conservative
+/// scanner: it favours recall over precision so a 30-digit value is never
+/// missed, while the boundary rule removes the common ID-fragment false
+/// positive.
 fn iter_numeric_literals(s: &str) -> Vec<Literal> {
     let bytes = s.as_bytes();
     let mut out = Vec::new();
@@ -155,8 +163,11 @@ fn iter_numeric_literals(s: &str) -> Vec<Literal> {
             i += 1;
             continue;
         }
-        // Scan the token.
         let start = i;
+        // Left boundary: the char before the token must not be alphanumeric
+        // (otherwise this digit run is the tail of an alphanumeric identifier).
+        let left_ok = start == 0 || !bytes[start - 1].is_ascii_alphanumeric();
+        // Scan the token.
         if bytes[i] == b'-' {
             i += 1;
         }
@@ -190,9 +201,11 @@ fn iter_numeric_literals(s: &str) -> Vec<Literal> {
                 }
             }
         }
+        // Right boundary: the char after the token must not be alphanumeric.
+        let right_ok = i >= bytes.len() || !bytes[i].is_ascii_alphanumeric();
         let text = &s[start..i];
-        // Only keep tokens that have at least one digit (guards against a bare '-').
-        if text.chars().any(|c| c.is_ascii_digit()) {
+        // Keep the token only if both boundaries are clean and it has a digit.
+        if left_ok && right_ok && text.chars().any(|c| c.is_ascii_digit()) {
             out.push(Literal {
                 text: text.to_string(),
             });
@@ -287,5 +300,21 @@ mod tests {
         assert!(lits.contains(&"5.5".to_string()));
         assert!(lits.contains(&"1".to_string()));
         assert!(lits.contains(&"2".to_string()));
+    }
+
+    #[test]
+    fn iter_literals_excludes_id_fragments() {
+        // TCK test-case IDs carry hex hash suffixes (e.g. `001_af177e63fc`).
+        // The `177e63` inside is NOT a scientific-notation number.
+        let s = r#"<testCase id="001_af177e63fc"><resultNode name="feel-decimal-function_010_4b46e59c8b">"#;
+        let lits: Vec<String> = iter_numeric_literals(s).into_iter().map(|l| l.text).collect();
+        // `001` is bounded by `"` and `_` — extracted (harmless: 3 sig digits).
+        assert!(lits.contains(&"001".to_string()));
+        // `177e63` / `46e59` are embedded in alphanumeric IDs — must NOT appear.
+        assert!(
+            !lits.iter().any(|l| l.contains('e') || l.contains('E')),
+            "no exponent tokens should be extracted from alphanumeric IDs, got {:?}",
+            lits
+        );
     }
 }
