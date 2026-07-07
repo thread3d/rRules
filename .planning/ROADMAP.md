@@ -159,7 +159,18 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
   4. The ~70+ FEEL built-in functions are available across conversion/string/list/numeric/date-time/context/boolean/range/equality families, and user-defined lambdas (grammar rule 55) evaluate.
   5. Cell/expression FEEL is pre-parsed to `Arc<FeelExpression>` at load time; the evaluator takes `&FeelExpression` and never re-parses (a 30-cell table × 10k evals ≈ 30 parses, not 300k).
 
-**Plans**: TBD
+**Plans**: 9 plans (sequential waves 1-9 — `eval.rs`/`builtins.rs` shared file overlap forces sequential execution matching the verify-each-plan cadence)
+
+Plans:
+- [ ] 31-01-PLAN.md — DMN-11: Lexer + recursive-descent Pratt parser (grammar 1-65), dual entry points, error-recovery partial AST, FeelExpression enum skeleton (wave 1)
+- [ ] 31-02-PLAN.md — DMN-12: Evaluator core + three-valued logic (feel_equals/feel_compare → Option<_>, explicit and/or/not truth tables, null → Value::Null, MANDATORY conformance cases) (wave 2)
+- [ ] 31-03-PLAN.md — DMN-13: Operators (arithmetic, comparison, boolean, string concat, date-time arithmetic, duration) + coercion.rs; div-by-zero/overflow → Null (wave 3)
+- [ ] 31-04-PLAN.md — DMN-14: Control + quantified (if, for, some/every, path, filter, instance of against Phase 30 FeelType lattice) (wave 4)
+- [ ] 31-05-PLAN.md — DMN-15: All 10 boxed expressions (recursive); boxed-context topological (dependency-order) evaluation with DFS color-marking cycle detection via flat Scope + deps map (wave 5)
+- [ ] 31-06-PLAN.md — DMN-16: User-defined lambdas (grammar rule 55, non-external); extend FeelFunction with closure body + captured scope (lexical capture) (wave 6)
+- [ ] 31-07-PLAN.md — DMN-17 part 1: Built-in functions (conversion/string/list/numeric families) + HashMap<&str, BuiltinFn> registry + FunctionInvocation dispatch wiring (wave 7)
+- [ ] 31-08-PLAN.md — DMN-17 part 2: Built-in functions (date-time/context/boolean/range/equality families); `is` never-null Pitfall-6 enforcement; Allen interval algebra range built-ins (wave 8)
+- [ ] 31-09-PLAN.md — DMN-18: AST cache (DashMap<String, Arc<FeelExpression>>), IR-loader pre-parse wiring, evaluator-takes-&FeelExpression type contract, TCK FEEL harness scaffold (wave 9)
 
 ### Phase 32: Decision-Table Engine + Hit Policies
 
