@@ -147,6 +147,11 @@ fn path_nav(v: Value, name: &str) -> Value {
 ///
 /// All operators return `Option<_>` so `None` maps to [`Value::Null`] at
 /// the evaluator boundary (three-valued logic, DMN 1.5 rule 49.a).
+// `#[allow(dead_code)]`: the cmp functions are exercised by the Task 1
+// unit tests (dmn12_/truth_tables) and are wired into `evaluate`'s dispatch
+// in Task 2 GREEN. The non-test build has no caller until that dispatch
+// lands, so the lint is expected and transient.
+#[allow(dead_code)]
 mod cmp {
     use crate::data_types::Value;
     use std::cmp::Ordering;
@@ -165,10 +170,44 @@ mod cmp {
     /// `true` (§10.3.2.2 — integers and numbers are one numeric domain).
     /// `Date = DateTimeTz` at UTC midnight → `true` (§10.3.2.3.5).
     pub fn feel_equals(a: &Value, b: &Value) -> Option<bool> {
-        // RED-phase stub: returns None for everything. GREEN replaces this
-        // with the full same-kind dispatch.
-        let _ = (a, b);
-        None
+        // Rule 49.a null arms (verbatim): null=null → true; null=non-null →
+        // false (because `FEEL(e) is null` is false when e is non-null).
+        match (a, b) {
+            (Value::Null, Value::Null) => return Some(true),
+            (Value::Null, _) | (_, Value::Null) => return Some(false),
+            _ => {}
+        }
+        // Same-kind arms.
+        match (a, b) {
+            // Numeric domain: Number/Number, Number/Integer, Integer/Number
+            // via feel_numeric_eq (Phase 30 consistency). (Integer, Integer)
+            // is NOT handled by feel_numeric_eq (its `_` arm returns None),
+            // so compare the integers directly.
+            (Value::Number(_), Value::Number(_))
+            | (Value::Number(_), Value::Integer(_))
+            | (Value::Integer(_), Value::Number(_)) => super::feel_numeric_eq(a, b),
+            (Value::Integer(x), Value::Integer(y)) => Some(*x == *y),
+            (Value::String(x), Value::String(y)) => Some(x == y),
+            (Value::Bool(x), Value::Bool(y)) => Some(x == y),
+            (Value::Date(x), Value::Date(y)) => Some(x == y),
+            // §10.3.2.3.5: a date ≡ a datetime at UTC midnight on that date.
+            (Value::Date(d), Value::DateTimeTz(dtv)) | (Value::DateTimeTz(dtv), Value::Date(d)) => {
+                date_equals_datetime_z(d, dtv)
+            }
+            (Value::Time(x), Value::Time(y)) => Some(x == y),
+            (Value::DateTimeTz(x), Value::DateTimeTz(y)) => Some(x == y),
+            (Value::DaysTimeDuration(x), Value::DaysTimeDuration(y)) => Some(x == y),
+            (Value::YearsMonthsDuration(x), Value::YearsMonthsDuration(y)) => Some(x == y),
+            (Value::Array(x), Value::Array(y)) => list_equals(x, y),
+            (Value::Object(x), Value::Object(y)) => context_equals(x, y),
+            // TODO(31-05): Value::Range equality (structural endpoint
+            // comparison) lands when boxed-context evaluation needs it. For
+            // now range equality yields None (null) — not a same-kind
+            // scalar arm. No conformance case requires it in 31-02.
+            // Type mismatch ("a" = 1, true = 1, etc.) → None (null), NOT
+            // false (Pitfall 4).
+            _ => None,
+        }
     }
 
     /// FEEL ordering — `Option<Ordering>` (null-propagating). NEVER reuse Rust `Ord`.
@@ -177,8 +216,26 @@ mod cmp {
     /// - Same-kind, comparable → `Some(Ordering)`.
     /// - **Different kind** → `None` (input domain requires same kind).
     pub fn feel_compare(a: &Value, b: &Value) -> Option<Ordering> {
-        let _ = (a, b);
-        None
+        match (a, b) {
+            (Value::Null, _) | (_, Value::Null) => None,
+            // Numeric domain. (Number, Integer) and (Integer, Number) are
+            // handled with the correct operand order (the research Pattern 2
+            // code had the order reversed for (Number, Integer) — a latent
+            // bug; this is the corrected version).
+            (Value::Number(x), Value::Number(y)) => x.partial_cmp(y),
+            (Value::Number(x), Value::Integer(i)) => x.partial_cmp(&rust_decimal::Decimal::from(*i)),
+            (Value::Integer(i), Value::Number(x)) => rust_decimal::Decimal::from(*i).partial_cmp(x),
+            (Value::Integer(x), Value::Integer(y)) => Some(x.cmp(y)),
+            (Value::String(x), Value::String(y)) => Some(x.cmp(y)),
+            (Value::Bool(x), Value::Bool(y)) => Some(x.cmp(y)),
+            (Value::Date(x), Value::Date(y)) => Some(x.cmp(y)),
+            (Value::Time(x), Value::Time(y)) => time_cmp(x, y),
+            (Value::DateTimeTz(x), Value::DateTimeTz(y)) => datetime_cmp(x, y),
+            (Value::DaysTimeDuration(x), Value::DaysTimeDuration(y)) => Some(x.cmp(y)),
+            (Value::YearsMonthsDuration(x), Value::YearsMonthsDuration(y)) => Some(x.months.cmp(&y.months)),
+            // Type mismatch or unordered types → None.
+            _ => None,
+        }
     }
 
     /// Explicit three-valued AND. `false` is dominant; `null` propagates
@@ -187,8 +244,11 @@ mod cmp {
     /// - `(Some(true), Some(true))` → `Some(true)`.
     /// - `_` → `None` (null present, no false).
     pub fn and_3vl(a: Option<bool>, b: Option<bool>) -> Option<bool> {
-        let _ = (a, b);
-        None
+        match (a, b) {
+            (Some(false), _) | (_, Some(false)) => Some(false),
+            (Some(true), Some(true)) => Some(true),
+            _ => None,
+        }
     }
 
     /// Explicit three-valued OR. `true` is dominant; `null` propagates
@@ -197,8 +257,11 @@ mod cmp {
     /// - `(Some(false), Some(false))` → `Some(false)`.
     /// - `_` → `None` (null present, no true).
     pub fn or_3vl(a: Option<bool>, b: Option<bool>) -> Option<bool> {
-        let _ = (a, b);
-        None
+        match (a, b) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), Some(false)) => Some(false),
+            _ => None,
+        }
     }
 
     /// Explicit three-valued NOT. `null` → `null`; else negate.
@@ -206,31 +269,110 @@ mod cmp {
     /// - `Some(false)` → `Some(true)`.
     /// - `None` → `None` (`not(null)` → `null`).
     pub fn not_3vl(a: Option<bool>) -> Option<bool> {
-        let _ = a;
-        None
+        match a {
+            Some(true) => Some(false),
+            Some(false) => Some(true),
+            None => None,
+        }
     }
 
     /// Element-wise list equality. Two lists are equal iff same length and
-    /// every pair is `feel_equals`-equal (with no `None`).
-    #[allow(dead_code)] // populated in GREEN; used by feel_equals's Array arm.
+    /// every pair is `feel_equals`-equal. A length mismatch → `Some(false)`
+    /// (definite). Any pair returning `None` (type mismatch) → `None` (null
+    /// propagates through the list comparison per 3VL).
     fn list_equals(x: &[Value], y: &[Value]) -> Option<bool> {
-        let _ = (x, y);
-        None
+        if x.len() != y.len() {
+            return Some(false);
+        }
+        let mut all_eq = true;
+        for (a, b) in x.iter().zip(y.iter()) {
+            match feel_equals(a, b) {
+                Some(true) => {}
+                Some(false) => all_eq = false,
+                None => return None,
+            }
+        }
+        Some(all_eq)
     }
 
     /// Context equality: same keys, and each key's value is `feel_equals`-equal.
-    #[allow(dead_code)] // populated in GREEN; used by feel_equals's Object arm.
-    fn context_equals(x: &std::collections::HashMap<String, Value>, y: &std::collections::HashMap<String, Value>) -> Option<bool> {
-        let _ = (x, y);
-        None
+    /// A missing key in the other context → `Some(false)` (definite). A
+    /// value comparison returning `None` → `None` (null propagates).
+    fn context_equals(
+        x: &std::collections::HashMap<String, Value>,
+        y: &std::collections::HashMap<String, Value>,
+    ) -> Option<bool> {
+        if x.len() != y.len() {
+            return Some(false);
+        }
+        let mut all_eq = true;
+        for (k, v) in x {
+            match y.get(k) {
+                None => return Some(false),
+                Some(v2) => match feel_equals(v, v2) {
+                    Some(true) => {}
+                    Some(false) => all_eq = false,
+                    None => return None,
+                },
+            }
+        }
+        Some(all_eq)
     }
 
     /// §10.3.2.3.5: a `date` equals a `date and time` at UTC midnight on
-    /// that date.
-    #[allow(dead_code)] // populated in GREEN; used by feel_equals's Date/DateTimeTz arm.
-    fn date_equals_datetime_z(d: &chrono::NaiveDate, dtv: &super::super::temporal::DateTimeValue) -> Option<bool> {
-        let _ = (d, dtv);
-        None
+    /// that date. The datetime is compared in UTC: a Fixed/Iana datetime is
+    /// converted to its UTC naive component; a Local datetime is treated as
+    /// if its naive component were UTC (no offset carried).
+    fn date_equals_datetime_z(
+        d: &chrono::NaiveDate,
+        dtv: &super::super::temporal::DateTimeValue,
+    ) -> Option<bool> {
+        let midnight = chrono::NaiveTime::from_hms_opt(0, 0, 0)?;
+        let (utc_date, utc_time) = match dtv {
+            super::super::temporal::DateTimeValue::Fixed(dt) => {
+                let utc = dt.naive_utc();
+                (utc.date(), utc.time())
+            }
+            super::super::temporal::DateTimeValue::Iana(dt) => {
+                let utc = dt.naive_utc();
+                (utc.date(), utc.time())
+            }
+            super::super::temporal::DateTimeValue::Local(ndt) => {
+                (ndt.date(), ndt.time())
+            }
+        };
+        Some(utc_date == *d && utc_time == midnight)
+    }
+
+    /// Compare two `TimeValue`s. Within-form comparisons use the natural
+    /// ordering; cross-form comparisons (e.g. Offset vs Local) return `None`
+    /// (incomparable without a shared reference frame).
+    fn time_cmp(
+        x: &super::super::temporal::TimeValue,
+        y: &super::super::temporal::TimeValue,
+    ) -> Option<Ordering> {
+        use super::super::temporal::TimeValue;
+        match (x, y) {
+            (TimeValue::Fixed(a), TimeValue::Fixed(b)) => Some(a.cmp(b)),
+            (TimeValue::Local(a), TimeValue::Local(b)) => Some(a.cmp(b)),
+            (TimeValue::Offset(a), TimeValue::Offset(b)) => Some(a.cmp(b)),
+            _ => None,
+        }
+    }
+
+    /// Compare two `DateTimeValue`s. Within-form comparisons use the natural
+    /// ordering; cross-form comparisons (Fixed/Iana/Local) return `None`.
+    fn datetime_cmp(
+        x: &super::super::temporal::DateTimeValue,
+        y: &super::super::temporal::DateTimeValue,
+    ) -> Option<Ordering> {
+        use super::super::temporal::DateTimeValue;
+        match (x, y) {
+            (DateTimeValue::Fixed(a), DateTimeValue::Fixed(b)) => Some(a.cmp(b)),
+            (DateTimeValue::Iana(a), DateTimeValue::Iana(b)) => Some(a.cmp(b)),
+            (DateTimeValue::Local(a), DateTimeValue::Local(b)) => Some(a.cmp(b)),
+            _ => None,
+        }
     }
 }
 
