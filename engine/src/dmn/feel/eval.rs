@@ -508,7 +508,7 @@ fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope:
         // (Pitfall 6); the explicit string()/number() built-ins (31-07) are
         // the only such path.
         BinOpKind::Add => eval_add(l, r),
-        BinOpKind::Sub => numeric_binop(l, r, |x, y| Some(x - y)),
+        BinOpKind::Sub => eval_sub(l, r),
         BinOpKind::Mul => numeric_binop(l, r, |x, y| Some(x * y)),
         BinOpKind::Div => numeric_binop(l, r, |x, y| {
             if y.is_zero() {
@@ -553,10 +553,13 @@ fn opt_bool(b: Option<bool>) -> Value {
 ///   (NO implicit number↔string conversion — Phase 30 Pitfall 6; the explicit
 ///   `string()`/`number()` built-ins in 31-07 are the only such path).
 fn eval_add(l: Value, r: Value) -> Value {
-    // Null operand short-circuit (both the concat and numeric arms propagate
-    // null for a null operand).
+    // Null operand short-circuit (all arms propagate null for a null operand).
     if matches!(l, Value::Null) || matches!(r, Value::Null) {
         return Value::Null;
+    }
+    // Date-time arithmetic (delegates to temporal helpers; DMN-13 matrix).
+    if let Some(v) = datetime_add(&l, &r) {
+        return v;
     }
     // String concatenation — both operands must be Strings. This is the ONLY
     // `+` overload for the String kind; Number+String falls through to the
@@ -568,6 +571,20 @@ fn eval_add(l: Value, r: Value) -> Value {
     }
     // Numeric add (Number/Integer → Decimal).
     numeric_binop(l, r, |x, y| Some(x + y))
+}
+
+/// FEEL `-` (DMN-13). Tries date-time subtraction first (Date-Date → DTD,
+/// DateTimeTz-DateTimeTz → DTD, Time-Time → DTD, Date-YMD → Date,
+/// Date-DTD → Date, DTD-DTD → DTD, YMD-YMD → YMD), then falls back to
+/// numeric subtraction. Null operand → `Value::Null`.
+fn eval_sub(l: Value, r: Value) -> Value {
+    if matches!(l, Value::Null) || matches!(r, Value::Null) {
+        return Value::Null;
+    }
+    if let Some(v) = datetime_sub(&l, &r) {
+        return v;
+    }
+    numeric_binop(l, r, |x, y| Some(x - y))
 }
 
 /// Apply a Decimal128 binary op to two `Value`s. Either operand not coercible
@@ -651,7 +668,200 @@ fn eval_in(l: Value, r: Value) -> Value {
     opt_bool(ok)
 }
 
-/// `Value` → `Option<bool>` for boolean operator operands: `Bool(b)` →
+// =====================================================================
+// Date-time arithmetic (DMN-13). Delegates to Phase 30 temporal helpers
+// for DST-correct computation. Returns `None` for any type-mismatched
+// pair not in the arithmetic matrix → the caller emits `Value::Null`.
+// =====================================================================
+
+use super::temporal::{add_days_time_zoned, add_months_zoned};
+use chrono::{Months, TimeZone};
+
+/// FEEL `+` for date-time operands (DMN-13 date-time arithmetic matrix).
+///
+/// - `Date + YearsMonthsDuration -> Date` (via `checked_add_months`).
+/// - `Date + DaysTimeDuration -> Date` (via NaiveDateTime + TimeDelta).
+/// - `DateTimeTz + DaysTimeDuration -> DateTimeTz` (via
+///   `add_days_time_zoned` for IANA — DST gap → None/null, overlap → earliest).
+/// - `DateTimeTz + YearsMonthsDuration -> DateTimeTz` (via
+///   `add_months_zoned` for IANA — same DST policy).
+/// - `Time + DaysTimeDuration -> Time` (NaiveTime wraps 24h).
+/// - `DaysTimeDuration + DaysTimeDuration -> DaysTimeDuration`.
+/// - `YearsMonthsDuration + YearsMonthsDuration -> YearsMonthsDuration`.
+///
+/// Returns `None` for any other type pair → caller emits `Value::Null`.
+fn datetime_add(l: &Value, r: &Value) -> Option<Value> {
+    match (l, r) {
+        // Date + YearsMonthsDuration -> Date
+        (Value::Date(d), Value::YearsMonthsDuration(ymd)) => {
+            add_months_to_date(*d, ymd.months).map(Value::Date)
+        }
+        // Date + DaysTimeDuration -> Date
+        (Value::Date(d), Value::DaysTimeDuration(td)) => {
+            let ndt = d.and_hms_opt(0, 0, 0)?;
+            ndt.checked_add_signed(*td).map(|r| r.date()).map(Value::Date)
+        }
+        // DateTimeTz + DaysTimeDuration -> DateTimeTz
+        (Value::DateTimeTz(dt), Value::DaysTimeDuration(td)) => match dt {
+            super::temporal::DateTimeValue::Iana(zdt) => {
+                add_days_time_zoned(*zdt, *td)
+                    .map(super::temporal::DateTimeValue::Iana)
+            }
+            super::temporal::DateTimeValue::Fixed(fdt) => {
+                fdt.checked_add_signed(*td).map(super::temporal::DateTimeValue::Fixed)
+            }
+            super::temporal::DateTimeValue::Local(ndt) => {
+                ndt.checked_add_signed(*td).map(super::temporal::DateTimeValue::Local)
+            }
+        }
+        .map(Value::DateTimeTz),
+        // DateTimeTz + YearsMonthsDuration -> DateTimeTz
+        (Value::DateTimeTz(dt), Value::YearsMonthsDuration(ymd)) => match dt {
+            super::temporal::DateTimeValue::Iana(zdt) => {
+                add_months_zoned(*zdt, ymd)
+                    .map(super::temporal::DateTimeValue::Iana)
+            }
+            super::temporal::DateTimeValue::Fixed(fdt) => {
+                let naive = fdt.naive_local();
+                let new_naive = add_months_to_naive_dt(naive, ymd.months)?;
+                let off = fdt.offset();
+                off.from_local_datetime(&new_naive)
+                    .single()
+                    .map(super::temporal::DateTimeValue::Fixed)
+            }
+            super::temporal::DateTimeValue::Local(ndt) => {
+                add_months_to_naive_dt(*ndt, ymd.months)
+                    .map(super::temporal::DateTimeValue::Local)
+            }
+        }
+        .map(Value::DateTimeTz),
+        // Time + DaysTimeDuration -> Time
+        (Value::Time(t), Value::DaysTimeDuration(td)) => match t {
+            super::temporal::TimeValue::Fixed(nt) => {
+                Some(Value::Time(super::temporal::TimeValue::Fixed(*nt + *td)))
+            }
+            super::temporal::TimeValue::Offset(ot) => ot
+                .checked_add_signed(*td)
+                .map(|r| Value::Time(super::temporal::TimeValue::Offset(r))),
+            super::temporal::TimeValue::Local(nt) => {
+                Some(Value::Time(super::temporal::TimeValue::Local(*nt + *td)))
+            }
+        },
+        // DaysTimeDuration + DaysTimeDuration -> DaysTimeDuration
+        (Value::DaysTimeDuration(a), Value::DaysTimeDuration(b)) => {
+            Some(Value::DaysTimeDuration(*a + *b))
+        }
+        // YearsMonthsDuration + YearsMonthsDuration -> YearsMonthsDuration
+        (
+            Value::YearsMonthsDuration(a),
+            Value::YearsMonthsDuration(b),
+        ) => Some(Value::YearsMonthsDuration(
+            super::temporal::YearsMonthsDuration {
+                months: a.months + b.months,
+            },
+        )),
+        _ => None,
+    }
+}
+
+/// FEEL `-` for date-time operands (DMN-13 date-time arithmetic matrix).
+///
+/// - `Date - Date -> DaysTimeDuration`.
+/// - `DateTimeTz - DateTimeTz -> DaysTimeDuration` (within-form only).
+/// - `Time - Time -> DaysTimeDuration` (within-form only).
+/// - `Date - YearsMonthsDuration -> Date`.
+/// - `Date - DaysTimeDuration -> Date`.
+/// - `DaysTimeDuration - DaysTimeDuration -> DaysTimeDuration`.
+/// - `YearsMonthsDuration - YearsMonthsDuration -> YearsMonthsDuration`.
+fn datetime_sub(l: &Value, r: &Value) -> Option<Value> {
+    match (l, r) {
+        // Date - Date -> DaysTimeDuration
+        (Value::Date(a), Value::Date(b)) => {
+            Some(Value::DaysTimeDuration((*a - *b)))
+        }
+        // DateTimeTz - DateTimeTz -> DaysTimeDuration (within-form only)
+        (Value::DateTimeTz(a), Value::DateTimeTz(b)) => match (a, b) {
+            (
+                super::temporal::DateTimeValue::Iana(az),
+                super::temporal::DateTimeValue::Iana(bz),
+            ) => Some(Value::DaysTimeDuration(*az - *bz)),
+            (
+                super::temporal::DateTimeValue::Fixed(af),
+                super::temporal::DateTimeValue::Fixed(bf),
+            ) => Some(Value::DaysTimeDuration(*af - *bf)),
+            (
+                super::temporal::DateTimeValue::Local(an),
+                super::temporal::DateTimeValue::Local(bn),
+            ) => Some(Value::DaysTimeDuration(*an - *bn)),
+            _ => None, // mixed timezone forms → type mismatch
+        },
+        // Time - Time -> DaysTimeDuration (within-form only)
+        (Value::Time(a), Value::Time(b)) => match (a, b) {
+            (super::temporal::TimeValue::Fixed(at), super::temporal::TimeValue::Fixed(bt)) => {
+                Some(Value::DaysTimeDuration(*at - *bt))
+            }
+            (
+                super::temporal::TimeValue::Offset(ao),
+                super::temporal::TimeValue::Offset(bo),
+            ) => Some(Value::DaysTimeDuration(*ao - *bo)),
+            (
+                super::temporal::TimeValue::Local(at),
+                super::temporal::TimeValue::Local(bt),
+            ) => Some(Value::DaysTimeDuration(*at - *bt)),
+            _ => None,
+        },
+        // Date - YearsMonthsDuration -> Date
+        (Value::Date(d), Value::YearsMonthsDuration(ymd)) => {
+            add_months_to_date(*d, -ymd.months).map(Value::Date)
+        }
+        // Date - DaysTimeDuration -> Date
+        (Value::Date(d), Value::DaysTimeDuration(td)) => {
+            let ndt = d.and_hms_opt(0, 0, 0)?;
+            ndt.checked_add_signed(-*td)
+                .map(|r| r.date())
+                .map(Value::Date)
+        }
+        // DaysTimeDuration - DaysTimeDuration -> DaysTimeDuration
+        (Value::DaysTimeDuration(a), Value::DaysTimeDuration(b)) => {
+            Some(Value::DaysTimeDuration(*a - *b))
+        }
+        // YearsMonthsDuration - YearsMonthsDuration -> YearsMonthsDuration
+        (
+            Value::YearsMonthsDuration(a),
+            Value::YearsMonthsDuration(b),
+        ) => Some(Value::YearsMonthsDuration(
+            super::temporal::YearsMonthsDuration {
+                months: a.months - b.months,
+            },
+        )),
+        _ => None,
+    }
+}
+
+/// Add `months` (signed) to a `NaiveDate` using chrono's
+/// `checked_add_months`/`checked_sub_months` — Jan 31 + 1 → Feb 28/29
+/// (spec-correct "last day of resulting month" semantics).
+fn add_months_to_date(d: chrono::NaiveDate, months: i64) -> Option<chrono::NaiveDate> {
+    if months >= 0 {
+        d.checked_add_months(Months::new(months.unsigned_abs() as u32))
+    } else {
+        d.checked_sub_months(Months::new(months.unsigned_abs() as u32))
+    }
+}
+
+/// Add `months` (signed) to a `NaiveDateTime` (for Fixed/Local
+/// `DateTimeTz` forms — same checked_add_months semantics).
+fn add_months_to_naive_dt(
+    ndt: chrono::NaiveDateTime,
+    months: i64,
+) -> Option<chrono::NaiveDateTime> {
+    if months >= 0 {
+        ndt.checked_add_months(Months::new(months.unsigned_abs() as u32))
+    } else {
+        ndt.checked_sub_months(Months::new(months.unsigned_abs() as u32))
+    }
+}
+
 /// `Some(b)`, `Null` → `None`, any other kind → `None` (a non-boolean in a
 /// boolean context is a type error → null, per 3VL).
 fn to_bool(v: &Value) -> Option<bool> {
@@ -1290,6 +1500,7 @@ fn in_range_null_operand_yields_null() {
 
 // ----- property test: Decimal128 division invariants -----
 
+#[cfg(test)]
 proptest::proptest! {
     #![proptest_config(proptest::test_runner::Config {
         cases: 64,
@@ -1315,9 +1526,7 @@ proptest::proptest! {
 // =====================================================================
 
 #[cfg(test)]
-use super::temporal::{TimeValue, YearsMonthsDuration};
-#[cfg(test)]
-use chrono::{Months, TimeDelta};
+use chrono::TimeDelta;
 
 #[cfg(test)]
 #[test]
@@ -1389,6 +1598,7 @@ fn datetime_arith_type_mismatch_yields_null() {
     assert_eq!(eval_src(r#"@"2021-01-31" + 5"#), Value::Null);
 }
 
+#[cfg(test)]
 proptest::proptest! {
     #![proptest_config(proptest::test_runner::Config {
         cases: 32,
