@@ -125,10 +125,10 @@ fn path_nav(v: Value, name: &str) -> Value {
 }
 
 // =====================================================================
-// Private cmp module — the SOLE home of FEEL equality/ordering.
+// Cmp module — the SOLE home of FEEL equality/ordering.
 // =====================================================================
 
-/// Private three-valued-logic comparison module.
+/// Three-valued-logic comparison module (pub(crate) for use by builtins.rs).
 ///
 /// This module is the **only** place in `feel::eval` that performs FEEL
 /// equality/ordering. It does NOT re-export `PartialEq`/`PartialOrd` —
@@ -143,7 +143,7 @@ fn path_nav(v: Value, name: &str) -> Value {
 // in Task 2 GREEN. The non-test build has no caller until that dispatch
 // lands, so the lint is expected and transient.
 #[allow(dead_code)]
-mod cmp {
+pub(crate) mod cmp {
     use crate::data_types::Value;
     use std::cmp::Ordering;
 
@@ -3408,4 +3408,19 @@ mod external_rejected {
         let result = evaluate(&invocation, &Scope::empty());
         assert_eq!(result, Value::Null, "non-function callee should return Null");
     }
+}
+
+// =====================================================================
+// Public helpers for downstream modules (builtins.rs).
+// =====================================================================
+
+/// Public wrapper around the private `cmp::feel_equals` function.
+///
+/// Exposed so that `builtins.rs` can use FEEL equality (NOT Rust `==`)
+/// for list operations like `distinct values`, `list contains`, etc.
+/// This preserves the Pitfall 1 invariant: never reuse Rust `==` for
+/// FEEL value comparison. The private `cmp` module does NOT re-export
+/// its symbols — this is the ONLY public access point.
+pub fn feel_equals_public(a: &Value, b: &Value) -> Option<bool> {
+    crate::dmn::feel::eval::cmp::feel_equals(a, b)
 }
