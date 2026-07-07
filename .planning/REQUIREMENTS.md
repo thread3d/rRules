@@ -25,7 +25,7 @@ Requirements for the v6.0 milestone. Each maps to roadmap phases 29–35.
 ### FEEL Expression Language
 
 - [x] **DMN-11**: FEEL lexer/parser — full grammar rules 1–65; dual entry points (`SimpleUnaryTests`, `Expression`); keyword-as-name disambiguation; hand-written recursive descent with Pratt precedence
-- [ ] **DMN-12**: FEEL evaluator with three-valued logic — `feel_equals`/`feel_compare` return `Option<_>` (null → `Value::Null`); explicit truth tables for `and`/`or`/`not`; conformance cases (`"a"=1`→null, `null<3`→null, `null=null`→true, `not(null)`→null)
+- [x] **DMN-12**: FEEL evaluator with three-valued logic — `feel_equals`/`feel_compare` return `Option<_>` (null → `Value::Null`); explicit truth tables for `and`/`or`/`not`; conformance cases (`"a"=1`→null, `null<3`→null, `null=null`→true, `not(null)`→null)
 - [ ] **DMN-13**: FEEL operators — arithmetic, comparison, boolean, string concatenation, date-time arithmetic and duration operations
 - [ ] **DMN-14**: FEEL control + quantified expressions — `if`, `for`, `some`/`every`, path, filter, `instance of`
 - [ ] **DMN-15**: FEEL boxed expressions — all 10 types (literal, context, list, relation, function invocation, function definition, conditional, filter, for, every/some), recursive; boxed contexts evaluated in dependency (topological) order with cycle detection
@@ -101,7 +101,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DMN-09 | Phase 30 | Complete |
 | DMN-10 | Phase 30 | Complete |
 | DMN-11 | Phase 31 | Complete |
-| DMN-12 | Phase 31 | Pending |
+| DMN-12 | Phase 31 | Complete |
 | DMN-13 | Phase 31 | Pending |
 | DMN-14 | Phase 31 | Pending |
 | DMN-15 | Phase 31 | Pending |

@@ -6,14 +6,14 @@ current_phase: 31
 current_phase_name: feel-parser-evaluator-built-in-function-library
 status: executing
 stopped_at: Completed 29-02-PLAN.md
-last_updated: "2026-07-07T06:27:53.544Z"
+last_updated: "2026-07-07T06:37:28.344Z"
 last_activity: 2026-07-07
 last_activity_desc: Phase 31 execution started
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 16
-  completed_plans: 8
+  completed_plans: 9
   percent: 29
 ---
 
@@ -29,7 +29,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-06)
 ## Current Position
 
 Phase: 31 (feel-parser-evaluator-built-in-function-library) — EXECUTING
-Plan: 2 of 9
+Plan: 3 of 9
 Status: Ready to execute
 Last activity: 2026-07-07 — Phase 31 execution started
 
@@ -283,6 +283,10 @@ From v2.0 milestone:
 - [Phase ?]: Pratt precedence ladder: or=10 and=20 comparison=30 instance-of=35 additive=40 mult=50 **=60 RIGHT-assoc
 - [Phase ?]: Error recovery: partial AST with Err nodes carrying spans (user override, not fail-fast)
 - [Phase ?]: FeelFunction carrier extended with param_names/body/captured (Arc-backed data-model decision)
+- [Phase ?]: Private mod cmp (not pub) makes Rust ==/Ord reuse a visibility error; no_rust_eq test enforces no PartialEq/PartialOrd/partial_cmp outside cmp (31-02)
+- [Phase ?]: feel_equals/feel_compare return Option<bool>/Option<Ordering> (None=null) — the 3VL boundary; opt_bool maps None→Value::Null (31-02)
+- [Phase ?]: evaluate(&FeelExpression, &Scope) is the sole entry point — NO evaluate(&str) overload (type-level no-re-parse contract, DMN-18) (31-02)
+- [Phase ?]: Tests flattened into mod eval (not nested mod tests) so VALIDATION.md filter substrings like dmn::feel::eval::dmn12_ match directly (31-02)
 
 ### Blockers/Concerns (All Resolved from v2.0)
 
@@ -314,7 +318,7 @@ From v3.0 milestone:
 
 **Stopped at:** Completed 29-02-PLAN.md
 
-Last session: 2026-07-07T06:27:53.529Z
+Last session: 2026-07-07T06:37:23.031Z
 
 **Completed Phases:**
 
@@ -355,3 +359,4 @@ Last session: 2026-07-07T06:27:53.529Z
 | Phase 30 P03 | 9min | 2 tasks | 2 files |
 | Phase 30 P04 | 7min | 2 tasks | 4 files |
 | Phase 31 P01 | 9m | 3 tasks | 11 files |
+| Phase 31 P02 | 12min | 2 tasks | 1 files |
