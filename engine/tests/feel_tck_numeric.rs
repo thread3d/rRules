@@ -198,12 +198,43 @@ fn parse_test_cases(path: &Path) -> Vec<TckCase> {
 /// This is a deliberately minimal evaluator — Phase 31 ships the full FEEL
 /// evaluator. Here we only prove the `Value::Number` value domain against
 /// the TCK arithmetic vectors.
-fn eval_numeric_expr(_expr: &str) -> Option<Decimal> {
-    // RED STUB — the real binary-arithmetic evaluator lands in the GREEN
-    // commit of Plan 30-02 Task 2. Returning None so NO in-scope vector is
-    // evaluated and the `feel_tck_numeric_vectors` "at least 10 evaluated"
-    // assertion fails genuinely.
-    None
+fn eval_numeric_expr(expr: &str) -> Option<Decimal> {
+    let s = expr.trim();
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    // LHS: optional leading '-', then digits and '.'.
+    let mut pos = if bytes[0] == b'-' { 1 } else { 0 };
+    let lhs_start = pos;
+    while pos < bytes.len() && (bytes[pos].is_ascii_digit() || bytes[pos] == b'.') {
+        pos += 1;
+    }
+    if pos == lhs_start {
+        return None; // no LHS digits
+    }
+    let lhs = Decimal::from_str(s[..pos].trim()).ok()?;
+    let rest = s[pos..].trim_start();
+    let op = rest.chars().next()?;
+    let rhs_str = rest[1..].trim();
+    if rhs_str.is_empty() {
+        return None;
+    }
+    let rhs = Decimal::from_str(rhs_str).ok()?;
+    match op {
+        '+' => Some(lhs + rhs),
+        '-' => Some(lhs - rhs),
+        '*' => Some(lhs * rhs),
+        '/' => {
+            if rhs.is_zero() {
+                None // div-by-zero → null mapping is Phase 31 (Security Domain)
+            } else {
+                lhs.checked_div(rhs)
+            }
+        }
+        // '**' (exponentiation) and any other operator → Phase 31
+        _ => None,
+    }
 }
 
 // ----- helpers -----
