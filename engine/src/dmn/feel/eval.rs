@@ -1308,3 +1308,113 @@ proptest::proptest! {
         prop_assert_eq!(r, Value::Number(rust_decimal::Decimal::ONE));
     }
 }
+
+// =====================================================================
+// Plan 31-03 Task 2: date-time arithmetic + duration operators.
+// Reuses Phase 30 add_months_zoned / add_days_time_zoned (DST-correct).
+// =====================================================================
+
+#[cfg(test)]
+use super::temporal::{TimeValue, YearsMonthsDuration};
+#[cfg(test)]
+use chrono::{Months, TimeDelta};
+
+#[cfg(test)]
+#[test]
+fn datetime_arith_date_plus_ymd() {
+    // Jan 31 + 1 month -> Feb 28 (spec-correct via checked_add_months)
+    assert_eq!(
+        eval_src(r#"@"2021-01-31" + @"P1M""#),
+        eval_src(r#"@"2021-02-28""#)
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn datetime_arith_datetime_plus_dtd_iana_preserved() {
+    // DateTimeTz + DaysTimeDuration preserves IANA zone (Pitfall 3)
+    let val = eval_src(r#"@"2021-01-01T10:00:00@Australia/Melbourne" + @"P1D""#);
+    match val {
+        Value::DateTimeTz(DateTimeValue::Iana(zdt)) => {
+            assert_eq!(zdt.timezone(), chrono_tz::Australia::Melbourne);
+            assert_eq!(
+                zdt.naive_local().date(),
+                NaiveDate::from_ymd_opt(2021, 1, 2).unwrap()
+            );
+        }
+        other => panic!("expected IANA DateTimeTz, got {:?}", other),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn datetime_arith_date_minus_date() {
+    let val = eval_src(r#"@"2012-12-25" - @"2012-12-24""#);
+    match val {
+        Value::DaysTimeDuration(td) => assert_eq!(td, TimeDelta::days(1)),
+        other => panic!("expected DaysTimeDuration, got {:?}", other),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn datetime_arith_dtd_plus_dtd() {
+    let val = eval_src(r#"@"P1D" + @"P2D""#);
+    match val {
+        Value::DaysTimeDuration(td) => assert_eq!(td, TimeDelta::days(3)),
+        other => panic!("expected DaysTimeDuration, got {:?}", other),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn datetime_arith_ymd_plus_ymd() {
+    let val = eval_src(r#"@"P1Y" + @"P2M""#);
+    match val {
+        Value::YearsMonthsDuration(ymd) => assert_eq!(ymd.months, 14),
+        other => panic!("expected YearsMonthsDuration, got {:?}", other),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn datetime_arith_null_plus_duration() {
+    assert_eq!(eval_src(r#"null + @"P1M""#), Value::Null);
+    assert_eq!(eval_src(r#"@"2021-01-31" + null"#), Value::Null);
+}
+
+#[cfg(test)]
+#[test]
+fn datetime_arith_type_mismatch_yields_null() {
+    assert_eq!(eval_src(r#"@"2021-01-31" + 5"#), Value::Null);
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::test_runner::Config {
+        cases: 32,
+        ..proptest::test_runner::Config::default()
+    })]
+
+    /// For any valid zoned datetime, dateTime + @"P0D" == dateTime
+    /// (identity, DST-safe). Restricted to safe dates/times (day 1-28,
+    /// hour 10-14) to avoid spring-forward/fall-back DST transitions.
+    #[test]
+    fn datetime_arith_identity_dtd_zero(
+        year in 2020i32..2025,
+        month in 1u32..=12,
+        day in 1u32..=28,
+        hour in 10u32..=14,
+    ) {
+        let src = format!(
+            r#"@"{}-{:02}-{:02}T{:02}:00:00@Australia/Melbourne" + @"P0D""#,
+            year, month, day, hour
+        );
+        let val = eval_src(&src);
+        let expected_src = format!(
+            r#"@"{}-{:02}-{:02}T{:02}:00:00@Australia/Melbourne""#,
+            year, month, day, hour
+        );
+        let expected = eval_src(&expected_src);
+        prop_assert_eq!(val, expected);
+    }
+}
