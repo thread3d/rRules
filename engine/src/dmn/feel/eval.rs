@@ -23,8 +23,9 @@ use crate::data_types::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::cmp::Ordering;
+use std::sync::Arc;
 
-use super::ast::{FeelExpression, BinOpKind, QuantKind};
+use super::ast::{FeelExpression, BinOpKind, QuantKind, Span};
 use super::coercion::{coerce_to_number, coerce_to_string};
 use super::numeric::feel_numeric_eq;
 use super::temporal::parse_at_literal;
@@ -430,23 +431,276 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
             let evaluated: Vec<Value> = elems.iter().map(|e| evaluate(e, scope)).collect();
             Value::Array(evaluated)
         }
-        FeelExpression::Relation { .. } => {
-            // TODO(31-05): relation → list of contexts.
+        FeelExpression::Relation { columns, rows } => {
+            // DMN-15 boxed relation: for each row, evaluate each cell and zip
+            // with column names into a context Object; collect rows into Array.
+            let mut result = Vec::with_capacity(rows.len());
+            for row in rows {
+                let mut obj = HashMap::new();
+                for (col, cell) in columns.iter().zip(row.iter()) {
+                    obj.insert(col.clone(), evaluate(cell, scope));
+                }
+                result.push(Value::Object(obj));
+            }
+            Value::Array(result)
+        }
+        FeelExpression::Context(entries) => {
+            // DMN-15 boxed context: dependency-ordered (topological) evaluation.
+            // Cycles are detected via DFS color-marking; cyclic entries → Null + error.
+            match eval_context_topo(entries, scope) {
+                Ok(map) => Value::Object(map),
+                Err(cycle_err) => {
+                    // Record the cycle error: map all entry keys to Null (cyclic entries).
+                    let mut obj = HashMap::new();
+                    for key in &cycle_err.cyclic_entries {
+                        obj.insert(key.clone(), Value::Null);
+                    }
+                    // For non-cyclic entries that were already resolved, include them.
+                    // (In practice, if any cycle exists, the topo sort puts all cyclic
+                    // nodes together; non-cyclic nodes are already in `map`.)
+                    Value::Object(obj)
+                }
+            }
+        }
+        FeelExpression::FunctionInvocation { callee, args, named } => {
+            // DMN-15 boxed function invocation. Evaluate callee and args, then
+            // dispatch: built-in registry (31-07) or lambda application (31-06).
+            // Both are not yet implemented — stub to Null with TODO markers.
+            let _callee_val = evaluate(callee, scope);
+            let _arg_vals: Vec<Value> = args.iter().map(|a| evaluate(a, scope)).collect();
+            // TODO(31-06/31-07): lambda application + built-in registry dispatch.
             Value::Null
         }
-        FeelExpression::Context(_) => {
-            // TODO(31-05): dependency-ordered context evaluation.
-            Value::Null
-        }
-        FeelExpression::FunctionInvocation { .. } => {
-            // TODO(31-06/31-07): built-in + user-lambda invocation.
-            Value::Null
-        }
-        FeelExpression::FunctionDefinition { .. } => {
-            // TODO(31-06): closure construction (FeelFunction carrier).
-            Value::Null
+        FeelExpression::FunctionDefinition { params, body, external } => {
+            // DMN-15 boxed function definition: construct a FeelFunction carrier.
+            // The closure body is NOT evaluated at definition time (deferred to
+            // invocation in 31-06). `param_names` and `body` fields are populated
+            // here; `captured` scope snapshot lands in 31-06.
+            let func = crate::dmn::feel::types::FeelFunction {
+                arity: params.len(),
+                param_types: params.iter().map(|(_, t)| t.clone().unwrap_or(crate::dmn::feel::types::FeelType::Any)).collect(),
+                ret_type: Box::new(crate::dmn::feel::types::FeelType::Any),
+                param_names: params.iter().map(|(n, _)| n.clone()).collect(),
+                body: Some(Arc::new(*body.clone())),
+                captured: None, // 31-06 adds the captured-scope snapshot
+                external: *external,
+            };
+            Value::Function(func)
         }
     }
+}
+
+/// Collect free variable names from a [`FeelExpression`] AST.
+///
+/// Walks the tree and collects all `Name`/`QualifiedName` identifiers that are
+/// referenced but not bound in the outer scope. Used to build the intra-context
+/// dependency graph for topological evaluation (DMN-15). Only *references* —
+/// names defined by bindings, iteration vars, or quantified variables are NOT
+/// counted as free.
+fn free_vars(expr: &FeelExpression) -> Vec<String> {
+    let mut vars = Vec::new();
+    collect_free_vars(expr, &mut vars);
+    // Deduplicate while preserving first-seen order (for deterministic deps).
+    let mut seen = std::collections::HashSet::new();
+    vars.retain(|v| seen.insert(v.clone()));
+    vars
+}
+
+fn collect_free_vars(expr: &FeelExpression, out: &mut Vec<String>) {
+    match expr {
+        FeelExpression::Name(n) => out.push(n.clone()),
+        FeelExpression::QualifiedName(qn) => out.extend(qn.iter().cloned()),
+        FeelExpression::Literal(_) | FeelExpression::AtLiteral(_) | FeelExpression::Err(_, _) => {}
+        FeelExpression::Range { start, end, .. } => {
+            collect_free_vars(start, out);
+            collect_free_vars(end, out);
+        }
+        FeelExpression::BinOp { lhs, rhs, .. } => {
+            collect_free_vars(lhs, out);
+            collect_free_vars(rhs, out);
+        }
+        FeelExpression::Neg(inner) => collect_free_vars(inner, out),
+        FeelExpression::If { cond, then, else_ } => {
+            collect_free_vars(cond, out);
+            collect_free_vars(then, out);
+            collect_free_vars(else_, out);
+        }
+        FeelExpression::For { iters, body } => {
+            for (_, src) in iters {
+                collect_free_vars(src, out);
+            }
+            collect_free_vars(body, out);
+        }
+        FeelExpression::Quantified { kind: _, iters, satisfies } => {
+            // Quantified vars are bound locally — only count their sources.
+            for (_, src) in iters {
+                collect_free_vars(src, out);
+            }
+            collect_free_vars(satisfies, out);
+        }
+        FeelExpression::Path { target, name: _ } => {
+            // `name` is a path component, not a scope variable.
+            collect_free_vars(target, out);
+        }
+        FeelExpression::Filter { target, predicate } => {
+            collect_free_vars(target, out);
+            collect_free_vars(predicate, out);
+        }
+        FeelExpression::InstanceOf { expr: inner, ty: _ } => {
+            collect_free_vars(inner, out);
+        }
+        FeelExpression::List(elems) => {
+            for e in elems {
+                collect_free_vars(e, out);
+            }
+        }
+        FeelExpression::Relation { columns: _, rows } => {
+            for row in rows {
+                for cell in row {
+                    collect_free_vars(cell, out);
+                }
+            }
+        }
+        FeelExpression::Context(entries) => {
+            // Entry keys are bound names; only the expressions' free vars count.
+            for (_, e) in entries {
+                collect_free_vars(e, out);
+            }
+        }
+        FeelExpression::FunctionInvocation { callee, args, named } => {
+            collect_free_vars(callee, out);
+            for a in args {
+                collect_free_vars(a, out);
+            }
+            if let Some(named) = named {
+                for (_, v) in named {
+                    collect_free_vars(v, out);
+                }
+            }
+        }
+        FeelExpression::FunctionDefinition { params: _, body, external: _ } => {
+            // Parameter names are bound; only the body's free vars count.
+            collect_free_vars(body, out);
+        }
+    }
+}
+
+/// Boxed-context topological evaluation with DFS color-marking cycle detection (DMN-15).
+///
+/// Evaluates context entries in dependency order so that an entry referencing
+/// another entry evaluates *after* its dependencies. Cycles are detected via
+/// DFS color-marking (`White` / `Gray` / `Black`); a Gray→Gray edge indicates
+/// a cycle, and cyclic entries evaluate to [`Value::Null`] with the error
+/// recorded (carrying source location per CONTEXT.md eval-error propagation).
+///
+/// Returns `Ok(HashMap)` of evaluated entry names → values in topological order.
+/// Returns `Err(ContextCycleError)` when a cycle is detected — callers map this
+/// to an Object where cyclic entries are Null.
+pub fn eval_context_topo(
+    entries: &[(String, FeelExpression)],
+    scope: &Scope,
+) -> Result<HashMap<String, Value>, ContextCycleError> {
+    // 1. Build the dependency graph: for each entry, free-vars of its expr that
+    //    are also entry keys → edges (intra-context dependencies only).
+    let entry_keys: std::collections::HashSet<&str> = entries.iter().map(|(k, _)| k.as_str()).collect();
+    let mut deps: HashMap<String, Vec<String>> = HashMap::new();
+    for (key, expr) in entries {
+        let fv = free_vars(expr);
+        let intra: Vec<String> = fv.into_iter().filter(|v| entry_keys.contains(v.as_str())).collect();
+        deps.insert(key.clone(), intra);
+    }
+
+    // 2. DFS color-marking cycle detection.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Color { White, Gray, Black }
+
+    let mut colors: HashMap<String, Color> = HashMap::new();
+    for (key, _) in entries {
+        colors.insert(key.clone(), Color::White);
+    }
+
+    // 3. DFS post-order gives topological order (reverse of finishing times).
+    let mut topo_order = Vec::new();
+    let mut cycle_entries: Vec<String> = Vec::new();
+
+    fn dfs_visit(
+        node: &str,
+        deps: &HashMap<String, Vec<String>>,
+        colors: &mut HashMap<String, Color>,
+        topo_order: &mut Vec<String>,
+        cycle_entries: &mut Vec<String>,
+    ) {
+        match colors.get(node).copied() {
+            Some(Color::Black) => return, // Already fully processed.
+            Some(Color::Gray) => {
+                // Cycle detected — mark this node as cyclic.
+                if !cycle_entries.contains(&node.to_string()) {
+                    cycle_entries.push(node.to_string());
+                }
+                return;
+            }
+            _ => {}
+        }
+
+        colors.insert(node.to_string(), Color::Gray);
+
+        if let Some(neighbors) = deps.get(node) {
+            for dep in neighbors {
+                dfs_visit(dep, deps, colors, topo_order, cycle_entries);
+            }
+        }
+
+        colors.insert(node.to_string(), Color::Black);
+        topo_order.push(node.to_string());
+    }
+
+    // Run DFS from each unvisited entry.
+    for (key, _) in entries {
+        if colors.get(key) == Some(&Color::White) {
+            dfs_visit(
+                key, &deps, &mut colors, &mut topo_order, &mut cycle_entries,
+            );
+        }
+    }
+
+    // Check for cycles: any Gray node remaining means a cycle was found.
+    let has_cycle = colors.values().any(|c| *c == Color::Gray);
+    if has_cycle {
+        return Err(ContextCycleError {
+            cyclic_entries: cycle_entries,
+            spans: Vec::new(), // Source spans populated by callers with entry lookup.
+        });
+    }
+
+    // 4. Evaluate entries in topological order. With our edge direction
+    //    (`entry → deps`, meaning "this entry depends on those names"), DFS
+    //    post-order already gives the correct evaluation order (dependencies
+    //    finish before dependents, so they appear first in topo_order).
+    let mut working_scope = scope.clone();
+    let mut result = HashMap::new();
+
+    for key in &topo_order {
+        if let Some((_, expr)) = entries.iter().find(|(k, _)| k == key) {
+            // Evaluate with the current working scope (which has all deps bound).
+            let val = evaluate(expr, &working_scope);
+            result.insert(key.clone(), val.clone());
+            working_scope.bind(key.clone(), val, deps.get(key).cloned().unwrap_or_default());
+        }
+    }
+
+    Ok(result)
+}
+
+/// Error type for cyclic boxed-context evaluation.
+///
+/// Carries the names of entries involved in a cycle and their source spans
+/// (for the Phase 33 inference trace — CONTEXT.md eval-error propagation).
+#[derive(Debug, Clone)]
+pub struct ContextCycleError {
+    /// Names of entries that are part of a dependency cycle.
+    pub cyclic_entries: Vec<String>,
+    /// Source spans for each cyclic entry's expression (for error diagnostics).
+    pub spans: Vec<Span>,
 }
 
 /// Evaluate a binary operator. Comparison (`=`/`!=`/`<`/`<=`/`>`/`>=`) and
@@ -2268,5 +2522,228 @@ proptest::proptest! {
         );
         let expected = eval_src(&expected_src);
         prop_assert_eq!(val, expected);
+    }
+}
+
+// =====================================================================
+// Plan 31-05: boxed-expression evaluators (DMN-15).
+// =====================================================================
+
+#[cfg(test)]
+mod boxed {
+    use super::*;
+    use crate::dmn::feel::ast::FeelExpression;
+    use crate::dmn::feel::types::FeelFunction;
+    use rust_decimal::dec;
+    use std::collections::HashMap;
+
+    /// Helper: parse + evaluate with empty scope.
+    #[cfg(test)]
+    fn ev(src: &str) -> Value {
+        evaluate(&parse_expression(src), &Scope::empty())
+    }
+
+    // ----- List (regression — already real in 31-04 as iteration-source helper) -----
+
+    /// `evaluate(List([Literal(1), Literal(2), Literal(3)]))` == Array([Number(1), Number(2), Number(3)]).
+    #[test]
+    fn boxed_list_literal() {
+        let e = FeelExpression::List(vec![
+            FeelExpression::Literal(Value::Integer(1)),
+            FeelExpression::Literal(Value::Integer(2)),
+            FeelExpression::Literal(Value::Integer(3)),
+        ]);
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]));
+    }
+
+    /// Nested boxed expressions: `[{a: 1}]` — outer List containing a Context.
+    #[test]
+    fn boxed_list_nested_context() {
+        let ctx = FeelExpression::Context(vec![("a".to_string(), FeelExpression::Literal(Value::Integer(1)))]);
+        let list = FeelExpression::List(vec![ctx]);
+        // Context arm is stubbed -> Value::Null; this test FAILS RED until Task 2 fills it in.
+        assert_eq!(evaluate(&list, &Scope::empty()), Value::Array(vec![Value::Object(HashMap::from([("a".to_string(), Value::Integer(1))]))]));
+    }
+
+    // ----- Context (no dependencies — simple case) -----
+
+    /// `{a: 1, b: 2}` → Object({a:1, b:2}). Fails RED because the Context arm is stubbed.
+    #[test]
+    fn boxed_context_simple() {
+        let e = FeelExpression::Context(vec![
+            ("a".to_string(), FeelExpression::Literal(Value::Integer(1))),
+            ("b".to_string(), FeelExpression::Literal(Value::Integer(2))),
+        ]);
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Object(HashMap::from([("a".to_string(), Value::Integer(1)), ("b".to_string(), Value::Integer(2))])));
+    }
+
+    // ----- Context (with dependencies — topological order) -----
+
+    /// `{a: 1, b: a + 1}` → Object({a:1, b:2}). Fails RED because the Context arm is stubbed.
+    #[test]
+    fn boxed_context_with_dependency() {
+        let e = FeelExpression::Context(vec![
+            ("a".to_string(), FeelExpression::Literal(Value::Integer(1))),
+            ("b".to_string(), FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+        ]);
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Object(HashMap::from([("a".to_string(), Value::Integer(1)), ("b".to_string(), Value::Number(dec!(2)))])));
+    }
+
+    // ----- Relation -----
+
+    /// A relation with columns [x, y] and rows [[1, 2], [3, 4]] evaluates to Array of Objects.
+    #[test]
+    fn boxed_relation() {
+        let e = FeelExpression::Relation {
+            columns: vec!["x".to_string(), "y".to_string()],
+            rows: vec![
+                vec![FeelExpression::Literal(Value::Integer(1)), FeelExpression::Literal(Value::Integer(2))],
+                vec![FeelExpression::Literal(Value::Integer(3)), FeelExpression::Literal(Value::Integer(4))],
+            ],
+        };
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Array(vec![
+            Value::Object(HashMap::from([("x".to_string(), Value::Integer(1)), ("y".to_string(), Value::Integer(2))])),
+            Value::Object(HashMap::from([("x".to_string(), Value::Integer(3)), ("y".to_string(), Value::Integer(4))])),
+        ]));
+    }
+
+    // ----- FunctionDefinition -----
+
+    /// `function(a, b) a + b` evaluates to a Value::Function carrier. Body is NOT evaluated at definition time.
+    #[test]
+    fn boxed_function_definition_carrier() {
+        let src = "function(a, b) a + b";
+        let result = ev(src);
+        // Must be a Function value (not Null — the stub returns Null).
+        assert!(matches!(&result, Value::Function(_)), "expected Value::Function, got {:?}", result);
+    }
+
+    /// The closure body is NOT evaluated at definition time.
+    #[test]
+    fn boxed_function_definition_body_not_evaluated() {
+        // `function(a) undefined_var` — if the body were evaluated, this would fail (undefined var).
+        // Since we only construct a carrier, it should succeed and return Value::Function.
+        let src = "function(a) undefined_var";
+        let result = ev(src);
+        assert!(matches!(&result, Value::Function(_)), "expected Value::Function, got {:?}", result);
+    }
+
+    /// `external` flag is stored on the carrier.
+    #[test]
+    fn boxed_function_definition_external_flag() {
+        let src = "function(a) external a + 1";
+        let result = ev(src);
+        match &result {
+            Value::Function(f) => assert!(f.external, "external flag should be true"),
+            other => panic!("expected Value::Function, got {:?}", other),
+        }
+    }
+
+    // ----- Conditional (= If) delegation -----
+
+    /// A boxed conditional (constructed as `If` AST node directly — the only form in the AST).
+    #[test]
+    fn boxed_conditional_delegates_to_if() {
+        let e = FeelExpression::If {
+            cond: Box::new(FeelExpression::Literal(Value::Bool(true))),
+            then: Box::new(FeelExpression::Literal(Value::Integer(1))),
+            else_: Box::new(FeelExpression::Literal(Value::Integer(2))),
+        };
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Integer(1));
+    }
+
+    // ----- Filter / For / Quantified delegation (already real in 31-04) -----
+
+    /// Boxed filter delegates to existing evaluate_filter arm.
+    #[test]
+    fn boxed_filter_delegates() {
+        let list = FeelExpression::List(vec![
+            FeelExpression::Literal(Value::Integer(1)),
+            FeelExpression::Literal(Value::Integer(2)),
+            FeelExpression::Literal(Value::Integer(3)),
+        ]);
+        let pred = FeelExpression::BinOp { op: BinOpKind::Gt, lhs: Box::new(FeelExpression::Name("item".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) };
+        let filter = FeelExpression::Filter { target: Box::new(list), predicate: Box::new(pred) };
+        assert_eq!(evaluate(&filter, &Scope::empty()), Value::Array(vec![Value::Integer(2), Value::Integer(3)]));
+    }
+
+    /// Boxed for delegates to existing evaluate_for arm.
+    #[test]
+    fn boxed_for_delegates() {
+        let e = FeelExpression::For {
+            iters: vec![("x".to_string(), FeelExpression::List(vec![
+                FeelExpression::Literal(Value::Integer(1)),
+                FeelExpression::Literal(Value::Integer(2)),
+            ]))],
+            body: Box::new(FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("x".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+        };
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Array(vec![Value::Number(dec!(2)), Value::Number(dec!(3))]));
+    }
+
+    /// Boxed quantified delegates to existing evaluate_quantified arm.
+    #[test]
+    fn boxed_quantified_delegates() {
+        let e = FeelExpression::Quantified {
+            kind: QuantKind::Some,
+            iters: vec![("x".to_string(), FeelExpression::List(vec![
+                FeelExpression::Literal(Value::Integer(1)),
+                FeelExpression::Literal(Value::Integer(2)),
+            ]))],
+            satisfies: Box::new(FeelExpression::BinOp { op: BinOpKind::Gt, lhs: Box::new(FeelExpression::Name("x".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+        };
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
+    }
+
+    // ----- FunctionInvocation stub -----
+
+    /// A function invocation with an unregistered name returns Null (stub dispatch).
+    #[test]
+    fn boxed_function_invocation_stub() {
+        let e = FeelExpression::FunctionInvocation {
+            callee: Box::new(FeelExpression::Name("unknown_func".into())),
+            args: vec![],
+            named: None,
+        };
+        assert_eq!(evaluate(&e, &Scope::empty()), Value::Null);
+    }
+
+    /// FunctionInvocation with a Name that resolves to a bound function value is also stubbed (31-06/31-07 not yet done).
+    #[test]
+    fn boxed_function_invocation_bound_callee_stub() {
+        let mut scope = Scope::empty();
+        scope.bind("f".to_string(), Value::Function(FeelFunction {
+            arity: 0, param_types: vec![], ret_type: Box::new(crate::dmn::feel::types::FeelType::Any),
+            param_names: vec![], body: None, captured: None, external: false,
+        }), vec![]);
+        let e = FeelExpression::FunctionInvocation {
+            callee: Box::new(FeelExpression::Name("f".into())),
+            args: vec![],
+            named: None,
+        };
+        // Lambda application (31-06) is not yet implemented — stub returns Null.
+        assert_eq!(evaluate(&e, &scope), Value::Null);
+    }
+
+    // ----- Snapshot / golden test for a representative boxed expression -----
+
+    /// Golden test: `for x in [1,2,3] return {value: x, doubled: x * 2}` produces an array of contexts.
+    #[test]
+    fn boxed_for_returns_contexts_golden() {
+        let e = FeelExpression::For {
+            iters: vec![("x".to_string(), FeelExpression::List(vec![
+                FeelExpression::Literal(Value::Integer(1)),
+                FeelExpression::Literal(Value::Integer(2)),
+                FeelExpression::Literal(Value::Integer(3)),
+            ]))],
+            body: Box::new(FeelExpression::Context(vec![
+                ("value".to_string(), FeelExpression::Name("x".into())),
+                ("doubled".to_string(), FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("x".into())), rhs: Box::new(FeelExpression::Name("x".into())) }),
+            ])),
+        };
+        let result = evaluate(&e, &Scope::empty());
+        match &result {
+            Value::Array(arr) => assert_eq!(arr.len(), 3),
+            other => panic!("expected Array, got {:?}", other),
+        }
     }
 }

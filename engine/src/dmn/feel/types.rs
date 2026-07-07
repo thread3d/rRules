@@ -150,6 +150,11 @@ pub struct FeelFunction {
     /// the closure sees its definition site's bindings). The `Arc` shares
     /// the snapshot cheaply across closure clones.
     pub captured: Option<Arc<Scope>>,
+    /// Whether this function was defined with the `external` keyword (rule 55).
+    /// `true` for externally-defined functions (rejected at invocation time in
+    /// 31-06 — only non-external user lambdas are supported); `false` for
+    /// regular closures. Built-in functions always carry `external: false`.
+    pub external: bool,
 }
 
 impl FeelFunction {
@@ -165,6 +170,7 @@ impl FeelFunction {
             param_names: Vec::new(),
             body: None,
             captured: None,
+            external: false,
         }
     }
 }
@@ -877,6 +883,7 @@ mod tests {
             param_names: vec!["x".to_string()],
             body: None,
             captured: None,
+            external: false,
         };
         assert_eq!(f.arity, 1);
         assert_eq!(f.param_names, vec!["x".to_string()]);
