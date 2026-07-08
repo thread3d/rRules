@@ -47,6 +47,11 @@ use crate::dmn::model::{
     ItemDefinition, KnowledgeSource, OutputClause, RuleEntry, TextAnnotation, TextContent,
 };
 
+// FEEL AST cache (Phase 31-09, DMN-18): pre-parse every FEEL cell into the
+// `FeelAstCache` at load time. The cache is a sidecar to `DmnModel` — never
+// mutated by the IR loader beyond `get_or_parse` calls during the walk.
+use crate::dmn::feel::{FeelAstCache, ParseEntry};
+
 /// Recognized DMN MODEL namespace URIs (DMN 1.1 / 1.3 / 1.5 — DMN-04).
 const DMN_MODEL_NAMESPACES: [&str; 3] = [
     // DMN 1.5
@@ -72,6 +77,103 @@ pub fn parse_dmn_file(path: &str) -> Result<DmnModel, DmnParseError> {
     let content =
         std::fs::read_to_string(path).map_err(|e| DmnParseError::Io(e.to_string()))?;
     parse_dmn(&content)
+}
+
+/// Parse a DMN document with FEEL AST pre-parsing (DMN-18, Phase 31-09).
+///
+/// Returns `(DmnModel, FeelAstCache)` — the `FeelAstCache` is a sidecar that
+/// holds every parsed FEEL cell from decision-table IR fields. The cache is
+/// populated during the walk below and read-only thereafter; it is owned by the
+/// caller (the Phase 32 decision-table engine will borrow it for evaluation).
+///
+/// **Performance property:** a 30-cell table evaluated 10k times performs ~30
+/// parses at load time, not 300k (each `get_or_parse` call is O(1) amortized
+/// after the first parse per unique key).
+pub fn parse_dmn_with_cache(input: &str) -> Result<(DmnModel, FeelAstCache), DmnParseError> {
+    let model = parse_dmn_bytes(input.as_bytes())?;
+    let mut cache = FeelAstCache::new();
+    walk_ir_and_populate_cache(&model, &mut cache);
+    Ok((model, cache))
+}
+
+/// Walk every FEEL-bearing field of an IR and pre-parse into the cache.
+///
+/// This is called once after `parse_dmn_bytes` returns a complete `DmnModel`.
+/// It walks:
+/// - Each [`Decision`] → each [`DecisionTable`] → input/output/annotation
+///   clauses, rule entries, allowed values (DMN-18 wiring).
+///
+/// **Open Question A6 resolution:** Phase 29's `Decision` struct carries only
+/// `decision_table: Option<DecisionTable>` — there are no non-table boxed
+/// expressions in the IR yet. The cache parses them on demand (via
+/// `get_or_parse`) when Phase 33 adds them; this walk covers the decision-table
+/// path that exists today.
+fn walk_ir_and_populate_cache(model: &DmnModel, cache: &FeelAstCache) {
+    for child in &model.definitions.children {
+        if let DefinitionsChild::Decision(decision) = child {
+            walk_decision(decision, cache);
+        }
+    }
+}
+
+fn walk_decision(decision: &Decision, cache: &FeelAstCache) {
+    if let Some(table) = &decision.decision_table {
+        walk_decision_table(table, cache);
+    }
+    // A6 resolution (Phase 29): `Decision` carries only `decision_table`. Non-table
+    // boxed expressions are NOT in the IR yet — they will be parsed on demand by the
+    // evaluator when Phase 33 adds them. Documented: plan 31-09 Open Question A6.
+}
+
+fn walk_decision_table(table: &DecisionTable, cache: &FeelAstCache) {
+    // Input clauses: `input_expression` is a FEEL Expression; `input_values` may be UnaryTests.
+    for input in &table.input_clauses {
+        if !input.input_expression.is_empty() {
+            cache.get_or_parse(&input.input_expression, ParseEntry::Expression);
+        }
+        if let Some(AllowedValues::UnaryTests(ref text)) = input.input_values {
+            if !text.is_empty() {
+                cache.get_or_parse(text, ParseEntry::SimpleUnaryTests);
+            }
+        }
+    }
+
+    // Output clauses: `default_output_entry` is a FEEL Expression.
+    for output in &table.output_clauses {
+        if let Some(ref default) = output.default_output_entry {
+            if !default.is_empty() {
+                cache.get_or_parse(default, ParseEntry::Expression);
+            }
+        }
+        if let Some(AllowedValues::UnaryTests(ref text)) = output.output_values {
+            if !text.is_empty() {
+                cache.get_or_parse(text, ParseEntry::SimpleUnaryTests);
+            }
+        }
+    }
+
+    // Rules: input_entries (SimpleUnaryTests), output_entries (Expression),
+    // annotation_entries (Expression).
+    for rule in &table.rules {
+        for entry in &rule.input_entries {
+            let text = entry.text.content.trim().to_string();
+            if !text.is_empty() {
+                cache.get_or_parse(&text, ParseEntry::SimpleUnaryTests);
+            }
+        }
+        for entry in &rule.output_entries {
+            let text = entry.text.content.trim().to_string();
+            if !text.is_empty() {
+                cache.get_or_parse(&text, ParseEntry::Expression);
+            }
+        }
+        for entry in &rule.annotation_entries {
+            let text = entry.text.content.trim().to_string();
+            if !text.is_empty() {
+                cache.get_or_parse(&text, ParseEntry::Expression);
+            }
+        }
+    }
 }
 
 // =========================================================================
