@@ -1,0 +1,114 @@
+{
+  "meta": {
+    "name": "OMG DMN TCK FEEL Grammar Subset",
+    "provenance": "Hand-curated subset of OMG DMN TCK feel-grammar vectors. Mirrors the structure of tck/0100-arithmetic but for FEEL expression grammar coverage.",
+    "deferred_to_phase": 35,
+    "note": "Full TCK passage deferred to Phase 35 (CONTEXT.md). This scaffold covers: arithmetic on decimals, three-valued logic operators, comparison, boxed expressions (list/context), and a few built-in functions."
+  },
+  "cases": [
+    {
+      "id": "feel-001",
+      "category": "arithmetic-decimal",
+      "expression": "2 + 3",
+      "expected_type": "number",
+      "expected_value": "5"
+    },
+    {
+      "id": "feel-002",
+      "category": "arithmetic-decimal",
+      "expression": "10 - 4",
+      "expected_type": "number",
+      "expected_value": "6"
+    },
+    {
+      "id": "feel-003",
+      "category": "arithmetic-decimal",
+      "expression": "3 * 7",
+      "expected_type": "number",
+      "expected_value": "21"
+    },
+    {
+      "id": "feel-004",
+      "category": "arithmetic-decimal",
+      "expression": "15 / 3",
+      "expected_type": "number",
+      "expected_value": "5"
+    },
+    {
+      "id": "feel-005",
+      "category": "three-valued-logic-and",
+      "expression": "true and true",
+      "expected_type": "boolean",
+      "expected_value": true
+    },
+    {
+      "id": "feel-006",
+      "category": "three-valued-logic-and",
+      "expression": "true and false",
+      "expected_type": "boolean",
+      "expected_value": false
+    },
+    {
+      "id": "feel-007",
+      "category": "three-valued-logic-or",
+      "expression": "false or true",
+      "expected_type": "boolean",
+      "expected_value": true
+    },
+    {
+      "id": "feel-008",
+      "category": "comparison-equality",
+      "expression": "5 = 5",
+      "expected_type": "boolean",
+      "expected_value": true
+    },
+    {
+      "id": "feel-009",
+      "category": "comparison-equality",
+      "expression": "5 != 3",
+      "expected_type": "boolean",
+      "expected_value": true
+    },
+    {
+      "id": "feel-010",
+      "category": "boxed-list",
+      "expression": "[1, 2, 3]",
+      "expected_type": "array",
+      "expected_length": 3
+    },
+    {
+      "id": "feel-011",
+      "category": "boxed-context",
+      "expression": "{\"a\": 1, \"b\": 2}",
+      "expected_type": "object",
+      "keys": ["a", "b"]
+    },
+    {
+      "id": "feel-012",
+      "category": "string-literal",
+      "expression": "\"hello\"",
+      "expected_type": "string",
+      "expected_value": "hello"
+    },
+    {
+      "id": "feel-013",
+      "category": "null-literal",
+      "expression": "null",
+      "expected_type": "null"
+    },
+    {
+      "id": "feel-014",
+      "category": "parenthesized-expression",
+      "expression": "(2 + 3) * 4",
+      "expected_type": "number",
+      "expected_value": "20"
+    },
+    {
+      "id": "feel-015",
+      "category": "comparison-greater-than",
+      "expression": "10 > 5",
+      "expected_type": "boolean",
+      "expected_value": true
+    }
+  ]
+}
