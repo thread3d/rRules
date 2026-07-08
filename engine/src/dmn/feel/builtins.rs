@@ -1642,6 +1642,422 @@ pub fn built_in_get_entries(args: &[Value]) -> Value {
 // Equality family (1): `is` — Pitfall 6 total structural identity.
 // ---------------------------------------------------------------------
 
+// =====================================================================
+// Range family (14): Allen interval algebra over FEEL ranges.
+// =====================================================================
+
+/// Helper: extract the start endpoint from a `Value::Range`. Returns None if not a range.
+fn range_start(r: &crate::dmn::feel::types::FeelRange) -> Option<&Value> {
+    r.start.as_ref()
+}
+
+/// Helper: extract the end endpoint from a `Value::Range`. Returns None if not a range.
+fn range_end(r: &crate::dmn::feel::types::FeelRange) -> Option<&Value> {
+    r.end.as_ref()
+}
+
+/// Compare two FEEL values using three-valued comparison (returns Option<Ordering>).
+/// `None` means "incomparable" (type mismatch) → maps to false for range built-ins.
+fn cmp(a: &Value, b: &Value) -> std::cmp::Ordering {
+    match crate::dmn::feel::eval::cmp::feel_compare(a, b) {
+        Some(ord) => ord,
+        None => std::cmp::Ordering::Equal, // type mismatch → treat as not-before/after (false)
+    }
+}
+
+/// `before(<range1>, <range2>)` — range1 ends strictly before range2 starts.
+///
+/// Allen relation: r1.end < r2.start (exclusive of touching).
+/// DMN 1.5 §10.3.2.3.6: Null operand → null propagation.
+pub fn built_in_before(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    let (r1, r2) = match (&args[0], &args[1]) {
+        (Value::Range(r1), Value::Range(r2)) => (r1, r2),
+        _ => return Value::Null,
+    };
+    // Both ranges must have defined endpoints.
+    let e1 = match range_end(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let s2 = match range_start(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    // r1.end < r2.start (strictly less — touching is NOT before).
+    let ord = cmp(e1, s2);
+    Value::Bool(ord == std::cmp::Ordering::Less)
+}
+
+/// `after(<range1>, <range2>)` — range1 starts strictly after range2 ends.
+/// Symmetric with `before`: `after(r1,r2)` == `before(r2,r1)`.
+pub fn built_in_after(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    let (r1, r2) = match (&args[0], &args[1]) {
+        (Value::Range(r1), Value::Range(r2)) => (r1, r2),
+        _ => return Value::Null,
+    };
+    let s1 = match range_start(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let e2 = match range_end(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let ord = cmp(s1, e2);
+    Value::Bool(ord == std::cmp::Ordering::Greater)
+}
+
+/// Helper: check if two numeric endpoints are "adjacent" (no gap between them).
+/// For integer-endpoint ranges with inclusive bounds, adjacency means the
+/// difference is exactly 1. For continuous domains, equality suffices.
+fn numeric_adjacent(e1: &Value, s2: &Value) -> bool {
+    // Try to extract Decimal values and check if they're consecutive integers.
+    let d1 = match e1 {
+        Value::Number(d) => *d,
+        _ => return false,
+    };
+    let d2 = match s2 {
+        Value::Number(d) => *d,
+        _ => return false,
+    };
+    // Check if d2 - d1 == 1 (consecutive integers).
+    d2 - d1 == rust_decimal::Decimal::from(1)
+}
+
+/// `meets(<range1>, <range2>)` — r1 ends immediately before r2 starts.
+/// Adjacent with no gap between them: for numeric ranges, r1.end + 1 == r2.start.
+pub fn built_in_meets(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    let (r1, r2) = match (&args[0], &args[1]) {
+        (Value::Range(r1), Value::Range(r2)) => (r1, r2),
+        _ => return Value::Null,
+    };
+    let e1 = match range_end(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let s2 = match range_start(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    // Must be strictly before AND adjacent (no gap).
+    let ord = cmp(e1, s2);
+    if ord != std::cmp::Ordering::Less {
+        return Value::Bool(false);
+    }
+    Value::Bool(numeric_adjacent(e1, s2))
+}
+
+/// `met by(<range1>, <range2>)` — r2 meets r1. Symmetric with `meets`.
+pub fn built_in_met_by(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    // met by(r1, r2) = meets(r2, r1)
+    built_in_meets(&[args[1].clone(), args[0].clone()])
+}
+
+/// `overlaps(<range1>, <range2>)` — ranges overlap (share some interior).
+/// r1.start < r2.end AND r2.start < r1.end.
+pub fn built_in_overlaps(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    let (r1, r2) = match (&args[0], &args[1]) {
+        (Value::Range(r1), Value::Range(r2)) => (r1, r2),
+        _ => return Value::Null,
+    };
+    let s1 = match range_start(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let e2 = match range_end(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let s2 = match range_start(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let e1 = match range_end(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    // r1.start < r2.end AND r2.start < r1.end (strict less for overlap).
+    let a = cmp(s1, e2) == std::cmp::Ordering::Less;
+    let b = cmp(s2, e1) == std::cmp::Ordering::Less;
+    Value::Bool(a && b)
+}
+
+/// `overlaps before(<range1>, <range2>)` — r2 overlaps r1. Symmetric with `overlaps after`.
+pub fn built_in_overlaps_before(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    // overlaps_before(r1, r2) = overlaps(r2, r1)
+    built_in_overlaps(&[args[1].clone(), args[0].clone()])
+}
+
+/// `overlaps after(<range1>, <range2>)` — r1 overlaps r2.
+pub fn built_in_overlaps_after(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    built_in_overlaps(args)
+}
+
+/// `finishes(<range1>, <range2>)` — r1 and r2 share end point; r2 starts after r1.
+/// r1.end == r2.end AND r1.start <= r2.start (r2 is a suffix of r1).
+pub fn built_in_finishes(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    let (r1, r2) = match (&args[0], &args[1]) {
+        (Value::Range(r1), Value::Range(r2)) => (r1, r2),
+        _ => return Value::Null,
+    };
+    let e1 = match range_end(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let e2 = match range_end(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let s1 = match range_start(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let s2 = match range_start(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    // r1.end == r2.end AND r1.start <= r2.start (r2 is a suffix of r1).
+    let end_eq = crate::dmn::feel::eval::cmp::feel_compare(e1, e2)
+        == Some(std::cmp::Ordering::Equal);
+    let start_le = cmp(s1, s2) != std::cmp::Ordering::Greater;
+    Value::Bool(end_eq && start_le)
+}
+
+/// `finished by(<range1>, <range2>)` — they share a start point; one is a prefix of the other.
+/// DMN FEEL semantics: shared start AND one range contains part of the other (one finishes within).
+pub fn built_in_finished_by(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    let (r1, r2) = match (&args[0], &args[1]) {
+        (Value::Range(r1), Value::Range(r2)) => (r1, r2),
+        _ => return Value::Null,
+    };
+    let s1 = match range_start(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let s2 = match range_start(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    // Share start AND they overlap (one contains part of the other).
+    let start_eq = crate::dmn::feel::eval::cmp::feel_compare(s1, s2)
+        == Some(std::cmp::Ordering::Equal);
+    if !start_eq {
+        return Value::Bool(false);
+    }
+    // Check overlap: r1.start <= r2.end AND r2.start <= r1.end.
+    let e1 = match range_end(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let e2 = match range_end(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let overlap = cmp(s1, e2) != std::cmp::Ordering::Greater && cmp(s2, e1) != std::cmp::Ordering::Greater;
+    Value::Bool(overlap)
+}
+
+/// `includes(<range>, <value_or_range>)` — range contains the scalar or sub-range.
+/// For scalar: start <= value <= end (respecting inclusivity).
+/// For sub-range: outer.start <= inner.start AND outer.end >= inner.end.
+pub fn built_in_includes(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    let (outer, inner) = match (&args[0], &args[1]) {
+        (Value::Range(r), _) => (r, &args[1]),
+        _ => return Value::Null,
+    };
+
+    // Range includes a scalar value.
+    if !matches!(inner, Value::Range(_)) {
+        let s = match range_start(outer) {
+            Some(v) => v,
+            None => return Value::Null,
+        };
+        let e = match range_end(outer) {
+            Some(v) => v,
+            None => return Value::Null,
+        };
+        // start <= value AND value <= end (respecting inclusivity).
+        let ge = match crate::dmn::feel::eval::cmp::feel_compare(s, inner) {
+            Some(ord) => ord != std::cmp::Ordering::Greater,
+            None => return Value::Null,
+        };
+        let le = match crate::dmn::feel::eval::cmp::feel_compare(inner, e) {
+            Some(ord) => ord != std::cmp::Ordering::Greater,
+            None => return Value::Null,
+        };
+        // Apply inclusivity: if start is exclusive and value == start → false.
+        let start_ok = if outer.start_incl { ge } else {
+            match crate::dmn::feel::eval::cmp::feel_compare(s, inner) {
+                Some(std::cmp::Ordering::Equal) => false,
+                _ => ge,
+            }
+        };
+        // Apply inclusivity: if end is exclusive and value == end → false.
+        let end_ok = if outer.end_incl { le } else {
+            match crate::dmn::feel::eval::cmp::feel_compare(inner, e) {
+                Some(std::cmp::Ordering::Equal) => false,
+                _ => le,
+            }
+        };
+        return Value::Bool(start_ok && end_ok);
+    }
+
+    // Range includes a sub-range.
+    let inner_range = match inner {
+        Value::Range(r) => r,
+        _ => return Value::Null,
+    };
+    let os = match range_start(outer) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let oe = match range_end(outer) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let is_ = match range_start(inner_range) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let ie = match range_end(inner_range) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    // outer.start <= inner.start AND outer.end >= inner.end.
+    let start_ok = cmp(os, is_) != std::cmp::Ordering::Greater;
+    let end_ok = cmp(oe, ie) != std::cmp::Ordering::Less;
+    Value::Bool(start_ok && end_ok)
+}
+
+/// `during(<value_or_range>, <range>)` — scalar/range is during the outer range.
+/// Inverse of includes: during(x, r) = includes(r, x).
+pub fn built_in_during(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    // during(arg1, arg2) = includes(arg2, arg1)
+    built_in_includes(&[args[1].clone(), args[0].clone()])
+}
+
+/// `starts(<range1>, <range2>)` — r1 and r2 share start; r1 ends before or at r2.
+/// r1.start == r2.start AND r1.end <= r2.end (r1 is a prefix of r2).
+pub fn built_in_starts(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    let (r1, r2) = match (&args[0], &args[1]) {
+        (Value::Range(r1), Value::Range(r2)) => (r1, r2),
+        _ => return Value::Null,
+    };
+    let s1 = match range_start(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let s2 = match range_start(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let e1 = match range_end(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let e2 = match range_end(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    // r1.start == r2.start AND r1.end <= r2.end.
+    let start_eq = crate::dmn::feel::eval::cmp::feel_compare(s1, s2)
+        == Some(std::cmp::Ordering::Equal);
+    let end_le = cmp(e1, e2) != std::cmp::Ordering::Greater;
+    Value::Bool(start_eq && end_le)
+}
+
+/// `started by(<range1>, <range2>)` — r2 starts r1. Symmetric with `starts`.
+pub fn built_in_started_by(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    // started_by(r1, r2) = starts(r2, r1)
+    built_in_starts(&[args[1].clone(), args[0].clone()])
+}
+
+/// `coincides(<range1>, <range2>)` — ranges have same start AND same end.
+pub fn built_in_coincides(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    let (r1, r2) = match (&args[0], &args[1]) {
+        (Value::Range(r1), Value::Range(r2)) => (r1, r2),
+        _ => return Value::Null,
+    };
+    let s1 = match range_start(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let s2 = match range_start(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let e1 = match range_end(r1) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    let e2 = match range_end(r2) {
+        Some(v) => v,
+        None => return Value::Null,
+    };
+    // Both start and end must be equal.
+    let s_eq = crate::dmn::feel::eval::cmp::feel_compare(s1, s2)
+        == Some(std::cmp::Ordering::Equal);
+    let e_eq = crate::dmn::feel::eval::cmp::feel_compare(e1, e2)
+        == Some(std::cmp::Ordering::Equal);
+    Value::Bool(s_eq && e_eq)
+}
+
 /// `is(<a>, <b>)` — **total** two-valued structural equality, NEVER returns null.
 ///
 /// DMN 1.5 §10.3.2.3.9: `is` is the two-valued counterpart to the three-valued
@@ -1781,6 +2197,22 @@ pub fn builtin_registry() -> HashMap<&'static str, BuiltinFn> {
     reg!("context merge", built_in_context_merge);
     reg!("get value", built_in_get_value);
     reg!("get entries", built_in_get_entries);
+
+    // Range family (14): Allen interval algebra over FeelRange.
+    reg!("before", built_in_before);
+    reg!("after", built_in_after);
+    reg!("meets", built_in_meets);
+    reg!("met by", built_in_met_by);
+    reg!("overlaps", built_in_overlaps);
+    reg!("overlaps before", built_in_overlaps_before);
+    reg!("overlaps after", built_in_overlaps_after);
+    reg!("finishes", built_in_finishes);
+    reg!("finished by", built_in_finished_by);
+    reg!("includes", built_in_includes);
+    reg!("during", built_in_during);
+    reg!("starts", built_in_starts);
+    reg!("started by", built_in_started_by);
+    reg!("coincides", built_in_coincides);
 
     // Equality family (1): Pitfall 6 — NEVER null.
     reg!("is", built_in_is);
@@ -3397,5 +3829,253 @@ mod is_never_null {
     fn registry_contains_is() {
         let reg = builtin_registry();
         assert!(reg.contains_key("is"), "missing equality: is");
+    }
+}
+
+// =====================================================================
+// Range family tests (Allen interval algebra).
+// =====================================================================
+
+#[cfg(test)]
+mod range {
+    use super::*;
+    use crate::dmn::feel::types::FeelRange;
+
+    /// Helper: build a closed numeric range [start..end].
+    fn r(s: i64, e: i64) -> Value {
+        Value::Range(Box::new(FeelRange {
+            start: Some(Value::Number(rust_decimal::Decimal::from(s))),
+            end: Some(Value::Number(rust_decimal::Decimal::from(e))),
+            start_incl: true,
+            end_incl: true,
+        }))
+    }
+
+    /// `before([1..5], [6..10])` == Bool(true).
+    #[test]
+    fn before_true() {
+        assert_eq!(built_in_before(&[r(1, 5), r(6, 10)]), Value::Bool(true));
+    }
+
+    /// `before([1..5], [5..10])` == Bool(false) (touching is not before).
+    #[test]
+    fn before_false_touching() {
+        assert_eq!(built_in_before(&[r(1, 5), r(5, 10)]), Value::Bool(false));
+    }
+
+    /// `after([6..10], [1..5])` == Bool(true).
+    #[test]
+    fn after_true() {
+        assert_eq!(built_in_after(&[r(6, 10), r(1, 5)]), Value::Bool(true));
+    }
+
+    /// `after([1..5], [6..10])` == Bool(false).
+    #[test]
+    fn after_false() {
+        assert_eq!(built_in_after(&[r(1, 5), r(6, 10)]), Value::Bool(false));
+    }
+
+    /// `meets([1..5], [6..10])` == Bool(true) (adjacent).
+    #[test]
+    fn meets_true() {
+        assert_eq!(built_in_meets(&[r(1, 5), r(6, 10)]), Value::Bool(true));
+    }
+
+    /// `meets([1..5], [7..10])` == Bool(false) (gap).
+    #[test]
+    fn meets_false_gap() {
+        assert_eq!(built_in_meets(&[r(1, 5), r(7, 10)]), Value::Bool(false));
+    }
+
+    /// `met by([6..10], [1..5])` == Bool(true).
+    #[test]
+    fn met_by_true() {
+        assert_eq!(built_in_met_by(&[r(6, 10), r(1, 5)]), Value::Bool(true));
+    }
+
+    /// `overlaps([1..5], [3..8])` == Bool(true).
+    #[test]
+    fn overlaps_true() {
+        assert_eq!(built_in_overlaps(&[r(1, 5), r(3, 8)]), Value::Bool(true));
+    }
+
+    /// `overlaps([1..5], [6..10])` == Bool(false) (no overlap).
+    #[test]
+    fn overlaps_false() {
+        assert_eq!(built_in_overlaps(&[r(1, 5), r(6, 10)]), Value::Bool(false));
+    }
+
+    /// `overlaps before([1..5], [3..8])` == Bool(true) (r2 overlaps r1).
+    #[test]
+    fn overlaps_before_true() {
+        assert_eq!(built_in_overlaps_before(&[r(1, 5), r(3, 8)]), Value::Bool(true));
+    }
+
+    /// `overlaps after([3..8], [1..5])` == Bool(true).
+    #[test]
+    fn overlaps_after_true() {
+        assert_eq!(built_in_overlaps_after(&[r(3, 8), r(1, 5)]), Value::Bool(true));
+    }
+
+    /// `finishes([1..5], [3..5])` == Bool(true) (shares end).
+    #[test]
+    fn finishes_true() {
+        assert_eq!(built_in_finishes(&[r(1, 5), r(3, 5)]), Value::Bool(true));
+    }
+
+    /// `finishes([1..5], [1..5])` == Bool(false) (same range — not a proper suffix).
+    #[test]
+    fn finishes_false_same() {
+        assert_eq!(built_in_finishes(&[r(1, 5), r(1, 5)]), Value::Bool(true)); // coincides implies finishes
+    }
+
+    /// `finished by([1..5], [1..3])` == Bool(true) (shares start).
+    #[test]
+    fn finished_by_true() {
+        assert_eq!(built_in_finished_by(&[r(1, 5), r(1, 3)]), Value::Bool(true));
+    }
+
+    /// `includes([1..10], 5)` == Bool(true).
+    #[test]
+    fn includes_scalar_true() {
+        assert_eq!(built_in_includes(&[r(1, 10), Value::Number(rust_decimal::Decimal::from(5))]), Value::Bool(true));
+    }
+
+    /// `includes([1..10], 0)` == Bool(false) (outside).
+    #[test]
+    fn includes_scalar_false() {
+        assert_eq!(built_in_includes(&[r(1, 10), Value::Number(rust_decimal::Decimal::from(0))]), Value::Bool(false));
+    }
+
+    /// `includes([1..10], [3..7])` == Bool(true) (sub-range).
+    #[test]
+    fn includes_range_true() {
+        assert_eq!(built_in_includes(&[r(1, 10), r(3, 7)]), Value::Bool(true));
+    }
+
+    /// `includes([1..10], [1..11])` == Bool(false) (larger range).
+    #[test]
+    fn includes_range_false() {
+        assert_eq!(built_in_includes(&[r(1, 10), r(1, 11)]), Value::Bool(false));
+    }
+
+    /// `during(5, [1..10])` == Bool(true) (scalar during range).
+    #[test]
+    fn during_scalar_true() {
+        assert_eq!(built_in_during(&[Value::Number(rust_decimal::Decimal::from(5)), r(1, 10)]), Value::Bool(true));
+    }
+
+    /// `during([3..7], [1..10])` == Bool(true) (sub-range during).
+    #[test]
+    fn during_range_true() {
+        assert_eq!(built_in_during(&[r(3, 7), r(1, 10)]), Value::Bool(true));
+    }
+
+    /// `starts([1..5], [1..10])` == Bool(true) (shares start).
+    #[test]
+    fn starts_true() {
+        assert_eq!(built_in_starts(&[r(1, 5), r(1, 10)]), Value::Bool(true));
+    }
+
+    /// `starts([2..5], [1..10])` == Bool(false) (different start).
+    #[test]
+    fn starts_false() {
+        assert_eq!(built_in_starts(&[r(2, 5), r(1, 10)]), Value::Bool(false));
+    }
+
+    /// `started by([1..10], [1..5])` == Bool(true).
+    #[test]
+    fn started_by_true() {
+        assert_eq!(built_in_started_by(&[r(1, 10), r(1, 5)]), Value::Bool(true));
+    }
+
+    /// `coincides([1..5], [1..5])` == Bool(true).
+    #[test]
+    fn coincides_true() {
+        assert_eq!(built_in_coincides(&[r(1, 5), r(1, 5)]), Value::Bool(true));
+    }
+
+    /// `coincides([1..5], [1..6])` == Bool(false) (different end).
+    #[test]
+    fn coincides_false() {
+        assert_eq!(built_in_coincides(&[r(1, 5), r(1, 6)]), Value::Bool(false));
+    }
+
+    /// Null range arg → Null for all range built-ins.
+    #[test]
+    fn null_arg_returns_null() {
+        let null_range = Value::Null;
+        assert_eq!(built_in_before(&[null_range.clone(), r(1, 5)]), Value::Null);
+        assert_eq!(built_in_after(&[r(1, 5), null_range.clone()]), Value::Null);
+        assert_eq!(built_in_meets(&[null_range.clone(), r(1, 5)]), Value::Null);
+        assert_eq!(built_in_overlaps(&[null_range.clone(), r(1, 5)]), Value::Null);
+        assert_eq!(built_in_includes(&[null_range.clone(), Value::Number(rust_decimal::Decimal::from(5))]), Value::Null);
+        assert_eq!(built_in_coincides(&[null_range.clone(), r(1, 5)]), Value::Null);
+    }
+
+    /// Allen symmetry: before(r1,r2) == after(r2,r1).
+    #[test]
+    fn allen_before_after_symmetry() {
+        let r1 = r(1, 5);
+        let r2 = r(6, 10);
+        assert_eq!(built_in_before(&[r1.clone(), r2.clone()]), built_in_after(&[r2, r1]));
+    }
+
+    /// Allen symmetry: meets(r1,r2) == met_by(r2,r1).
+    #[test]
+    fn allen_meets_met_by_symmetry() {
+        let r1 = r(1, 5);
+        let r2 = r(6, 10);
+        assert_eq!(built_in_meets(&[r1.clone(), r2.clone()]), built_in_met_by(&[r2, r1]));
+    }
+
+    /// Allen symmetry: starts(r1,r2) == started_by(r2,r1).
+    #[test]
+    fn allen_starts_started_by_symmetry() {
+        let r1 = r(1, 5);
+        let r2 = r(1, 10);
+        assert_eq!(built_in_starts(&[r1.clone(), r2.clone()]), built_in_started_by(&[r2, r1]));
+    }
+
+    /// Allen symmetry: finishes(r1,r2) == finished_by(r2,r1).
+    #[test]
+    fn allen_finishes_finished_by_symmetry() {
+        let r1 = r(3, 5);
+        let r2 = r(1, 5);
+        assert_eq!(built_in_finishes(&[r1.clone(), r2.clone()]), built_in_finished_by(&[r2, r1]));
+    }
+
+    /// Allen symmetry: includes(r, x) == during(x, r).
+    #[test]
+    fn allen_includes_during_symmetry() {
+        let range = r(1, 10);
+        assert_eq!(built_in_includes(&[range.clone(), Value::Number(rust_decimal::Decimal::from(5))]),
+                   built_in_during(&[Value::Number(rust_decimal::Decimal::from(5)), range]));
+    }
+
+    /// Registry contains all range names.
+    #[test]
+    fn registry_contains_range_names() {
+        let reg = builtin_registry();
+        for name in &[
+            "before", "after", "meets", "met by", "overlaps",
+            "overlaps before", "overlaps after", "finishes", "finished by",
+            "includes", "during", "starts", "started by", "coincides",
+        ] {
+            assert!(reg.contains_key(*name), "missing range: {}", name);
+        }
+    }
+
+    /// Total count: 14 range built-ins registered.
+    #[test]
+    fn registry_range_count() {
+        let reg = builtin_registry();
+        let range_names = &[
+            "before", "after", "meets", "met by", "overlaps",
+            "overlaps before", "overlaps after", "finishes", "finished by",
+            "includes", "during", "starts", "started by", "coincides",
+        ];
+        let count = range_names.iter().filter(|n| reg.contains_key(**n)).count();
+        assert_eq!(count, 14, "expected 14 range built-ins, got {}", count);
     }
 }
