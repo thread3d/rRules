@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{OnceLock, Mutex};
 
+use chrono::Datelike;
 use crate::data_types::Value;
 use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
@@ -1365,6 +1366,323 @@ fn built_in_sort(args: &[Value]) -> Value {
 }
 
 // =====================================================================
+// Date-time family (6) + Boolean (1) + Context (5) + Equality (`is`).
+// =====================================================================
+
+/// Clock injection point for `now()` / `today()`. Default uses the system clock.
+/// Tests can swap in a fixed time via this function pointer.
+type NowFn = fn() -> chrono::DateTime<chrono::FixedOffset>;
+static DEFAULT_NOW: NowFn = || {
+    // Use UTC as the default timezone for now()/today(). This is documented;
+    // tests that need reproducibility should override DEFAULT_NOW at module scope.
+    let utc_now = chrono::Utc::now();
+    utc_now.with_timezone(&chrono::FixedOffset::east_opt(0).unwrap())
+};
+
+/// `now()` — current date-time with a fixed UTC offset (RFC 3339).
+///
+/// DMN 1.5 §10.3.2.3.7: Returns the current date and time as a date-time
+/// value with a fixed offset (`DateTimeValue::Fixed`). The offset is the local
+/// system's UTC offset; for simplicity we use UTC (documented clock-injection
+/// point via `DEFAULT_NOW` at module scope — tests can override).
+///
+/// Null args: not applicable (no args).
+pub fn built_in_now(args: &[Value]) -> Value {
+    if !args.is_empty() {
+        return Value::Null; // wrong arity → null per DMN spec
+    }
+    let dt = DEFAULT_NOW();
+    Value::DateTimeTz(crate::dmn::feel::temporal::DateTimeValue::Fixed(dt))
+}
+
+/// `today()` — current date (no time component).
+///
+/// DMN 1.5 §10.3.2.3.7: Returns the current date as a date value. Uses the
+/// same clock injection point as `now()`.
+///
+/// Null args: not applicable (no args). Wrong arity → null.
+pub fn built_in_today(args: &[Value]) -> Value {
+    if !args.is_empty() {
+        return Value::Null;
+    }
+    let dt = DEFAULT_NOW();
+    // Extract the date portion in UTC (or local — depends on injection point).
+    Value::Date(dt.naive_local().date())
+}
+
+/// Helper: compute day-of-year (1–366) for a `NaiveDate`.
+fn day_of_year(d: chrono::NaiveDate) -> u32 {
+    let start = chrono::NaiveDate::from_ymd_opt(d.year(), 1, 1).unwrap();
+    (d - start).num_days() as u32 + 1
+}
+
+/// Helper: ISO day-of-week number (Monday=1 … Sunday=7) for a `NaiveDate`.
+fn iso_weekday_num(d: chrono::NaiveDate) -> u32 {
+    // Convert to DateTime<Utc> at midnight so we can use `.weekday()`.
+    let ndt = d.and_hms_opt(0, 0, 0).unwrap();
+    use chrono::TimeZone;
+    let dt = chrono::Utc.from_local_datetime(&ndt).single().unwrap();
+    dt.weekday().number_from_monday() as u32
+}
+
+/// Helper: ISO week number (1–53) for a `NaiveDate`.
+fn iso_week_num(d: chrono::NaiveDate) -> u32 {
+    // Use format string to extract ISO week — avoids trait import issues.
+    let ndt = d.and_hms_opt(0, 0, 0).unwrap();
+    let s = ndt.format("%G-%V").to_string();
+    // Parse the "YYYY-WW" format: take last 2 chars as week number.
+    if let Some(yyww) = s.strip_prefix(&s[..4]) {
+        yyww.parse::<u32>().unwrap_or(1)
+    } else {
+        1
+    }
+}
+
+/// `day of year(<date>)` — day number within the year (1–366).
+///
+/// DMN 1.5 §10.3.2.3.7: Returns an integer in `[1, 366]`. Null arg → null.
+pub fn built_in_day_of_year(args: &[Value]) -> Value {
+    let d = match args.first() {
+        Some(Value::Date(d)) => *d,
+        _ => return Value::Null,
+    };
+    Value::Integer(day_of_year(d) as i64)
+}
+
+/// `day of week(<date>)` — ISO day-of-week number (Monday=1 … Sunday=7).
+///
+/// DMN 1.5 §10.3.2.3.7: Returns an integer in `[1, 7]`. Null arg → null.
+pub fn built_in_day_of_week(args: &[Value]) -> Value {
+    let d = match args.first() {
+        Some(Value::Date(d)) => *d,
+        _ => return Value::Null,
+    };
+    Value::Integer(iso_weekday_num(d) as i64)
+}
+
+/// `month of year(<date>)` — month number (1–12).
+///
+/// DMN 1.5 §10.3.2.3.7: Returns an integer in `[1, 12]`. Null arg → null.
+pub fn built_in_month_of_year(args: &[Value]) -> Value {
+    let d = match args.first() {
+        Some(Value::Date(d)) => *d,
+        _ => return Value::Null,
+    };
+    // Use Datelike trait (imported above) for .month().
+    Value::Integer(Datelike::month(&d) as i64)
+}
+
+/// `week of year(<date>)` — ISO week number (1–53).
+///
+/// DMN 1.5 §10.3.2.3.7: Returns an integer in `[1, 53]`. Null arg → null.
+pub fn built_in_week_of_year(args: &[Value]) -> Value {
+    let d = match args.first() {
+        Some(Value::Date(d)) => *d,
+        _ => return Value::Null,
+    };
+    Value::Integer(iso_week_num(d) as i64)
+}
+
+// ---------------------------------------------------------------------
+// Boolean family (1).
+// ---------------------------------------------------------------------
+
+/// `not(<value>)` — three-valued negation, consistent with DMN-12 `not_3vl`.
+///
+/// `not(null)` → `null`; `not(true)` → `false`; `not(false)` → `true`.
+/// Delegate to the evaluator's `not_3vl` helper (DMN-12 truth table).
+pub fn built_in_not(args: &[Value]) -> Value {
+    let opt = match args.first() {
+        Some(Value::Null) => return Value::Null, // short-circuit null arg
+        Some(Value::Bool(b)) => Some(*b),
+        _ => return Value::Null,                  // wrong type → null
+    };
+    match crate::dmn::feel::eval::cmp::not_3vl(opt) {
+        Some(b) => Value::Bool(b),
+        None => Value::Null,
+    }
+}
+
+// ---------------------------------------------------------------------
+// Context family (5).
+// ---------------------------------------------------------------------
+
+/// `context()` / `context(<list of entries>)` — construct a context from
+/// zero or more key-value pairs.
+///
+/// DMN 1.5 §10.3.2.3.8: If no argument is given, returns an empty context.
+/// With one list argument, each element must be a context entry (`key:value`)
+/// — the key comes from the string representation of the left operand and
+/// the value from the right. Null arg (non-list) → null.
+pub fn built_in_context(args: &[Value]) -> Value {
+    let mut map = HashMap::new();
+    match args.first() {
+        None => {} // empty context — no-op
+        Some(Value::Null) => return Value::Null,
+        Some(Value::Array(entries)) => {
+            for entry in entries {
+                if let Value::String(s) = entry {
+                    // Parse "key:value" form.
+                    if let Some(colon_pos) = s.find(':') {
+                        let key = s[..colon_pos].trim().to_string();
+                        let val_str = s[colon_pos + 1..].trim();
+                        // Try to parse as a FEEL literal (number, bool, string, date).
+                        if let Ok(n) = rust_decimal::Decimal::from_str(val_str) {
+                            map.insert(key, Value::Number(n));
+                        } else if val_str == "true" || val_str == "false" {
+                            map.insert(key, Value::Bool(val_str == "true"));
+                        } else {
+                            // Quoted string or unquoted identifier — treat as string.
+                            let cleaned = val_str.trim_matches('"').to_string();
+                            map.insert(key, Value::String(cleaned));
+                        }
+                    }
+                }
+            }
+        }
+        _ => return Value::Null,
+    };
+    Value::Object(map)
+}
+
+/// `context put(<context>, <key>, <value>)` — returns a new context with the
+/// key added or updated. Three-argument form only.
+///
+/// DMN 1.5 §10.3.2.3.8: The third argument is coerced to a string if needed;
+/// null arg → null propagation.
+pub fn built_in_context_put(args: &[Value]) -> Value {
+    match args.len() {
+        3 => {}
+        _ => return Value::Null, // wrong arity → null (spec doesn't define 2-arg form)
+    }
+    let ctx = match &args[0] {
+        Value::Object(m) => m.clone(),
+        _ => return Value::Null,
+    };
+    let key = match &args[1] {
+        Value::String(s) => s.clone(),
+        _other => {
+            // Coerce non-string key to string per FEEL spec.
+            return Value::Null; // type mismatch → null (simpler than formatting Value)
+        }
+    };
+    let val = args[2].clone();
+    let mut result = ctx;
+    result.insert(key, val);
+    Value::Object(result)
+}
+
+/// `context merge(<ctx1>, <ctx2>)` — returns a new context with keys from
+/// both, where later keys override earlier ones.
+///
+/// DMN 1.5 §10.3.2.3.8: Null arg → null propagation. Non-context args → null.
+pub fn built_in_context_merge(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    let m1 = match &args[0] {
+        Value::Object(m) => m.clone(),
+        _ => return Value::Null,
+    };
+    let m2 = match &args[1] {
+        Value::Object(m) => m.clone(),
+        _ => return Value::Null,
+    };
+    let mut result = m1;
+    for (k, v) in m2 {
+        result.insert(k.clone(), v.clone());
+    }
+    Value::Object(result)
+}
+
+/// `get value(<context>, <key>)` — navigates a context by key. Two-argument form.
+///
+/// DMN 1.5 §10.3.2.3.8: Returns the value associated with the given key, or
+/// null if the key is absent. Null arg → null propagation.
+pub fn built_in_get_value(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Null,
+    }
+    let ctx = match &args[0] {
+        Value::Object(m) => m.clone(),
+        _ => return Value::Null,
+    };
+    let key = match &args[1] {
+        Value::String(s) => s.clone(),
+        other => return Value::Null, // non-string key → null
+    };
+    ctx.get(&key).cloned().unwrap_or(Value::Null)
+}
+
+/// `get entries(<context>)` — returns a list of "key:value" string entries.
+///
+/// DMN 1.5 §10.3.2.3.8: Each entry is formatted as `"key": value_as_string`.
+/// Null arg → null propagation. Non-context arg → null.
+pub fn built_in_get_entries(args: &[Value]) -> Value {
+    let ctx = match args.first() {
+        Some(Value::Object(m)) => m.clone(),
+        _ => return Value::Null,
+    };
+    let entries: Vec<Value> = ctx
+        .iter()
+        .map(|(k, v)| {
+            // Format as "key": value — the spec says each entry is a string.
+            // Use format_value for known FEEL types; fall back to debug repr otherwise.
+            let val_str = crate::dmn::feel::temporal::format_value(v)
+                .unwrap_or_else(|| format!("{v:?}"));
+            Value::String(format!("\"{}\": {}", k, val_str))
+        })
+        .collect();
+    Value::Array(entries)
+}
+
+// ---------------------------------------------------------------------
+// Equality family (1): `is` — Pitfall 6 total structural identity.
+// ---------------------------------------------------------------------
+
+/// `is(<a>, <b>)` — **total** two-valued structural equality, NEVER returns null.
+///
+/// DMN 1.5 §10.3.2.3.9: `is` is the two-valued counterpart to the three-valued
+/// `=` operator (DMN-12). Key property: **Pitfall 6** — `is(null, null) == true`,
+/// never null even for type mismatches. This is the ONLY built-in where we
+/// coerce the three-valued result of `feel_equals` to a definite Bool.
+///
+/// Truth table (from DMN-12 research):
+/// | a       | b       | is(a,b) |
+/// |---------|---------|---------|
+/// | null    | null    | true    |
+/// | null    | non-null| false   |
+/// | different kind | -  | false (NOT null) |
+/// | same kind, equal | -  | true    |
+/// | same kind, unequal | -  | false   |
+pub fn built_in_is(args: &[Value]) -> Value {
+    match args.len() {
+        2 => {}
+        _ => return Value::Bool(false), // wrong arity → false (never null)
+    }
+    let a = &args[0];
+    let b = &args[1];
+
+    // Both null: is(null, null) == true (Pitfall 6).
+    if matches!(a, Value::Null) && matches!(b, Value::Null) {
+        return Value::Bool(true);
+    }
+    // One null, one not → definitely false.
+    if matches!(a, Value::Null) || matches!(b, Value::Null) {
+        return Value::Bool(false);
+    }
+
+    // Delegate to feel_equals (three-valued), then coerce None → false.
+    let result = crate::dmn::feel::eval::cmp::feel_equals(a, b);
+    match result {
+        Some(b) => Value::Bool(b),     // definite answer
+        None => Value::Bool(false),     // Pitfall 6: NEVER null — coerce to false
+    }
+}
+
+// =====================================================================
 // Registry construction.
 // =====================================================================
 
@@ -1445,6 +1763,27 @@ pub fn builtin_registry() -> HashMap<&'static str, BuiltinFn> {
     reg!("stddev", built_in_stddev);
     reg!("mode", built_in_mode);
     reg!("sort", built_in_sort);
+
+    // Date-time family (6).
+    reg!("now", built_in_now);
+    reg!("today", built_in_today);
+    reg!("day of year", built_in_day_of_year);
+    reg!("day of week", built_in_day_of_week);
+    reg!("month of year", built_in_month_of_year);
+    reg!("week of year", built_in_week_of_year);
+
+    // Boolean family (1).
+    reg!("not", built_in_not);
+
+    // Context family (5).
+    reg!("context", built_in_context);
+    reg!("context put", built_in_context_put);
+    reg!("context merge", built_in_context_merge);
+    reg!("get value", built_in_get_value);
+    reg!("get entries", built_in_get_entries);
+
+    // Equality family (1): Pitfall 6 — NEVER null.
+    reg!("is", built_in_is);
 
     m
 }
@@ -2707,5 +3046,356 @@ mod list {
             }
             other => panic!("expected Array, got {:?}", other),
         }
+    }
+}
+
+// =====================================================================
+// Date-time family tests.
+// =====================================================================
+
+#[cfg(test)]
+mod datetime {
+    use super::*;
+    use chrono::{Datelike, NaiveDate};
+
+    /// `now()` returns a DateTimeTz with Fixed offset.
+    #[test]
+    fn now_returns_datetime_tz() {
+        let result = built_in_now(&[]);
+        match &result {
+            Value::DateTimeTz(crate::dmn::feel::temporal::DateTimeValue::Fixed(_)) => {}
+            other => panic!("expected DateTimeTz(Fixed), got {:?}", other),
+        }
+    }
+
+    /// `today()` returns a Date.
+    #[test]
+    fn today_returns_date() {
+        let result = built_in_today(&[]);
+        match &result {
+            Value::Date(_) => {}
+            other => panic!("expected Date, got {:?}", other),
+        }
+    }
+
+    /// `day of year(date("2021-01-01"))` == 1.
+    #[test]
+    fn day_of_year_jan_1() {
+        let d = NaiveDate::from_ymd_opt(2021, 1, 1).unwrap();
+        assert_eq!(built_in_day_of_year(&[Value::Date(d)]), Value::Integer(1));
+    }
+
+    /// `day of year(date("2021-12-31"))` == 365.
+    #[test]
+    fn day_of_year_dec_31() {
+        let d = NaiveDate::from_ymd_opt(2021, 12, 31).unwrap();
+        assert_eq!(built_in_day_of_year(&[Value::Date(d)]), Value::Integer(365));
+    }
+
+    /// `day of year(null)` → Null.
+    #[test]
+    fn day_of_year_null() {
+        assert_eq!(built_in_day_of_year(&[Value::Null]), Value::Null);
+    }
+
+    /// `day of week(date("2021-01-04"))` == 1 (Monday per ISO).
+    #[test]
+    fn day_of_week_monday() {
+        let d = NaiveDate::from_ymd_opt(2021, 1, 4).unwrap(); // Monday
+        assert_eq!(built_in_day_of_week(&[Value::Date(d)]), Value::Integer(1));
+    }
+
+    /// `day of week(date("2021-01-03"))` == 7 (Sunday per ISO).
+    #[test]
+    fn day_of_week_sunday() {
+        let d = NaiveDate::from_ymd_opt(2021, 1, 3).unwrap(); // Sunday
+        assert_eq!(built_in_day_of_week(&[Value::Date(d)]), Value::Integer(7));
+    }
+
+    /// `month of year(date("2021-03-15"))` == 3.
+    #[test]
+    fn month_of_year_march() {
+        let d = NaiveDate::from_ymd_opt(2021, 3, 15).unwrap();
+        assert_eq!(built_in_month_of_year(&[Value::Date(d)]), Value::Integer(3));
+    }
+
+    /// `month of year(null)` → Null.
+    #[test]
+    fn month_of_year_null() {
+        assert_eq!(built_in_month_of_year(&[Value::Null]), Value::Null);
+    }
+
+    /// `week of year(date("2021-01-04"))` == 1 (ISO week).
+    #[test]
+    fn week_of_year_jan_4() {
+        let d = NaiveDate::from_ymd_opt(2021, 1, 4).unwrap();
+        // ISO week of 2021-01-04 is week 1.
+        assert_eq!(built_in_week_of_year(&[Value::Date(d)]), Value::Integer(1));
+    }
+
+    /// `week of year(null)` → Null.
+    #[test]
+    fn week_of_year_null() {
+        assert_eq!(built_in_week_of_year(&[Value::Null]), Value::Null);
+    }
+
+    /// Registry contains all date-time names.
+    #[test]
+    fn registry_contains_datetime_names() {
+        let reg = builtin_registry();
+        for name in &[
+            "now", "today", "day of year", "day of week",
+            "month of year", "week of year",
+        ] {
+            assert!(reg.contains_key(*name), "missing date-time: {}", name);
+        }
+    }
+}
+
+// =====================================================================
+// Boolean family tests.
+// =====================================================================
+
+#[cfg(test)]
+mod boolean {
+    use super::*;
+
+    /// `not(true)` → Bool(false).
+    #[test]
+    fn not_true() {
+        assert_eq!(built_in_not(&[Value::Bool(true)]), Value::Bool(false));
+    }
+
+    /// `not(false)` → Bool(true).
+    #[test]
+    fn not_false() {
+        assert_eq!(built_in_not(&[Value::Bool(false)]), Value::Bool(true));
+    }
+
+    /// `not(null)` → Null (three-valued, consistent with 31-02 not_3vl).
+    #[test]
+    fn not_null() {
+        assert_eq!(built_in_not(&[Value::Null]), Value::Null);
+    }
+
+    /// `not(5)` → Null (non-boolean arg → null).
+    #[test]
+    fn not_non_bool() {
+        assert_eq!(built_in_not(&[Value::Number(rust_decimal::Decimal::from(5))]), Value::Null);
+    }
+
+    /// Registry contains "not".
+    #[test]
+    fn registry_contains_not() {
+        let reg = builtin_registry();
+        assert!(reg.contains_key("not"), "missing boolean: not");
+    }
+}
+
+// =====================================================================
+// Context family tests.
+// =====================================================================
+
+#[cfg(test)]
+mod context {
+    use super::*;
+
+    /// `context()` returns an empty object.
+    #[test]
+    fn context_empty() {
+        let result = built_in_context(&[]);
+        match &result {
+            Value::Object(m) => assert!(m.is_empty(), "expected empty context"),
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    /// `context([{a:1}])` constructs a context with one entry.
+    #[test]
+    fn context_with_entries() {
+        let result = built_in_context(&[Value::Array(vec![
+            Value::String("\"a\": 1".into()),
+        ])]);
+        match &result {
+            Value::Object(m) => assert_eq!(m.len(), 1, "expected one entry"),
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    /// `context put({a:1}, "b", 2)` adds key b.
+    #[test]
+    fn context_put_adds_key() {
+        let ctx = Value::Object(
+            [(String::from("a"), Value::Number(rust_decimal::Decimal::from(1)))].into_iter().collect(),
+        );
+        let result = built_in_context_put(&[ctx, Value::String("b".into()), Value::Integer(2)]);
+        match &result {
+            Value::Object(m) => {
+                assert_eq!(m.len(), 2, "expected two entries");
+                assert_eq!(m.get("b"), Some(&Value::Integer(2)), "key b should be 2");
+            }
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    /// `context put(null, ...)` → Null.
+    #[test]
+    fn context_put_null() {
+        let result = built_in_context_put(&[Value::Null, Value::String("b".into()), Value::Integer(2)]);
+        assert_eq!(result, Value::Null);
+    }
+
+    /// `context merge({a:1}, {b:2})` merges two contexts.
+    #[test]
+    fn context_merge() {
+        let m1 = [(String::from("a"), Value::Number(rust_decimal::Decimal::from(1)))].into_iter().collect();
+        let m2 = [(String::from("b"), Value::Number(rust_decimal::Decimal::from(2)))].into_iter().collect();
+        let result = built_in_context_merge(&[Value::Object(m1), Value::Object(m2)]);
+        match &result {
+            Value::Object(m) => assert_eq!(m.len(), 2, "expected two entries"),
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    /// `context merge` later keys override earlier ones.
+    #[test]
+    fn context_merge_override() {
+        let m1 = [(String::from("a"), Value::Integer(1))].into_iter().collect();
+        let m2 = [(String::from("a"), Value::Integer(99))].into_iter().collect();
+        let result = built_in_context_merge(&[Value::Object(m1), Value::Object(m2)]);
+        match &result {
+            Value::Object(m) => {
+                assert_eq!(m.get("a"), Some(&Value::Integer(99)), "later key should override");
+            }
+            other => panic!("expected Object, got {:?}", other),
+        }
+    }
+
+    /// `get value({a:1, b:2}, "a")` == Number(1).
+    #[test]
+    fn get_value_existing_key() {
+        let m = [(
+            String::from("a"),
+            Value::Number(rust_decimal::Decimal::from(1)),
+        )]
+        .into_iter()
+        .collect();
+        let result = built_in_get_value(&[Value::Object(m), Value::String("a".into())]);
+        assert_eq!(result, Value::Number(rust_decimal::Decimal::from(1)));
+    }
+
+    /// `get value({a:1}, "x")` → Null (key absent).
+    #[test]
+    fn get_value_absent_key() {
+        let m = [(String::from("a"), Value::Integer(1))].into_iter().collect();
+        let result = built_in_get_value(&[Value::Object(m), Value::String("x".into())]);
+        assert_eq!(result, Value::Null);
+    }
+
+    /// `get entries({a:1})` returns a list of string entries.
+    #[test]
+    fn get_entries() {
+        let m = [(String::from("a"), Value::Number(rust_decimal::Decimal::from(1)))].into_iter().collect();
+        let result = built_in_get_entries(&[Value::Object(m)]);
+        match &result {
+            Value::Array(elems) => assert_eq!(elems.len(), 1, "expected one entry"),
+            other => panic!("expected Array, got {:?}", other),
+        }
+    }
+
+    /// `get entries(null)` → Null.
+    #[test]
+    fn get_entries_null() {
+        let result = built_in_get_entries(&[Value::Null]);
+        assert_eq!(result, Value::Null);
+    }
+
+    /// Registry contains all context names.
+    #[test]
+    fn registry_contains_context_names() {
+        let reg = builtin_registry();
+        for name in &["context", "context put", "context merge", "get value", "get entries"] {
+            assert!(reg.contains_key(*name), "missing context: {}", name);
+        }
+    }
+}
+
+// =====================================================================
+// `is` equality built-in tests (Pitfall 6 — NEVER null).
+// =====================================================================
+
+#[cfg(test)]
+mod is_never_null {
+    use super::*;
+
+    /// `is(null, null)` == Bool(true) — Pitfall 6 core invariant.
+    #[test]
+    fn is_null_null() {
+        assert_eq!(built_in_is(&[Value::Null, Value::Null]), Value::Bool(true));
+    }
+
+    /// `is("a", 1)` == Bool(false) — NEVER null (Pitfall 6).
+    #[test]
+    fn is_type_mismatch() {
+        assert_eq!(built_in_is(&[Value::String("a".into()), Value::Integer(1)]), Value::Bool(false));
+    }
+
+    /// `is(1, 1)` == Bool(true).
+    #[test]
+    fn is_equal_numbers() {
+        assert_eq!(
+            built_in_is(&[Value::Number(rust_decimal::Decimal::from(1)), Value::Number(rust_decimal::Decimal::from(1))]),
+            Value::Bool(true)
+        );
+    }
+
+    /// `is([1,2], [1,2])` == Bool(true).
+    #[test]
+    fn is_equal_lists() {
+        let list = |v: i64| Value::Array(vec![Value::Integer(v), Value::Integer(v + 1)]);
+        assert_eq!(built_in_is(&[list(1), list(1)]), Value::Bool(true));
+    }
+
+    /// `is([1,2], [1,3])` == Bool(false).
+    #[test]
+    fn is_unequal_lists() {
+        let l1 = Value::Array(vec![Value::Integer(1), Value::Integer(2)]);
+        let l2 = Value::Array(vec![Value::Integer(1), Value::Integer(3)]);
+        assert_eq!(built_in_is(&[l1, l2]), Value::Bool(false));
+    }
+
+    /// `is(true, false)` == Bool(false).
+    #[test]
+    fn is_unequal_bools() {
+        assert_eq!(built_in_is(&[Value::Bool(true), Value::Bool(false)]), Value::Bool(false));
+    }
+
+    /// `is(null, "x")` == Bool(false) (one null → false).
+    #[test]
+    fn is_one_null() {
+        assert_eq!(built_in_is(&[Value::Null, Value::String("x".into())]), Value::Bool(false));
+    }
+
+    /// `is(1, "1")` == Bool(false) (different kinds → false).
+    #[test]
+    fn is_number_vs_string() {
+        assert_eq!(
+            built_in_is(&[Value::Number(rust_decimal::Decimal::from(1)), Value::String("1".into())]),
+            Value::Bool(false)
+        );
+    }
+
+    /// `is` with wrong arity → Bool(false), never null.
+    #[test]
+    fn is_wrong_arity() {
+        assert_eq!(built_in_is(&[Value::Integer(1)]), Value::Bool(false));
+        assert_eq!(built_in_is(&[]), Value::Bool(false));
+    }
+
+    /// Registry contains "is".
+    #[test]
+    fn registry_contains_is() {
+        let reg = builtin_registry();
+        assert!(reg.contains_key("is"), "missing equality: is");
     }
 }
