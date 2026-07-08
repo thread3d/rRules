@@ -62,4 +62,9 @@ pub mod numeric;
 pub mod parser;
 pub mod temporal;
 pub mod types;
+
+// Re-exports for the IR loader (Phase 29 `engine/src/dmn/parser.rs`) and
+// downstream consumers. The cache is a sidecar to the DMN model — it lives in
+// `feel::cache` but the IR loader needs it accessible as `feel::FeelAstCache`.
+pub use cache::{FeelAstCache, ParseEntry};
 // (sub-module wiring — `pub mod ast; pub mod parser; pub mod eval; pub mod builtins; pub mod coercion; pub mod cache;` declared above alongside the Phase 30 `numeric`/`temporal`/`types`.)
