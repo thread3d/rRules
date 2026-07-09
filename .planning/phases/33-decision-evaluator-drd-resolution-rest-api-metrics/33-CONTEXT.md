@@ -16,8 +16,8 @@ Specifically:
   `Scope<Value>`, and returns results + trace events.
 - A `POST /v1/decisions/{id}/evaluate` endpoint with multi-output support (MVP: evaluate all
   outputs of a single decision; DRD chaining deferred to a follow-up if not already in scope).
-- Per-decision Prometheus metrics (`rrules_dmn_evaluate_requests_total`, `_duration_seconds`,
-  `_rules_fired_total`) on the existing dedicated registry.
+- Per-decision Prometheus metrics (`rrules_dmn_evaluations_total`, `rrules_dmn_decision_duration_seconds`,
+  `rrules_dmn_hit_policy_violations_total`) on the existing dedicated registry (per ROADMAP spec).
 - Inference trace emission (matching Phase 28's `TraceEvent`/`TraceData` pattern) for each
   decision evaluation, surfaced at `GET /v1/decisions/{id}/trace`.
 - Hot-reload: when a `.dmn` file changes on disk, the next evaluate call picks up the new IR
