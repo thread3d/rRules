@@ -5,7 +5,7 @@
 
 pub mod trace;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use crate::data_types::Value;
@@ -87,6 +87,124 @@ fn extract_decisions(definitions: &DmnModel) -> Vec<&Decision> {
             _ => None,
         })
         .collect()
+}
+
+// =========================================================================
+// Topological DRD resolution (Phase 33 — §10.4)
+// =========================================================================
+
+/// Resolve decisions in topological order so that upstream dependencies are
+/// evaluated before dependents. Uses DFS with gray/black coloring for cycle
+/// detection (O(V+E) time). Returns the target decision ID last (it's the root).
+fn resolve_drd_order(
+    shared: &SharedDmnModel,
+    target_id: &str,
+) -> Result<Vec<String>, DecisionEvalError> {
+    // Build decision map: id -> &Decision for all decisions in model.
+    let decision_map: Vec<(&str, &Decision)> = extract_decisions_for_drd(&shared.model);
+
+    if decision_map.is_empty() {
+        return Ok(vec![target_id.to_string()]);
+    }
+
+    // DFS with gray/black coloring.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Color { White, Gray, Black }
+    let mut colors: HashMap<String, Color> = decision_map.iter().map(|(id, _)| (id.to_string(), Color::White)).collect();
+    let mut order = Vec::new();
+
+    fn dfs<'a>(
+        node: &str,
+        decision_map: &[(&'a str, &'a Decision)],
+        colors: &mut HashMap<String, Color>,
+        order: &mut Vec<String>,
+    ) -> Result<(), DecisionEvalError> {
+        match colors.get(node).copied() {
+            Some(Color::Gray) => return Err(DecisionEvalError::DrdCycle(collect_cycle(node, decision_map))),
+            Some(Color::Black) => return Ok(()),
+            _ => {}
+        }
+        colors.insert(node.to_string(), Color::Gray);
+
+        // Find the decision for this node and recurse into its required_decisions.
+        if let Some((_, decision)) = decision_map.iter().find(|(id, _)| *id == node) {
+            for dep_id in &decision.required_decisions {
+                // Only recurse into decisions that exist in the model (skip external refs).
+                if decision_map.iter().any(|(id, _)| *id == dep_id.as_str()) {
+                    dfs(dep_id, decision_map, colors, order)?;
+                }
+            }
+        }
+
+        colors.insert(node.to_string(), Color::Black);
+        order.push(node.to_string());
+        Ok(())
+    }
+
+    // Sort all decisions for deterministic ordering, then run DFS.
+    let mut sorted_ids: Vec<&str> = decision_map.iter().map(|(id, _)| *id).collect();
+    sorted_ids.sort();
+    for id in &sorted_ids {
+        dfs(id, &decision_map, &mut colors, &mut order)?;
+    }
+
+    // Filter to only decisions reachable from target_id.
+    let mut result = Vec::new();
+    fn collect_reachable(
+        id: &str, decision_map: &[(&str, &Decision)], reachable: &mut HashSet<String>
+    ) {
+        if reachable.contains(id) { return; }
+        reachable.insert(id.to_string());
+        if let Some((_, d)) = decision_map.iter().find(|(id2, _)| id2 == &id) {
+            for dep in &d.required_decisions {
+                collect_reachable(dep, decision_map, reachable);
+            }
+        }
+    }
+    let mut reachable = HashSet::new();
+    collect_reachable(target_id, &decision_map, &mut reachable);
+
+    // Return topological order filtered to reachable set.
+    for id in order {
+        if reachable.contains(&id) { result.push(id); }
+    }
+
+    Ok(result)
+}
+
+/// Helper: extract all decisions from the model for DRD resolution.
+fn extract_decisions_for_drd(model: &DmnModel) -> Vec<(&str, &Decision)> {
+    model.definitions.children.iter()
+        .filter_map(|child| match child {
+            DefinitionsChild::Decision(d) => Some((d.id.as_str(), d)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Collect the cycle path for error reporting.
+fn collect_cycle(start: &str, decision_map: &[(&str, &Decision)]) -> Vec<String> {
+    let mut cycle = vec![start.to_string()];
+    let mut current = start;
+    let mut visited = HashSet::new();
+    while !visited.contains(current) && visited.len() < 100 {
+        visited.insert(current.to_string());
+        if let Some((_, d)) = decision_map.iter().find(|(id, _)| id == &current) {
+            for dep in &d.required_decisions {
+                if visited.contains(dep.as_str()) || dep == start {
+                    cycle.push(dep.clone());
+                    return cycle;
+                }
+            }
+        }
+        // Move to first dependency.
+        if let Some((_, d)) = decision_map.iter().find(|(id, _)| id == &current) {
+            if !d.required_decisions.is_empty() {
+                current = &d.required_decisions[0];
+            } else { break; }
+        } else { break; }
+    }
+    cycle
 }
 
 // =========================================================================
@@ -229,6 +347,9 @@ pub enum DecisionEvalError {
 
     #[error("internal error: {0}")]
     Internal(String),
+
+    #[error("DRD cycle detected involving decisions: {0:?}")]
+    DrdCycle(Vec<String>),
 
     #[error(transparent)]
     ParseError(#[from] crate::dmn::model::DmnParseError),
