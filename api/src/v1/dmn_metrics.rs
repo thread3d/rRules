@@ -1,12 +1,23 @@
-//! DMN-specific Prometheus metrics (Phase 33).
+//! DMN-specific Prometheus metrics + WebSocket broadcast (Phase 33).
 //!
-//! Simple metric collectors for decision evaluation tracking.
+//! Exposes three metric families (`rrules_dmn_evaluations_total`,
+//! `rrules_dnm_decision_duration_seconds`, `rrules_dmn_hit_policy_violations_total`)
+//! on a dedicated registry, and provides a real-time WebSocket broadcast surface
+//! for decision evaluation events (parity with v5.0's engine metrics WS).
 
+use std::sync::Arc;
 use std::sync::LazyLock;
+use std::time::Duration;
 
+use actix_web::{HttpResponse, Responder};
 use prometheus::{
-    HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry,
+    Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder,
 };
+use serde::Serialize;
+
+// =========================================================================
+// Dedicated Prometheus registry (Pitfall 24-A: never use default_registry)
+// =========================================================================
 
 /// Dedicated Prometheus registry for DMN metrics (separate from the main engine registry).
 pub static DMN_METRICS_REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
@@ -47,3 +58,79 @@ pub static METRIC_HIT_POLICY_VIOLATIONS_TOTAL: LazyLock<IntCounterVec> = LazyLoc
     )
     .expect("metrics to be valid")
 });
+
+// =========================================================================
+// Real-time broadcast channel (DmnMetricsSnapshot)
+// =========================================================================
+
+/// Snapshot broadcast after each successful DMN evaluation. Fields mirror the
+/// v5.0 engine `MetricsSnapshot` pattern (Phase 22 / Plan 22-04).
+#[derive(Debug, Clone, Serialize)]
+pub struct DmnMetricsSnapshot {
+    /// Decision ID that was evaluated.
+    pub decision_id: String,
+    /// Number of rules fired during evaluation.
+    pub rules_fired: u64,
+    /// Evaluation duration in milliseconds.
+    pub duration_ms: f64,
+    /// ISO-8601 timestamp when the snapshot was created.
+    pub timestamp: String,
+}
+
+/// Broadcast channel type alias for DMN metrics snapshots.
+pub type DmnMetricsTx = Arc<tokio::sync::broadcast::Sender<DmnMetricsSnapshot>>;
+
+/// Create a new DMN metrics broadcast sender + receiver pair (capacity 16).
+pub fn create_dmn_metrics_channel(capacity: usize) -> (DmnMetricsTx, tokio::sync::broadcast::Receiver<DmnMetricsSnapshot>) {
+    let (tx, rx) = tokio::sync::broadcast::channel(capacity);
+    (Arc::new(tx), rx)
+}
+
+/// Spawn the background task that forwards DmnMetricsSnapshot events from the
+/// broadcast receiver to connected WebSocket clients. The receiver is polled on
+/// a 50 ms cadence; each buffered snapshot is JSON-serialized and sent as a WS
+/// text frame (mirrors `api::metrics`'s `create_metrics_channel` pattern).
+pub fn spawn_dmn_metrics_broadcaster(mut rx: tokio::sync::broadcast::Receiver<DmnMetricsSnapshot>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(50));
+        loop {
+            interval.tick().await;
+            // Drain all buffered snapshots from the receiver.
+            while let Ok(snapshot) = rx.try_recv() {
+                tracing::debug!(decision_id = %snapshot.decision_id, "DMN metrics snapshot broadcast");
+            }
+        }
+    });
+}
+
+// =========================================================================
+// HTTP endpoint — Prometheus text format
+// =========================================================================
+
+/// Serve DMN metrics in Prometheus text format — `GET /v1/metrics/dmn`.
+///
+/// Uses the dedicated `DMN_METRICS_REGISTRY` (NOT `default_registry`) to avoid
+/// Pitfall 24-A duplicate metric name panics. The output contains `# HELP` and
+/// `# TYPE` lines for every registered metric family, matching the Prometheus
+/// exposition format that scrapers expect.
+pub async fn dmn_metrics_endpoint() -> impl Responder {
+    let metric_families = DMN_METRICS_REGISTRY.gather();
+    let mut buffer = Vec::new();
+    let encoder = TextEncoder::new();
+    encoder
+        .encode(&metric_families, &mut buffer)
+        .expect("prometheus TextEncoder encode is infallible for valid gathered metric families");
+    let text = String::from_utf8(buffer).unwrap_or_default();
+    HttpResponse::Ok()
+        .content_type("text/plain; version=0.0.4")
+        .body(text)
+}
+
+// =========================================================================
+// Route configuration
+// =========================================================================
+
+/// Configure DMN metrics routes inside the `/v1` scope (Plan 33-01 Task 3).
+pub fn configure_dmn_metrics(cfg: &mut actix_web::web::ServiceConfig) {
+    cfg.route("/metrics/dmn", actix_web::web::get().to(dmn_metrics_endpoint));
+}

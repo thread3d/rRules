@@ -141,6 +141,14 @@ async fn main() -> std::io::Result<()> {
     // and `DecisionEvaluator` is not `Clone` (it holds an `Arc<RwLock<>>` internally).
     let dmn_evaluator = std::sync::Arc::new(DecisionEvaluator::new(std::sync::Arc::new(std::sync::RwLock::new(shared_dmn_model))));
 
+    // Phase 33 (Plan 33-01 Task 3): create the DMN metrics broadcast channel
+    // for real-time WebSocket delivery of DmnMetricsSnapshot events. Capacity 16
+    // matches the existing engine metrics channel pattern. The receiver is moved
+    // into a background broadcaster task; the sender is cloned and injected as
+    // `web::Data` so handlers can push snapshots after each evaluation.
+    let (dmn_metrics_tx, dmn_metrics_rx) = v1::dmn_metrics::create_dmn_metrics_channel(16);
+    v1::dmn_metrics::spawn_dmn_metrics_broadcaster(dmn_metrics_rx);
+
     // Create metrics broadcast channel for real-time updates (for future WebSocket use)
     let (metrics_tx, _) = metrics::create_metrics_channel(16);
 
@@ -274,6 +282,9 @@ async fn main() -> std::io::Result<()> {
             // Phase 33 (Plan 33-01): inject the DecisionEvaluator as web::Data so
             // handlers can evaluate decisions and hot-reload the shared model.
             .app_data(web::Data::new(dmn_evaluator.clone()))
+            // Phase 33 (Task 3): inject the DMN metrics broadcast sender so handlers
+            // can push DmnMetricsSnapshot events after each evaluation (WS delivery).
+            .app_data(web::Data::new(dmn_metrics_tx.clone()))
             .app_data(web::Data::new(rule_store.clone()))
             .app_data(web::Data::new(category_store.clone()))
             .app_data(web::Data::new(tag_store.clone()))
@@ -396,7 +407,11 @@ async fn main() -> std::io::Result<()> {
                     // Registered after simulation but before metrics so that the
                     // `/v1/decisions/*` paths resolve without conflict with any
                     // existing wildcard segments.
-                    .configure(v1::configure_v1_decisions),
+                    .configure(v1::configure_v1_decisions)
+                    // Phase 33 (Task 3): DMN Prometheus text endpoint + WS broadcast.
+                    // Registered after decisions so the full path is /v1/metrics/dmn
+                    // and /v1/metrics/dmn/ws without conflicts with the root /metrics scope.
+                    .configure(v1::configure_dmn_metrics),
             )
             .configure(metrics::configure_metrics)
             // Serve frontend static files at root path (last, so API routes take precedence)

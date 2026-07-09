@@ -10,6 +10,7 @@ pub mod branches;
 pub mod categories;
 pub mod decisions;
 pub mod dmn_metrics;
+pub mod dmn_metrics_ws;
 pub mod execution;
 pub mod metrics;
 pub mod rules;
@@ -50,4 +51,10 @@ pub fn configure_v1_simulation(cfg: &mut web::ServiceConfig) {
 /// Configure v1/decisions routes inside the /v1 scope (Phase 33).
 pub fn configure_v1_decisions(cfg: &mut web::ServiceConfig) {
     decisions::configure_v1_decisions(cfg);
+}
+
+/// Configure DMN metrics + WebSocket endpoints inside the `/v1` scope (Plan 33-01 Task 3).
+pub fn configure_dmn_metrics(cfg: &mut web::ServiceConfig) {
+    cfg.configure(dmn_metrics::configure_dmn_metrics);
+    cfg.configure(dmn_metrics_ws::configure_dmn_metrics_ws);
 }
