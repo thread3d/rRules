@@ -37,8 +37,8 @@ pub enum DecisionTableError {
     AggregatorMismatch(String),
 
     /// An output cell value could not be interpreted for the expected type.
-    #[error("invalid output value at rule {rule_idx}: {0}")]
-    InvalidOutputValue(#[from] String),
+    #[error("invalid output value at rule {0}")]
+    InvalidOutputValue(String),
 
     /// Generic fallback error.
     #[error("{0}")]
@@ -86,7 +86,7 @@ impl DecisionTableEvaluator {
                 .input_clauses
                 .iter()
                 .zip(rule.input_entries.iter())
-                .all(|(clause, entry)| input_clause_matches(clause, entry, scope, cache));
+                .all(|(clause, entry)| Self::input_clause_matches(clause, entry, scope, cache));
 
             if all_match {
                 // Extract output values from the rule.
@@ -183,7 +183,7 @@ impl DecisionTableEvaluator {
         let first = &matches[0].1;
         for (idx, (_rule_idx, outputs)) in matches.iter().enumerate().skip(1) {
             for (col, (a, b)) in first.iter().zip(outputs.iter()).enumerate() {
-                if !eval::feel_equals_public(a, b) {
+                if eval::feel_equals_public(a, b) != Some(true) {
                     let col_name = Self::output_column_name(table, col);
                     return Err(DecisionTableError::HitPolicyViolation {
                         policy: "ANY".into(),
@@ -205,7 +205,7 @@ impl DecisionTableEvaluator {
         table: &DecisionTable,
     ) -> Result<Value, DecisionTableError> {
         match matches.first() {
-            Some(first) => Self::pack_outputs(first, table),
+            Some((_, outputs)) => Self::pack_outputs(outputs, table),
             None => Ok(Self::null_with_defaults(table)),
         }
     }
@@ -226,7 +226,7 @@ impl DecisionTableEvaluator {
                 clause
                     .default_output_entry
                     .as_deref()
-                    .and_then(|text| {
+                    .map(|text| {
                         // Try to evaluate the default entry text as a FEEL expression.
                         let cache = FeelAstCache::new();
                         let ast = cache.get_or_parse(text, ParseEntry::Expression);
@@ -266,12 +266,11 @@ impl DecisionTableEvaluator {
         table.output_clauses.get(idx).map_or_else(
             || format!("output_{idx}"),
             |clause| {
-                clause.label.as_deref().unwrap_or_else(|| {
-                    clause.name.as_deref().unwrap_or(&format!("output_{idx}"))
+                clause.label.clone().unwrap_or_else(|| {
+                    clause.name.clone().unwrap_or_else(|| format!("output_{idx}"))
                 })
             },
         )
-        .to_string()
     }
 }
 
@@ -298,9 +297,9 @@ mod tests {
     }
 
     /// Helper to load a DMN fixture and extract the first decision's table.
-    fn load_fixture(name: &str) -> (DtModel, FeelAstCache) {
+    fn load_fixture(name: &str) -> (crate::dmn::model::DmnModel, FeelAstCache) {
         let path = format!(
-            "{}/engine/tests/fixtures/dmn/{}",
+            "{}/tests/fixtures/dmn/{}",
             env!("CARGO_MANIFEST_DIR"),
             name
         );
@@ -309,10 +308,10 @@ mod tests {
     }
 
     /// Helper: extract the DecisionTable from a loaded model by decision id.
-    fn table_for(
-        model: &crate::dmn::model::DmnModel,
+    fn table_for<'a>(
+        model: &'a crate::dmn::model::DmnModel,
         dec_id: &str,
-    ) -> Option<&DtModel> {
+    ) -> Option<&'a DtModel> {
         for child in &model.definitions.children {
             if let crate::dmn::model::DefinitionsChild::Decision(dec) = child {
                 if dec.id == dec_id && dec.decision_table.is_some() {

@@ -1327,8 +1327,12 @@ fn eval_in_with_ast(l: Value, rhs_expr: &FeelExpression) -> Value {
     }
 }
 
-/// Evaluate a positive unary test against an input value.
-fn eval_in_unary_test(input: Value, test: &FeelExpression) -> Option<bool> {
+/// Evaluate a positive unary test (SimpleUnaryTests AST) against an input value.
+///
+/// Returns `Some(true)` if the unary test matches, `Some(false)` if it does not, or
+/// `None` for three-valued null propagation. Used by the decision-table evaluator to
+/// check whether an input clause fires for a given rule entry.
+pub fn eval_in_unary_test(input: Value, test: &FeelExpression) -> Option<bool> {
     match test {
         // Or-chain (comma-list): fold via or_3vl.
         FeelExpression::BinOp { op: BinOpKind::Or, lhs, rhs } => {
