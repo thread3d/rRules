@@ -27,26 +27,85 @@ export interface FilterState {
 
 // Decision table types
 
-export interface HitPolicy {
-  id: string
-  name: string
-  description: string
-  requiresAggregation?: boolean
-}
+// ---- DMN 1.5 Canonical Hit-Policy Model (per DMN spec Clause 8.2.12) ----
+// Aligns frontend vocabulary with engine/src/dmn/model.rs HitPolicy enum.
 
-export const HIT_POLICIES: HitPolicy[] = [
-  { id: 'unique', name: 'Unique', description: 'Only one rule can match' },
-  { id: 'any', name: 'Any', description: 'Multiple rules can match, order doesn\'t matter' },
-  { id: 'priority', name: 'Priority', description: 'Rules are ordered by priority' },
-  { id: 'collect', name: 'Collect', description: 'All matching rules are fired', requiresAggregation: true },
-  { id: 'rule-order', name: 'Rule Order', description: 'First matching rule fires' },
-  { id: 'sum', name: 'Sum', description: 'Aggregates values from matching rules', requiresAggregation: true },
-  { id: 'min', name: 'Min', description: 'Selects minimum value from matching rules', requiresAggregation: true },
-  { id: 'max', name: 'Max', description: 'Selects maximum value from matching rules', requiresAggregation: true },
-  { id: 'count', name: 'Count', description: 'Counts matching rules', requiresAggregation: true },
+/** String union of exactly the 7 canonical DMN 1.5 hit-policy values. */
+export type HitPolicy = 'UNIQUE' | 'ANY' | 'PRIORITY' | 'FIRST' | 'RULE ORDER' | 'OUTPUT ORDER' | 'COLLECT'
+
+/** String union for COLLECT aggregators (only meaningful when HitPolicy === 'COLLECT'). */
+export type Aggregator = 'SUM' | 'MIN' | 'MAX' | 'COUNT'
+
+/** Which hit policies support aggregation. Per DMN spec, only COLLECT does. */
+export const AGGREGATOR_POLICIES: HitPolicy[] = ['COLLECT']
+
+/** Default aggregator for new COLLECT tables. */
+export const DEFAULT_AGGREGATOR: Aggregator = 'SUM'
+
+/** Aggregator display options. */
+export const AGGREGATORS: { id: Aggregator; name: string }[] = [
+  { id: 'SUM', name: 'Sum' },
+  { id: 'MIN', name: 'Min' },
+  { id: 'MAX', name: 'Max' },
+  { id: 'COUNT', name: 'Count' },
 ]
 
-export type HitPolicyId = (typeof HIT_POLICIES)[number]['id']
+/** Metadata shape for each hit policy. */
+export interface HitPolicyMeta {
+  id: HitPolicy
+  name: string
+  description: string
+  requiresAggregator: boolean
+}
+
+/** Full metadata record mapping each canonical HitPolicy to its spec-accurate description (DMN 1.5 Clause 8.2.12). */
+export const HIT_POLICY_META: Record<HitPolicy, HitPolicyMeta> = {
+  UNIQUE: {
+    id: 'UNIQUE',
+    name: 'Unique',
+    description: "Only one rule can match. Multiple matches is a violation.",
+    requiresAggregator: false,
+  },
+  ANY: {
+    id: 'ANY',
+    name: 'Any',
+    description: "Multiple rules can match; all must agree on outputs.",
+    requiresAggregator: false,
+  },
+  PRIORITY: {
+    id: 'PRIORITY',
+    name: 'Priority',
+    description: "Select the matching rule whose output has highest allowedValues position.",
+    requiresAggregator: false,
+  },
+  FIRST: {
+    id: 'FIRST',
+    name: 'First',
+    description: "First matching rule in document order wins. No conflict detection.",
+    requiresAggregator: false,
+  },
+  'RULE ORDER': {
+    id: 'RULE ORDER',
+    name: 'Rule Order',
+    description: "All matching rules' outputs returned in document order.",
+    requiresAggregator: false,
+  },
+  'OUTPUT ORDER': {
+    id: 'OUTPUT ORDER',
+    name: 'Output Order',
+    description: "All matching rules' outputs sorted by allowedValues enumeration.",
+    requiresAggregator: false,
+  },
+  COLLECT: {
+    id: 'COLLECT',
+    name: 'Collect',
+    description: "Collect all matching rule outputs; optionally aggregate (SUM/MIN/MAX/COUNT).",
+    requiresAggregator: true,
+  },
+}
+
+/** Array form for dropdown rendering — derived from HIT_POLICY_META keys. */
+export const HIT_POLICIES: HitPolicy[] = Object.keys(HIT_POLICY_META) as HitPolicy[]
 
 export interface DecisionTableColumn {
   id: string
