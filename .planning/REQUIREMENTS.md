@@ -26,12 +26,12 @@ Requirements for the v6.0 milestone. Each maps to roadmap phases 29–35.
 
 - [x] **DMN-11**: FEEL lexer/parser — full grammar rules 1–65; dual entry points (`SimpleUnaryTests`, `Expression`); keyword-as-name disambiguation; hand-written recursive descent with Pratt precedence
 - [x] **DMN-12**: FEEL evaluator with three-valued logic — `feel_equals`/`feel_compare` return `Option<_>` (null → `Value::Null`); explicit truth tables for `and`/`or`/`not`; conformance cases (`"a"=1`→null, `null<3`→null, `null=null`→true, `not(null)`→null)
-- [ ] **DMN-13**: FEEL operators — arithmetic, comparison, boolean, string concatenation, date-time arithmetic and duration operations
-- [ ] **DMN-14**: FEEL control + quantified expressions — `if`, `for`, `some`/`every`, path, filter, `instance of`
+- [x] **DMN-13**: FEEL operators — arithmetic, comparison, boolean, string concatenation, date-time arithmetic and duration operations
+- [x] **DMN-14**: FEEL control + quantified expressions — `if`, `for`, `some`/`every`, path, filter, `instance of`
 - [x] **DMN-15**: FEEL boxed expressions — all 10 types (literal, context, list, relation, function invocation, function definition, conditional, filter, for, every/some), recursive; boxed contexts evaluated in dependency (topological) order with cycle detection
-- [ ] **DMN-16**: FEEL user-defined functions (lambdas, non-external) — grammar rule 55
-- [ ] **DMN-17**: FEEL built-in function library — all ~70+ functions across conversion/string/list/numeric/date-time/context/boolean/range/equality families
-- [ ] **DMN-18**: FEEL AST cache — cells/expressions pre-parsed to `Arc<FeelExpression>` at DMN load time; the evaluator takes `&FeelExpression` and never re-parses (prevents the 4–6× re-parse perf bug)
+- [x] **DMN-16**: FEEL user-defined functions (lambdas, non-external) — grammar rule 55
+- [x] **DMN-17**: FEEL built-in function library — all ~70+ functions across conversion/string/list/numeric/date-time/context/boolean/range/equality families
+- [x] **DMN-18**: FEEL AST cache — cells/expressions pre-parsed to `Arc<FeelExpression>` at DMN load time; the evaluator takes `&FeelExpression` and never re-parses (prevents the 4–6× re-parse perf bug)
 
 ### Decision Tables
 
@@ -102,12 +102,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DMN-10 | Phase 30 | Complete |
 | DMN-11 | Phase 31 | Complete |
 | DMN-12 | Phase 31 | Complete |
-| DMN-13 | Phase 31 | Pending |
-| DMN-14 | Phase 31 | Pending |
+| DMN-13 | Phase 31 | Complete |
+| DMN-14 | Phase 31 | Complete |
 | DMN-15 | Phase 31 | Complete |
-| DMN-16 | Phase 31 | Pending |
-| DMN-17 | Phase 31 | Pending |
-| DMN-18 | Phase 31 | Pending |
+| DMN-16 | Phase 31 | Complete |
+| DMN-17 | Phase 31 | Complete |
+| DMN-18 | Phase 31 | Complete |
 | DMN-19 | Phase 32 | Pending |
 | DMN-20 | Phase 32 | Pending |
 | DMN-21 | Phase 32 | Pending |

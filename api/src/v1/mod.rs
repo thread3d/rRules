@@ -8,6 +8,8 @@ pub mod audit;
 // (JWT validation) — see api/src/lib.rs, not a v1 submodule.
 pub mod branches;
 pub mod categories;
+pub mod decisions;
+pub mod dmn_metrics;
 pub mod execution;
 pub mod metrics;
 pub mod rules;
@@ -43,4 +45,9 @@ pub fn configure_v1_simulation(cfg: &mut web::ServiceConfig) {
             .route("", web::post().to(simulation::run_simulation))
             .route("/", web::post().to(simulation::run_simulation)),
     );
+}
+
+/// Configure v1/decisions routes inside the /v1 scope (Phase 33).
+pub fn configure_v1_decisions(cfg: &mut web::ServiceConfig) {
+    decisions::configure_v1_decisions(cfg);
 }
