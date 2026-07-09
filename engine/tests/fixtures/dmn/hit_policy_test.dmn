@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20200524/MODEL/" id="_defs" name="HitPolicyTest">
+  <!-- UNIQUE test: single output, two rules with disjoint ranges -->
+  <decision id="_dec_unique" name="UniqueTest">
+    <variable name="Result" typeRef="feel:string"/>
+    <decisionTable id="_dt_unique" hitPolicy="UNIQUE">
+      <input><inputExpression><text>score</text></inputExpression></input>
+      <output name="Result" typeRef="feel:string"/>
+      <rule><inputEntry><text>&gt;= 90</text></inputEntry><outputEntry><text>"A"</text></outputEntry></rule>
+      <rule><inputEntry><text>&lt; 90</text></inputEntry><outputEntry><text>"B"</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+  <!-- ANY test: two rules that both match (score=85 matches &gt;=80 and &lt; 90) with CONFLICTING outputs -->
+  <decision id="_dec_any_conflict" name="AnyConflictTest">
+    <variable name="Result" typeRef="feel:string"/>
+    <decisionTable id="_dt_any_conflict" hitPolicy="ANY">
+      <input><inputExpression><text>score</text></inputExpression></input>
+      <output name="Result" typeRef="feel:string"/>
+      <rule><inputEntry><text>&gt;= 80</text></inputEntry><outputEntry><text>"High"</text></outputEntry></rule>
+      <rule><inputEntry><text>&lt; 90</text></inputEntry><outputEntry><text>"Low"</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+  <!-- ANY test: two rules that both match with AGREEING outputs -->
+  <decision id="_dec_any_agree" name="AnyAgreeTest">
+    <variable name="Result" typeRef="feel:string"/>
+    <decisionTable id="_dt_any_agree" hitPolicy="ANY">
+      <input><inputExpression><text>score</text></inputExpression></input>
+      <output name="Result" typeRef="feel:string"/>
+      <rule><inputEntry><text>&gt;= 80</text></inputEntry><outputEntry><text>"High"</text></outputEntry></rule>
+      <rule><inputEntry><text>&lt; 90</text></inputEntry><outputEntry><text>"High"</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+  <!-- FIRST test: two rules that both match, first by document order wins -->
+  <decision id="_dec_first" name="FirstTest">
+    <variable name="Result" typeRef="feel:string"/>
+    <decisionTable id="_dt_first" hitPolicy="FIRST">
+      <input><inputExpression><text>score</text></inputExpression></input>
+      <output name="Result" typeRef="feel:string"/>
+      <rule><inputEntry><text>&gt;= 80</text></inputEntry><outputEntry><text>"First"</text></outputEntry></rule>
+      <rule><inputEntry><text>&lt; 90</text></inputEntry><outputEntry><text>"Second"</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+</definitions>
