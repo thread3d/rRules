@@ -24,7 +24,11 @@
 //! FEEL cell/expression text is carried as `String` here; Phase 31 parses it
 //! into a distinct `FeelExpression` AST (NOT the rule-engine `Expression`).
 
+pub mod decision_table;
 pub mod exporter;
 pub mod feel;
 pub mod model;
 pub mod parser;
+
+// Re-exports for convenient access.
+pub use decision_table::{DecisionTableEvaluator, DecisionTableError};
