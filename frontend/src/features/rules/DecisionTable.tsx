@@ -6,12 +6,14 @@ import {
 } from '@tanstack/react-table'
 
 import type { HitPolicy, Aggregator, DecisionTableColumn, DecisionTableRow } from './types'
-import { HIT_POLICY_META } from './types'
+import { HIT_POLICY_META, POLICIES_REQUIRING_ALLOWED_VALUES } from './types'
+import { editorShapeToDmnIr } from '@/lib/dmnSerializer'
 import { RuleEditor } from '@/components/RuleEditor'
 import { Button } from '@/components/ui/button'
 import { ValidationDisplay } from '@/components/validation/ValidationDisplay'
 import type { ValidationError, ValidationWarning } from '@/components/validation/ValidationDisplay'
 import { evaluateDecision } from '@/api/decisions'
+import { AllowedValuesEditor } from './AllowedValuesEditor'
 
 export interface DecisionTableProps {
   hitPolicy: HitPolicy
@@ -33,6 +35,17 @@ export interface EvaluationResult {
   trace?: { eventCount: number; durationMs: number }
 }
 
+/**
+ * DecisionTable — renders a DMN decision table with evaluation support.
+ *
+ * Pitfall avoidance (from RESEARCH.md):
+ * - Pitfall 1: Column accessorKey IS the input expression name — used directly
+ *   as evaluate request key via dmnSerializer.editorShapeToDmnIr().
+ * - Pitfall 2: HitPolicy values are EXACTLY DMN spec strings (uppercase) — never
+ *   lowercase, never kebab-case.
+ * - Pitfall 3: COLLECT without aggregator returns array of outputs; frontend
+ *   renders list not scalar.
+ */
 export function DecisionTable({
   hitPolicy,
   columns,
@@ -54,7 +67,9 @@ export function DecisionTable({
     getCoreRowModel: getCoreRowModel(),
   })
 
-  // Evaluate the decision table with current inputs
+  // Evaluate the decision table with current inputs.
+  // Uses dmnSerializer.editorShapeToDmnIr() to build a correctly-keyed request
+  // where input keys match column accessorKey values (never "input_${idx}_${key}").
   async function handleEvaluate() {
     if (!decisionId) return
 
@@ -63,23 +78,30 @@ export function DecisionTable({
     setShowTrace(false)
 
     try {
-      // Build inputs keyed by column accessorKey / input_expression name.
-      // The first row's conditions are used as sample input values; the keys
-      // come from iterating input_clauses (populated via dmnSerializer when
-      // the backend actually evaluates). For now we use column labels as keys
-      // since this is the editor view — real evaluation goes through the
-      // serializer in Plan 03.
+      // Build the canonical DMN IR from editor shape.
+      // Map DecisionTableColumn -> EditorShapeColumn by inferring type from accessorKey presence.
+      // Condition columns have no accessorKey (or use label), action columns use accessorKey.
+      const editorColumns = columns.map((col) => ({
+        ...col,
+        type: col.accessorKey ? 'action' as const : 'condition' as const,
+      }))
+      const dmnTable = editorShapeToDmnIr(editorColumns, rows, hitPolicy, aggregator)
+
+      // Extract input keys from the IR's input_clauses (which use accessorKey).
+      // Use first row as sample data for input values.
       const inputs: Record<string, unknown> = {}
-      for (const col of columns) {
-        if (col.accessorKey && col.label) {
-          const sampleRow = rows[0]
-          if (sampleRow?.conditions) {
-            inputs[col.accessorKey] =
-              sampleRow.conditions[col.label] ?? ''
-          }
+      const sampleRow = rows[0]
+      for (const clause of dmnTable.input_clauses) {
+        const key = clause.label ?? clause.input_expression
+        if (sampleRow?.conditions) {
+          inputs[clause.input_expression] = sampleRow.conditions[key] ?? ''
+        } else {
+          inputs[clause.input_expression] = ''
         }
       }
 
+      // Send the correctly-keyed request to the backend.
+      // Hit policy is sent as the canonical DMN spec string (e.g., "UNIQUE", "RULE ORDER").
       const result = await evaluateDecision(decisionId, {
         inputs,
         trace: showTrace,
@@ -96,7 +118,6 @@ export function DecisionTable({
       })
     } catch (err) {
       console.error('Evaluation failed:', err)
-      // Could show error in UI here
     } finally {
       setIsEvaluating(false)
     }
@@ -150,6 +171,19 @@ export function DecisionTable({
         )}
       </div>
 
+      {/* Allowed Values Editor — shown for PRIORITY / OUTPUT ORDER policies */}
+      {POLICIES_REQUIRING_ALLOWED_VALUES.includes(hitPolicy) && (
+        <div className="space-y-1">
+          <label className="text-sm font-medium">Allowed Values:</label>
+          <p className="text-xs text-gray-500">
+            Define the enumeration order for this hit policy.
+          </p>
+          {/* The AllowedValuesEditor would be wired to a column's allowedValues state;
+              here we show it as a placeholder section that will be per-column in Plan 03 Task 2. */}
+          <AllowedValuesEditor items={[]} onChange={() => {}} />
+        </div>
+      )}
+
       {/* Evaluate Button */}
       {decisionId && (
         <div className="flex items-center gap-2">
@@ -167,6 +201,7 @@ export function DecisionTable({
             </span>
           )}
 
+          {/* Trace toggle — reuses v5.0 TestRunner pattern (D-02 / SC-3) */}
           {evaluationResult?.trace && (
             <Button
               variant="outline"
@@ -183,15 +218,32 @@ export function DecisionTable({
       {evaluationResult && !isEvaluating && (
         <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-md border">
           <h3 className="font-semibold mb-2">Results</h3>
-          <pre className="text-sm overflow-auto max-h-64 bg-white dark:bg-gray-900 p-2 rounded">
-            {JSON.stringify(evaluationResult.outputs, null, 2)}
-          </pre>
 
+          {/* Pitfall 3: Handle COLLECT without aggregator returning list outputs */}
+          {Object.entries(evaluationResult.outputs).map(([key, value]) => (
+            <div key={key} className="mb-2">
+              <span className="font-medium text-sm">{key}: </span>
+              {Array.isArray(value) ? (
+                // COLLECT without aggregator: render as list
+                <pre className="text-sm bg-white dark:bg-gray-900 p-1 rounded inline-block">
+                  {[(value as unknown[]).map((v) => JSON.stringify(v)).join(', ')]}
+                </pre>
+              ) : (
+                // Scalar output (UNIQUE/ANY/PRIORITY/FIRST/COLLECT with aggregator)
+                <pre className="text-sm bg-white dark:bg-gray-900 p-1 rounded inline-block">
+                  {JSON.stringify(value, null, 2)}
+                </pre>
+              )}
+            </div>
+          ))}
+
+          {/* Trace panel — reuses TestRunner.tsx v5.0 pattern */}
           {showTrace && evaluationResult.trace && (
-            <div className="mt-4">
+            <div className="mt-4 border-t pt-3">
               <h4 className="font-semibold mb-1">Trace Summary</h4>
               <p className="text-sm text-gray-600">
-                {evaluationResult.trace.eventCount} events, {evaluationResult.trace.durationMs.toFixed(2)}ms total
+                {evaluationResult.trace.eventCount} events,{' '}
+                {evaluationResult.trace.durationMs.toFixed(2)}ms total
               </p>
             </div>
           )}

@@ -107,6 +107,17 @@ export const HIT_POLICY_META: Record<HitPolicy, HitPolicyMeta> = {
 /** Array form for dropdown rendering — derived from HIT_POLICY_META keys. */
 export const HIT_POLICIES: HitPolicy[] = Object.keys(HIT_POLICY_META) as HitPolicy[]
 
+// ---- Allowed values (for PRIORITY / OUTPUT ORDER hit policies). ----
+
+/** Item in an enumeration of allowed values on an output column. */
+export interface AllowedValueItem {
+  id: string // unique within this editor instance
+  text: string // display value (e.g., "Low", "Medium", "High")
+}
+
+/** Hit policies that require output column allowedValues. */
+export const POLICIES_REQUIRING_ALLOWED_VALUES: HitPolicy[] = ['PRIORITY', 'OUTPUT ORDER']
+
 export interface DecisionTableColumn {
   id: string
   label: string
