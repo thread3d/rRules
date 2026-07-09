@@ -424,6 +424,70 @@ pub async fn export_dmn(
     }
 }
 
+/// Return parsed decision table IR as JSON — `GET /v1/decisions/{id}/ir`.
+///
+/// Loads the raw DMN XML, parses it via the Phase 29 parser, extracts the
+/// Decision node by ID from `definitions.children`, and returns the full
+/// DecisionTable IR as JSON. This is what the frontend uses to load a saved
+/// decision for editing — without it, the frontend has no way to get
+/// input_expression names from the backend.
+pub async fn get_decision_ir(
+    persistence: web::Data<FileSystemDmnStore>,
+    path: web::Path<String>,
+) -> HttpResponse {
+    let decision_id = path.into_inner();
+
+    match persistence.get(&decision_id).await {
+        Ok(doc) => {
+            let content = String::from_utf8_lossy(&doc.content).to_string();
+            match engine::dmn::parser::parse_dmn(&content) {
+                Ok(model) => {
+                    // Find the decision node by ID in definitions.children.
+                    let target_id = decision_id.clone();
+                    let decision_node = model.definitions.children.iter().find_map(|child| {
+                        if let DefinitionsChild::Decision(decision) = child {
+                            if decision.id == target_id {
+                                return Some(decision);
+                            }
+                        }
+                        None
+                    });
+
+                    match decision_node {
+                        Some(decision) => {
+                            if let Some(ref table) = decision.decision_table {
+                                HttpResponse::Ok().json(serde_json::json!({
+                                    "decision_id": doc.id,
+                                    "name": doc.name,
+                                    "decision_table": table,
+                                }))
+                            } else {
+                                HttpResponse::BadRequest().json(serde_json::json!({
+                                    "error": "Decision has no decision table expression"
+                                }))
+                            }
+                        }
+                        None => HttpResponse::NotFound().json(serde_json::json!({
+                            "error": format!("decision '{}' not found in model", decision_id)
+                        })),
+                    }
+                }
+                Err(e) => HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": format!("failed to parse DMN: {}", e)
+                })),
+            }
+        }
+        Err(engine_state::PersistenceError::NotFound(_)) => {
+            HttpResponse::NotFound().json(serde_json::json!({
+                "error": format!("decision '{}' not found", decision_id)
+            }))
+        }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("failed to get decision: {}", e)
+        })),
+    }
+}
+
 /// Reload a DMN model — `POST /v1/decisions/reload`.
 pub async fn reload_dmn(
     evaluator: web::Data<Arc<DecisionEvaluator>>,
@@ -469,6 +533,8 @@ pub fn configure_v1_decisions(cfg: &mut web::ServiceConfig) {
             // Import/export endpoints.
             .route("/import", web::post().to(import_dmn))
             .route("/{id}/export", web::get().to(export_dmn))
+            // IR endpoint — returns parsed decision table as JSON for frontend editing.
+            .route("/{id}/ir", web::get().to(get_decision_ir))
             // Hot-reload endpoint.
             .route("/reload", web::post().to(reload_dmn)),
     );
