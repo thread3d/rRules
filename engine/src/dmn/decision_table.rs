@@ -145,15 +145,15 @@ impl DecisionTableEvaluator {
             HitPolicy::Unique => Self::handle_unique(matches, table),
             HitPolicy::Any => Self::handle_any(matches, table),
             HitPolicy::First => Self::handle_first(matches, table),
-            // PRIORITY / OUTPUT_ORDER / RULE_ORDER / COLLECT → Plan 02.
-            _ => Err(DecisionTableError::Other(
-                "hit policy not yet implemented".into(),
-            )),
+            HitPolicy::Priority => Self::handle_priority(matches, table),
+            HitPolicy::OutputOrder => Self::handle_output_order(matches, table),
+            HitPolicy::RuleOrder => Self::handle_rule_order(matches, table),
+            HitPolicy::Collect => Self::handle_collect(matches, table),
         }
     }
 
     // ---------------------------------------------------------------------
-    // Hit-policy handlers (Phase 32 foundational set)
+    // Hit-policy handlers (Phase 32 — all seven)
     // ---------------------------------------------------------------------
 
     /// UNIQUE: at most one rule may match; zero matches → null per column.
@@ -208,6 +208,255 @@ impl DecisionTableEvaluator {
             Some((_, outputs)) => Self::pack_outputs(outputs, table),
             None => Ok(Self::null_with_defaults(table)),
         }
+    }
+
+    /// PRIORITY: select the match whose output column value has highest position in the allowedValues enumeration.
+    fn handle_priority(
+        matches: &[(usize, Vec<Value>)],
+        table: &DecisionTable,
+    ) -> Result<Value, DecisionTableError> {
+        if matches.is_empty() {
+            return Ok(Self::null_with_defaults(table));
+        }
+
+        // Get the allowedValues enumeration from the first output clause.
+        let enum_order = Self::get_allowed_values_order(table)?;
+
+        // Find each matching rule's position in the enumeration.
+        let mut best_idx: Option<usize> = None;
+        let mut best_pos: i64 = -1;
+
+        for (match_idx, (_rule_idx, outputs)) in matches.iter().enumerate() {
+            if let Some(first_output) = outputs.first() {
+                // Find position of this output value in the enumeration.
+                if let Some(pos) = enum_order.iter().position(|v| eval::feel_equals_public(v, first_output) == Some(true)) {
+                    let pos_i64 = pos as i64;
+                    if best_idx.is_none() || pos_i64 > best_pos {
+                        best_idx = Some(match_idx);
+                        best_pos = pos_i64;
+                    }
+                }
+                // If the output value is NOT in the enumeration, skip it.
+            }
+        }
+
+        match best_idx {
+            Some(idx) => Self::pack_outputs(&matches[idx].1, table),
+            None => Ok(Self::null_with_defaults(table)),
+        }
+    }
+
+    /// OUTPUT ORDER: return all matching rules' outputs sorted by allowedValues enumeration order.
+    fn handle_output_order(
+        matches: &[(usize, Vec<Value>)],
+        table: &DecisionTable,
+    ) -> Result<Value, DecisionTableError> {
+        if matches.is_empty() {
+            return Ok(Value::Array(Vec::new()));
+        }
+
+        let enum_order = Self::get_allowed_values_order(table)?;
+
+        // Sort matches by their first output's position in the enumeration.
+        let mut sorted_matches: Vec<&(usize, Vec<Value>)> = matches.iter().collect();
+        sorted_matches.sort_by(|a, b| {
+            let pos_a = a.1.first()
+                .and_then(|v| enum_order.iter().position(|ev| eval::feel_equals_public(ev, v) == Some(true)))
+                .map(|p| p as i64)
+                .unwrap_or(i64::MAX); // Non-enumerated values go last.
+            let pos_b = b.1.first()
+                .and_then(|v| enum_order.iter().position(|ev| eval::feel_equals_public(ev, v) == Some(true)))
+                .map(|p| p as i64)
+                .unwrap_or(i64::MAX);
+            pos_a.cmp(&pos_b)
+        });
+
+        // Collect all outputs into an array.
+        let mut result = Vec::new();
+        for (_, outputs) in &sorted_matches {
+            if outputs.len() == 1 && table.output_clauses.len() <= 1 {
+                result.push(outputs[0].clone());
+            } else {
+                result.push(Self::pack_values_as_context(outputs, table));
+            }
+        }
+
+        Ok(Value::Array(result))
+    }
+
+    /// RULE ORDER: return all matching rules' outputs in document order.
+    fn handle_rule_order(
+        matches: &[(usize, Vec<Value>)],
+        table: &DecisionTable,
+    ) -> Result<Value, DecisionTableError> {
+        if matches.is_empty() {
+            return Ok(Value::Array(Vec::new()));
+        }
+
+        // Collect all outputs into an array (already in document order from collect_matching_rules).
+        let mut result = Vec::new();
+        for (_, outputs) in matches {
+            if outputs.len() == 1 && table.output_clauses.len() <= 1 {
+                result.push(outputs[0].clone());
+            } else {
+                result.push(Self::pack_values_as_context(outputs, table));
+            }
+        }
+
+        Ok(Value::Array(result))
+    }
+
+    /// COLLECT: collect all matching rules' outputs into a list, optionally applying an aggregator.
+    fn handle_collect(
+        matches: &[(usize, Vec<Value>)],
+        table: &DecisionTable,
+    ) -> Result<Value, DecisionTableError> {
+        if matches.is_empty() {
+            // Empty match with aggregation: return null for SUM/MIN/MAX, 0 for COUNT.
+            if let Some(aggregator) = &table.aggregation {
+                return Ok(Self::empty_aggregate_result(aggregator));
+            }
+            return Ok(Value::Array(Vec::new()));
+        }
+
+        // Extract output values from each matching rule (first output column).
+        let mut values: Vec<Value> = Vec::new();
+        for (_, outputs) in matches {
+            if let Some(first_output) = outputs.first() {
+                values.push(first_output.clone());
+            }
+        }
+
+        // Apply aggregator if present.
+        if let Some(aggregator) = &table.aggregation {
+            return Ok(Self::apply_aggregator(aggregator, &values)?);
+        }
+
+        // No aggregation: return raw list.
+        Ok(Value::Array(values))
+    }
+
+    /// Get the allowedValues enumeration order from the first output clause (if present).
+    fn get_allowed_values_order(table: &DecisionTable) -> Result<Vec<Value>, DecisionTableError> {
+        if let Some(first_clause) = table.output_clauses.first() {
+            if let Some(allowed) = &first_clause.output_values {
+                return Self::parse_allowed_values(allowed);
+            }
+        }
+        // No allowedValues: return empty list (PRIORITY/OUTPUT ORDER will skip non-enumerated).
+        Ok(Vec::new())
+    }
+
+    /// Parse AllowedValues into a Vec<Value>.
+    fn parse_allowed_values(allowed: &AllowedValues) -> Result<Vec<Value>, DecisionTableError> {
+        let mut values = Vec::new();
+        match allowed {
+            AllowedValues::UnaryTests(text) => {
+                // For PRIORITY/OUTPUT ORDER, the allowedValues is an Enumeration, not UnaryTests.
+                // If it's UnaryTests, we can't determine enumeration order — return error.
+                Err(DecisionTableError::Other(
+                    "allowedValues must be an Enumeration for PRIORITY/OUTPUT ORDER".into(),
+                ))
+            }
+            AllowedValues::Enumeration(items) => {
+                for item in items {
+                    // Each item is a TextContent representing a literal value.
+                    let cache = FeelAstCache::new();
+                    let ast = cache.get_or_parse(&item.content, ParseEntry::Expression);
+                    let val = eval::evaluate(&ast, &Scope::empty());
+                    values.push(val);
+                }
+                Ok(values)
+            }
+        }
+    }
+
+    /// Return the empty-match result for a given aggregator.
+    fn empty_aggregate_result(aggregator: &BuiltinAggregator) -> Value {
+        match aggregator {
+            BuiltinAggregator::Sum | BuiltinAggregator::Min | BuiltinAggregator::Max => {
+                Value::Null // Empty SUM/MIN/MAX → null
+            }
+            BuiltinAggregator::Count => {
+                Value::Number(rust_decimal::Decimal::ZERO) // Empty COUNT → 0 (spec exception)
+            }
+        }
+    }
+
+    /// Apply an aggregator to a list of values.
+    fn apply_aggregator(aggregator: &BuiltinAggregator, values: &[Value]) -> Result<Value, DecisionTableError> {
+        match aggregator {
+            BuiltinAggregator::Sum => Self::aggregate_sum(values),
+            BuiltinAggregator::Min => Self::aggregate_min(values),
+            BuiltinAggregator::Max => Self::aggregate_max(values),
+            BuiltinAggregator::Count => Ok(Self::aggregate_count(values)),
+        }
+    }
+
+    /// SUM aggregator: sum all numeric outputs. Empty → null. Non-numeric → AggregatorMismatch.
+    fn aggregate_sum(values: &[Value]) -> Result<Value, DecisionTableError> {
+        if values.is_empty() {
+            return Ok(Value::Null);
+        }
+
+        let mut sum = rust_decimal::Decimal::ZERO;
+        for v in values {
+            match v {
+                Value::Number(d) => sum += d,
+                _ => return Err(DecisionTableError::AggregatorMismatch("SUM requires numeric outputs".into())),
+            }
+        }
+        Ok(Value::Number(sum))
+    }
+
+    /// MIN aggregator: minimum of all output values. Empty → null. Non-numeric → AggregatorMismatch.
+    fn aggregate_min(values: &[Value]) -> Result<Value, DecisionTableError> {
+        if values.is_empty() {
+            return Ok(Value::Null);
+        }
+
+        let mut min = None;
+        for v in values {
+            match v {
+                Value::Number(d) => {
+                    let d_clone = d.clone();
+                    if min.is_none() || d_clone < *min.as_ref().unwrap() {
+                        min = Some(d_clone);
+                    }
+                }
+                _ => return Err(DecisionTableError::AggregatorMismatch("MIN requires numeric outputs".into())),
+            }
+        }
+
+        Ok(Value::Number(min.unwrap_or(rust_decimal::Decimal::ZERO)))
+    }
+
+    /// MAX aggregator: maximum of all output values. Empty → null. Non-numeric → AggregatorMismatch.
+    fn aggregate_max(values: &[Value]) -> Result<Value, DecisionTableError> {
+        if values.is_empty() {
+            return Ok(Value::Null);
+        }
+
+        let mut max = None;
+        for v in values {
+            match v {
+                Value::Number(d) => {
+                    let d_clone = d.clone();
+                    if max.is_none() || d_clone > *max.as_ref().unwrap() {
+                        max = Some(d_clone);
+                    }
+                }
+                _ => return Err(DecisionTableError::AggregatorMismatch("MAX requires numeric outputs".into())),
+            }
+        }
+
+        Ok(Value::Number(max.unwrap_or(rust_decimal::Decimal::ZERO)))
+    }
+
+    /// COUNT aggregator: count of all matching rules. Always returns a Number (0 for empty).
+    fn aggregate_count(values: &[Value]) -> Value {
+        let count = values.len() as i64;
+        Value::Number(rust_decimal::Decimal::from(count))
     }
 
     // ---------------------------------------------------------------------
@@ -575,18 +824,14 @@ mod tests {
 
     #[test]
     fn unimplemented_policy_returns_other_error() {
+        // All policies are now implemented — this test no longer applies.
+        // Previously tested that COLLECT/OUTPUT_ORDER/RULE_ORDER returned Other error.
         let mut dt = DtModel::default();
-        dt.hit_policy = HitPolicy::Priority;
-        // No rules → would return null anyway, but dispatch happens first.
+        dt.hit_policy = HitPolicy::Collect;
+        // No rules → returns empty list (no aggregation).
         let cache = FeelAstCache::new();
         let scope = Scope::empty();
         let result = DecisionTableEvaluator::evaluate(&dt, &scope, &cache);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            DecisionTableError::Other(msg) => {
-                assert!(msg.contains("not yet implemented"));
-            }
-            other => panic!("expected Other error, got {other:?}"),
-        }
+        assert!(result.is_ok());
     }
 }
