@@ -85,7 +85,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 
 - [x] **Phase 29: DMN 1.5 Model + XML Parser + Canonical IR** — DMN 1.1–1.5 `.dmn` import into a canonical IR (round-trip foundation) (completed 2026-07-06)
 - [x] **Phase 30: FEEL Value Types + Type Lattice + Temporal Domain** — Decimal128, date/time/duration types, type lattice (research-needed) (completed 2026-07-07)
-- [ ] **Phase 31: FEEL Parser + Evaluator + Built-in Function Library** — Full FEEL grammar 1–65, ternary logic, 10 boxed expressions, ~70 builtins, AST cache (research-needed; largest phase)
+- [x] **Phase 31: FEEL Parser + Evaluator + Built-in Function Library** — Full FEEL grammar 1–65, ternary logic, 10 boxed expressions, ~70 builtins, AST cache (research-needed; largest phase) (completed 2026-07-08)
 - [ ] **Phase 32: Decision-Table Engine + Hit Policies** — All 7 hit policies + COLLECT aggregators + allowed-values validation
 - [ ] **Phase 33: Decision Evaluator + DRD Resolution + REST API + Metrics** — `POST /v1/decisions/{id}/evaluate` (multi-output decision services + DRD chaining), metrics, trace, hot-reload
 - [ ] **Phase 34: Frontend Wiring + Hit-Policy Model Refactor** — Wire existing v4.0 editor to the real backend; refactor `HitPolicySelector` to DMN canonical
@@ -184,19 +184,19 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 31-06-PLAN.md — DMN-16: User-defined lambdas (grammar rule 55, non-external); extend FeelFunction with closure body + captured scope (lexical capture) (wave 6)
+- [x] 31-06-PLAN.md — DMN-16: User-defined lambdas (grammar rule 55, non-external); extend FeelFunction with closure body + captured scope (lexical capture) (wave 6)
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 31-07-PLAN.md — DMN-17 part 1: Built-in functions (conversion/string/list/numeric families) + HashMap<&str, BuiltinFn> registry + FunctionInvocation dispatch wiring (wave 7)
+- [x] 31-07-PLAN.md — DMN-17 part 1: Built-in functions (conversion/string/list/numeric families) + HashMap<&str, BuiltinFn> registry + FunctionInvocation dispatch wiring (wave 7)
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
-- [ ] 31-08-PLAN.md — DMN-17 part 2: Built-in functions (date-time/context/boolean/range/equality families); `is` never-null Pitfall-6 enforcement; Allen interval algebra range built-ins (wave 8)
+- [x] 31-08-PLAN.md — DMN-17 part 2: Built-in functions (date-time/context/boolean/range/equality families); `is` never-null Pitfall-6 enforcement; Allen interval algebra range built-ins (wave 8)
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
-- [ ] 31-09-PLAN.md — DMN-18: AST cache (DashMap<String, Arc<FeelExpression>>), IR-loader pre-parse wiring, evaluator-takes-&FeelExpression type contract, TCK FEEL harness scaffold (wave 9)
+- [x] 31-09-PLAN.md — DMN-18: AST cache (DashMap<String, Arc<FeelExpression>>), IR-loader pre-parse wiring, evaluator-takes-&FeelExpression type contract, TCK FEEL harness scaffold (wave 9)
 
 ### Phase 32: Decision-Table Engine + Hit Policies
 
@@ -211,7 +211,11 @@ Plans:
   3. COLLECT aggregators (SUM/MIN/MAX/COUNT) compute correctly; multi-output aggregator tables are rejected; empty-match semantics hold (empty SUM/MIN/MAX → null, empty COUNT → 0).
   4. All cell FEEL is pre-parsed into ASTs at table-load time — the evaluator never re-parses a cell on each evaluation.
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 32-01-PLAN.md — Core decision-table evaluator (UNIQUE/ANY/FIRST hit policies, input clause matching via FEEL unary tests)
+- [ ] 32-02-PLAN.md — Advanced hit policies + COLLECT aggregators (PRIORITY/OUTPUT ORDER/RULE ORDER/COLLECT with SUM/MIN/MAX/COUNT; load-time validation)
 
 ### Phase 33: Decision Evaluator + DRD Resolution + REST API + Metrics
 
@@ -294,8 +298,8 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 28. Frontend test-runner | v5.0 | 5/5 | Complete | 2026-07-06 |
 | 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 3/3 | Complete   | 2026-07-06 |
 | 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 4/4 | Complete    | 2026-07-07 |
-| 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 5/9 | In Progress|  |
-| 32. Decision-Table Engine + Hit Policies | v6.0 | 0/TBD | Not started | - |
+| 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 9/9 | Complete    | 2026-07-08 |
+| 32. Decision-Table Engine + Hit Policies | v6.0 | 0/2 | Planned | - |
 | 33. Decision Evaluator + DRD Resolution + REST API + Metrics | v6.0 | 0/TBD | Not started | - |
 | 34. Frontend Wiring + Hit-Policy Model Refactor | v6.0 | 0/TBD | Not started | - |
 | 35. Conformance Verification + Round-trip + Monitoring Close-out | v6.0 | 0/TBD | Not started | - |
