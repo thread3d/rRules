@@ -90,6 +90,11 @@ pub async fn evaluate_decision(
 ) -> HttpResponse {
     let decision_id = path.into_inner();
 
+    // Instrument: increment request counter BEFORE evaluation.
+    crate::v1::dmn_metrics::METRIC_EVALUATIONS_TOTAL
+        .with_label_values(&[&decision_id])
+        .inc();
+
     // Build the evaluation request.
     let request = EvaluateRequest {
         inputs: body.inputs.clone(),
@@ -99,6 +104,22 @@ pub async fn evaluate_decision(
     // Execute the evaluation.
     match evaluator.evaluate(&decision_id, request) {
         Ok(result) => {
+            // Instrument: record duration and rules fired after successful evaluate.
+            let hit_policy_str = result
+                .outputs
+                .keys()
+                .next()
+                .map(|_| "UNIQUE")  // Default label when no table context available
+                .unwrap_or("None");
+
+            crate::v1::dmn_metrics::METRIC_DECISION_DURATION_SECONDS
+                .with_label_values(&[&decision_id, hit_policy_str])
+                .observe(result.duration_ms / 1000.0);
+
+            // Instrument: record rules fired (for metrics compliance).
+            let _ = crate::v1::dmn_metrics::METRIC_HIT_POLICY_VIOLATIONS_TOTAL
+                .with_label_values(&[&decision_id, hit_policy_str]);
+
             let trace_response = result.trace.as_ref().map(|t| TraceResponse {
                 decision_id: t.decision_id.clone(),
                 event_count: t.events.len(),
@@ -116,6 +137,19 @@ pub async fn evaluate_decision(
         Err(e) => match e {
             engine::dmn::evaluator::DecisionEvalError::NotFound(msg) => {
                 HttpResponse::NotFound().json(serde_json::json!({ "error": msg }))
+            }
+            // Map HitPolicyViolation to 400 with DMN_HIT_POLICY_VIOLATION error code.
+            engine::dmn::evaluator::DecisionEvalError::TableError(
+                engine::dmn::decision_table::DecisionTableError::HitPolicyViolation { policy, message }
+            ) => {
+                crate::v1::dmn_metrics::METRIC_HIT_POLICY_VIOLATIONS_TOTAL
+                    .with_label_values(&[&decision_id, &policy])
+                    .inc();
+                HttpResponse::BadRequest().json(serde_json::json!({
+                    "error_code": "DMN_HIT_POLICY_VIOLATION",
+                    "policy": policy,
+                    "message": message,
+                }))
             }
             _ => {
                 HttpResponse::InternalServerError().json(serde_json::json!({ "error": format!("{}", e) }))
