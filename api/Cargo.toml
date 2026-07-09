@@ -15,6 +15,7 @@ path = "src/main.rs"
 # `engine-rete` for shared types (engine/Cargo.toml), so listing all four
 # is explicit and safe.
 engine = { path = "../engine", features = ["engine-rete", "engine-treat", "engine-leaps", "engine-phreak"] }
+engine_state = { path = "../engine_state" }
 actix-web = { version = "4.4", features = ["macros", "ws"] }
 actix-files = "0.6"
 # CORS middleware — required for D-22-05's separate-host prod URL mode (VITE_API_URL

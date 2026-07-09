@@ -285,6 +285,10 @@ async fn main() -> std::io::Result<()> {
             // Phase 33 (Task 3): inject the DMN metrics broadcast sender so handlers
             // can push DmnMetricsSnapshot events after each evaluation (WS delivery).
             .app_data(web::Data::new(dmn_metrics_tx.clone()))
+            // Phase 33 (Task 5): inject the FileSystemDmnStore for decision CRUD.
+            .app_data(web::Data::new(
+                engine_state::FileSystemDmnStore::default(),
+            ))
             .app_data(web::Data::new(rule_store.clone()))
             .app_data(web::Data::new(category_store.clone()))
             .app_data(web::Data::new(tag_store.clone()))

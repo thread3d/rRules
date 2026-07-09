@@ -1,18 +1,28 @@
-//! Decision evaluation endpoints (Phase 33).
+//! Decision evaluation + CRUD endpoints (Phase 33).
 //!
-//! Provides `POST /v1/decisions/{id}/evaluate` for decision service (§10.4) with:
-//! - Multi-output support (MVP: evaluate all outputs of a single decision)
-//! - Optional inference trace emission
-//! - Per-decision Prometheus metrics
+//! Provides:
+//! - `POST /v1/decisions/{id}/evaluate` for decision service (§10.4) with multi-output,
+//!   optional inference trace emission, and per-decision Prometheus metrics.
+//! - Full decision lifecycle management: CRUD (`GET`, `POST`, `PUT`, `DELETE` on `/v1/decisions`),
+//!   import via `POST /v1/decisions/import`, export via `GET /v1/decisions/{id}/export`.
+//! - Hot-reload via `POST /v1/decisions/reload`.
 
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use engine::data_types::Value;
 use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest};
 use engine::dmn::model::{DmnModel, DefinitionsChild, Decision};
+use engine_state::DmnDocument;
+use engine_state::FileSystemDmnStore;
+// Import the DmnPersistence trait so its methods are in scope for FileSystemDmnStore.
+use engine_state::DmnPersistence;
+
+// Re-export DmnMetricsSnapshot for use in handlers.
+pub use crate::v1::dmn_metrics::DmnMetricsSnapshot;
 
 // =========================================================================
 // Request/Response types
@@ -62,6 +72,40 @@ pub struct ReloadDmnRequest {
     pub dmn_content: String,
 }
 
+/// Request body for creating a new decision.
+#[derive(Debug, Deserialize)]
+pub struct CreateDecisionRequest {
+    /// Human-readable name for the decision.
+    pub name: String,
+    /// Raw DMN XML content (string representation of the .dmn file).
+    pub content: String,
+    /// Optional explicit ID — if not provided, a UUID is generated.
+    #[serde(default)]
+    pub id: Option<String>,
+}
+
+/// Request body for updating an existing decision.
+#[derive(Debug, Deserialize)]
+pub struct UpdateDecisionRequest {
+    /// Updated raw DMN XML content.
+    pub content: String,
+    /// Updated metadata (optional).
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Pagination query parameters for list endpoints.
+#[derive(Debug, Deserialize)]
+pub struct ListQuery {
+    #[serde(default = "default_page")]
+    pub page: u32,
+    #[serde(default = "default_per_page")]
+    pub per_page: u32,
+}
+
+fn default_page() -> u32 { 1 }
+fn default_per_page() -> u32 { 20 }
+
 // =========================================================================
 // Helper: extract decisions from Definitions children
 // =========================================================================
@@ -104,7 +148,7 @@ pub async fn evaluate_decision(
     // Execute the evaluation.
     match evaluator.evaluate(&decision_id, request) {
         Ok(result) => {
-            // Instrument: record duration and rules fired after successful evaluate.
+            // Instrument: record duration after successful evaluate.
             let hit_policy_str = result
                 .outputs
                 .keys()
@@ -115,10 +159,6 @@ pub async fn evaluate_decision(
             crate::v1::dmn_metrics::METRIC_DECISION_DURATION_SECONDS
                 .with_label_values(&[&decision_id, hit_policy_str])
                 .observe(result.duration_ms / 1000.0);
-
-            // Instrument: record rules fired (for metrics compliance).
-            let _ = crate::v1::dmn_metrics::METRIC_HIT_POLICY_VIOLATIONS_TOTAL
-                .with_label_values(&[&decision_id, hit_policy_str]);
 
             let trace_response = result.trace.as_ref().map(|t| TraceResponse {
                 decision_id: t.decision_id.clone(),
@@ -158,89 +198,230 @@ pub async fn evaluate_decision(
     }
 }
 
-/// Get a DMN model — `GET /v1/decisions`.
+/// List decisions — `GET /v1/decisions`.
 pub async fn list_decisions(
-    evaluator: web::Data<Arc<DecisionEvaluator>>,
+    persistence: web::Data<FileSystemDmnStore>,
+    query: web::Query<ListQuery>,
 ) -> HttpResponse {
-    let guard = match evaluator.shared.read() {
-        Ok(guard) => guard,
-        Err(e) => {
-            return HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("failed to acquire read lock: {}", e)
-            }));
+    let page = query.page as usize;
+    let per_page = query.per_page as usize;
+    let offset = (page.saturating_sub(1)) * per_page;
+
+    // Dereference Arc to access the underlying FileSystemDmnStore methods.
+    let store: &FileSystemDmnStore = &*persistence;
+    match store.list().await {
+        Ok(summaries) => {
+            let total = summaries.len();
+            let paginated: Vec<_> = summaries.into_iter()
+                .skip(offset)
+                .take(per_page)
+                .collect();
+
+            HttpResponse::Ok().json(serde_json::json!({
+                "decisions": paginated,
+                "total": total,
+                "page": page,
+                "per_page": per_page,
+                "pages": (total + per_page - 1) / per_page.max(1),
+            }))
         }
-    };
-
-    let decisions = extract_decisions(&guard.model).iter().map(|d| {
-        serde_json::json!({
-            "id": d.id,
-            "name": d.name.as_deref().unwrap_or(""),
-            "description": d.description.as_ref().map(|dc| dc.content.clone()),
-            "hit_policy": d.decision_table.as_ref()
-                .map(|t| format!("{:?}", t.hit_policy))
-                .unwrap_or_else(|| "None".to_string()),
-        })
-    }).collect::<Vec<_>>();
-
-    HttpResponse::Ok().json(serde_json::json!({
-        "decisions": decisions,
-        "model_version": guard.generation(),
-    }))
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("failed to list decisions: {}", e)
+        })),
+    }
 }
 
 /// Get a specific decision — `GET /v1/decisions/{id}`.
 pub async fn get_decision(
-    evaluator: web::Data<Arc<DecisionEvaluator>>,
+    persistence: web::Data<FileSystemDmnStore>,
     path: web::Path<String>,
 ) -> HttpResponse {
     let decision_id = path.into_inner();
 
-    let guard = match evaluator.shared.read() {
-        Ok(guard) => guard,
-        Err(e) => {
-            return HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("failed to acquire read lock: {}", e)
-            }));
-        }
-    };
-
-    let decision = match extract_decisions(&guard.model).into_iter()
-        .find(|d| d.id == decision_id) {
-        Some(d) => d,
-        None => {
-            return HttpResponse::NotFound().json(serde_json::json!({
+    match persistence.get(&decision_id).await {
+        Ok(doc) => HttpResponse::Ok().json(serde_json::json!({
+            "id": doc.id,
+            "name": doc.name,
+            "content_length": doc.content.len(),
+            "metadata": doc.metadata,
+            "created_at": doc.created_at.to_rfc3339(),
+            "updated_at": doc.updated_at.to_rfc3339(),
+        })),
+        Err(engine_state::PersistenceError::NotFound(_)) => {
+            HttpResponse::NotFound().json(serde_json::json!({
                 "error": format!("decision '{}' not found", decision_id)
-            }));
+            }))
         }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("failed to get decision: {}", e)
+        })),
+    }
+}
+
+/// Create a new decision — `POST /v1/decisions`.
+pub async fn create_decision(
+    persistence: web::Data<FileSystemDmnStore>,
+    body: web::Json<CreateDecisionRequest>,
+) -> HttpResponse {
+    let id = body.id.clone().unwrap_or_else(|| Uuid::new_v4().to_string());
+    let now = chrono::Utc::now();
+
+    let doc = DmnDocument {
+        id: id.clone(),
+        name: body.name.clone(),
+        content: body.content.as_bytes().to_vec(),
+        metadata: serde_json::json!({}),
+        created_at: now,
+        updated_at: now,
     };
 
-    let table_info = decision.decision_table.as_ref().map(|t| {
-        serde_json::json!({
-            "id": t.id,
-            "name": t.name,
-            "hit_policy": format!("{:?}", t.hit_policy),
-            "input_clauses": t.input_clauses.iter().map(|ic| {
-                serde_json::json!({
-                    "label": ic.label,
-                    "input_expression": ic.input_expression,
-                })
-            }).collect::<Vec<_>>(),
-            "output_clauses": t.output_clauses.iter().map(|oc| {
-                serde_json::json!({
-                    "name": oc.name,
-                    "type_ref": oc.type_ref,
-                })
-            }).collect::<Vec<_>>(),
-        })
-    });
+    match persistence.create(doc).await {
+        Ok(created) => HttpResponse::Created().json(serde_json::json!({
+            "id": created.id,
+            "name": created.name,
+            "content_length": created.content.len(),
+            "metadata": created.metadata,
+            "created_at": created.created_at.to_rfc3339(),
+            "updated_at": created.updated_at.to_rfc3339(),
+        })),
+        Err(engine_state::PersistenceError::Conflict(msg)) => {
+            HttpResponse::Conflict().json(serde_json::json!({
+                "error_code": "DMN_CONFLICT",
+                "message": msg,
+            }))
+        }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("failed to create decision: {}", e)
+        })),
+    }
+}
 
-    HttpResponse::Ok().json(serde_json::json!({
-        "id": decision.id,
-        "name": decision.name,
-        "description": decision.description.as_ref().map(|dc| dc.content.clone()),
-        "question": decision.question,
-        "decision_table": table_info,
-    }))
+/// Update an existing decision — `PUT /v1/decisions/{id}`.
+pub async fn update_decision(
+    persistence: web::Data<FileSystemDmnStore>,
+    path: web::Path<String>,
+    body: web::Json<UpdateDecisionRequest>,
+) -> HttpResponse {
+    let id = path.into_inner();
+
+    match persistence.get(&id).await {
+        Ok(existing) => {
+            let updated_content = body.content.as_bytes().to_vec();
+            let metadata = body.metadata.clone().unwrap_or(existing.metadata);
+
+            let doc = DmnDocument {
+                id: existing.id,
+                name: existing.name,
+                content: updated_content,
+                metadata,
+                created_at: existing.created_at,
+                updated_at: chrono::Utc::now(),
+            };
+
+            match persistence.update(&id, doc).await {
+                Ok(updated) => HttpResponse::Ok().json(serde_json::json!({
+                    "id": updated.id,
+                    "name": updated.name,
+                    "content_length": updated.content.len(),
+                    "metadata": updated.metadata,
+                    "created_at": updated.created_at.to_rfc3339(),
+                    "updated_at": updated.updated_at.to_rfc3339(),
+                })),
+                Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": format!("failed to update decision: {}", e)
+                })),
+            }
+        }
+        Err(engine_state::PersistenceError::NotFound(_)) => {
+            HttpResponse::NotFound().json(serde_json::json!({
+                "error": format!("decision '{}' not found", id)
+            }))
+        }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("failed to get existing decision: {}", e)
+        })),
+    }
+}
+
+/// Delete a decision — `DELETE /v1/decisions/{id}`.
+pub async fn delete_decision(
+    persistence: web::Data<FileSystemDmnStore>,
+    path: web::Path<String>,
+) -> HttpResponse {
+    let id = path.into_inner();
+
+    match persistence.delete(&id).await {
+        Ok(()) => HttpResponse::NoContent().finish(),
+        Err(engine_state::PersistenceError::NotFound(_)) => {
+            HttpResponse::NotFound().json(serde_json::json!({
+                "error": format!("decision '{}' not found", id)
+            }))
+        }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("failed to delete decision: {}", e)
+        })),
+    }
+}
+
+/// Import a DMN file — `POST /v1/decisions/import`.
+pub async fn import_dmn(
+    persistence: web::Data<FileSystemDmnStore>,
+    body: web::Json<ImportDmnRequest>,
+) -> HttpResponse {
+    let filename = format!("{}.dmn", &body.id);
+
+    // Check for conflicts.
+    match persistence.load_file(&filename).await {
+        Ok(_) => {
+            return HttpResponse::Conflict().json(serde_json::json!({
+                "error_code": "DMN_CONFLICT",
+                "message": format!("decision with id '{}' already exists", body.id),
+            }));
+        }
+        Err(engine_state::PersistenceError::NotFound(_)) => {
+            // No conflict — proceed.
+        }
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("failed to check existing file: {}", e)
+        })),
+    }
+
+    match persistence.save_file(&filename, &body.content).await {
+        Ok(()) => HttpResponse::Created().json(serde_json::json!({
+            "status": "imported",
+            "id": body.id,
+            "message": format!("DMN file '{}' imported successfully", filename),
+        })),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("failed to import DMN: {}", e)
+        })),
+    }
+}
+
+/// Export a DMN decision — `GET /v1/decisions/{id}/export`.
+pub async fn export_dmn(
+    persistence: web::Data<FileSystemDmnStore>,
+    path: web::Path<String>,
+) -> HttpResponse {
+    let id = path.into_inner();
+
+    match persistence.get(&id).await {
+        Ok(doc) => HttpResponse::Ok()
+            .content_type("application/xml")
+            .header(
+                actix_web::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}.dmn\"", id),
+            )
+            .body(String::from_utf8_lossy(&doc.content).to_string()),
+        Err(engine_state::PersistenceError::NotFound(_)) => {
+            HttpResponse::NotFound().json(serde_json::json!({
+                "error": format!("decision '{}' not found", id)
+            }))
+        }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("failed to export decision: {}", e)
+        })),
+    }
 }
 
 /// Reload a DMN model — `POST /v1/decisions/reload`.
@@ -259,18 +440,36 @@ pub async fn reload_dmn(
     }
 }
 
+/// Request body for DMN import.
+#[derive(Debug, Deserialize)]
+pub struct ImportDmnRequest {
+    /// Decision ID extracted from the DMN file or provided by caller.
+    pub id: String,
+    /// Raw DMN XML content.
+    pub content: Vec<u8>,
+}
+
 // =========================================================================
 // Route configuration
 // =========================================================================
 
-/// Configure `/v1/decisions` routes.
+/// Configure `/v1/decisions` routes (Phase 33).
 pub fn configure_v1_decisions(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/decisions")
+            // CRUD endpoints.
             .route("", web::get().to(list_decisions))
             .route("/", web::get().to(list_decisions))
+            .route("", web::post().to(create_decision))
             .route("/{id}", web::get().to(get_decision))
+            .route("/{id}", web::put().to(update_decision))
+            .route("/{id}", web::delete().to(delete_decision))
+            // Evaluate endpoint.
             .route("/{id}/evaluate", web::post().to(evaluate_decision))
+            // Import/export endpoints.
+            .route("/import", web::post().to(import_dmn))
+            .route("/{id}/export", web::get().to(export_dmn))
+            // Hot-reload endpoint.
             .route("/reload", web::post().to(reload_dmn)),
     );
 }
