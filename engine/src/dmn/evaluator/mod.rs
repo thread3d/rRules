@@ -227,7 +227,8 @@ impl DecisionEvaluator {
 
     /// Evaluate a single decision (the MVP: evaluate all outputs of one decision).
     ///
-    /// This is the core "decision service" (§10.4) — takes an input scope and returns outputs + trace.
+    /// This is the core "decision service" (§10.4) — takes an input scope and returns per-output values + trace.
+    /// Resolves DRD edges topologically before evaluation; cycles produce DrdCycle error.
     pub fn evaluate(
         &self,
         decision_id: &str,
@@ -240,15 +241,10 @@ impl DecisionEvaluator {
             DecisionEvalError::Internal(format!("failed to acquire read lock: {}", e))
         })?;
 
-        // 2. Find the decision in the model's definitions children.
-        let decision = extract_decisions(&guard.model)
-            .into_iter()
-            .find(|d| d.id == decision_id)
-            .ok_or_else(|| {
-                DecisionEvalError::NotFound(format!("decision '{}' not found", decision_id))
-            })?;
+        // 2. Resolve DRD order — evaluate upstream decisions first.
+        let drd_order = resolve_drd_order(&guard, decision_id)?;
 
-        // 3. Build the input scope from request inputs.
+        // 3. Build the initial input scope from request inputs.
         let mut scope = Scope::empty();
         for (key, value) in &request.inputs {
             scope.bindings.insert(key.clone(), value.clone());
@@ -261,19 +257,83 @@ impl DecisionEvaluator {
             None
         };
 
-        // 5. Evaluate the decision table (if present).
+        // 5. Evaluate upstream decisions in topological order, merging outputs into scope.
+        let mut merged_context: HashMap<String, Value> = HashMap::new();
+
+        for (idx, upstream_id) in drd_order.iter().enumerate() {
+            if *upstream_id == decision_id {
+                // This is the target — skip evaluation, use it last.
+                continue;
+            }
+
+            // Build upstream request with merged context as additional inputs.
+            let mut upstream_inputs = HashMap::new();
+            upstream_inputs.extend(request.inputs.clone());
+            upstream_inputs.extend(merged_context.clone());
+
+            // Evaluate upstream decision recursively.
+            match self.evaluate(upstream_id, EvaluateRequest {
+                inputs: upstream_inputs,
+                trace: false, // Don't propagate trace for upstream decisions (performance).
+            }) {
+                Ok(upstream_result) => {
+                    // Merge upstream outputs into context under variable.name.
+                    let upstream_decision = extract_decisions_for_drd(&guard.model).into_iter()
+                        .find(|(did, _)| *did == upstream_id)
+                        .map(|(_, d)| d);
+
+                    if let Some(decision) = upstream_decision {
+                        if let Some(ref var) = decision.variable {
+                            // variable.name is a String (not Option). Use it directly.
+                            let name_str: &str = &var.name;
+                            // Find the corresponding output value (if any).
+                            for (_, val) in &upstream_result.outputs {
+                                merged_context.insert(name_str.to_string(), val.clone());
+                                break;
+                            }
+                        } else {
+                            // No variable — merge all outputs directly.
+                            merged_context.extend(upstream_result.outputs);
+                        }
+                    } else {
+                        merged_context.extend(upstream_result.outputs);
+                    }
+
+                    if let Some(ref mut t) = trace {
+                        t.emit("drd_resolve", format!("resolved upstream decision '{}'", upstream_id));
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        // 6. Find the target decision and evaluate it with merged context.
+        let target_decision = extract_decisions(&guard.model)
+            .into_iter()
+            .find(|d| d.id == decision_id)
+            .ok_or_else(|| {
+                DecisionEvalError::NotFound(format!("decision '{}' not found", decision_id))
+            })?;
+
+        // Build final scope with merged context.
+        for (key, value) in &merged_context {
+            scope.bindings.insert(key.clone(), value.clone());
+        }
+
         let mut outputs = HashMap::new();
         let mut rules_fired = 0u64;
 
-        if let Some(ref table) = decision.decision_table {
-            // Evaluate the decision table against the scope.
+        if let Some(ref table) = target_decision.decision_table {
+            // Evaluate the decision table against the merged scope.
             let result = DecisionTableEvaluator::evaluate(
                 table,
                 &scope,
                 &guard.ast_cache,
             )?;
 
-            // Map output clause names to their values.
+            // Map output clause names to their values (per-output).
+            // For the MVP: each output clause gets the full aggregated result value,
+            // keyed by its output clause name. Per-cell evaluation is a future enhancement.
             for (i, output_clause) in table.output_clauses.iter().enumerate() {
                 let name = output_clause.name.as_deref()
                     .map(|s| s.to_string())
@@ -281,26 +341,34 @@ impl DecisionEvaluator {
                 outputs.insert(name, result.clone());
             }
 
-            rules_fired = 1; // Simplified: count tables as "rules fired" for metrics.
+            rules_fired = 1; // Simplified: one "rule fired" per table evaluation.
 
             if let Some(ref mut t) = trace {
-                let hp_str = decision
-                    .decision_table
-                    .as_ref()
+                let hp_str = target_decision.decision_table.as_ref()
                     .map(|t| t.hit_policy.as_str().to_string())
                     .unwrap_or_else(|| "Unknown".to_string());
-                let hp_owned = hp_str.clone();
                 t.emit_with(
                     "evaluate_table",
-                    format!("evaluated table (hit policy: {})", hp_owned),
+                    format!("evaluated table (hit policy: {})", hp_str),
                     None,
                     Vec::new(),
                     Some(result.clone()),
                 );
+
+                // Emit merge_scope event for DRD resolution.
+                if !merged_context.is_empty() {
+                    t.emit_with(
+                        "merge_scope",
+                        format!("merged {} outputs from upstream decisions", merged_context.len()),
+                        None,
+                        Vec::new(),
+                        Some(Value::Object(merged_context.clone())),
+                    );
+                }
             }
         } else {
             // No decision table — return the scope values as outputs.
-            for (key, value) in request.inputs {
+            for (key, value) in scope.bindings {
                 outputs.insert(key, value);
             }
         }
@@ -313,6 +381,13 @@ impl DecisionEvaluator {
             duration_ms,
             trace: trace.filter(|_| request.trace),
         })
+    }
+
+    /// Find a decision by ID in the model (helper for DRD resolution).
+    fn find_decision_by_id<'a>(model: &'a DmnModel, id: &str) -> Option<&'a Decision> {
+        extract_decisions_for_drd(model).into_iter()
+            .find(|(did, _)| *did == id)
+            .map(|(_, d)| d)
     }
 
     /// Reload the DMN model from a new file (hot-reload — Phase 25 pattern).
