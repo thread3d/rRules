@@ -12,7 +12,7 @@ anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "chrono", "uuid"] }
 git2 = "0.21.0"
-prometheus = { workspace = true, optional = true }
+prometheus = { workspace = true }
 utoipa = { version = "4", features = ["chrono", "uuid"] }
 # DMN 1.5 XML parser/exporter (Phase 29+) — streaming NsReader/Writer, multi-namespace.
 # Supply-chain verified 2026-07-06 (Task 1 gate): repo tafia/quick-xml, 322M downloads.
@@ -50,7 +50,6 @@ proptest = { workspace = true }
 
 [features]
 default = []
-metrics = ["prometheus"]
 engine-rete = []
 # Enable individual engine implementations (all require engine-rete as dependency)
 engine-treat = ["engine-rete"]

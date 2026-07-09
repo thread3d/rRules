@@ -1,44 +1,29 @@
 //! DMN-specific Prometheus metrics + WebSocket broadcast (Phase 33).
 //!
-//! Exposes three metric families (`rrules_dmn_evaluations_total`,
-//! `rrules_dnm_decision_duration_seconds`, `rrules_dmn_hit_policy_violations_total`)
-//! on a dedicated registry, and provides a real-time WebSocket broadcast surface
-//! for decision evaluation events (parity with v5.0's engine metrics WS).
+//! Exposes metric families on a dedicated registry, and provides a real-time
+//! WebSocket broadcast surface for decision evaluation events.
 
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
 
 use actix_web::{HttpResponse, Responder};
-use prometheus::{
-    Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder,
-};
+use prometheus::{Encoder, Registry, TextEncoder};
 use serde::Serialize;
 
-// =========================================================================
-// Dedicated Prometheus registry (Pitfall 24-A: never use default_registry)
-// =========================================================================
+// Re-export Phase 35 extended metrics from engine (avoids duplicate registration).
+pub use engine::dmn::evaluator::{METRIC_OUTPUT_EVALUATIONS_TOTAL, METRIC_DRD_CHAIN_DEPTH};
 
-/// Dedicated Prometheus registry for DMN metrics (separate from the main engine registry).
-pub static DMN_METRICS_REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
-    let registry = Registry::new();
-    // Register all metric collectors.
-    let _ = registry.register(Box::new(METRIC_EVALUATIONS_TOTAL.clone()));
-    let _ = registry.register(Box::new(METRIC_DECISION_DURATION_SECONDS.clone()));
-    let _ = registry.register(Box::new(METRIC_HIT_POLICY_VIOLATIONS_TOTAL.clone()));
-    registry
-});
+/// Original Phase 33 metrics (defined here since they're API-scoped).
+use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, Opts};
 
-/// Metric: total decision evaluation requests (ROADMAP canonical name).
 pub static METRIC_EVALUATIONS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
     IntCounterVec::new(
         Opts::new("rrules_dmn_evaluations_total", "Total number of decision evaluations"),
         &["decision_id"],
-    )
-    .expect("metrics to be valid")
+    ).expect("metrics to be valid")
 });
 
-/// Metric: distribution of decision evaluation duration in seconds (ROADMAP canonical name).
 pub static METRIC_DECISION_DURATION_SECONDS: LazyLock<HistogramVec> = LazyLock::new(|| {
     HistogramVec::new(
         HistogramOpts::new(
@@ -46,17 +31,31 @@ pub static METRIC_DECISION_DURATION_SECONDS: LazyLock<HistogramVec> = LazyLock::
             "Distribution of decision evaluation duration in seconds",
         ),
         &["decision_id", "hit_policy"],
-    )
-    .expect("metrics to be valid")
+    ).expect("metrics to be valid")
 });
 
-/// Metric: total hit policy violations during decision evaluation (ROADMAP canonical name).
 pub static METRIC_HIT_POLICY_VIOLATIONS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
     IntCounterVec::new(
         Opts::new("rrules_dmn_hit_policy_violations_total", "Total number of hit policy violations during decision evaluation"),
         &["decision_id", "hit_policy"],
-    )
-    .expect("metrics to be valid")
+    ).expect("metrics to be valid")
+});
+
+// =========================================================================
+// Dedicated Prometheus registry (Pitfall 24-A: never use default_registry)
+// =========================================================================
+
+/// Dedicated Prometheus registry for DMN metrics.
+pub static DMN_METRICS_REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
+    let registry = Registry::new();
+    // Phase 33 metrics.
+    let _ = registry.register(Box::new(METRIC_EVALUATIONS_TOTAL.clone()));
+    let _ = registry.register(Box::new(METRIC_DECISION_DURATION_SECONDS.clone()));
+    let _ = registry.register(Box::new(METRIC_HIT_POLICY_VIOLATIONS_TOTAL.clone()));
+    // Phase 35 extended metrics (re-exported from engine).
+    let _ = registry.register(Box::new(METRIC_OUTPUT_EVALUATIONS_TOTAL.clone()));
+    let _ = registry.register(Box::new(METRIC_DRD_CHAIN_DEPTH.clone()));
+    registry
 });
 
 // =========================================================================

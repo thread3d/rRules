@@ -30,6 +30,8 @@ pub mod exporter;
 pub mod feel;
 pub mod model;
 pub mod parser;
+pub mod test_util;
+pub mod tracker;
 
 // Re-exports for convenient access.
 pub use decision_table::{DecisionTableEvaluator, DecisionTableError};

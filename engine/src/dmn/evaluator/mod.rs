@@ -17,6 +17,33 @@ use crate::dmn::model::{DmnModel, DefinitionsChild, Decision};
 use self::trace::InferenceTrace;
 
 // =========================================================================
+// Metrics (Phase 35, DMN-27)
+// =========================================================================
+
+use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, Opts};
+use std::sync::LazyLock;
+
+/// Per-output evaluation counter: total output clause evaluations per decision.
+pub static METRIC_OUTPUT_EVALUATIONS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    IntCounterVec::new(
+        Opts::new("rrules_dmn_output_evaluations_total", "Total number of output clause evaluations during decision service invocation"),
+        &["decision_id", "output_name"],
+    ).expect("metrics to be valid")
+});
+
+/// DRD chain depth histogram: distribution of decisions resolved per evaluation.
+pub static METRIC_DRD_CHAIN_DEPTH: LazyLock<HistogramVec> = LazyLock::new(|| {
+    HistogramVec::new(
+        HistogramOpts::new(
+            "rrules_dmn_drd_chain_depth_seconds",
+            "Distribution of DRD chain depths (number of decisions resolved) per evaluation",
+        ),
+        &["decision_id"],
+    )
+    .expect("metrics to be valid")
+});
+
+// =========================================================================
 // Public types
 // =========================================================================
 
@@ -40,6 +67,10 @@ pub struct EvaluateResult {
     pub duration_ms: f64,
     /// Optional inference trace (only if `trace: true` on the request).
     pub trace: Option<InferenceTrace>,
+    /// Number of decisions resolved in the DRD topological order.
+    pub drd_chain_depth: usize,
+    /// Output clause names that were evaluated.
+    pub outputs_evaluated: Vec<String>,
 }
 
 /// Shared snapshot of a loaded DMN model + its AST cache (Phase 25 pattern).
@@ -244,6 +275,11 @@ impl DecisionEvaluator {
         // 2. Resolve DRD order — evaluate upstream decisions first.
         let drd_order = resolve_drd_order(&guard, decision_id)?;
 
+        // Observe DRD chain depth for metrics (Phase 35).
+        METRIC_DRD_CHAIN_DEPTH
+            .with_label_values(&[decision_id])
+            .observe(drd_order.len() as f64);
+
         // 3. Build the initial input scope from request inputs.
         let mut scope = Scope::empty();
         for (key, value) in &request.inputs {
@@ -260,7 +296,7 @@ impl DecisionEvaluator {
         // 5. Evaluate upstream decisions in topological order, merging outputs into scope.
         let mut merged_context: HashMap<String, Value> = HashMap::new();
 
-        for (idx, upstream_id) in drd_order.iter().enumerate() {
+        for (_idx, upstream_id) in drd_order.iter().enumerate() {
             if *upstream_id == decision_id {
                 // This is the target — skip evaluation, use it last.
                 continue;
@@ -322,6 +358,7 @@ impl DecisionEvaluator {
 
         let mut outputs = HashMap::new();
         let mut rules_fired = 0u64;
+        let mut evaluated_outputs = Vec::new();
 
         if let Some(ref table) = target_decision.decision_table {
             // Evaluate the decision table against the merged scope.
@@ -331,14 +368,15 @@ impl DecisionEvaluator {
                 &guard.ast_cache,
             )?;
 
-            // Map output clause names to their values (per-output).
-            // For the MVP: each output clause gets the full aggregated result value,
-            // keyed by its output clause name. Per-cell evaluation is a future enhancement.
             for (i, output_clause) in table.output_clauses.iter().enumerate() {
                 let name = output_clause.name.as_deref()
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| format!("output_{}", i));
-                outputs.insert(name, result.clone());
+                outputs.insert(name.clone(), result.clone());
+                METRIC_OUTPUT_EVALUATIONS_TOTAL
+                    .with_label_values(&[decision_id, &name])
+                    .inc();
+                evaluated_outputs.push(name);
             }
 
             rules_fired = 1; // Simplified: one "rule fired" per table evaluation.
@@ -369,17 +407,28 @@ impl DecisionEvaluator {
         } else {
             // No decision table — return the scope values as outputs.
             for (key, value) in scope.bindings {
-                outputs.insert(key, value);
+                outputs.insert(key.clone(), value);
+                METRIC_OUTPUT_EVALUATIONS_TOTAL
+                    .with_label_values(&[decision_id, &key])
+                    .inc();
+                evaluated_outputs.push(key);
             }
         }
 
         let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        // Record evaluation in DMN decision tracker (Phase 35, DMN-27).
+        if let Ok(ref mut tracker) = crate::dmn::tracker::DMN_DECISION_TRACKER.lock() {
+            tracker.record_evaluation(decision_id);
+        }
 
         Ok(EvaluateResult {
             outputs,
             rules_fired,
             duration_ms,
             trace: trace.filter(|_| request.trace),
+            drd_chain_depth: drd_order.len(),
+            outputs_evaluated: evaluated_outputs,
         })
     }
 
