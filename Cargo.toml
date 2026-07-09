@@ -1,5 +1,5 @@
 [workspace]
-members = ["engine", "api"]
+members = ["engine", "api", "engine_state"]
 resolver = "2"
 
 [workspace.dependencies]
