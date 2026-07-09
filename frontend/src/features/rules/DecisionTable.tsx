@@ -5,7 +5,8 @@ import {
   useReactTable,
 } from '@tanstack/react-table'
 
-import type { HitPolicyId, DecisionTableColumn, DecisionTableRow } from './types'
+import type { HitPolicy, Aggregator, DecisionTableColumn, DecisionTableRow } from './types'
+import { HIT_POLICY_META } from './types'
 import { RuleEditor } from '@/components/RuleEditor'
 import { Button } from '@/components/ui/button'
 import { ValidationDisplay } from '@/components/validation/ValidationDisplay'
@@ -13,11 +14,13 @@ import type { ValidationError, ValidationWarning } from '@/components/validation
 import { evaluateDecision } from '@/api/decisions'
 
 export interface DecisionTableProps {
-  hitPolicy: HitPolicyId
+  hitPolicy: HitPolicy
   columns: DecisionTableColumn[]
   rows: DecisionTableRow[]
   decisionId?: string // Optional: decision ID for evaluation
-  onHitPolicyChange?: (policy: HitPolicyId) => void
+  onHitPolicyChange?: (policy: HitPolicy) => void
+  aggregator?: Aggregator
+  onAggregatorChange?: (agg: Aggregator) => void
   // Optional validation state for the entire table
   validationErrors?: ValidationError[]
   validationWarnings?: ValidationWarning[]
@@ -30,24 +33,14 @@ export interface EvaluationResult {
   trace?: { eventCount: number; durationMs: number }
 }
 
-const HIT_POLICY_OPTIONS = [
-  { id: 'unique', label: 'Unique' },
-  { id: 'any', label: 'Any' },
-  { id: 'priority', label: 'Priority' },
-  { id: 'collect', label: 'Collect' },
-  { id: 'rule-order', label: 'Rule Order' },
-  { id: 'sum', label: 'Sum' },
-  { id: 'min', label: 'Min' },
-  { id: 'max', label: 'Max' },
-  { id: 'count', label: 'Count' },
-]
-
 export function DecisionTable({
   hitPolicy,
   columns,
   rows,
   decisionId,
   onHitPolicyChange,
+  aggregator,
+  onAggregatorChange,
   validationErrors = [],
   validationWarnings = [],
 }: DecisionTableProps) {
@@ -70,15 +63,22 @@ export function DecisionTable({
     setShowTrace(false)
 
     try {
-      // Build inputs from row data (simplified: use condition values as inputs)
+      // Build inputs keyed by column accessorKey / input_expression name.
+      // The first row's conditions are used as sample input values; the keys
+      // come from iterating input_clauses (populated via dmnSerializer when
+      // the backend actually evaluates). For now we use column labels as keys
+      // since this is the editor view — real evaluation goes through the
+      // serializer in Plan 03.
       const inputs: Record<string, unknown> = {}
-      rows.forEach((row, idx) => {
-        if (row.conditions) {
-          Object.entries(row.conditions).forEach(([key, value]) => {
-            inputs[`input_${idx}_${key}`] = value
-          })
+      for (const col of columns) {
+        if (col.accessorKey && col.label) {
+          const sampleRow = rows[0]
+          if (sampleRow?.conditions) {
+            inputs[col.accessorKey] =
+              sampleRow.conditions[col.label] ?? ''
+          }
         }
-      })
+      }
 
       const result = await evaluateDecision(decisionId, {
         inputs,
@@ -112,26 +112,42 @@ export function DecisionTable({
         />
       ) : null}
 
-      {/* Hit Policy Selector */}
+      {/* Hit Policy Selector — uses HIT_POLICY_META from types.ts */}
       <div className="flex items-center gap-2">
         <label className="font-medium">Hit Policy:</label>
         <select
           value={hitPolicy}
-          onChange={(e) => onHitPolicyChange?.(e.target.value as HitPolicyId)}
+          onChange={(e) => onHitPolicyChange?.(e.target.value as HitPolicy)}
           className="px-4 py-2 border rounded-md"
         >
-          {HIT_POLICY_OPTIONS.map((policy) => (
-            <option key={policy.id} value={policy.id}>
-              {policy.label}
+          {Object.values(HIT_POLICY_META).map((policyMeta) => (
+            <option key={policyMeta.id} value={policyMeta.id}>
+              {policyMeta.name}
             </option>
           ))}
         </select>
 
         <span className="text-sm text-gray-500">
-          {
-            HIT_POLICY_OPTIONS.find((p) => p.id === hitPolicy)?.label
-          }
+          {HIT_POLICY_META[hitPolicy]?.description}
         </span>
+
+        {/* Aggregator selector — only shown for COLLECT */}
+        {hitPolicy === 'COLLECT' && onAggregatorChange && (
+          <div className="flex items-center gap-2 ml-4">
+            <label className="font-medium text-sm">Agg:</label>
+            <select
+              value={aggregator ?? 'SUM'}
+              onChange={(e) => onAggregatorChange?.(e.target.value as Aggregator)}
+              className="px-3 py-1.5 border rounded-md text-sm"
+            >
+              {['SUM', 'MIN', 'MAX', 'COUNT'].map((agg) => (
+                <option key={agg} value={agg}>
+                  {agg}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Evaluate Button */}
@@ -147,7 +163,7 @@ export function DecisionTable({
 
           {evaluationResult && (
             <span className="text-sm text-gray-600">
-              ✓ Completed in {evaluationResult.durationMs.toFixed(2)}ms ({evaluationResult.rulesFired} rules fired)
+              {'✓'} Completed in {evaluationResult.durationMs.toFixed(2)}ms ({evaluationResult.rulesFired} rules fired)
             </span>
           )}
 

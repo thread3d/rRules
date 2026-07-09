@@ -3,11 +3,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { RuleEditor } from '@/components/RuleEditor'
 import { DecisionTable } from '@/features/rules/DecisionTable'
 import { HitPolicySelector } from '@/features/rules/HitPolicySelector'
-import type { HitPolicyId, DecisionTableColumn, DecisionTableRow } from '@/features/rules/types'
+import type { HitPolicy, DecisionTableColumn, DecisionTableRow } from '@/features/rules/types'
 
 function NewRulePage() {
   const [expression, setExpression] = useState('// New rule expression\nreturn true;')
-  const [hitPolicy, setHitPolicy] = useState<HitPolicyId>('unique')
+  const [hitPolicy, setHitPolicy] = useState<HitPolicy>('UNIQUE')
   // TODO(22-05/22-06): wire to rule create API. Using empty placeholder columns/
   // rows so the editor mounts end-to-end; the real save + table data lands in
   // the governance/authoring wiring plans.

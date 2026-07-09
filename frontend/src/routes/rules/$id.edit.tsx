@@ -5,7 +5,7 @@ import { DecisionTable } from '@/features/rules/DecisionTable'
 import { HitPolicySelector } from '@/features/rules/HitPolicySelector'
 import { TestRunner } from '@/components/TestRunner'
 import { updateRule } from '@/api/rules'
-import type { HitPolicyId, DecisionTableColumn, DecisionTableRow } from '@/features/rules/types'
+import type { HitPolicy, DecisionTableColumn, DecisionTableRow } from '@/features/rules/types'
 
 function EditRulePage() {
   const { id } = Route.useParams()
@@ -14,7 +14,7 @@ function EditRulePage() {
   // is this plan's bar; fetch/save wiring lands in the governance/authoring
   // plans.
   const [expression, setExpression] = useState(`// Editing rule ${id}\nreturn true;`)
-  const [hitPolicy, setHitPolicy] = useState<HitPolicyId>('unique')
+  const [hitPolicy, setHitPolicy] = useState<HitPolicy>('UNIQUE')
   const [columns] = useState<DecisionTableColumn[]>([])
   const [rows] = useState<DecisionTableRow[]>([])
   const [saving, setSaving] = useState(false)
