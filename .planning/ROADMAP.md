@@ -86,7 +86,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 - [x] **Phase 29: DMN 1.5 Model + XML Parser + Canonical IR** — DMN 1.1–1.5 `.dmn` import into a canonical IR (round-trip foundation) (completed 2026-07-06)
 - [x] **Phase 30: FEEL Value Types + Type Lattice + Temporal Domain** — Decimal128, date/time/duration types, type lattice (research-needed) (completed 2026-07-07)
 - [x] **Phase 31: FEEL Parser + Evaluator + Built-in Function Library** — Full FEEL grammar 1–65, ternary logic, 10 boxed expressions, ~70 builtins, AST cache (research-needed; largest phase) (completed 2026-07-08)
-- [ ] **Phase 32: Decision-Table Engine + Hit Policies** — All 7 hit policies + COLLECT aggregators + allowed-values validation
+- [x] **Phase 32: Decision-Table Engine + Hit Policies** — All 7 hit policies + COLLECT aggregators + allowed-values validation (completed 2026-07-09)
 - [ ] **Phase 33: Decision Evaluator + DRD Resolution + REST API + Metrics** — `POST /v1/decisions/{id}/evaluate` (multi-output decision services + DRD chaining), metrics, trace, hot-reload
 - [ ] **Phase 34: Frontend Wiring + Hit-Policy Model Refactor** — Wire existing v4.0 editor to the real backend; refactor `HitPolicySelector` to DMN canonical
 - [ ] **Phase 35: Conformance Verification + Round-trip + Monitoring Close-out** — OMG DMN TCK pass, exporter round-trip, `DmnDecisionTracker`, Level 3 checklist gate (research-needed)
@@ -211,11 +211,12 @@ Plans:
   3. COLLECT aggregators (SUM/MIN/MAX/COUNT) compute correctly; multi-output aggregator tables are rejected; empty-match semantics hold (empty SUM/MIN/MAX → null, empty COUNT → 0).
   4. All cell FEEL is pre-parsed into ASTs at table-load time — the evaluator never re-parses a cell on each evaluation.
 
-**Plans**: 2 plans
+**Plans**: 2/2 plans complete
 
 Plans:
-- [ ] 32-01-PLAN.md — Core decision-table evaluator (UNIQUE/ANY/FIRST hit policies, input clause matching via FEEL unary tests)
-- [ ] 32-02-PLAN.md — Advanced hit policies + COLLECT aggregators (PRIORITY/OUTPUT ORDER/RULE ORDER/COLLECT with SUM/MIN/MAX/COUNT; load-time validation)
+
+- [x] 32-01-PLAN.md — Core decision-table evaluator (UNIQUE/ANY/FIRST hit policies, input clause matching via FEEL unary tests)
+- [x] 32-02-PLAN.md — Advanced hit policies + COLLECT aggregators (PRIORITY/OUTPUT ORDER/RULE ORDER/COLLECT with SUM/MIN/MAX/COUNT; load-time validation)
 
 ### Phase 33: Decision Evaluator + DRD Resolution + REST API + Metrics
 
@@ -299,7 +300,7 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 3/3 | Complete   | 2026-07-06 |
 | 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 4/4 | Complete    | 2026-07-07 |
 | 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 9/9 | Complete    | 2026-07-08 |
-| 32. Decision-Table Engine + Hit Policies | v6.0 | 0/2 | Planned | - |
+| 32. Decision-Table Engine + Hit Policies | v6.0 | 2/2 | Complete   | 2026-07-09 |
 | 33. Decision Evaluator + DRD Resolution + REST API + Metrics | v6.0 | 0/TBD | Not started | - |
 | 34. Frontend Wiring + Hit-Policy Model Refactor | v6.0 | 0/TBD | Not started | - |
 | 35. Conformance Verification + Round-trip + Monitoring Close-out | v6.0 | 0/TBD | Not started | - |
