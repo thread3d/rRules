@@ -8,6 +8,7 @@
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use engine::data_types::Value;
 use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest};
@@ -83,7 +84,7 @@ fn extract_decisions(definitions: &DmnModel) -> Vec<&Decision> {
 
 /// Evaluate a decision — `POST /v1/decisions/{id}/evaluate`.
 pub async fn evaluate_decision(
-    evaluator: web::Data<DecisionEvaluator>,
+    evaluator: web::Data<Arc<DecisionEvaluator>>,
     path: web::Path<String>,
     body: web::Json<EvaluateDecisionRequest>,
 ) -> HttpResponse {
@@ -125,7 +126,7 @@ pub async fn evaluate_decision(
 
 /// Get a DMN model — `GET /v1/decisions`.
 pub async fn list_decisions(
-    evaluator: web::Data<DecisionEvaluator>,
+    evaluator: web::Data<Arc<DecisionEvaluator>>,
 ) -> HttpResponse {
     let guard = match evaluator.shared.read() {
         Ok(guard) => guard,
@@ -155,7 +156,7 @@ pub async fn list_decisions(
 
 /// Get a specific decision — `GET /v1/decisions/{id}`.
 pub async fn get_decision(
-    evaluator: web::Data<DecisionEvaluator>,
+    evaluator: web::Data<Arc<DecisionEvaluator>>,
     path: web::Path<String>,
 ) -> HttpResponse {
     let decision_id = path.into_inner();
@@ -210,7 +211,7 @@ pub async fn get_decision(
 
 /// Reload a DMN model — `POST /v1/decisions/reload`.
 pub async fn reload_dmn(
-    evaluator: web::Data<DecisionEvaluator>,
+    evaluator: web::Data<Arc<DecisionEvaluator>>,
     body: web::Json<ReloadDmnRequest>,
 ) -> HttpResponse {
     match evaluator.reload(&body.dmn_content) {

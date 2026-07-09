@@ -35,6 +35,8 @@ use crate::v1::sessions::{read_session_config, run_session_sweep, SessionManager
 // `api::v1::execution` as a pub fn and is the single source of truth for
 // both startup (here) and reload (`reload_and_swap`) — it parses `.rules`
 // / `.drl` JSON files into `Rule` objects via `serde_json`.
+use engine::dmn::evaluator::{DecisionEvaluator, SharedDmnModel};
+use engine::dmn::feel::cache::FeelAstCache;
 use engine::engine::{EngineRegistry, EngineSelector};
 
 #[actix_web::main]
@@ -91,6 +93,53 @@ async fn main() -> std::io::Result<()> {
         .unwrap_or_else(|_| "./rules".to_string());
     let ruleset = SharedRuleSet::new(v1::execution::build_ruleset_from_dir(&rules_dir));
     let ruleset = web::Data::new(std::sync::Arc::new(std::sync::RwLock::new(ruleset)));
+
+    // Phase 33 (Plan 33-01 / D-33-01): shared DMN model snapshot built once at
+    // startup. Read `DMN_STORAGE_PATH` with fallback `"./dmn"`. If the directory
+    // exists and contains at least one `.dmn` file, load via `parse_dmn_with_cache()`;
+    // otherwise construct an empty SharedDmnModel (do NOT crash — model can be loaded
+    // later via hot-reload). This mirrors Phase 25's SharedRuleSet pattern.
+    let dmn_storage_path = std::env::var("DMN_STORAGE_PATH")
+        .unwrap_or_else(|_| "./dmn".to_string());
+    let shared_dmn_model = if std::path::Path::new(&dmn_storage_path).is_dir() {
+        let entries: Vec<_> = match std::fs::read_dir(&dmn_storage_path) {
+            Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+            Err(_) => vec![],
+        };
+        let dmn_files: Vec<_> = entries.iter()
+            .filter(|e| e.path().extension().map_or(false, |ext| ext == "dmn"))
+            .collect();
+        if !dmn_files.is_empty() {
+            tracing::info!(path = %dmn_storage_path, files = dmn_files.len(), "Loading DMN model from storage");
+            let first_dmn = &dmn_files[0];
+            match std::fs::read_to_string(first_dmn.path()) {
+                Ok(content) => {
+                    match engine::dmn::parser::parse_dmn_with_cache(&content) {
+                        Ok((model, ast_cache)) => SharedDmnModel::new(model, ast_cache),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "Failed to parse first .dmn file, using empty model");
+                            SharedDmnModel::new(engine::dmn::model::DmnModel::default(), FeelAstCache::default())
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to read first .dmn file, using empty model");
+                    SharedDmnModel::new(engine::dmn::model::DmnModel::default(), FeelAstCache::default())
+                }
+            }
+        } else {
+            tracing::info!(path = %dmn_storage_path, "No .dmn files found in storage path; using empty DMN model");
+            SharedDmnModel::new(engine::dmn::model::DmnModel::default(), FeelAstCache::default())
+        }
+    } else {
+        tracing::info!(path = %dmn_storage_path, "DMN storage path does not exist; using empty DMN model");
+        SharedDmnModel::new(engine::dmn::model::DmnModel::default(), FeelAstCache::default())
+    };
+
+    // Phase 33: create the DecisionEvaluator holding the shared snapshot.
+    // Wrapped in `Arc` because actix-web's `web::Data<T>` requires `T: Clone`,
+    // and `DecisionEvaluator` is not `Clone` (it holds an `Arc<RwLock<>>` internally).
+    let dmn_evaluator = std::sync::Arc::new(DecisionEvaluator::new(std::sync::Arc::new(std::sync::RwLock::new(shared_dmn_model))));
 
     // Create metrics broadcast channel for real-time updates (for future WebSocket use)
     let (metrics_tx, _) = metrics::create_metrics_channel(16);
@@ -222,6 +271,9 @@ async fn main() -> std::io::Result<()> {
             // Phase 27 (D-12): inject the shared SessionManager as web::Data
             // so execute_rules / dispose_session / reset_session can extract it.
             .app_data(web::Data::new(session_manager.clone()))
+            // Phase 33 (Plan 33-01): inject the DecisionEvaluator as web::Data so
+            // handlers can evaluate decisions and hot-reload the shared model.
+            .app_data(web::Data::new(dmn_evaluator.clone()))
             .app_data(web::Data::new(rule_store.clone()))
             .app_data(web::Data::new(category_store.clone()))
             .app_data(web::Data::new(tag_store.clone()))
@@ -339,7 +391,12 @@ async fn main() -> std::io::Result<()> {
                     // can connect; the stream is read-only (threat model).
                     .configure(websocket::configure_metrics_ws)
                     // Simulation / What-If analysis endpoints (Phase 5)
-                    .configure(v1::configure_v1_simulation),
+                    .configure(v1::configure_v1_simulation)
+                    // Phase 33 (Plan 33-01): decision evaluation + reload routes.
+                    // Registered after simulation but before metrics so that the
+                    // `/v1/decisions/*` paths resolve without conflict with any
+                    // existing wildcard segments.
+                    .configure(v1::configure_v1_decisions),
             )
             .configure(metrics::configure_metrics)
             // Serve frontend static files at root path (last, so API routes take precedence)
