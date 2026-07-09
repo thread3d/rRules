@@ -523,6 +523,47 @@ impl DecisionTableEvaluator {
     }
 }
 
+/// Load-time validation for a decision table.
+///
+/// Checks structural constraints that must hold before evaluation:
+/// - COLLECT with aggregation requires exactly one output column (DMN-20)
+/// - PRIORITY/OUTPUT ORDER require allowedValues on the first output clause (DMN-21)
+/// - aggregation attribute only valid with COLLECT hit policy
+pub fn validate_decision_table(table: &DecisionTable) -> Result<(), String> {
+    // 1. Multi-output rejection for aggregator tables (DMN-20).
+    if table.hit_policy == HitPolicy::Collect && table.aggregation.is_some() && table.output_clauses.len() != 1 {
+        return Err(format!(
+            "COLLECT with aggregation requires exactly one output column, got {}",
+            table.output_clauses.len()
+        ));
+    }
+
+    // 2. allowedValues validation for PRIORITY (DMN-21).
+    if table.hit_policy == HitPolicy::Priority {
+        if let Some(first_clause) = table.output_clauses.first() {
+            if first_clause.output_values.is_none() {
+                return Err("PRIORITY hit policy requires allowedValues on the output column".into());
+            }
+        }
+    }
+
+    // 3. allowedValues validation for OUTPUT ORDER (DMN-21).
+    if table.hit_policy == HitPolicy::OutputOrder {
+        if let Some(first_clause) = table.output_clauses.first() {
+            if first_clause.output_values.is_none() {
+                return Err("OUTPUT ORDER hit policy requires allowedValues on the output column".into());
+            }
+        }
+    }
+
+    // 4. Aggregator attribute consistency.
+    if table.aggregation.is_some() && table.hit_policy != HitPolicy::Collect {
+        return Err("aggregation attribute only valid with COLLECT hit policy".into());
+    }
+
+    Ok(())
+}
+
 // =========================================================================
 // Tests
 // =========================================================================

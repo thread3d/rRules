@@ -43,4 +43,105 @@
       <rule><inputEntry><text>&lt; 90</text></inputEntry><outputEntry><text>"Second"</text></outputEntry></rule>
     </decisionTable>
   </decision>
+
+  <!-- PRIORITY test: allowedValues ["Low", "Medium", "High"]; score=85 matches both rules, second rule's output "High" has higher position -->
+  <decision id="_dec_priority" name="PriorityTest">
+    <variable name="Rating" typeRef="feel:string"/>
+    <decisionTable id="_dt_priority" hitPolicy="PRIORITY">
+      <input><inputExpression><text>score</text></inputExpression></input>
+      <output name="Rating" typeRef="feel:string">
+        <outputValues><itemComponent><text>"Low"</text></itemComponent><itemComponent><text>"Medium"</text></itemComponent><itemComponent><text>"High"</text></itemComponent></outputValues>
+      </output>
+      <rule><inputEntry><text>&lt; 100</text></inputEntry><outputEntry><text>"Low"</text></outputEntry></rule>
+      <rule><inputEntry><text>&gt;= 60</text></inputEntry><outputEntry><text>"High"</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+  <!-- OUTPUT ORDER test: same allowedValues, returns all matches sorted -->
+  <decision id="_dec_output_order" name="OutputOrderTest">
+    <variable name="Ratings" typeRef="feel:string"/>
+    <decisionTable id="_dt_output_order" hitPolicy="OUTPUT ORDER">
+      <input><inputExpression><text>score</text></inputExpression></input>
+      <output name="Rating" typeRef="feel:string">
+        <outputValues><itemComponent><text>"Low"</text></itemComponent><itemComponent><text>"Medium"</text></itemComponent><itemComponent><text>"High"</text></itemComponent></outputValues>
+      </output>
+      <rule><inputEntry><text>&lt; 100</text></inputEntry><outputEntry><text>"Low"</text></outputEntry></rule>
+      <rule><inputEntry><text>&gt;= 60</text></inputEntry><outputEntry><text>"High"</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+  <!-- RULE ORDER test: returns all matches in document order -->
+  <decision id="_dec_rule_order" name="RuleOrderTest">
+    <variable name="Ratings" typeRef="feel:string"/>
+    <decisionTable id="_dt_rule_order" hitPolicy="RULE ORDER">
+      <input><inputExpression><text>score</text></inputExpression></input>
+      <output name="Rating" typeRef="feel:string"/>
+      <rule><inputEntry><text>&lt; 100</text></inputEntry><outputEntry><text>"Low"</text></outputEntry></rule>
+      <rule><inputEntry><text>&gt;= 60</text></inputEntry><outputEntry><text>"High"</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+  <!-- COLLECT/SUM test: multiple rules matching, sum their numeric outputs -->
+  <decision id="_dec_collect_sum" name="CollectSumTest">
+    <variable name="Total" typeRef="feel:number"/>
+    <decisionTable id="_dt_collect_sum" hitPolicy="COLLECT" aggregation="SUM">
+      <input><inputExpression><text>score</text></inputExpression></input>
+      <output name="Total" typeRef="feel:number"/>
+      <rule><inputEntry><text>&gt;= 0</text></inputEntry><outputEntry><text>10</text></outputEntry></rule>
+      <rule><inputEntry><text>&gt;= 20</text></inputEntry><outputEntry><text>20</text></outputEntry></rule>
+      <rule><inputEntry><text>&gt;= 40</text></inputEntry><outputEntry><text>30</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+  <!-- COLLECT/EMPTY test: no rules match (score below all thresholds) → SUM of empty = null -->
+  <decision id="_dec_collect_empty" name="CollectEmptyTest">
+    <variable name="Total" typeRef="feel:number"/>
+    <decisionTable id="_dt_collect_empty" hitPolicy="COLLECT" aggregation="SUM">
+      <input><inputExpression><text>score</text></inputExpression></input>
+      <output name="Total" typeRef="feel:number"/>
+      <rule><inputEntry><text>&gt;= 100</text></inputEntry><outputEntry><text>10</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+  <!-- COLLECT/COUNT test: COUNT of matching rules -->
+  <decision id="_dec_collect_count" name="CollectCountTest">
+    <variable name="Count" typeRef="feel:number"/>
+    <decisionTable id="_dt_collect_count" hitPolicy="COLLECT" aggregation="COUNT">
+      <input><inputExpression><text>score</text></inputExpression></input>
+      <output name="Count" typeRef="feel:number"/>
+      <rule><inputEntry><text>&gt;= 0</text></inputEntry><outputEntry><text>1</text></outputEntry></rule>
+      <rule><inputEntry><text>&gt;= 20</text></inputEntry><outputEntry><text>1</text></outputEntry></rule>
+      <rule><inputEntry><text>&gt;= 40</text></inputEntry><outputEntry><text>1</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+  <!-- COLLECT/COUNT empty test: COUNT of empty = 0 (not null) -->
+  <decision id="_dec_collect_count_empty" name="CollectCountEmptyTest">
+    <variable name="Count" typeRef="feel:number"/>
+    <decisionTable id="_dt_collect_count_empty" hitPolicy="COLLECT" aggregation="COUNT">
+      <input><inputExpression><text>score</text></inputExpression></input>
+      <output name="Count" typeRef="feel:number"/>
+      <rule><inputEntry><text>&gt;= 100</text></inputEntry><outputEntry><text>1</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+  <!-- Multi-output COLLECT test (should be rejected): two output columns with aggregation -->
+  <decision id="_dec_collect_multi" name="CollectMultiTest">
+    <variable name="Result" typeRef="feel:string"/>
+    <decisionTable id="_dt_collect_multi" hitPolicy="COLLECT" aggregation="SUM">
+      <input><inputExpression><text>x</text></inputExpression></input>
+      <output name="A" typeRef="feel:number"/><output name="B" typeRef="feel:number"/>
+      <rule><inputEntry><text>&gt;= 0</text></inputEntry><outputEntry><text>1</text></outputEntry><outputEntry><text>2</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
+
+  <!-- PRIORITY without allowedValues (should be rejected) -->
+  <decision id="_dec_priority_no_allowed" name="PriorityNoAllowedTest">
+    <variable name="Rating" typeRef="feel:string"/>
+    <decisionTable id="_dt_priority_no_allowed" hitPolicy="PRIORITY">
+      <input><inputExpression><text>x</text></inputExpression></input>
+      <output name="Rating" typeRef="feel:string"/>
+      <rule><inputEntry><text>&gt;= 0</text></inputEntry><outputEntry><text>"A"</text></outputEntry></rule>
+    </decisionTable>
+  </decision>
 </definitions>
