@@ -56,3 +56,10 @@ engine-treat = ["engine-rete"]
 engine-leaps = ["engine-rete"]
 engine-phreak = ["engine-rete"]
 history = []
+
+# Benchmark target for the DMN subsystem (Phase 36).
+# Criterion's `harness = true` uses the default harness; benchmarks are written
+# with criterion_group!/criterion_main! and live in engine/benches/dmn_benchmarks.rs.
+[[bench]]
+name = "dmn_benchmarks"
+harness = true
