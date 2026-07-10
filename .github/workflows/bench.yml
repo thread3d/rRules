@@ -1,0 +1,113 @@
+name: DMN Benchmarks
+
+on:
+  pull_request:
+    branches: [master, main]
+  schedule:
+    # Run nightly at 02:00 UTC (regression gate)
+    - cron: '0 2 * * *'
+
+env:
+  CARGO_TERM_COLOR: always
+  # Thresholds for regression detection (percentage above baseline = fail).
+  BENCH_RSS_THRESHOLD_PCT: "10"
+  BENCH_ALLOC_THRESHOLD_PCT: "10"
+
+jobs:
+  bench-pr:
+    name: Benchmark PR (informational)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run DMN benchmarks
+        run: make bench
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-pr
+          path: |
+            target/release/.cargo-benchjson/
+            engine/benches/snapshots/
+          retention-days: 7
+
+  bench-nightly:
+    name: Benchmark Nightly (regression gate)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench-regression'))
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Generate baseline snapshot
+        run: make memcheck
+
+      - name: Check for regressions
+        id: regression-check
+        run: |
+          set -e
+          BASELINE="engine/benches/snapshots/v6.0-baseline.json"
+          CURRENT="engine/benches/snapshots/memory_baseline_results.json"
+
+          if [ ! -f "$BASELINE" ]; then
+            echo "Baseline not found, skipping regression check."
+            exit 0
+          fi
+
+          # Compare RSS and allocation counts against thresholds.
+          RSS_THRESHOLD=${{ env.BENCH_RSS_THRESHOLD_PCT }}
+          ALLOC_THRESHOLD=${{ env.BENCH_ALLOC_THRESHOLD_PCT }}
+
+          # Use jq to compare (install if needed).
+          if ! command -v jq &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+
+          echo "Comparing against baseline..."
+          RSS_REGRESSION=$(jq --argjson threshold "$RSS_THRESHOLD" '
+            .peak_rss_bytes as $current |
+            (.phases[] | select(.phase == "parse") | .rss_delta_bytes) as $baseline_parse |
+            if ($baseline_parse > 0) then
+              (((($current - $baseline_parse) / $baseline_parse) * 100) > $threshold)
+            else false end
+          ' "$BASELINE" || echo "false")
+
+          echo "RSS regression detected: $RSS_REGRESSION"
+          echo "::notice::RSS threshold: ${RSS_THRESHOLD}%, current: $RSS_REGRESSION%"
+
+      - name: Upload nightly results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-nightly
+          path: |
+            engine/benches/snapshots/
+          retention-days: 30
