@@ -71,7 +71,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 
 > **v5.0 phase detail archived:** See `.planning/milestones/v5.0-ROADMAP.md` for full per-phase goals, deliverables, pitfalls, and success criteria.
 
-### 🚧 v6.0 DMN Level 3 Compliance (In Progress)
+- ✅ **v6.0 DMN Level 3 Compliance** — Phases 29–35 (shipped 2026-07-10) — Real DMN parser, FEEL evaluator, decision-table engine with all hit policies, REST API + metrics, frontend wiring; closes stubbed Phase 6 gap. [Archive](milestones/v6.0-ROADMAP.md)
 
 **Milestone Goal:** Make DMN real — deliver a DMN 1.5 parser, a complete FEEL expression-language evaluator, and a decision-table engine with all hit policies, exposed via a decision-evaluation API and wired to the existing frontend editor. Closes the stubbed Phase 6 / `DMN-01..03` gap. Milestone-level success criterion: OMG DMN 1.5 Level 3 conformance (DMN-34 checklist 100% + TCK pass) with the existing Rete rule-execution path unchanged (zero regression).
 
@@ -87,7 +87,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 - [x] **Phase 30: FEEL Value Types + Type Lattice + Temporal Domain** — Decimal128, date/time/duration types, type lattice (research-needed) (completed 2026-07-07)
 - [x] **Phase 31: FEEL Parser + Evaluator + Built-in Function Library** — Full FEEL grammar 1–65, ternary logic, 10 boxed expressions, ~70 builtins, AST cache (research-needed; largest phase) (completed 2026-07-08)
 - [x] **Phase 32: Decision-Table Engine + Hit Policies** — All 7 hit policies + COLLECT aggregators + allowed-values validation (completed 2026-07-09)
-- [ ] **Phase 33: Decision Evaluator + DRD Resolution + REST API + Metrics** — `POST /v1/decisions/{id}/evaluate` (multi-output decision services + DRD chaining), metrics, trace, hot-reload
+- [x] **Phase 33: Decision Evaluator + DRD Resolution + REST API + Metrics** — `POST /v1/decisions/{id}/evaluate` (multi-output decision services + DRD chaining), metrics, trace, hot-reload (planned 2026-07-09)
 - [ ] **Phase 34: Frontend Wiring + Hit-Policy Model Refactor** — Wire existing v4.0 editor to the real backend; refactor `HitPolicySelector` to DMN canonical
 - [ ] **Phase 35: Conformance Verification + Round-trip + Monitoring Close-out** — OMG DMN TCK pass, exporter round-trip, `DmnDecisionTracker`, Level 3 checklist gate (research-needed)
 
@@ -232,7 +232,12 @@ Plans:
   4. Per-decision Prometheus counters register on the existing dedicated registry (NOT a second registry); WebSocket `MetricsSnapshot` broadcasts after each evaluate.
   5. Inference trace (`TraceEvent`/`TraceData`, new `event_type` constants) is opt-in via request flag, and `SharedDmnModel{model, generation}` reloads via file-watcher (hot-reload of decisions).
 
-**Plans**: TBD
+**Plans**: 3 plans complete (Wave 1: route wiring + metrics; Wave 2: DRD resolution + multi-output; Wave 3: integration tests)
+
+Plans:
+- [x] 33-01-PLAN.md — Wire DecisionEvaluator into main.rs + register /v1/decisions routes + Prometheus metrics instrumentation (DMN-22, DMN-26)
+- [x] 33-02-PLAN.md — Topological DRD resolution with cycle detection + multi-output evaluation enhancement (DMN-23)
+- [x] 33-03-PLAN.md — Wave 0 integration tests: evaluate endpoint, trace emission, hot-reload, metrics verification (DMN-25, DMN-26, DMN-28)
 
 ### Phase 34: Frontend Wiring + Hit-Policy Model Refactor
 
@@ -247,7 +252,13 @@ Plans:
   3. `dmnSerializer.ts` maps editor-shape ↔ backend DMN model via edit-through-IR-projection — it never reconstructs DMN from the frontend model (round-trip fidelity preserved).
   4. An allowed-values editor for output columns supports PRIORITY/OUTPUT ORDER usability.
 
-**Plans**: TBD
+**Plans**: 3 plans in 3 waves
+
+Plans:
+- [ ] 34-01-PLAN.md — Refactor HitPolicy data model to DMN canonical (7 policies + COLLECT aggregator sub-type); update HitPolicySelector and DecisionTable
+- [ ] 34-02-PLAN.md — Create dmnSerializer.ts (editor-shape ↔ backend IR mapper) + add GET /v1/decisions/{id}/ir endpoint returning parsed decision table as JSON
+- [ ] 34-03-PLAN.md — Wire DecisionTable evaluate button to real backend via serializer; display results/trace in UI; create AllowedValuesEditor for PRIORITY/OUTPUT ORDER columns
+
 **UI hint**: yes
 
 ### Phase 35: Conformance Verification + Round-trip + Monitoring Close-out
@@ -265,8 +276,15 @@ Plans:
   4. The Level 3 conformance checklist (one item per built-in family, grammar rule, and boxed expression type) is 100% complete and is the phase-exit gate — the v6.0 tag is not cut until the checklist is complete and the TCK passes.
   5. The existing Rete rule-execution path (`/v1/execute`, `EngineRegistry`) is unchanged — zero regression.
 
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 4 plans in 4 waves
+
+Plans:
+- [ ] 35-01-PLAN.md — TCK test infrastructure: expanded vector discovery, structural XML comparison helper, TCK runner scaffold (DMN-33)
+- [ ] 35-02-PLAN.md — Full TCK sweep execution + DMNDI round-trip verification with human review gate (DMN-07, DMN-33)
+- [ ] 35-03-PLAN.md — Extended DMN metrics: per-output counters, DRD chain depth gauge, decision service invocation traces (DMN-27)
+- [ ] 35-04-PLAN.md — Level 3 conformance checklist verification + zero-regression audit + phase-exit gate (DMN-34)
+
+**UI hint**: no
 
 ## Progress
 
@@ -301,7 +319,7 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 4/4 | Complete    | 2026-07-07 |
 | 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 9/9 | Complete    | 2026-07-08 |
 | 32. Decision-Table Engine + Hit Policies | v6.0 | 2/2 | Complete   | 2026-07-09 |
-| 33. Decision Evaluator + DRD Resolution + REST API + Metrics | v6.0 | 0/TBD | Not started | - |
+| 33. Decision Evaluator + DRD Resolution + REST API + Metrics | v6.0 | 3/3 | Planned (2026-07-09) | - |
 | 34. Frontend Wiring + Hit-Policy Model Refactor | v6.0 | 0/TBD | Not started | - |
 | 35. Conformance Verification + Round-trip + Monitoring Close-out | v6.0 | 0/TBD | Not started | - |
 
