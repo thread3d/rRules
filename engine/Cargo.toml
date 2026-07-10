@@ -63,3 +63,9 @@ history = []
 [[bench]]
 name = "dmn_benchmarks"
 harness = true
+
+# Memory baseline binary — runs once to capture RSS/allocations against the v6.0 corpus,
+# writes a JSON snapshot to engine/benches/snapshots/v6.0-baseline.json.
+[[bin]]
+name = "memory_baseline"
+path = "benches/memory_baseline.rs"

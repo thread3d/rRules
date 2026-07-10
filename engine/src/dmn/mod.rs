@@ -24,6 +24,7 @@
 //! FEEL cell/expression text is carried as `String` here; Phase 31 parses it
 //! into a distinct `FeelExpression` AST (NOT the rule-engine `Expression`).
 
+pub mod bench_util;
 pub mod decision_table;
 pub mod evaluator;
 pub mod exporter;
