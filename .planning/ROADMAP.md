@@ -72,6 +72,7 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 > **v5.0 phase detail archived:** See `.planning/milestones/v5.0-ROADMAP.md` for full per-phase goals, deliverables, pitfalls, and success criteria.
 
 - ✅ **v6.0 DMN Level 3 Compliance** — Phases 29–35 (shipped 2026-07-10) — Real DMN parser, FEEL evaluator, decision-table engine with all hit policies, REST API + metrics, frontend wiring; closes stubbed Phase 6 gap. [Archive](milestones/v6.0-ROADMAP.md)
+- 🚧 **v7.0 Performance + Production Readiness** — Phases 36–39 (in progress) — Benchmarks + memory profiling gates, parser/evaluator optimization with AST cache warming, DRD parallelization with topological sort, testing expansion with fuzzing and property-based tests.
 
 **Milestone Goal:** Make DMN real — deliver a DMN 1.5 parser, a complete FEEL expression-language evaluator, and a decision-table engine with all hit policies, exposed via a decision-evaluation API and wired to the existing frontend editor. Closes the stubbed Phase 6 / `DMN-01..03` gap. Milestone-level success criterion: OMG DMN 1.5 Level 3 conformance (DMN-34 checklist 100% + TCK pass) with the existing Rete rule-execution path unchanged (zero regression).
 

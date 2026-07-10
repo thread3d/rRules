@@ -1,5 +1,33 @@
 # Milestones
 
+## v7.0 Performance + Production Readiness (Shipped: 2026-07-10)
+
+**Phases completed:** 8 phases, 29 plans, 33 tasks
+
+**Key accomplishments:**
+
+- 1. [Rule 3 - Blocking build issue] Created a minimal `model.rs` stub in Task 2 so `cargo build -p engine` passes
+- Streaming namespace-aware quick-xml NsReader parser importing DMN 1.1/1.3/1.5 into the canonical IR with XXE rejection, CDATA preservation, entity reference resolution, and Clause 7 item definitions
+- quick_xml::writer::Writer-based DMN exporter serializing the canonical IR back to .dmn XML with CDATA/element-order/ID preservation, plus an 8-test DOM-compare round-trip gate proving parse(export(parse(x)))==parse(x) for the import corpus (DMN-06)
+- Additive Value enum extension (8 FEEL variants), engine/src/dmn/feel/ module skeleton (FeelType lattice + temporal carriers), chrono-tz dep, and vendored OMG TCK subset with a green Wave-0 precision-audit gate confirming rust_decimal sufficiency (A1)
+- FEEL numeric equality (`feel_numeric_eq`) with null propagation and Number↔Integer cross-type promotion on `rust_decimal::Decimal`, the headline `0.1 + 0.2 = 0.3` DMN-08 proof, and 17 vendored OMG TCK 0100-arithmetic numeric vectors passing against `Value::Number` with a 13-category conformance-gap SKIP_LIST
+- parse_at_literal / format_value / add_months_zoned / add_days_time_zoned for all 5 FEEL temporal types with IANA-zone preservation through duration arithmetic (Pitfall 3), DST-correct gap/overlap handling (Pitfall 5), and the vendored TCK 0100-arithmetic Australia/Melbourne round-trip regression passing
+- The FEEL type lattice (conforms/equivalent/implicit_convert/type_of/resolve_type_ref) implementing DMN 1.5 §10.3.2.9 verbatim with EXACTLY the three spec-defined implicit conversions (no number↔string — the 1+"2"→null prohibition gate), plus the Success Criterion 4 regression audit documenting every Value wildcard in validation.rs/rules.rs as Rete-only
+- 13 failing lexer tests covering numbers (Decimal, never f64), strings with rule-64 escapes, at-literals, keyword-as-name emission, punctuators (**, <=, >=, !=), qualified-name splitting on `.`, max_tokens DoS guard, line/col tracking.
+- 1. [Rule 1 - Bug] Number/Integer operand order reversed in research Pattern 2 feel_compare
+- 1. [Rule 1 - Bug] Between arm ge/le comparisons were swapped
+- FEEL control flow (if/for/some/every), path navigation, filter expressions, instance-of type checks, and unary-test `in` operator — the DMN-14 surface enabling branching, iteration, quantification, navigation, and type conformance.
+- All 10 FEEL boxed-expression evaluators with recursive dispatch, and the boxed-context topological (dependency-order) evaluation with DFS color-marking cycle detection — the DMN-15 surface.
+- User-defined FEEL lambdas (grammar rule 55, non-external) with lexical capture — closure body evaluated against merged captured scope + param bindings; external functions rejected at invocation.
+- 1. [Rule 2 - Missing functionality] Added null-propagation helpers (`null_unary`, `null_binary`, `null_ternary`)
+- `now`, `today`, `day of year`, `day of week`, `month of year`, `week of year`
+- 1. [Rule 3 - Blocking] `Arc<DecisionEvaluator>` wrapping for actix-web Data compatibility
+- 1. [Rule 3 - Blocking] Color enum missing Copy derive
+- 1. [Rule 3 - Blocking] engine::data_types::Value uses internally-tagged serde
+- 2026-07-10
+
+---
+
 ## v5.0 Live Execution (Shipped: 2026-07-06)
 
 **Closeout:** verified — all 6 phases verified PASS (milestone audit `passed` after debt-fix), 0 open artifacts, 0 blockers, 13/13 requirements satisfied. The milestone audit's 2 cross-phase WARNINGs (`rule_filter` dead input; `/metrics` HTML/JSON `active_sessions` hardcoded) were resolved in commit `384b1f17d` and verified (cargo 118/0, vitest 5/5) before tagging — see `.planning/milestones/v5.0-MILESTONE-AUDIT.md` (re-audit `passed`).
