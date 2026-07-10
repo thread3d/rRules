@@ -242,17 +242,15 @@ pub fn collect_dmn_files(root: &Path) -> Vec<PathBuf> {
 /// Locate the TCK fixture root.
 pub fn tck_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let parent1 = manifest.parent().unwrap_or_else(|| Path::new("."));
-    let parent2 = parent1.parent().unwrap_or_else(|| Path::new("."));
-    parent2.join("engine/tests/fixtures/tck")
+    let repo_root = manifest.parent().unwrap_or_else(|| Path::new("."));
+    repo_root.join("engine/tests/fixtures/tck")
 }
 
 /// Locate the import-test corpus.
 pub fn import_corpus_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let parent1 = manifest.parent().unwrap_or_else(|| Path::new("."));
-    let parent2 = parent1.parent().unwrap_or_else(|| Path::new("."));
-    parent2.join("api/dmn")
+    let repo_root = manifest.parent().unwrap_or_else(|| Path::new("."));
+    repo_root.join("api/dmn")
 }
 
 /// Load the combined corpus: TCK fixtures + import-test DMN files.
@@ -266,9 +264,8 @@ pub fn load_corpus_files() -> Vec<PathBuf> {
 /// Write a baseline snapshot to the snapshots directory (engine/benches/snapshots/).
 pub fn write_baseline_snapshot(baseline: &MemoryBaseline, corpus_name: &str) -> Result<PathBuf, String> {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let parent1 = manifest.parent().unwrap_or_else(|| Path::new("."));
-    let parent2 = parent1.parent().unwrap_or_else(|| Path::new("."));
-    let snapshots_dir = parent2.join("engine/benches/snapshots");
+    let repo_root = manifest.parent().unwrap_or_else(|| Path::new("."));
+    let snapshots_dir = repo_root.join("engine/benches/snapshots");
 
     fs::create_dir_all(&snapshots_dir)
         .map_err(|e| format!("failed to create snapshots dir: {}", e))?;
