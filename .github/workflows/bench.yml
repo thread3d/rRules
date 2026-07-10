@@ -83,6 +83,11 @@ jobs:
             exit 0
           fi
 
+          if [ ! -f "$CURRENT" ]; then
+            echo "Current snapshot not found, skipping regression check."
+            exit 0
+          fi
+
           # Compare RSS and allocation counts against thresholds.
           RSS_THRESHOLD=${{ env.BENCH_RSS_THRESHOLD_PCT }}
           ALLOC_THRESHOLD=${{ env.BENCH_ALLOC_THRESHOLD_PCT }}
@@ -92,17 +97,37 @@ jobs:
             sudo apt-get update && sudo apt-get install -y jq
           fi
 
-          echo "Comparing against baseline..."
-          RSS_REGRESSION=$(jq --argjson threshold "$RSS_THRESHOLD" '
-            .peak_rss_bytes as $current |
-            (.phases[] | select(.phase == "parse") | .rss_delta_bytes) as $baseline_parse |
-            if ($baseline_parse > 0) then
-              (((($current - $baseline_parse) / $baseline_parse) * 100) > $threshold)
-            else false end
-          ' "$BASELINE" || echo "false")
+          echo "Comparing current snapshot against baseline..."
 
-          echo "RSS regression detected: $RSS_REGRESSION"
-          echo "::notice::RSS threshold: ${RSS_THRESHOLD}%, current: $RSS_REGRESSION%"
+          # Check RSS regression: compare peak_rss_bytes from CURRENT vs BASELINE
+          RSS_REGRESSION=$(jq --argjson threshold "$RSS_THRESHOLD" '
+            (.peak_rss_bytes) as $current |
+            (.[0].peak_rss_bytes // 0) as $baseline |
+            if ($baseline > 0) then
+              (((($current - $baseline) / $baseline) * 100) > $threshold)
+            else false end
+          ' "$CURRENT" || echo "false")
+
+          # Check allocation regression: compare total_allocations from CURRENT vs BASELINE
+          ALLOC_REGRESSION=$(jq --argjson threshold "$ALLOC_THRESHOLD" '
+            (.total_allocations // 0) as $current |
+            (.[0].total_allocations // 0) as $baseline |
+            if ($baseline > 0) then
+              (((($current - $baseline) / $baseline) * 100) > $threshold)
+            else false end
+          ' "$CURRENT" || echo "false")
+
+          echo "RSS regression detected: $RSS_REGRESSION (threshold: ${RSS_THRESHOLD}%)"
+          echo "::notice::RSS threshold: ${RSS_THRESHOLD}%, current delta: $(jq '.peak_rss_bytes' "$CURRENT") bytes vs baseline"
+          echo "Allocation regression detected: $ALLOC_REGRESSION (threshold: ${ALLOC_THRESHOLD}%)"
+
+          # Exit non-zero if either regression exceeds threshold
+          if [ "$RSS_REGRESSION" = "true" ] || [ "$ALLOC_REGRESSION" = "true" ]; then
+            echo "::error::Regression detected! RSS or allocation counts exceeded threshold."
+            exit 1
+          fi
+
+          echo "No regressions detected - all metrics within thresholds."
 
       - name: Upload nightly results
         uses: actions/upload-artifact@v4

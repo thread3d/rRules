@@ -25,21 +25,19 @@ use engine::dmn::model::{BuiltinAggregator, DecisionTable, HitPolicy, InputClaus
 // ---------------------------------------------------------------------------
 
 /// Locate the TCK fixture root relative to the workspace.  Benchmarks always run
-/// out of `target/` so we walk up two levels (`.. / ..`) to reach the repo root,
-/// then descend into `engine/tests/fixtures/tck/`.
+/// out of `target/` so we walk up one level from CARGO_MANIFEST_DIR (which is
+/// `engine/`) to reach the repo root, then descend into `engine/tests/fixtures/tck/`.
 fn tck_root() -> std::path::PathBuf {
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let parent1 = manifest.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let parent2 = parent1.parent().unwrap_or_else(|| std::path::Path::new("."));
-    parent2.join("engine/tests/fixtures/tck")
+    parent1.join("engine/tests/fixtures/tck")
 }
 
 /// Locate the import-test corpus under `api/dmn/`.
 fn import_corpus_root() -> std::path::PathBuf {
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let parent1 = manifest.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let parent2 = parent1.parent().unwrap_or_else(|| std::path::Path::new("."));
-    parent2.join("api/dmn")
+    parent1.join("api/dmn")
 }
 
 /// Collect every `.dmn` file under a directory (recursively).  Returns the full
