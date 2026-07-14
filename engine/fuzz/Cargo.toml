@@ -1,0 +1,27 @@
+[package]
+name = "engine-fuzz"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# cargo-fuzz canonical layout: the fuzz crate lives in <engine>/fuzz/ and
+# depends on the engine crate one directory up.
+[[bin]]
+name = "feel_parser"
+path = "fuzz_targets/feel_parser.rs"
+
+[[bin]]
+name = "decision_table"
+path = "fuzz_targets/decision_table.rs"
+
+[dependencies]
+libfuzzer-sys = "0.4"
+engine = { path = ".." }
+# Used directly by the decision_table target to construct FEEL Number values.
+rust_decimal = "1.42"
+
+# The fuzz crate is a standalone crate (not a member of the root workspace),
+# so cargo-fuzz can build it with its own sanitizer RUSTFLAGS.
+[workspace]

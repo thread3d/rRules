@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt docker-build run clean frontend-dev frontend-build ci help bench memcheck
+.PHONY: build test lint fmt docker-build run clean frontend-dev frontend-build ci help bench memcheck fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -54,6 +54,22 @@ memcheck:
 		exit 1; \
 	fi
 	cargo run -p engine --bin memory_baseline
+
+# Build cargo-fuzz targets (Phase 38+; requires nightly toolchain)
+fuzz-build:
+	cd engine && cargo +nightly fuzz build
+
+# Run DMN fuzz targets (Phase 38+; requires nightly + cargo-fuzz).
+# Usage: make fuzz TARGET=decision_table   (default: all targets)
+fuzz:
+	@if [ -z "$$TARGET" ]; then \
+		echo "Fuzzing all targets (bounded, ~60s each)..."; \
+		cd engine && cargo +nightly fuzz run feel_parser -- -max_total_time=60; \
+		cd engine && cargo +nightly fuzz run decision_table -- -max_total_time=60; \
+	else \
+		echo "Fuzzing target: $$TARGET"; \
+		cd engine && cargo +nightly fuzz run $$TARGET -- -max_total_time=60; \
+	fi
 
 help:
 	@echo "Available targets:"

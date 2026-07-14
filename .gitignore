@@ -14,6 +14,11 @@ api/dmn/
 # ── Planning research cache (local only) ─────────────────────
 .planning/research/.cache/
 
+# ── cargo-fuzz build output / corpus / crash artifacts ────────
+engine/fuzz/target/
+engine/fuzz/corpus/
+engine/fuzz/artifacts/
+
 # ── Logs ──────────────────────────────────────────────────────
 *.log
 npm-debug.log*

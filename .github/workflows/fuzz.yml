@@ -1,0 +1,73 @@
+name: DMN Fuzz
+
+on:
+  schedule:
+    # Nightly fuzzing run at 03:00 UTC (after the 02:00 bench gate).
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    # Manual runs; also triggered by the `fuzz` label on a PR.
+  pull_request:
+    branches: [master, main]
+    types: [labeled, opened, synchronize]
+
+env:
+  CARGO_TERM_COLOR: always
+  # Bounded run per target so the job stays within GitHub's timeout budget.
+  FUZZ_RUNS: "600000"
+  FUZZ_MAX_TOTAL_TIME: "300"
+
+jobs:
+  fuzz:
+    name: Fuzz DMN targets
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'fuzz')
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust nightly (sanitizers + coverage)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --locked
+
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            engine/target/
+            engine/fuzz/target/
+          key: ${{ runner.os }}-fuzz-${{ hashFiles('**/Cargo.lock', 'engine/fuzz/Cargo.toml') }}
+
+      - name: Build fuzz targets
+        run: cargo +nightly fuzz build
+
+      - name: Fuzz feel_parser
+        run: cargo +nightly fuzz run feel_parser -- -runs=${{ env.FUZZ_RUNS }} -max_total_time=${{ env.FUZZ_MAX_TOTAL_TIME }}
+
+      - name: Fuzz decision_table
+        run: cargo +nightly fuzz run decision_table -- -runs=${{ env.FUZZ_RUNS }} -max_total_time=${{ env.FUZZ_MAX_TOTAL_TIME }}
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-artifacts
+          path: |
+            engine/fuzz/fuzz_targets/artifacts/
+            **/crash-*
+            **/oom-*
+            **/timeout-*
+          retention-days: 30
+          if-no-files-found: ignore

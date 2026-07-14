@@ -3,18 +3,24 @@
   "timestamp": "2026-07-14T00:00:00Z",
   "phase": "38",
   "phase_name": "Testing Expansion + Fuzzing + Property-based Tests",
-  "plan": "38-01 — T1/T2 committed; T3 (decision-table fuzzing) in progress",
-  "status": "executing",
-  "next_action": "Implement Phase 38 T3: decision-table fuzz target that drives DecisionTableEvaluator across all 7 hit policies + COLLECT aggregators from fuzzed input; then commit + sync planning docs.",
+  "plan": "38-01 — T1/T2/T3 all COMPLETE & committed; Phase 38 fully done",
+  "status": "phase_complete",
+  "next_action": "Phase 38 fully complete. Next: determine whether v7.0 has a Phase 39 (ROADMAP lists phases 36-39 but 37 absorbed the DRD-parallelization scope as T3, so 39 may be vestigial) — otherwise run v7.0 milestone closeout (audit + verify + tag).",
   "blockers": [],
-  "human_actions_pending": [],
+  "human_actions_pending": [
+    {
+      "action": "Decide next step: start Phase 39 (if a real plan exists) or run /gsd-audit-milestone + complete-milestone for v7.0 closeout.",
+      "context": "v7.0 phases 36-38 are all complete and committed. ROADMAP mentions Phase 39 in the v7.0 range but no Phase 39 directory/plan exists."
+    }
+  ],
   "completed_tasks": [
     {"id": "37-T1", "name": "Lexer token cache (LexerTokenCache)", "status": "done", "commit": "deb23df57"},
     {"id": "37-T2", "name": "parse_expression_with_cache entry point", "status": "done", "commit": "deb23df57"},
     {"id": "37-T3", "name": "DRD resolution documentation + parallelization infrastructure", "status": "done", "commit": "deb23df57"},
     {"id": "38-T1", "name": "FEEL parser cargo-fuzz target (feel_parser)", "status": "done", "commit": "31cdbf77"},
-    {"id": "38-T2", "name": "Property-based tests (engine/tests/feel_properties.rs, 14 tests)", "status": "done", "commit": "31cdbf77"}
+    {"id": "38-T2", "name": "Property-based tests (engine/tests/feel_properties.rs, 14 tests)", "status": "done", "commit": "31cdbf77"},
+    {"id": "38-T3", "name": "Decision-table fuzz target (all 7 hit policies + COLLECT aggregators) + canonical fuzz-crate layout + make fuzz + nightly fuzz.yml CI gate", "status": "done", "commit": "pending in this session"}
   ],
-  "context_notes": "Phase 37 + Phase 38 T1/T2 committed 2026-07-14 after verifying DMN tests green (feel_properties 14/14, hit_policy_advanced 9/9, feel_tck_subset 2/2, tck_sweep 1/1). T3 was previously a stub (engine/fuzz/fuzz_targets/decision_table.rs) that ignored fuzzed input — it was excluded from the 38-01 commit and is being rewritten to actually drive the evaluator from fuzz data. api/dmn/ runtime artifacts are now gitignored. Note: test binaries with engine-rete/engine-leaps modules require --all-features to compile.",
+  "context_notes": "Phase 38 T3 implemented: engine/fuzz/fuzz_targets/decision_table.rs builds a fuzz-shaped table from the input stream and evaluates it across all 7 hit policies x every COLLECT aggregator (incl. none). Smoke run: 20,000 executions, 0 crashes, cov 1088. Fuzz crate restructured to canonical cargo-fuzz layout (engine/fuzz/Cargo.toml with [package.metadata] cargo-fuzz=true + standalone [workspace] + engine={path=\"..\"}) — the prior Cargo.fuzz.toml layout was non-functional and never built. Verified both targets build with cargo +nightly fuzz build. Added .github/workflows/fuzz.yml (nightly 03:00 UTC + fuzz-label PR trigger) and `make fuzz`/`make fuzz-build`.",
   "uncommitted_files": []
 }
