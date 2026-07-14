@@ -5,8 +5,8 @@
 
 use std::time::Instant;
 use engine::dmn::bench_util::{
-    collect_dmn_files, load_corpus_files, MemoryBaseline, PhaseBreakdown, RssSnapshot,
-    tck_root, write_baseline_snapshot, import_corpus_root,
+    load_corpus_files, MemoryBaseline, PhaseBreakdown, RssSnapshot,
+    tck_root, write_baseline_snapshot,
 };
 use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest, SharedDmnModel};
 
@@ -43,7 +43,7 @@ fn main() {
         models.push(model);
     }
     let post_parse_rss = RssSnapshot::take();
-    let parse_duration = Instant::now().duration_since(start_time);
+    let _parse_duration = Instant::now().duration_since(start_time);
 
     phases.push(PhaseBreakdown {
         phase: "parse".into(),
@@ -73,7 +73,7 @@ fn main() {
                     inputs: std::collections::HashMap::new(),
                     trace: false,
                 };
-                if let Ok(result) = evaluator.evaluate(decision, request) {
+                if let Ok(_result) = evaluator.evaluate(decision, request) {
                     total_evals += 1;
                 }
             }
@@ -142,7 +142,17 @@ fn main() {
         total_duration_ns: total_duration.as_nanos(),
     };
 
-    let snapshot_path = write_baseline_snapshot(&baseline, "v6.0-baseline")
+    // PERF-04: by default write a CURRENT snapshot to a separate file so the
+    // frozen `v6.0-baseline.json` (committed to the repo) is never overwritten
+    // by a regression-gate run. Pass `--update-baseline` to intentionally
+    // refresh the frozen baseline (used by `make baseline-update` when
+    // accepting new numbers).
+    let snapshot_name = if std::env::args().any(|a| a == "--update-baseline") {
+        "v6.0-baseline"
+    } else {
+        "v6.0-current"
+    };
+    let snapshot_path = write_baseline_snapshot(&baseline, snapshot_name)
         .expect("write baseline snapshot");
 
     println!("\n=== Memory Baseline Summary ===");

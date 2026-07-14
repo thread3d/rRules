@@ -68,66 +68,19 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Generate baseline snapshot
+      - name: Install jq (regression gate dependency)
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Generate current snapshot and check for regressions
         run: make memcheck
 
-      - name: Check for regressions
-        id: regression-check
-        run: |
-          set -e
-          BASELINE="engine/benches/snapshots/v6.0-baseline.json"
-          CURRENT="engine/benches/snapshots/memory_baseline_results.json"
-
-          if [ ! -f "$BASELINE" ]; then
-            echo "Baseline not found, skipping regression check."
-            exit 0
-          fi
-
-          if [ ! -f "$CURRENT" ]; then
-            echo "Current snapshot not found, skipping regression check."
-            exit 0
-          fi
-
-          # Compare RSS and allocation counts against thresholds.
-          RSS_THRESHOLD=${{ env.BENCH_RSS_THRESHOLD_PCT }}
-          ALLOC_THRESHOLD=${{ env.BENCH_ALLOC_THRESHOLD_PCT }}
-
-          # Use jq to compare (install if needed).
-          if ! command -v jq &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y jq
-          fi
-
-          echo "Comparing current snapshot against baseline..."
-
-          # Check RSS regression: compare peak_rss_bytes from CURRENT vs BASELINE
-          RSS_REGRESSION=$(jq --argjson threshold "$RSS_THRESHOLD" '
-            (.peak_rss_bytes) as $current |
-            (.[0].peak_rss_bytes // 0) as $baseline |
-            if ($baseline > 0) then
-              (((($current - $baseline) / $baseline) * 100) > $threshold)
-            else false end
-          ' "$CURRENT" || echo "false")
-
-          # Check allocation regression: compare total_allocations from CURRENT vs BASELINE
-          ALLOC_REGRESSION=$(jq --argjson threshold "$ALLOC_THRESHOLD" '
-            (.total_allocations // 0) as $current |
-            (.[0].total_allocations // 0) as $baseline |
-            if ($baseline > 0) then
-              (((($current - $baseline) / $baseline) * 100) > $threshold)
-            else false end
-          ' "$CURRENT" || echo "false")
-
-          echo "RSS regression detected: $RSS_REGRESSION (threshold: ${RSS_THRESHOLD}%)"
-          echo "::notice::RSS threshold: ${RSS_THRESHOLD}%, current delta: $(jq '.peak_rss_bytes' "$CURRENT") bytes vs baseline"
-          echo "Allocation regression detected: $ALLOC_REGRESSION (threshold: ${ALLOC_THRESHOLD}%)"
-
-          # Exit non-zero if either regression exceeds threshold
-          if [ "$RSS_REGRESSION" = "true" ] || [ "$ALLOC_REGRESSION" = "true" ]; then
-            echo "::error::Regression detected! RSS or allocation counts exceeded threshold."
-            exit 1
-          fi
-
-          echo "No regressions detected - all metrics within thresholds."
+      - name: Upload nightly results
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results-nightly
+          path: |
+            engine/benches/snapshots/
+          retention-days: 30
 
       - name: Upload nightly results
         uses: actions/upload-artifact@v4

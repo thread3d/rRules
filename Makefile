@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt docker-build run clean frontend-dev frontend-build ci help bench memcheck fuzz fuzz-build
+.PHONY: build test lint fmt docker-build run clean frontend-dev frontend-build ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -45,15 +45,27 @@ ci: build test lint frontend-build
 bench:
 	cargo bench --bench dmn_benchmarks -p engine
 
-# Run memory baseline comparison against v6.0 snapshots (regression gate)
+# Run memory baseline comparison against the frozen v6.0 snapshot (regression
+# gate, PERF-04). Writes a CURRENT snapshot (engine/benches/snapshots/v6.0-current.json)
+# and compares it against the committed v6.0-baseline.json via the gate script.
+# Exits non-zero on RSS/allocation regression beyond threshold.
 memcheck:
 	@echo "Running memory baseline check..."
 	@if [ ! -f engine/benches/snapshots/v6.0-baseline.json ]; then \
-		echo "ERROR: v6.0 baseline snapshot not found at engine/benches/snapshots/v6.0-baseline.json"; \
-		echo "Run 'make bench' first to generate baselines, or update the baseline with new measurements."; \
+		echo "ERROR: frozen v6.0 baseline snapshot not found at engine/benches/snapshots/v6.0-baseline.json"; \
+		echo "Run 'make baseline-update' to capture a baseline, then commit it."; \
 		exit 1; \
 	fi
 	cargo run -p engine --bin memory_baseline
+	@./scripts/memcheck-gate.sh
+
+# Refresh the FROZEN v6.0 baseline snapshot (PERF-04). Use only when intentionally
+# accepting new memory numbers (e.g. after an optimization that legitimately
+# changes the baseline). Commit the resulting v6.0-baseline.json.
+baseline-update:
+	@echo "Refreshing frozen v6.0 baseline snapshot..."
+	cargo run -p engine --bin memory_baseline -- --update-baseline
+	@echo "Frozen baseline refreshed. Commit engine/benches/snapshots/v6.0-baseline.json."
 
 # Build cargo-fuzz targets (Phase 38+; requires nightly toolchain)
 fuzz-build:
