@@ -1,17 +1,17 @@
 # TCK Sweep Results - Phase 35
 
-**Duration:** 10.173784708s  
+**Duration:** 2.440134049s  
 **TCK Source:** https://github.com/dmn-tck/tck (commit 0dbcaf9)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Total vectors discovered | 21 |
-| Passed | 57 |
+| Total vectors discovered | 51 |
+| Passed | 123 |
 | Failed | 0 |
 | Skipped (documented) | 0 |
-| Vectors with at least one pass | 21 / 21 | 100% |
+| Vectors with at least one pass | 51 / 51 | 100% |
 
 
 ## By Compliance Level
@@ -19,7 +19,7 @@
 ### compliance-level-2
 | Vectors | Passed | Failed | Skipped | Pass Rate |
 |---------|--------|--------|---------|-----------|
-| 44 | 44 | 0 | 0 | 100% |
+| 110 | 110 | 0 | 0 | 100% |
 
 ### compliance-level-3
 | Vectors | Passed | Failed | Skipped | Pass Rate |
@@ -30,7 +30,11 @@
 | Directory | Passed | Failed | Skipped |
 |-----------|--------|--------|---------|
 
+| 0001-filter | 3 | 0 | 0 |
+
 | 0002-input-data-number | 3 | 0 | 0 |
+
+| 0002-string-functions | 3 | 0 | 0 |
 
 | 0004-simpletable-U | 3 | 0 | 0 |
 
@@ -50,15 +54,71 @@
 
 | 0009-invocation-arithmetic | 3 | 0 | 0 |
 
+| 0010-concatenate | 3 | 0 | 0 |
+
 | 0010-multi-output-U | 3 | 0 | 0 |
+
+| 0011-insert-remove | 3 | 0 | 0 |
 
 | 0012-list-functions | 3 | 0 | 0 |
 
+| 0013-sort | 3 | 0 | 0 |
+
 | 0016-some-every | 3 | 0 | 0 |
+
+| 0021-singleton-list | 3 | 0 | 0 |
 
 | 0033-for-loops | 3 | 0 | 0 |
 
+| 0050-feel-abs-function | 2 | 0 | 0 |
+
+| 0051-feel-sqrt-function | 2 | 0 | 0 |
+
+| 0052-feel-exp-function | 2 | 0 | 0 |
+
+| 0053-feel-log-function | 2 | 0 | 0 |
+
+| 0054-feel-even-function | 2 | 0 | 0 |
+
+| 0055-feel-odd-function | 2 | 0 | 0 |
+
+| 0056-feel-modulo-function | 2 | 0 | 0 |
+
+| 0057-feel-context | 2 | 0 | 0 |
+
+| 0058-feel-number-function | 2 | 0 | 0 |
+
+| 0059-feel-all-function | 2 | 0 | 0 |
+
+| 0060-feel-any-function | 2 | 0 | 0 |
+
+| 0061-feel-median-function | 2 | 0 | 0 |
+
+| 0062-feel-mode-function | 2 | 0 | 0 |
+
+| 0063-feel-stddev-function | 2 | 0 | 0 |
+
+| 0067-feel-split-function | 2 | 0 | 0 |
+
+| 0068-feel-equality | 2 | 0 | 0 |
+
+| 0069-feel-list | 2 | 0 | 0 |
+
+| 0071-feel-between | 2 | 0 | 0 |
+
+| 0080-feel-getvalue-function | 2 | 0 | 0 |
+
+| 0081-feel-getentries-function | 2 | 0 | 0 |
+
 | 0085-decision-services | 2 | 0 | 0 |
+
+| 0094-feel-product-function | 2 | 0 | 0 |
+
+| 0096-feel-day-of-week-function | 2 | 0 | 0 |
+
+| 0097-feel-month-of-year-function | 2 | 0 | 0 |
+
+| 0098-feel-week-of-year-function | 2 | 0 | 0 |
 
 | 0100-arithmetic | 2 | 0 | 0 |
 
@@ -82,8 +142,8 @@
 
 ## Round-Trip Fidelity (DMNDI)
 
-- **Fixtures with DMNDI content:** 21
-- **Preserved through round-trip:** 15
+- **Fixtures with DMNDI content:** 50
+- **Preserved through round-trip:** 21
 - **Lost:** None
 
 ## Layer Breakdown
