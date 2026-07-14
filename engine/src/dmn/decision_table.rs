@@ -10,13 +10,12 @@
 //! working-memory-mutating, and two-valued. The two paths share neither an execution engine
 //! nor an expression AST (milestone research anti-pattern avoided).
 
-use std::sync::Arc;
 
 use crate::data_types::Value;
 use crate::dmn::feel::cache::{FeelAstCache, ParseEntry};
 use crate::dmn::feel::eval::{self, Scope};
 use crate::dmn::model::{
-    AllowedValues, BuiltinAggregator, DecisionTable, HitPolicy, InputClause, OutputClause, RuleEntry,
+    AllowedValues, BuiltinAggregator, DecisionTable, HitPolicy, InputClause, RuleEntry,
 };
 
 use thiserror::Error;
@@ -181,7 +180,7 @@ impl DecisionTableEvaluator {
         }
 
         let first = &matches[0].1;
-        for (idx, (_rule_idx, outputs)) in matches.iter().enumerate().skip(1) {
+        for (_idx, (_rule_idx, outputs)) in matches.iter().enumerate().skip(1) {
             for (col, (a, b)) in first.iter().zip(outputs.iter()).enumerate() {
                 if eval::feel_equals_public(a, b) != Some(true) {
                     let col_name = Self::output_column_name(table, col);
@@ -351,7 +350,7 @@ impl DecisionTableEvaluator {
     fn parse_allowed_values(allowed: &AllowedValues) -> Result<Vec<Value>, DecisionTableError> {
         let mut values = Vec::new();
         match allowed {
-            AllowedValues::UnaryTests(text) => {
+            AllowedValues::UnaryTests(_text) => {
                 // For PRIORITY/OUTPUT ORDER, the allowedValues is an Enumeration, not UnaryTests.
                 // If it's UnaryTests, we can't determine enumeration order — return error.
                 Err(DecisionTableError::Other(

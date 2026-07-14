@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use thiserror::Error;
 use tokio::fs;
@@ -22,7 +23,7 @@ use tokio::fs;
 // =========================================================================
 
 /// Summary of a DMN document (used in list responses).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DmnSummary {
     pub id: String,
     pub name: Option<String>,
@@ -31,7 +32,7 @@ pub struct DmnSummary {
 }
 
 /// Full DMN document (metadata + raw XML content).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DmnDocument {
     pub id: String,
     pub name: String,

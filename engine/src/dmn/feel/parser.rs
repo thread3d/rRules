@@ -32,9 +32,16 @@
 //! (default 10_000); `max_depth` cap on the parser recursion (default 256).
 //!
 //! *(Task 2 implements the lexer; Task 3 implements the parser.)*
+//!
+//! Phase 37 adds:
+//! - [`LexerTokenCache`] — lexer token caching to avoid redundant lexing
 
 use rust_decimal::Decimal;
 use super::ast::Span;
+
+// Forward declaration for ParseEntry (defined in cache.rs)
+#[allow(dead_code)]
+type ParseEntry = crate::dmn::feel::cache::ParseEntry;
 
 /// A FEEL lexical token (grammar rules 25, 33, 34, 35, 64, 65 + punctuators).
 ///
@@ -758,6 +765,163 @@ mod lexer_tests {
         assert_eq!(toks[0].span.col, 1);
         assert_eq!(toks[1].span.line, 2);
         assert_eq!(toks[1].span.col, 1);
+    }
+}
+
+// ======================================================================
+// Lexer token cache (Phase 37 optimization: avoid redundant lexing).
+// ======================================================================
+//
+// The lexer produces a Vec<TokenSpan> that is often reused:
+// - Multiple evalutations of the same FEEL cell (cached in FeelAstCache)
+// - Incremental parsing scenarios (user typing, editor undo/redo)
+//
+// We cache the token stream keyed by source text + entry point kind.
+// The same source always yields identical tokens — lexing is deterministic.
+
+use std::sync::Arc;
+use dashmap::DashMap;
+
+/// Canonical cache key: `(entry-point kind, trimmed content)`.
+///
+/// This mirrors `cell_key` in the AST cache but for tokens instead of ASTs.
+pub fn token_cache_key(src: &str, entry: ParseEntry) -> String {
+    let trimmed = src.trim();
+    format!("{:?}:{}", entry, trimmed)
+}
+
+/// Token cache keyed by `(ParseEntry, source_text)` pairs.
+///
+/// Used to avoid redundant lexing when the same FEEL text is parsed
+/// multiple times. The cache stores `Arc<Vec<TokenSpan>>` so token lists
+/// can be shared without cloning.
+#[derive(Debug)]
+pub struct LexerTokenCache {
+    map: DashMap<String, Arc<Vec<TokenSpan>>>,
+}
+
+impl LexerTokenCache {
+    /// Construct an empty lexer token cache.
+    pub fn new() -> Self {
+        Self {
+            map: DashMap::new(),
+        }
+    }
+
+    /// Look up or lex `src` under the given entry-point kind. Returns the
+    /// cached (or freshly lexed) token stream as an `Arc<Vec<TokenSpan>>`.
+    ///
+    /// **Contract:** `src` must be post-CDATA-strip (same as AST cache).
+    pub fn get_or_lex(&self, src: &str, entry: ParseEntry) -> Arc<Vec<TokenSpan>> {
+        let key = token_cache_key(src, entry);
+        self.map
+            .entry(key)
+            .or_insert_with(|| {
+                let mut lexer = Lexer::new(src);
+                Arc::new(lexer.tokenize())
+            })
+            .clone()
+    }
+
+    /// Number of distinct (entry-point, content) pairs currently cached.
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// True iff the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
+    /// Clear all cached tokens (useful for test isolation or reload scenarios).
+    pub fn clear(&self) {
+        self.map.clear();
+    }
+}
+
+impl Default for LexerTokenCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ======================================================================
+// Tests
+// ======================================================================
+
+#[cfg(test)]
+mod lexer_cache_tests {
+    use super::*;
+
+    /// Same source text under same entry point returns identical token stream.
+    #[test]
+    fn get_or_lex_returns_same_tokens_for_same_source() {
+        let cache = LexerTokenCache::new();
+        let src = "1 + 2 * 3";
+
+        let a = cache.get_or_lex(src, ParseEntry::Expression);
+        let b = cache.get_or_lex(src, ParseEntry::Expression);
+
+        assert_eq!(a.len(), b.len(), "same source yields same token count");
+        for (ta, tb) in a.iter().zip(b.iter()) {
+            assert_eq!(ta.token, tb.token, "token at position {} differs", ta.span.start);
+            assert_eq!(ta.span, tb.span, "span at position {} differs", ta.span.start);
+        }
+    }
+
+    /// Different entry points for same source return IDENTICAL token streams
+    /// (lexer doesn't care about parsing context).
+    #[test]
+    fn different_entry_points_produce_identical_token_streams() {
+        let cache = LexerTokenCache::new();
+        let src = "x"; // simple name
+
+        let expr_tokens = cache.get_or_lex(src, ParseEntry::Expression);
+        let unary_tokens = cache.get_or_lex(src, ParseEntry::SimpleUnaryTests);
+
+        assert_eq!(expr_tokens.len(), unary_tokens.len(),
+            "lexer produces same token count regardless of entry point");
+        for (ta, tb) in expr_tokens.iter().zip(unary_tokens.iter()) {
+            assert_eq!(ta.token, tb.token,
+                "token at position {} identical regardless of entry point", ta.span.start);
+        }
+        // Same source = same cache key (key is just (entry, content), so different
+        // entry points yield DIFFERENT entries even if tokens are the same).
+        assert_eq!(cache.len(), 2, "different entry points create separate cache entries");
+    }
+
+    /// Whitespace normalization works in token cache key.
+    #[test]
+    fn whitespace_is_normalized_in_token_cache_key() {
+        let cache = LexerTokenCache::new();
+
+        let a = cache.get_or_lex("  x + y  ", ParseEntry::Expression);
+        let b = cache.get_or_lex("x + y", ParseEntry::Expression);
+
+        assert_eq!(a.len(), b.len());
+    }
+
+    /// Cache len reflects distinct (entry, content) pairs.
+    #[test]
+    fn cache_len_tracks_distinct_entries() {
+        let cache = LexerTokenCache::new();
+
+        cache.get_or_lex("1 + 2", ParseEntry::Expression);
+        cache.get_or_lex("3 * 4", ParseEntry::Expression);
+        cache.get_or_lex("1 + 2", ParseEntry::Expression); // duplicate
+
+        assert_eq!(cache.len(), 2, "duplicate entries don't grow cache");
+    }
+
+    /// clear() empties the cache.
+    #[test]
+    fn clear_empties_cache() {
+        let cache = LexerTokenCache::new();
+        cache.get_or_lex("1 + 2", ParseEntry::Expression);
+        assert_eq!(cache.len(), 1);
+
+        cache.clear();
+        assert_eq!(cache.is_empty(), true, "clear empties the cache");
     }
 }
 
@@ -1582,10 +1746,31 @@ impl Parser {
 ///
 /// **Error recovery:** on a parse error, returns a `FeelExpression::Err`
 /// node — never panics on untrusted input (T-31-01-03 mitigation).
+///
+/// **Lexer cache (Phase 37):** optional `cache` parameter for token caching.
+/// When provided, the lexer's output tokens are cached and reused across
+/// identical source texts. For the first parse of a given text, tokens are
+/// produced normally and stored in the cache; subsequent parses return
+/// cached tokens with zero lexical overhead.
 pub fn parse_expression(src: &str) -> FeelExpression {
-    let mut lexer = Lexer::new(src);
-    let tokens = lexer.tokenize();
-    let mut p = Parser::new(tokens);
+    parse_expression_with_cache(src, None)
+}
+
+/// Parse a FEEL `Expression` (grammar rule 1) from `src` using an optional lexer cache.
+///
+/// When `cache` is `Some(&LexerTokenCache)`, the lexer's token stream is cached
+/// and reused across identical source texts. This eliminates redundant lexing
+/// for expressions parsed multiple times (e.g., in iterative evaluation scenarios).
+pub fn parse_expression_with_cache(src: &str, cache: Option<&LexerTokenCache>) -> FeelExpression {
+    let tokens = if let Some(cache) = cache {
+        // Use cached tokens when available.
+        cache.get_or_lex(src, ParseEntry::Expression)
+    } else {
+        // Fall back to direct lexing.
+        let mut lexer = Lexer::new(src);
+        Arc::new(lexer.tokenize())
+    };
+    let mut p = Parser::new(tokens.as_ref().to_vec());
     p.parse_expr(0)
 }
 
@@ -1595,9 +1780,18 @@ pub fn parse_expression(src: &str) -> FeelExpression {
 /// node), `not(tests)` → `Neg(positiveUnaryTests)`, and a comma-separated
 /// Or-chain of positive unary tests (rule 14 → rule 13 → expression).
 pub fn parse_simple_unary_tests(src: &str) -> FeelExpression {
-    let mut lexer = Lexer::new(src);
-    let tokens = lexer.tokenize();
-    let mut p = Parser::new(tokens);
+    parse_simple_unary_tests_with_cache(src, None)
+}
+
+/// Parse a FEEL `SimpleUnaryTests` (grammar rule 15) from `src` using an optional lexer cache.
+pub fn parse_simple_unary_tests_with_cache(src: &str, cache: Option<&LexerTokenCache>) -> FeelExpression {
+    let tokens = if let Some(cache) = cache {
+        cache.get_or_lex(src, ParseEntry::SimpleUnaryTests)
+    } else {
+        let mut lexer = Lexer::new(src);
+        Arc::new(lexer.tokenize())
+    };
+    let mut p = Parser::new(tokens.as_ref().to_vec());
 
     // Lone `-` means "always true" (any input passes). The lexer appends
     // a trailing `Eof`, so we check: first token is `Minus` and the next

@@ -3,7 +3,7 @@
 //! This module implements ChainingSelector that automatically determines whether
 //! forward or backward chaining is optimal for a given set of rules.
 
-use crate::rules::{Condition, ComparisonOp, Rule};
+use crate::rules::{ComparisonOp, Condition, Rule};
 
 /// Result of analyzing rule structure for inference pattern classification.
 #[derive(Debug, Clone, PartialEq)]
@@ -199,7 +199,7 @@ pub struct ActivationWithJustification {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::{Condition, RuleBuilder};
+    use crate::rules::{ComparisonOp, Condition, RuleBuilder};
     use crate::Value;
 
     #[test]

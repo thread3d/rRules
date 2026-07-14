@@ -1156,7 +1156,7 @@ fn cartesian_iterate(
     }
 
     // For the current iter var, iterate over all values of this source.
-    let name = iters[idx].0.clone();
+    let _name = iters[idx].0.clone();
     for val in &materialized[idx] {
         let mut new_current = current.to_vec();
         new_current.push(val.clone());
@@ -1234,7 +1234,7 @@ fn collect_quant_predicates(
         return;
     }
 
-    let name = iters[idx].0.clone();
+    let _name = iters[idx].0.clone();
     for val in &materialized[idx] {
         let mut new_current = current.to_vec();
         new_current.push(val.clone());
@@ -1491,7 +1491,7 @@ fn datetime_sub(l: &Value, r: &Value) -> Option<Value> {
     match (l, r) {
         // Date - Date -> DaysTimeDuration
         (Value::Date(a), Value::Date(b)) => {
-            Some(Value::DaysTimeDuration((*a - *b)))
+            Some(Value::DaysTimeDuration(*a - *b))
         }
         // DateTimeTz - DateTimeTz -> DaysTimeDuration (within-form only)
         (Value::DateTimeTz(a), Value::DateTimeTz(b)) => match (a, b) {

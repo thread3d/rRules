@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! FEEL built-in function library — `BuiltinFn` registry + ~70+ functions.
 //!
 //! Plan 31-07 (part 1: conversion/string/list/numeric families) and 31-08
@@ -1611,7 +1613,7 @@ pub fn built_in_get_value(args: &[Value]) -> Value {
     };
     let key = match &args[1] {
         Value::String(s) => s.clone(),
-        other => return Value::Null, // non-string key → null
+        _other => return Value::Null, // non-string key → null
     };
     ctx.get(&key).cloned().unwrap_or(Value::Null)
 }
