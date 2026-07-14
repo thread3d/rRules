@@ -82,6 +82,12 @@ pub struct SharedDmnModel {
     pub ast_cache: FeelAstCache,
     /// Generation counter (incremented on reload).
     generation: u64,
+    /// Cached resolved DRD topological orders, keyed by target decision ID
+    /// (PERF-08 hardening). The topological order for a target is computed
+    /// once and reused across (recursive) `evaluate` calls, avoiding an
+    /// O(V+E) DRD re-walk for every upstream decision. Invalidated on
+    /// reload via [`Self::bump_generation`].
+    drd_order_cache: RwLock<HashMap<String, Vec<String>>>,
 }
 
 impl SharedDmnModel {
@@ -90,16 +96,55 @@ impl SharedDmnModel {
             model,
             ast_cache,
             generation: 1,
+            drd_order_cache: RwLock::new(HashMap::new()),
         }
     }
 
     /// Increment the generation counter (called after a successful reload).
+    /// Clears the DRD order cache so stale topological orders are never
+    /// reused after the model is reloaded (PERF-08).
     pub fn bump_generation(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+        if let Ok(mut cache) = self.drd_order_cache.write() {
+            cache.clear();
+        }
     }
 
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Resolve the DRD topological order for `target_id`, memoizing the
+    /// result in [`Self::drd_order_cache`] (PERF-08 hardening). The first
+    /// call computes the order via [`resolve_drd_order`]; subsequent calls
+    /// (including recursive upstream evaluations) return the cached order,
+    /// eliminating redundant O(V+E) DRD walks per `evaluate`.
+    ///
+    /// The cache is a pure optimization: on a poisoned lock it is skipped
+    /// and the order is recomputed, so correctness never depends on it.
+    pub fn resolve_drd_order_cached(
+        &self,
+        target_id: &str,
+    ) -> Result<Vec<String>, DecisionEvalError> {
+        // Fast path: read lock, return clone on hit.
+        if let Ok(cache) = self.drd_order_cache.read() {
+            if let Some(order) = cache.get(target_id) {
+                return Ok(order.clone());
+            }
+        }
+        // Miss: compute (no inner lock held during the O(V+E) walk), then
+        // store. A concurrent caller may compute the same order twice; that
+        // is harmless (idempotent insert of an equal value).
+        let order = resolve_drd_order(self, target_id)?;
+        if let Ok(mut cache) = self.drd_order_cache.write() {
+            cache.insert(target_id.to_string(), order.clone());
+        }
+        Ok(order)
+    }
+
+    /// Number of cached DRD orders (for diagnostics / tests).
+    pub fn drd_order_cache_len(&self) -> usize {
+        self.drd_order_cache.read().map(|c| c.len()).unwrap_or(0)
     }
 }
 
@@ -272,8 +317,10 @@ impl DecisionEvaluator {
             DecisionEvalError::Internal(format!("failed to acquire read lock: {}", e))
         })?;
 
-        // 2. Resolve DRD order — evaluate upstream decisions first.
-        let drd_order = resolve_drd_order(&guard, decision_id)?;
+        // 2. Resolve DRD order — evaluate upstream decisions first. Memoized
+        // in the shared snapshot (PERF-08) so recursive upstream evaluations
+        // reuse the cached topological order instead of re-walking the DRD.
+        let drd_order = guard.resolve_drd_order_cached(decision_id)?;
 
         // Observe DRD chain depth for metrics (Phase 35).
         METRIC_DRD_CHAIN_DEPTH
@@ -480,4 +527,71 @@ pub enum DecisionEvalError {
 
     #[error(transparent)]
     TableError(#[from] crate::dmn::decision_table::DecisionTableError),
+}
+
+#[cfg(test)]
+mod drd_cache_tests {
+    use super::*;
+    use crate::dmn::feel::cache::FeelAstCache;
+    use crate::dmn::model::{Decision, Definitions, DefinitionsChild, DmnModel};
+
+    /// Build a minimal 2-decision DRD: `d2` requires `d1`. No decision tables —
+    /// the DRD resolver only walks `required_decisions`, so tables are not
+    /// needed to exercise the order cache.
+    fn two_decision_model() -> DmnModel {
+        let mk = |id: &str, req: Vec<String>| Decision {
+            id: id.into(),
+            name: None,
+            description: None,
+            variable: None,
+            question: None,
+            allowed_answers: None,
+            decision_table: None,
+            required_decisions: req,
+            required_inputs: vec![],
+            required_knowledge: vec![],
+            annotations: vec![],
+        };
+        let mut defs = Definitions::default();
+        defs.children.push(DefinitionsChild::Decision(mk("d1", vec![])));
+        defs.children.push(DefinitionsChild::Decision(mk("d2", vec!["d1".into()])));
+        DmnModel { definitions: defs, source_namespace: None }
+    }
+
+    /// PERF-08: the DRD topological order is memoized — a second
+    /// `resolve_drd_order_cached` for the same target returns the cached
+    /// order without recomputation, and the cache holds exactly one entry.
+    #[test]
+    fn drd_order_is_memoized() {
+        let model = two_decision_model();
+        let shared = SharedDmnModel::new(model, FeelAstCache::new());
+
+        let order1 = shared.resolve_drd_order_cached("d2").expect("resolve d2");
+        assert_eq!(order1, vec!["d1".to_string(), "d2".to_string()]);
+        assert_eq!(shared.drd_order_cache_len(), 1, "one cached order for d2");
+
+        // Second call must return the SAME order from the cache (no new entry).
+        let order2 = shared.resolve_drd_order_cached("d2").expect("resolve d2 again");
+        assert_eq!(order2, order1, "cached order identical to first");
+        assert_eq!(shared.drd_order_cache_len(), 1, "cache not grown on hit");
+
+        // Resolving d1 caches a second, distinct order.
+        let order_d1 = shared.resolve_drd_order_cached("d1").expect("resolve d1");
+        assert_eq!(order_d1, vec!["d1".to_string()]);
+        assert_eq!(shared.drd_order_cache_len(), 2, "d1 adds a second cache entry");
+    }
+
+    /// PERF-08: `bump_generation` (reload) invalidates the DRD order cache so
+    /// a stale topological order is never reused after the model changes.
+    #[test]
+    fn bump_generation_clears_drd_order_cache() {
+        let model = two_decision_model();
+        let mut shared = SharedDmnModel::new(model, FeelAstCache::new());
+        let _ = shared.resolve_drd_order_cached("d2").unwrap();
+        assert_eq!(shared.drd_order_cache_len(), 1);
+
+        shared.bump_generation();
+        assert_eq!(shared.drd_order_cache_len(), 0, "reload clears the DRD cache");
+        assert_eq!(shared.generation(), 2);
+    }
 }
