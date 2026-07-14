@@ -1,35 +1,34 @@
 {
   "version": "1.0",
-  "timestamp": "2026-07-14T13:30:00Z",
+  "timestamp": "2026-07-14T14:30:00Z",
   "phase": "v7.0-closure",
   "phase_name": "v7.0 Closure — fixing 8 unsatisfied PERF requirements inline",
   "plan": "User chose 'Closure phases (Recommended)' — fix all 8 gaps inline, then re-verify 36/37/38, then re-audit. Working in priority order, committing each gap atomically.",
   "status": "in_progress",
-  "next_action": "Continue closing remaining gaps: PERF-06 (per-thread thread_local! L1 cache), PERF-07 (quick-XML zero-copy in DMN loader), then PERF-03 (benchmark >=20% parser / >=15% evaluator vs v6.0-baseline.json — depends on 06/07/09, now all landed). Then write/re-write VERIFICATION.md for 36/37/38 and re-run /gsd-audit-milestone. PERF-09 and PERF-12 are now DONE (this context). 5 of 8 gaps closed.",
+  "next_action": "Continue closing remaining gaps: PERF-07 (quick-XML zero-copy in DMN loader — touches engine/src/dmn/parser.rs IR string extraction, review before editing), then PERF-03 (benchmark >=20% parser / >=15% evaluator vs v6.0-baseline.json — depends on 06/07/09, now ALL landed; bench harness now actually runs thanks to the harness=false fix in PERF-06). Then write/re-write VERIFICATION.md for 36/37/38 and re-run /gsd-audit-milestone. PERF-06 now DONE (this context). 6 of 8 gaps closed.",
   "closure_progress": {
     "closed": [
       {"req": "PERF-05", "commit": "74bce5cfe", "what": "Wired LexerTokenCache into FeelAstCache.get_or_parse (was orphaned dead code); added bounded FIFO eviction to both LexerTokenCache and FeelAstCache (max_entries=10_000). Tests: get_or_parse_warms_lexer_token_cache + bounded eviction."},
       {"req": "PERF-04", "commit": "20c0ea954", "what": "Fixed structurally-non-functional nightly regression gate: scripts/memcheck-gate.sh (single source of truth), memory_baseline writes v6.0-current.json (no longer overwrites frozen v6.0-baseline.json), --update-baseline opt-in, Makefile memcheck/baseline-update, bench.yml uses make memcheck + installs jq. Verified pass/fail/missing cases."},
       {"req": "PERF-08", "commit": "c6abe6c77", "what": "Memoized DRD topological order on SharedDmnModel (drd_order_cache, cleared on bump_generation); resolve_drd_order_cached used by evaluate. Cycle detection unchanged. Tests: drd_order_is_memoized + bump_generation_clears_drd_order_cache."},
       {"req": "PERF-09", "commit": "870422dc3", "what": "Level-by-level parallel DRD evaluation via rayon. New resolve_drd_levels (topo levels) + evaluate_single_decision (non-recursive, lock-free). evaluate rewritten: levels processed in order (barrier between levels), >1-decision levels use par_iter, single-decision levels stay sequential. One outer read guard; &SharedDmnModel shared into rayon tasks (Sync). DRD order precomputed before parallel section. Added rayon=1.10. Tests: resolve_drd_levels_groups_diamond, diamond_parallel_eval_produces_correct_result (d1->{d2a,d2b}->d3, result=118), chain_eval_sequential_levels. TCK sweep + hit_policy_core/advanced + dmn_round_trip + feel_cache_wiring all pass. Plan: 39-01-PLAN.md."},
-      {"req": "PERF-12", "commit": "975894688", "what": "Expanded vendored TCK corpus 21->51 Level 3 dirs (target 35+) from upstream dmn-tck/tck@0dbcaf9, covering FEEL built-in families (numeric/string/list/context/relational/temporal). cargo test --test tck_sweep green: 51 vectors, 123 layer-passes, 0 failed. Documented 30 remaining evaluator-layer gaps (parse+round-trip pass, evaluator output not yet matching) in TCK-COVERAGE-GAPS.md grouped by DMN 1.5 section 10.3.4 family as future FEEL built-in roadmap. Plans: 39-02-PLAN.md + TCK-COVERAGE-GAPS.md."}
+      {"req": "PERF-12", "commit": "975894688", "what": "Expanded vendored TCK corpus 21->51 Level 3 dirs (target 35+) from upstream dmn-tck/tck@0dbcaf9, covering FEEL built-in families (numeric/string/list/context/relational/temporal). cargo test --test tck_sweep green: 51 vectors, 123 layer-passes, 0 failed. Documented 30 remaining evaluator-layer gaps (parse+round-trip pass, evaluator output not yet matching) in TCK-COVERAGE-GAPS.md grouped by DMN 1.5 section 10.3.4 family as future FEEL built-in roadmap. Plans: 39-02-PLAN.md + TCK-COVERAGE-GAPS.md."},
+      {"req": "PERF-06", "commit": "2066ef455", "what": "Per-thread thread_local! L1 FEEL-AST cache (Weak<FeelExpression>) shadowing the shared DashMap in get_or_parse. FEEL text->AST is pure so keyed by (entry,content) is correct across reloads/instances. Live L1 hit returns the SAME Arc with no shard-lock; dead Weak falls through to shared map. Bounded FIFO 1024/thread. Also FIXED latent harness bug: engine/Cargo.toml dmn_benchmarks harness true->false (criterion_main! was shadowed by libtest; make bench measured nothing). New bench_feel_cache_concurrency group: thread_local vs dashmap_contended at 16/32 threads. Results: 11.1x speedup @16t (3.87ms vs 43.18ms), 16.1x @32t (7.59ms vs 122.56ms) — target 4-20x MET. 5 new cache tests; all 15 cache + tck_sweep + feel_cache_wiring + hit_policy_core green. Plan: 39-03-PLAN.md."}
     ],
     "remaining": [
-      {"req": "PERF-06", "scope": "moderate", "what": "Per-thread cache patterns (thread_local! L1 cache shadowing the shared DashMap). FEEL text->AST is a pure function so a thread_local keyed by (entry,content) is safe across reloads. Marginal value, low risk."},
       {"req": "PERF-07", "scope": "moderate-high", "what": "quick-XML zero-copy / streaming in the DMN XML loader (borrow from input buffer instead of allocating Strings). Touches IR string extraction in engine/src/dmn/parser.rs — review before editing."},
-      {"req": "PERF-03", "scope": "depends", "what": "Benchmark >=20% parser / >=15% evaluator vs v6.0-baseline.json. Now unblocked (06/07/09 landed). Run: make bench + memory_baseline; compare. NOTE: benchmark runs are slow on this machine (test-profile compiles took >5min; cargo hangs if another cargo holds ~/.cargo/.package-cache lock — kill stale cargos first). PERF-09 parallel eval should help evaluator throughput on independent chains."}
+      {"req": "PERF-03", "scope": "depends", "what": "Benchmark >=20% parser / >=15% evaluator vs v6.0-baseline.json. Now FULLY unblocked (06/07/09 landed AND bench harness now actually runs thanks to harness=false fix). Run: make bench + memory_baseline; compare. NOTE: benchmark runs are slow on this machine; cargo hangs if another cargo holds ~/.cargo/.package-cache lock — kill stale cargo/rustc by PID and rm -f ~/.cargo/.package-cache first. PERF-09 parallel eval should help evaluator throughput on independent chains."}
     ]
   },
   "blockers": [
-    "PERF-06: per-thread cache patterns not implemented",
     "PERF-07: quick-XML zero-copy not implemented",
-    "PERF-03: perf targets not yet benchmarked (depends on 06/07/09 — 09 now done; needs 06/07)",
+    "PERF-03: perf targets not yet benchmarked (depends on 07 — 06/08/09 landed; bench harness fixed)",
     "VERIFICATION.md missing for 36/37/38; Phase 36 VERIFICATION stale — restore verify-work gate then re-audit"
   ],
   "human_actions_pending": [
     {
-      "action": "Resume v7.0 closure in a fresh context: close PERF-06/07, then benchmark PERF-03, then write VERIFICATION.md for 36/37/38 and re-run /gsd-audit-milestone.",
-      "context": "5/8 gaps closed and committed (PERF-05,04,08,09,12). 3 remain (PERF-06,07,03). Working branch: master. Commits: 74bce5cfe, 20c0ea954, c6abe6c77, 870422dc3, 975894688."
+      "action": "Resume v7.0 closure in a fresh context: close PERF-07, then benchmark PERF-03 (run make bench + memory_baseline vs v6.0-baseline.json; harness now fixed so criterion actually measures), then write VERIFICATION.md for 36/37/38 and re-run /gsd-audit-milestone.",
+      "context": "6/8 gaps closed and committed (PERF-05,04,08,09,12,06). 2 remain (PERF-07,03). Working branch: master. Commits: 74bce5cfe, 20c0ea954, c6abe6c77, 870422dc3, 975894688, 2066ef455."
     }
   ],
   "completed_tasks": [
@@ -38,11 +37,11 @@
     {"id": "PERF-08", "name": "memoize DRD topological order", "status": "done", "commit": "c6abe6c77"},
     {"id": "PERF-09", "name": "level-by-level parallel evaluation", "status": "done", "commit": "870422dc3"},
     {"id": "PERF-12", "name": "TCK coverage gap closure (21->51)", "status": "done", "commit": "975894688"},
-    {"id": "PERF-06", "name": "per-thread cache patterns", "status": "pending"},
+    {"id": "PERF-06", "name": "per-thread L1 cache + concurrency benchmark + harness fix", "status": "done", "commit": "2066ef455"},
     {"id": "PERF-07", "name": "quick-XML zero-copy", "status": "pending"},
-    {"id": "PERF-03", "name": "benchmark perf targets vs baseline", "status": "pending", "note": "depends on 06/07"},
+    {"id": "PERF-03", "name": "benchmark perf targets vs baseline", "status": "pending", "note": "depends on 07; 06/08/09 landed; bench harness fixed (harness=false)"},
     {"id": "verify-gate", "name": "VERIFICATION.md for 36/37/38 + re-audit", "status": "pending"}
   ],
-  "context_notes": "v7.0 closure (2026-07-14): 5 of 8 unsatisfied PERF requirements closed with atomic commits + targeted tests. This context closed PERF-09 (parallel DRD eval, rayon) and PERF-12 (TCK 21->51 + gap doc). Remaining 3: PERF-06 (per-thread cache, moderate), PERF-07 (quick-XML zero-copy, moderate-high, touches parser.rs IR string extraction), PERF-03 (benchmarking — now unblocked by 09; bench runs slow on this machine). Then restore verify-work gate (VERIFICATION.md for 36/37/38; Phase 36 stale) and re-run /gsd-audit-milestone to re-score from 4/12 toward passed/tech_debt. Build caveat: a stale cargo from another project holding ~/.cargo/.package-cache caused cargo hangs — kill stale cargo/rustc by PID and rm -f ~/.cargo/.package-cache before running cargo. Full lib test-profile compile is slow (>5min) — use targeted tests (cargo test --lib <module>, cargo test --test <name>). Audit report at .planning/v7.0-MILESTONE-AUDIT.md (still says gaps_found 4/12 — re-score after remaining gaps close). Working branch master (not the protected main). Phase 39 now has plans 39-01 (PERF-09) and 39-02 (PERF-12) + TCK-COVERAGE-GAPS.md.",
+  "context_notes": "v7.0 closure (2026-07-14): 6 of 8 unsatisfied PERF requirements closed with atomic commits + targeted tests. This context closed PERF-06 (per-thread thread_local! L1 FEEL-AST cache with Weak<FeelExpression>, shadowing the shared DashMap; live hit returns same Arc with no shard-lock; 11x/16x speedup at 16/32 threads in new bench_feel_cache_concurrency group; ALSO fixed latent harness=true bug in engine/Cargo.toml that made make bench measure nothing — now harness=false so criterion runs). Remaining 2: PERF-07 (quick-XML zero-copy, moderate-high, touches parser.rs IR string extraction), PERF-03 (benchmarking — now fully unblocked: 06/08/09 landed and bench harness fixed; bench runs slow on this machine). Then restore verify-work gate (VERIFICATION.md for 36/37/38; Phase 36 stale) and re-run /gsd-audit-milestone to re-score from 4/12 toward passed/tech_debt. Build caveat: stale cargo from another project (domaths-kernel) holding ~/.cargo/.package-cache caused cargo hangs — kill stale cargo/rustc by PID and rm -f ~/.cargo/.package-cache before running cargo. Full lib test-profile compile is slow (>5min) — use targeted tests (cargo test --lib <module>, cargo test --test <name>). Cargo.lock now committed with rayon entry (was uncommitted drift from PERF-09). Audit report at .planning/v7.0-MILESTONE-AUDIT.md (still says gaps_found 4/12 — re-score after remaining gaps close). Working branch master (not the protected main). Phase 39 now has plans 39-01 (PERF-09), 39-02 (PERF-12), 39-03 (PERF-06) + TCK-COVERAGE-GAPS.md.",
   "uncommitted_files": []
 }
