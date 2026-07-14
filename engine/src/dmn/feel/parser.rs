@@ -779,7 +779,8 @@ mod lexer_tests {
 // We cache the token stream keyed by source text + entry point kind.
 // The same source always yields identical tokens — lexing is deterministic.
 
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use dashmap::DashMap;
 
 /// Canonical cache key: `(entry-point kind, trimmed content)`.
@@ -790,21 +791,45 @@ pub fn token_cache_key(src: &str, entry: ParseEntry) -> String {
     format!("{:?}:{}", entry, trimmed)
 }
 
+/// Default bounded capacity for the lexer token cache (PERF-05). Matches
+/// the AST cache cap; the two caches are populated in lockstep (every AST
+/// cache miss performs one token cache lookup), so they stay size-aligned
+/// in normal per-model operation.
+const DEFAULT_MAX_TOKEN_CACHE_ENTRIES: usize = 10_000;
+
 /// Token cache keyed by `(ParseEntry, source_text)` pairs.
 ///
 /// Used to avoid redundant lexing when the same FEEL text is parsed
 /// multiple times. The cache stores `Arc<Vec<TokenSpan>>` so token lists
 /// can be shared without cloning.
+///
+/// **PERF-05 — bounded eviction:** the map is bounded by
+/// [`DEFAULT_MAX_TOKEN_CACHE_ENTRIES`] via FIFO eviction (insertion-order,
+/// tracked by a `Mutex<VecDeque<String>>`). FIFO keeps the hot read path
+/// lock-free — the `Mutex` is touched only on a miss/insert. See
+/// [`crate::dmn::feel::cache::FeelAstCache`] for the full rationale (the two
+/// caches share the same eviction strategy and per-model scoping argument).
 #[derive(Debug)]
 pub struct LexerTokenCache {
     map: DashMap<String, Arc<Vec<TokenSpan>>>,
+    /// Insertion order for FIFO eviction when `map.len()` exceeds `max_entries`.
+    order: Mutex<VecDeque<String>>,
+    /// Bounded capacity (PERF-05 backstop).
+    max_entries: usize,
 }
 
 impl LexerTokenCache {
-    /// Construct an empty lexer token cache.
+    /// Construct an empty lexer token cache with the default bounded capacity.
     pub fn new() -> Self {
+        Self::with_capacity(DEFAULT_MAX_TOKEN_CACHE_ENTRIES)
+    }
+
+    /// Construct an empty lexer token cache with a custom bounded capacity.
+    pub fn with_capacity(max_entries: usize) -> Self {
         Self {
             map: DashMap::new(),
+            order: Mutex::new(VecDeque::new()),
+            max_entries,
         }
     }
 
@@ -814,13 +839,45 @@ impl LexerTokenCache {
     /// **Contract:** `src` must be post-CDATA-strip (same as AST cache).
     pub fn get_or_lex(&self, src: &str, entry: ParseEntry) -> Arc<Vec<TokenSpan>> {
         let key = token_cache_key(src, entry);
-        self.map
-            .entry(key)
-            .or_insert_with(|| {
+        let tokens = match self.map.entry(key.clone()) {
+            dashmap::mapref::entry::Entry::Occupied(o) => o.get().clone(),
+            dashmap::mapref::entry::Entry::Vacant(v) => {
                 let mut lexer = Lexer::new(src);
-                Arc::new(lexer.tokenize())
-            })
-            .clone()
+                let lexed = Arc::new(lexer.tokenize());
+                v.insert(lexed.clone());
+                if let Ok(mut ord) = self.order.lock() {
+                    ord.push_back(key);
+                }
+                lexed
+            }
+        };
+        if self.map.len() > self.max_entries {
+            self.evict_oldest();
+        }
+        tokens
+    }
+
+    /// FIFO eviction: drop the oldest-inserted keys until `map.len()` is back
+    /// under `max_entries`. Duplicate keys (from concurrent misses) are
+    /// harmless — `map.remove` is idempotent on a missing key.
+    fn evict_oldest(&self) {
+        let to_remove: Vec<String> = {
+            let mut ord = match self.order.lock() {
+                Ok(o) => o,
+                Err(_) => return,
+            };
+            let mut keys = Vec::new();
+            while self.map.len() > self.max_entries {
+                match ord.pop_front() {
+                    Some(k) => keys.push(k),
+                    None => break,
+                }
+            }
+            keys
+        };
+        for k in &to_remove {
+            self.map.remove(k);
+        }
     }
 
     /// Number of distinct (entry-point, content) pairs currently cached.
@@ -836,6 +893,9 @@ impl LexerTokenCache {
     /// Clear all cached tokens (useful for test isolation or reload scenarios).
     pub fn clear(&self) {
         self.map.clear();
+        if let Ok(mut ord) = self.order.lock() {
+            ord.clear();
+        }
     }
 }
 
