@@ -236,6 +236,7 @@ Plans:
 **Plans**: 3 plans complete (Wave 1: route wiring + metrics; Wave 2: DRD resolution + multi-output; Wave 3: integration tests)
 
 Plans:
+
 - [x] 33-01-PLAN.md — Wire DecisionEvaluator into main.rs + register /v1/decisions routes + Prometheus metrics instrumentation (DMN-22, DMN-26)
 - [x] 33-02-PLAN.md — Topological DRD resolution with cycle detection + multi-output evaluation enhancement (DMN-23)
 - [x] 33-03-PLAN.md — Wave 0 integration tests: evaluate endpoint, trace emission, hot-reload, metrics verification (DMN-25, DMN-26, DMN-28)
@@ -256,6 +257,7 @@ Plans:
 **Plans**: 3 plans in 3 waves
 
 Plans:
+
 - [ ] 34-01-PLAN.md — Refactor HitPolicy data model to DMN canonical (7 policies + COLLECT aggregator sub-type); update HitPolicySelector and DecisionTable
 - [ ] 34-02-PLAN.md — Create dmnSerializer.ts (editor-shape ↔ backend IR mapper) + add GET /v1/decisions/{id}/ir endpoint returning parsed decision table as JSON
 - [ ] 34-03-PLAN.md — Wire DecisionTable evaluate button to real backend via serializer; display results/trace in UI; create AllowedValuesEditor for PRIORITY/OUTPUT ORDER columns
@@ -280,6 +282,7 @@ Plans:
 **Plans**: 4 plans in 4 waves
 
 Plans:
+
 - [ ] 35-01-PLAN.md — TCK test infrastructure: expanded vector discovery, structural XML comparison helper, TCK runner scaffold (DMN-33)
 - [ ] 35-02-PLAN.md — Full TCK sweep execution + DMNDI round-trip verification with human review gate (DMN-07, DMN-33)
 - [ ] 35-03-PLAN.md — Extended DMN metrics: per-output counters, DRD chain depth gauge, decision service invocation traces (DMN-27)

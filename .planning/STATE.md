@@ -2,19 +2,20 @@
 gsd_state_version: 1.0
 milestone: v7.0
 milestone_name: Performance + Production Readiness
-current_phase: 0
-status: Awaiting next milestone
-stopped_at: context exhaustion at 77% (2026-07-10)
-last_updated: "2026-07-10T11:22:15.044Z"
-last_activity: 2026-07-10
-last_activity_desc: Milestone v7.0 completed and archived
+current_phase: 38
+current_phase_name: Testing Expansion + Fuzzing + Property-based Tests
+status: executing
+stopped_at: Phase 38 T1/T2 committed (2026-07-14); T3 next
+paused_at: 2026-07-14 — Phase 38 T1/T2 committed, T3 (decision-table fuzzing) queued
+last_updated: "2026-07-14T00:00:00.000Z"
+last_activity: 2026-07-14
+last_activity_desc: Phase 37 + Phase 38 T1/T2 committed; T3 next
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 25
-  completed_plans: 23
-  percent: 71
-current_phase_name: decision-table-engine-hit-policies
+  completed_plans: 24
+  percent: 75
 ---
 
 # Project State
@@ -24,14 +25,14 @@ current_phase_name: decision-table-engine-hit-policies
 See: `.planning/PROJECT.md` (updated 2026-07-10)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** Phase 36 — benchmarks-memory-profiling-gates (v7.0)
+**Current focus:** Phase 38 — Testing Expansion + Fuzzing + Property-based Tests (T3 next)
 
 ## Current Position
 
-Phase: Milestone v7.0 complete
-Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-07-10 — Milestone v7.0 completed and archived
+Phase: 38 (Testing Expansion + Fuzzing + Property-based Tests) — EXECUTING
+Plan: 38-01 (T1+T2 committed; T3 next)
+Status: Phase 37 + Phase 38 T1/T2 committed (2026-07-14); T3 (decision-table fuzzing) is next
+Last activity: 2026-07-14 — committed Phase 37 + Phase 38 T1/T2; T3 queued
 
 ### Milestone v6.0 Phases
 
@@ -314,11 +315,11 @@ From v3.0 milestone:
 
 ## Session Continuity
 
-**Resume file:** None
+**Resume file:** None (stale .continue-here.md from v4.0 — not applicable)
 
-**Stopped at:** context exhaustion at 77% (2026-07-10)
+**Stopped at:** context exhaustion at 77% (2026-07-13)
 
-Last session: 2026-07-10T11:21:26.725Z
+Last session: 2026-07-13T10:36:13.889Z
 
 **Completed Phases:**
 
@@ -327,6 +328,7 @@ Last session: 2026-07-10T11:21:26.725Z
 - Phase 19: Monitoring & Metrics (Prometheus, Dashboard, Dead Rules, Coverage) ✅
 - Phase 20: Complete Management API (Rules CRUD, Categories, Tags, Approvals, Audit, Branches) ✅
 - Phase 21: Deployment & CI/CD (Helm charts, K8s manifests, hot reload) ✅
+- Phase 36: Benchmarks + Memory Profiling Gates ✅
 
 **Phase 10 Status (Completed):**
 
@@ -335,6 +337,8 @@ Last session: 2026-07-10T11:21:26.725Z
 - TREAT algorithm with caching ✅
 - LEAPS algorithm with aggregations ✅
 - PHREAK algorithm with truth maintenance ✅
+
+---
 
 ---
 
@@ -362,3 +366,38 @@ Last session: 2026-07-10T11:21:26.725Z
 | Phase 31 P02 | 12min | 2 tasks | 1 files |
 | Phase 31 P03 | ~20min | 2 tasks | 3 files |
 | Phase 31-feel-parser-evaluator-built-in-function-library P05 | 20min | 2 tasks | - files |
+
+## Session Continuity (Updated 2026-07-13)
+
+**Paused at:** 2026-07-14 — Phase 37 + Phase 38 T1/T2 committed; T3 (decision-table fuzzing) queued
+**Resume command:** `/gsd-resume-work` or say "continue"
+
+**Completed in this session:**
+
+- Phase 36 (Benchmarks + Memory Profiling Gates) — COMPLETE & committed
+  - Criterion benchmark harness with four groups (parser, FEEL evaluator, decision-table, DRD)
+  - Memory profiling utility with RSS measurement and baseline snapshots
+  - CI integration with nightly regression gates
+- Phase 37 (Parser/Evaluator Optimization + AST Cache Warming) — COMPLETE & committed (deb23df57)
+  - T1: Lexer token cache (`LexerTokenCache`) — DashMap-backed
+  - T2: Parser entry points extended with cache support (`parse_expression_with_cache`)
+  - T3: DRD resolution documentation and parallelization infrastructure ready
+- Phase 38 T1/T2 — COMPLETE & committed (31cdbf77)
+  - T1: FEEL parser cargo-fuzz target (`feel_parser`)
+  - T2: 14 property-based tests (`engine/tests/feel_properties.rs`)
+
+**Phase 37 Tasks:**
+| ID | Name | Status |
+|----|------|--------|
+| T1 | Parser optimization (lexer caching) | COMPLETE (committed) |
+| T2 | Evaluator optimization (AST cache warming) | COMPLETE (committed) |
+| T3 | DRD parallelization | COMPLETE (committed) |
+
+**Phase 38 Tasks:**
+| ID | Name | Status |
+|----|------|--------|
+| T1 | Fuzzing for FEEL parser (cargo-fuzz) | COMPLETE (committed) |
+| T2 | Property-based tests for FEEL evaluator | COMPLETE (committed) |
+| T3 | Fuzzing for decision-table evaluation | NEXT (in progress) |
+
+---

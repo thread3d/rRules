@@ -1,43 +1,20 @@
 {
   "version": "1.0",
-  "timestamp": "2026-07-01T12:30:00.000Z",
-  "phase": "v4.0-closure",
-  "phase_name": "v4.0 Production Platform - close frontend integration gaps",
-  "phase_dir": ".planning",
-  "plan": "v4.0 hardening (A1-A7) COMPLETE; milestone audit (B2) gaps_found; user chose to close inline via new frontend-wiring phase",
-  "plan_file": "/home/threaded/.claude/plans/eager-whistling-reddy.md",
-  "task": "post-audit",
-  "total_tasks": 1,
-  "status": "paused_at_decision",
-  "completed_tasks": [
-    {"id": "A1-A6a", "status": "done", "commits": "5a1e2adc7,179c7ca10,74374c5a0,cc22329eb,8e9119295"},
-    {"id": "A6b", "name": "utoipa OpenAPI spec + Swagger UI (32 paths, 53 schemas)", "status": "done", "commit": "5e383baf7"},
-    {"id": "A7", "name": "Hardening gate (clippy/test/check workspace green, 232 tests pass)", "status": "done"},
-    {"id": "B1", "name": "Re-verify Phase 19 VERIFICATION.md (GAPS_FOUND -> passed w/ deferred tech-debt note)", "status": "done", "commit": "b951b41ac"},
-    {"id": "B2", "name": "Regenerate v4.0 milestone audit", "status": "done", "commit": "11d01fe8e", "result": "gaps_found - frontend (Phase 17) is a scaffolding skeleton, orphaned from router/backend; 9/13 requirements partial; 4/13 satisfied (MON-01, API-04, DEPLOY-03, DEPLOY-04)"}
-  ],
-  "remaining_tasks": [
-    {"id": "C1", "name": "Insert + run new frontend-wiring closure phase (close v4.0 gaps inline)", "status": "not_started", "next_command": "/gsd-phase --insert 22 \"Close v4.0 frontend integration gaps: wire orphaned UI to backend\" then /gsd-discuss-phase 22 /gsd-plan-phase 22 /gsd-execute-phase 22"},
-    {"id": "C2", "name": "Re-audit milestone v4.0 after frontend phase; if passed/tech_debt proceed", "status": "not_started"},
-    {"id": "B3", "name": "gsd-complete-milestone v4.0 - DEFERRED until C1+C2 pass", "status": "not_started", "blocked_by": ["C1", "C2"]},
-    {"id": "B4", "name": "gsd-cleanup (user confirms destructive cleanup) - DEFERRED until B3", "status": "not_started", "blocked_by": ["B3"]}
-  ],
+  "timestamp": "2026-07-14T00:00:00Z",
+  "phase": "38",
+  "phase_name": "Testing Expansion + Fuzzing + Property-based Tests",
+  "plan": "38-01 — T1/T2 committed; T3 (decision-table fuzzing) in progress",
+  "status": "executing",
+  "next_action": "Implement Phase 38 T3: decision-table fuzz target that drives DecisionTableEvaluator across all 7 hit policies + COLLECT aggregators from fuzzed input; then commit + sync planning docs.",
   "blockers": [],
-  "async_jobs": [],
-  "human_actions_pending": [
-    {"action": "Frontend-wiring phase may warrant its own git branch; decide during plan", "context": "Currently on gsd/phase-19-monitoring-metrics", "blocking": false}
+  "human_actions_pending": [],
+  "completed_tasks": [
+    {"id": "37-T1", "name": "Lexer token cache (LexerTokenCache)", "status": "done", "commit": "deb23df57"},
+    {"id": "37-T2", "name": "parse_expression_with_cache entry point", "status": "done", "commit": "deb23df57"},
+    {"id": "37-T3", "name": "DRD resolution documentation + parallelization infrastructure", "status": "done", "commit": "deb23df57"},
+    {"id": "38-T1", "name": "FEEL parser cargo-fuzz target (feel_parser)", "status": "done", "commit": "31cdbf77"},
+    {"id": "38-T2", "name": "Property-based tests (engine/tests/feel_properties.rs, 14 tests)", "status": "done", "commit": "31cdbf77"}
   ],
-  "decisions": [
-    {"decision": "Harden first, then close", "rationale": "Prior session decision", "phase": "v4.0"},
-    {"decision": "API docs: BOTH manual docs/API.md AND utoipa+Swagger UI", "rationale": "Done in A6a/A6b", "phase": "v4.0"},
-    {"decision": "execute_rules stays a stub; out of scope for v4.0", "rationale": "Making execution functional is a separate future milestone", "phase": "v4.0"},
-    {"decision": "Close v4.0 gaps inline via new frontend-wiring phase (vs re-scope to v5.0 / accept as tech debt / pause)", "rationale": "User choice 2026-07-01 after audit gaps_found", "phase": "v4.0"},
-    {"decision": "B3/B4 deferred until frontend phase closes gaps and re-audit passes", "rationale": "Cannot complete a milestone with 9/13 partial requirements", "phase": "v4.0"}
-  ],
-  "uncommitted_files": [],
-  "next_action": "Run in a fresh context: /gsd-phase --insert 22 \"Close v4.0 frontend integration gaps: wire orphaned UI to backend\" then the standard chain (/gsd-discuss-phase 22, /gsd-plan-phase 22, /gsd-execute-phase 22). Read .planning/v4-MILESTONE-AUDIT.md first for the full gap list with file:line evidence. Build is GREEN; clippy 0 warnings; 232 tests pass.",
-  "context_notes": "Hardening (A1-A7) and audit (B1-B2) complete and committed. Audit found Phase 17 frontend is a scaffolding skeleton (orphaned components, baseURL /api/v1 vs /v1 mismatch, unmounted AuthProvider, incomplete router, stub/mock governance UIs, unregistered WebSocket, unwrapped auth middleware). 9/13 v4.0 requirements partial. User chose to close inline via new phase. Branch gsd/phase-19-monitoring-metrics. Continue-here marker at .planning/.continue-here.md has the gap list + next commands.",
-  "optional_remaining": [
-    "Add formal VERIFICATION.md for phases 20/21 (verification debt - 20-SUMMARY status:complete, 21-UAT 4/4). Optional during closure."
-  ]
+  "context_notes": "Phase 37 + Phase 38 T1/T2 committed 2026-07-14 after verifying DMN tests green (feel_properties 14/14, hit_policy_advanced 9/9, feel_tck_subset 2/2, tck_sweep 1/1). T3 was previously a stub (engine/fuzz/fuzz_targets/decision_table.rs) that ignored fuzzed input — it was excluded from the 38-01 commit and is being rewritten to actually drive the evaluator from fuzz data. api/dmn/ runtime artifacts are now gitignored. Note: test binaries with engine-rete/engine-leaps modules require --all-features to compile.",
+  "uncommitted_files": []
 }

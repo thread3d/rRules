@@ -437,17 +437,15 @@ export const HIT_POLICIES: HitPolicy[] = Object.keys(HIT_POLICY_META) as HitPoli
 
 **If this table is empty:** All claims in this research were verified or cited — no user confirmation needed.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does `GET /v1/decisions/{id}` return the full decision table IR (input_clauses, output_clauses, rules) or just metadata?**
+1. **Does `GET /v1/decisions/{id}` return the full decision table IR (input_clauses, output_clauses, rules) or just metadata?** [RESOLVED: Plan 02 Task 2 — new endpoint `GET /v1/decisions/{id}/ir` returns parsed DecisionTable as JSON]
    - What we know: The current Phase 33 response returns `id`, `name`, `content_length`, `metadata`, timestamps — it's a file-store get, not an IR parse. It does NOT include the parsed decision table structure.
-   - What's unclear: Whether the frontend should (a) call `GET /v1/decisions/{id}/export` to get raw XML and parse it client-side, or (b) add a new endpoint that returns the parsed IR as JSON, or (c) use `POST /v1/decisions/reload` with the content and then read from an in-memory model.
-   - Recommendation: The simplest approach is to have the frontend load the raw XML via export, parse it through a client-side DMN parser (or send it to backend for parsing), and extract the IR shape. Alternatively, Phase 33 could be extended with a `GET /v1/decisions/{id}/ir` endpoint that returns the parsed decision table as JSON. This is a planning-phase design decision.
+   - Resolution: Add a new endpoint `GET /v1/decisions/{id}/ir` in Plan 02 that returns the parsed DecisionTable as JSON (not raw XML). The frontend loads full table data for editing via this endpoint, then passes it through `dmnIrToEditorShape()` for rendering. This eliminates the need for client-side DMN parsing and keeps IR serialization authoritative on the backend.
 
-2. **Should the allowed-values editor support both Enumeration and UnaryTests formats?**
+2. **Should the allowed-values editor support both Enumeration and UnaryTests formats?** [RESOLVED: Plan 03 Task 2 — start with Enumeration-only; UnaryTests deferred to Phase 35]
    - What we know: The DMN model's `AllowedValues` enum has two variants: `UnaryTests(String)` (FEEL text) and `Enumeration(Vec<TextContent>)` (literal values). PRIORITY/OUTPUT ORDER require Enumeration.
-   - What's unclear: Whether the frontend editor should let users switch between these formats or only support Enumeration (which is what PRIORITY/OUTPUT ORDER need).
-   - Recommendation: Start with Enumeration-only for allowed values (covers PRIORITY/OUTPUT ORDER, which are the main use cases). UnaryTests can be added in Phase 35 when full DMN authoring fidelity is needed.
+   - Resolution: Start with Enumeration-only for allowed values (covers PRIORITY/OUTPUT ORDER, which are the main use cases for this phase). UnaryTests can be added in Phase 35 when full DMN authoring fidelity is needed. The `dmnSerializer.ts` in Plan 02 includes `AllowedValuesShape` type with both kinds to support forward compatibility.
 
 ## Security Domain
 

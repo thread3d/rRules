@@ -1,6 +1,6 @@
 # TCK Sweep Results - Phase 35
 
-**Duration:** 12.593978608s  
+**Duration:** 10.173784708s  
 **TCK Source:** https://github.com/dmn-tck/tck (commit 0dbcaf9)
 
 ## Summary
@@ -11,7 +11,8 @@
 | Passed | 57 |
 | Failed | 0 |
 | Skipped (documented) | 0 |
-| Pass rate | 2.7% |
+| Vectors with at least one pass | 21 / 21 | 100% |
+
 
 ## By Compliance Level
 

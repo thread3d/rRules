@@ -37,6 +37,34 @@ Milestone v5.0 (Live Execution) — **shipped & tagged** 2026-07-06 (Phases 23�
 - RBAC with maker-checker approval workflows
 - Full DMN Level 3 compliance
 
+## Compact Instructions
+
+When compacting, preserve working state for continuation, not chat history.
+
+Always keep:
+
+- Current goal and acceptance criteria
+- Exact files changed, created, deleted, or inspected and why
+- Important hooks, functions, classes, routes, settings, commands, and config keys
+- Business rules and architectural decisions
+- Rejected approaches and why they were rejected
+- Errors, failed tests, commands run, and fixes attempted
+- Pending tasks and the exact next step
+
+Summarize:
+
+- Completed exploration
+- Older discussion
+- Repeated command output
+
+Drop:
+
+- Verbose logs unless they contain unresolved errors
+- Duplicate explanations
+- Abandoned ideas that are no longer relevant
+
+After compaction, re-read PLAN.md or HANDOFF.md if present before continuing.
+
 ## Phase Roadmap (6 Phases)
 
 1. **Core Engine Foundation** - Rule engine with Rete algorithm, forward/backward chaining
@@ -50,3 +78,5 @@ Milestone v5.0 (Live Execution) — **shipped & tagged** 2026-07-06 (Phases 23�
 
 1. Run `/gsd:new-milestone` to plan the next milestone (proposed thesis: **v6.0 DMN Level 3 Compliance** — close the stubbed Phase 6 gap; no real `dmn` module exists yet)
 2. Optionally: add a git remote (`git remote add origin <url>`) and push tags `v1.0`–`v5.0` — currently local-only (no remote configured)
+
+
