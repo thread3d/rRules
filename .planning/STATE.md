@@ -25,14 +25,13 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-10)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** Phase 38 COMPLETE — next: Phase 39 (if defined) or v7.0 milestone closeout
+**Current focus:** v7.0 MILESTONE AUDIT — status `gaps_found` (4/12 requirements satisfied). See .planning/v7.0-MILESTONE-AUDIT.md.
 
 ## Current Position
 
-Phase: 38 (Testing Expansion + Fuzzing + Property-based Tests) — COMPLETE
-Plan: 38-01 (T1+T2+T3 committed)
-Status: v7.0 phases 36–38 all complete & committed (2026-07-14); Phase 39 or milestone closeout next
-Last activity: 2026-07-14 — Phase 38 T3 (decision-table fuzzing) committed; Phase 38 fully complete
+Milestone: v7.0 (Performance + Production Readiness) — AUDIT COMPLETE: gaps_found
+Status: 4/12 PERF requirements satisfied; 8 unsatisfied (PERF-03/04/05/06/07/08/09/12). Not ready to tag.
+Last activity: 2026-07-14 — v7.0 milestone audit run; report at .planning/v7.0-MILESTONE-AUDIT.md
 
 ### Milestone v6.0 Phases
 
