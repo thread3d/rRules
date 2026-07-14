@@ -16,7 +16,8 @@ use engine::data_types::Value;
 use engine::dmn::decision_table::DecisionTableEvaluator;
 use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest, SharedDmnModel};
 use engine::dmn::feel::ast::FeelExpression;
-use engine::dmn::feel::cache::FeelAstCache;
+use engine::dmn::feel::cache::{clear_l1, FeelAstCache};
+use engine::dmn::feel::cache::ParseEntry;
 use engine::dmn::feel::eval::Scope;
 use engine::dmn::model::{BuiltinAggregator, DecisionTable, HitPolicy, InputClause, OutputClause};
 
@@ -417,6 +418,125 @@ fn bench_drd_resolution(c: &mut criterion::Criterion) {
 }
 
 // ---------------------------------------------------------------------------
+// Benchmark group 5: FEEL AST cache under concurrency (PERF-06)
+// ---------------------------------------------------------------------------
+//
+// PERF-06 requires benchmarking the per-thread `thread_local!` L1 cache vs the
+// shared `DashMap` under 16+ concurrent request scenarios. The L1 sits in front
+// of the shared map; on a hit it returns the SAME `Arc` the shared map owns
+// with no shard-lock acquisition — the dominant cost under high concurrency.
+//
+// Two regimes bracket the benefit:
+//   * `thread_local`       — small per-thread working set (64 cells, well under
+//                            the 1024-entry L1 cap). After each worker primes
+//                            its L1, the measured loop is served entirely from
+//                            the L1: lock-free, zero shared-map traffic.
+//   * `dashmap_contended`  — large working set (4096 cells, > L1 cap). The L1
+//                            FIFO-evicts continuously, so most calls fall
+//                            through to the shared `DashMap::entry`, which
+//                            takes a per-shard write lock even on a hit —
+//                            contended across all worker threads.
+//
+// Both regimes pre-populate the shared map in setup (unmeasured) so workers
+// perform pure `get_or_parse` lookups. The ratio `thread_local / dashmap_contended`
+// is the ThreadLocal throughput advantage at that concurrency level.
+
+fn bench_feel_cache_concurrency(c: &mut criterion::Criterion) {
+    use std::thread;
+
+    let mut group = c.benchmark_group("feel_cache_concurrency");
+    group.sampling_mode(SamplingMode::Flat);
+    // Concurrency benchmarks are expensive (spawn + join N threads per sample);
+    // use a small sample size and short per-thread iteration count. The goal is
+    // a relative throughput ratio, not statistical tightness.
+    group.sample_size(10);
+
+    const CALLS_PER_THREAD: usize = 500;
+    const SMALL_WS: usize = 64;   // << L1 cap (1024) → fully L1-served
+    const LARGE_WS: usize = 4096; // > L1 cap → L1 thrashes, shared map dominates
+
+    for (n_threads, label) in [(16usize, "16t"), (32usize, "32t")] {
+        // ---- Variant A: thread-local L1 hot path (lock-free hits) ----
+        let small_ws: Vec<String> =
+            (0..SMALL_WS).map(|i| format!("{} + {}", i, i)).collect();
+        group.bench_function(BenchmarkId::new("thread_local", label), |b| {
+            b.iter_batched(
+                || {
+                    // Unmeasured setup: build + pre-populate the shared map.
+                    let cache = Arc::new(FeelAstCache::new());
+                    for s in &small_ws {
+                        let _ = cache.get_or_parse(s, ParseEntry::Expression);
+                    }
+                    (cache, small_ws.clone())
+                },
+                |(cache, ws)| {
+                    thread::scope(|scope| {
+                        for _ in 0..n_threads {
+                            let cache = cache.clone();
+                            let ws = ws.clone();
+                            scope.spawn(move || {
+                                // Prime this worker's per-thread L1.
+                                for s in &ws {
+                                    let _ = cache.get_or_parse(s, ParseEntry::Expression);
+                                }
+                                // Measured: pure L1 hits, no shared-map lock.
+                                for i in 0..CALLS_PER_THREAD {
+                                    let s = &ws[i % ws.len()];
+                                    let ast = cache.get_or_parse(s, ParseEntry::Expression);
+                                    criterion::black_box(ast);
+                                }
+                            });
+                        }
+                    });
+                },
+                criterion::BatchSize::SmallInput,
+            )
+        });
+
+        // ---- Variant B: DashMap-contended (L1 thrashing → shared lock) ----
+        let large_ws: Vec<String> =
+            (0..LARGE_WS).map(|i| format!("{} * {}", i, i + 1)).collect();
+        group.bench_function(BenchmarkId::new("dashmap_contended", label), |b| {
+            b.iter_batched(
+                || {
+                    let cache = Arc::new(FeelAstCache::new());
+                    // Pre-populate the whole working set so workers do pure
+                    // lookups (Occupied entries) — still shard-write-locked.
+                    for s in &large_ws {
+                        let _ = cache.get_or_parse(s, ParseEntry::Expression);
+                    }
+                    // Drop the setup thread's L1 so it doesn't bias anything.
+                    clear_l1();
+                    (cache, large_ws.clone())
+                },
+                |(cache, ws)| {
+                    thread::scope(|scope| {
+                        for _ in 0..n_threads {
+                            let cache = cache.clone();
+                            let ws = ws.clone();
+                            scope.spawn(move || {
+                                // Fresh worker thread → empty L1. With a 4096-cell
+                                // working set > 1024 L1 cap, the L1 FIFO-evicts
+                                // continuously, so the steady state is shared-map
+                                // lookups (contended shard write locks).
+                                for i in 0..CALLS_PER_THREAD {
+                                    let s = &ws[i % ws.len()];
+                                    let ast = cache.get_or_parse(s, ParseEntry::Expression);
+                                    criterion::black_box(ast);
+                                }
+                            });
+                        }
+                    });
+                },
+                criterion::BatchSize::SmallInput,
+            )
+        });
+    }
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
 // Criterion wiring
 // ---------------------------------------------------------------------------
 
@@ -424,5 +544,12 @@ criterion_group!(benches_parser, bench_parser);
 criterion_group!(benches_feel_evaluator, bench_feel_evaluator);
 criterion_group!(benches_decision_table, bench_decision_table);
 criterion_group!(benches_drd_resolution, bench_drd_resolution);
+criterion_group!(benches_feel_cache_concurrency, bench_feel_cache_concurrency);
 
-criterion_main!(benches_parser, benches_feel_evaluator, benches_decision_table, benches_drd_resolution);
+criterion_main!(
+    benches_parser,
+    benches_feel_evaluator,
+    benches_decision_table,
+    benches_drd_resolution,
+    benches_feel_cache_concurrency
+);

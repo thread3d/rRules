@@ -13,8 +13,9 @@
 //! **Performance property:** a 30-cell table evaluated 10k times does
 //! ~30 parses (at load), not 300k (31-RESEARCH.md headline property).
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex, Weak};
 
 use dashmap::DashMap;
 
@@ -54,6 +55,117 @@ pub fn cell_key(src: &str, entry: ParseEntry) -> String {
 /// model's distinct FEEL cells. This cap is a safety backstop for the case
 /// where a single cache instance is reused across many models.
 const DEFAULT_MAX_CACHE_ENTRIES: usize = 10_000;
+
+// =====================================================================
+// PERF-06: per-thread L1 AST cache
+// =====================================================================
+
+/// Default bounded capacity for the per-thread L1 cache (PERF-06).
+///
+/// The L1 is small and per-thread: it shadows the shared `DashMap` to avoid
+/// shard-lock acquisition on the hot read path. 1024 distinct cells is ample
+/// for a single request's working set; the FIFO bound caps per-thread memory.
+const DEFAULT_L1_CACHE_ENTRIES: usize = 1024;
+
+/// Per-thread L1 FEEL-AST cache (PERF-06).
+///
+/// FEEL text→AST is a **pure function** of `(entry-point kind, trimmed
+/// content)`: the same text always yields the same AST, regardless of which
+/// model or `FeelAstCache` instance issued the parse. That purity lets a
+/// single thread-local cache shadow *every* `FeelAstCache` on the calling
+/// thread and stay correct across model reloads — an L1 hit returns the SAME
+/// `Arc` the shared `DashMap` owns, with **no shard-lock acquisition** on the
+/// hot path (the dominant cost under high concurrency, where many threads
+/// contend on the shared map's shards).
+///
+/// Entries are `Weak<FeelExpression>`: the shared `DashMap` (or a caller's
+/// held `Arc`) is the authority that keeps an AST alive. When every strong
+/// ref drops — e.g. a model is dropped or its cache evicts the key — the L1
+/// weak simply fails to `upgrade` and the next call falls through to the
+/// shared map. This bounds per-thread memory: the L1 never keeps an AST
+/// alive past its real owners (no leak on long-lived worker threads such as
+/// the rayon pool used by PERF-09 parallel DRD evaluation).
+///
+/// **Correctness across reloads:** because the parse is pure, a stale Weak
+/// can only ever resolve to an AST that is bit-identical to what a fresh
+/// parse would produce — so even if a reload reused a live L1 entry, the
+/// result is correct. Dead Weaks (authority dropped) are purged lazily on
+/// the next lookup of the same key.
+struct L1AstCache {
+    map: HashMap<String, Weak<FeelExpression>>,
+    /// FIFO insertion order for bounded eviction.
+    order: VecDeque<String>,
+    max_entries: usize,
+}
+
+impl L1AstCache {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+            max_entries: DEFAULT_L1_CACHE_ENTRIES,
+        }
+    }
+}
+
+thread_local! {
+    /// The global per-thread L1. Shared across all `FeelAstCache` instances on
+    /// a thread (safe because the parse is pure). Each rayon/tokio worker
+    /// thread accumulates its own warm L1 across `evaluate` calls.
+    static L1_FEEL_AST: RefCell<L1AstCache> = RefCell::new(L1AstCache::new());
+}
+
+/// L1 lookup. Returns a strong `Arc` on a live hit. A dead Weak (authority
+/// dropped the strong) is purged and `None` returned so the caller falls
+/// through to the shared `DashMap`.
+fn l1_get(key: &str) -> Option<Arc<FeelExpression>> {
+    L1_FEEL_AST.with(|cell| {
+        let mut c = cell.borrow_mut();
+        // Clone the Weak out first so the map borrow ends before a possible
+        // `remove` (avoids a double-borrow on `c.map`).
+        let weak = c.map.get(key).map(Weak::clone)?;
+        match weak.upgrade() {
+            Some(strong) => Some(strong),
+            None => {
+                // Stale: the shared authority dropped the strong ref. Reclaim
+                // the slot rather than leaving a dead entry to age out via FIFO.
+                c.map.remove(key);
+                None
+            }
+        }
+    })
+}
+
+/// Record a freshly resolved `Arc` in the L1 as a `Weak`. No-op if the key is
+/// already present (keeps FIFO order stable on repeat inserts). FIFO-evicts
+/// the oldest entry when the per-thread bound is reached.
+fn l1_insert(key: String, ast: &Arc<FeelExpression>) {
+    L1_FEEL_AST.with(|cell| {
+        let mut c = cell.borrow_mut();
+        if c.map.contains_key(&key) {
+            return;
+        }
+        if c.map.len() >= c.max_entries {
+            if let Some(old) = c.order.pop_front() {
+                c.map.remove(&old);
+            }
+        }
+        c.map.insert(key.clone(), Arc::downgrade(ast));
+        c.order.push_back(key);
+    })
+}
+
+/// Drop every L1 entry on the calling thread. Used by [`FeelAstCache::clear`]
+/// for hygiene and by tests for isolation (the Weak design already makes
+/// cross-test contamination impossible — strong refs die with each test's
+/// cache — but this makes the intent explicit).
+pub fn clear_l1() {
+    L1_FEEL_AST.with(|cell| {
+        let mut c = cell.borrow_mut();
+        c.map.clear();
+        c.order.clear();
+    });
+}
 
 /// Concurrent FEEL AST cache.
 ///
@@ -124,6 +236,17 @@ impl FeelAstCache {
     /// [`LexerTokenCache`] and skipped on repeat parses of the same text.
     pub fn get_or_parse(&self, src: &str, entry: ParseEntry) -> Arc<FeelExpression> {
         let key = cell_key(src, entry);
+
+        // PERF-06: per-thread L1 cache (see module docs). FEEL text→AST is a
+        // pure function, so a thread_local keyed by (entry, content) is correct
+        // across model reloads. A live hit returns the SAME Arc the shared
+        // DashMap owns — no shard-lock acquisition, which is the dominant cost
+        // under high concurrency. A dead Weak (authority dropped the strong)
+        // falls through to the shared map below.
+        if let Some(ast) = l1_get(&key) {
+            return ast;
+        }
+
         let ast = match self.map.entry(key.clone()) {
             dashmap::mapref::entry::Entry::Occupied(o) => o.get().clone(),
             dashmap::mapref::entry::Entry::Vacant(v) => {
@@ -137,7 +260,7 @@ impl FeelAstCache {
                 };
                 v.insert(parsed.clone());
                 if let Ok(mut ord) = self.order.lock() {
-                    ord.push_back(key);
+                    ord.push_back(key.clone());
                 }
                 parsed
             }
@@ -149,6 +272,13 @@ impl FeelAstCache {
         if self.map.len() > self.max_entries {
             self.evict_oldest();
         }
+
+        // PERF-06: warm the per-thread L1 with a Weak so future lookups on
+        // this thread hit the L1 and skip the shared DashMap shard lock. The
+        // Weak ensures the L1 does not keep the AST alive past the shared
+        // cache's authority (no per-thread memory leak).
+        l1_insert(key, &ast);
+
         ast
     }
 
@@ -193,6 +323,11 @@ impl FeelAstCache {
         if let Ok(mut ord) = self.order.lock() {
             ord.clear();
         }
+        // PERF-06: also drop the per-thread L1 on the calling thread. The
+        // Weak design means L1 entries pointing at this cache's strongs are
+        // already dead, but clearing reclaims the slots immediately and keeps
+        // the L1 from carrying stale keys into a reload.
+        clear_l1();
     }
 }
 
@@ -393,5 +528,124 @@ mod tests {
         // Different entry point → different key for same content.
         let k3 = cell_key("foo + bar", ParseEntry::SimpleUnaryTests);
         assert_ne!(k1, k3, "entry-point kind is part of the key");
+    }
+
+    // =================================================================
+    // PERF-06: per-thread L1 cache
+    // =================================================================
+
+    /// L1 hit returns the SAME Arc the shared DashMap owns (pointer identity),
+    /// and a repeat call does NOT touch the shared map — `cache.len()` stays
+    /// at 1 because the second call is served entirely from the L1.
+    #[test]
+    fn l1_hit_returns_same_arc_and_skips_shared_map() {
+        clear_l1();
+        let cache = FeelAstCache::new();
+
+        let a = cache.get_or_parse("l1_hit_probe", ParseEntry::Expression);
+        assert_eq!(cache.len(), 1, "first call populates the shared map");
+
+        // Second call: L1 hit (Weak upgrades — `a` and the shared map both
+        // hold strongs). Served from the L1, shared map untouched.
+        let b = cache.get_or_parse("l1_hit_probe", ParseEntry::Expression);
+        assert!(
+            Arc::as_ptr(&a) == Arc::as_ptr(&b),
+            "L1 hit must return the SAME Arc the shared map owns"
+        );
+        assert_eq!(
+            cache.len(),
+            1,
+            "L1 hit must not grow or touch the shared map"
+        );
+    }
+
+    /// Cross-instance sharing: the L1 is global per thread, and FEEL text→AST
+    /// is pure, so a SECOND `FeelAstCache` instance resolves the same cell
+    /// from the L1 without parsing or inserting into its own shared map.
+    /// This is the cross-reload value of the thread_local design.
+    #[test]
+    fn l1_shares_across_cache_instances_on_same_thread() {
+        clear_l1();
+        let cache_a = FeelAstCache::new();
+        // Hold a strong ref so the L1 Weak stays live across the instance swap.
+        let a = cache_a.get_or_parse("l1_cross_instance_probe", ParseEntry::Expression);
+        assert_eq!(cache_a.len(), 1);
+
+        // A brand-new cache on the same thread. The L1 already has a live Weak
+        // for this key (kept alive by `a`), so this call is an L1 HIT — it
+        // returns cache_a's Arc and does NOT insert into cache_b's shared map.
+        let cache_b = FeelAstCache::new();
+        let b = cache_b.get_or_parse("l1_cross_instance_probe", ParseEntry::Expression);
+        assert!(
+            Arc::as_ptr(&a) == Arc::as_ptr(&b),
+            "cross-instance L1 hit returns cache_a's Arc (pure-function sharing)"
+        );
+        assert_eq!(
+            cache_b.len(),
+            0,
+            "L1 hit must not populate the new instance's shared map"
+        );
+        clear_l1();
+    }
+
+    /// When the shared authority drops the strong (eviction), the L1 Weak
+    /// dies and the next lookup falls through to a fresh parse rather than
+    /// returning a stale/dead Arc. This is the no-leak / no-stale guarantee.
+    #[test]
+    fn l1_dead_weak_falls_through_to_shared_map() {
+        clear_l1();
+        let cache = FeelAstCache::with_capacity(1);
+
+        // "first" is parsed, L1 Weak inserted. `let _` drops the caller's
+        // strong immediately, so the only strong lives in the shared map.
+        let _ = cache.get_or_parse("l1_dead_first", ParseEntry::Expression);
+        assert_eq!(cache.len(), 1);
+
+        // "second" overflows the cap-1 cache → evicts "first" from the shared
+        // map. The L1 Weak for "first" is now dead (no strong remains).
+        let _ = cache.get_or_parse("l1_dead_second", ParseEntry::Expression);
+        assert!(cache.len() <= 1, "cap-1 cache evicted the first entry");
+
+        // Re-request "first": L1 Weak is dead → fall through → re-parse →
+        // re-insert. Must succeed and return a valid Arc, not panic.
+        let again = cache.get_or_parse("l1_dead_first", ParseEntry::Expression);
+        assert_eq!(
+            cache.len(),
+            1,
+            "re-parse of evicted key re-populates the shared map"
+        );
+        // Touch the Arc to prove it's usable after a dead-weak fallthrough.
+        let _ = &*again;
+        clear_l1();
+    }
+
+    /// `clear()` clears the per-thread L1 as well as the shared map: after a
+    /// clear, a repeat call is a true miss (re-parse), not an L1 hit.
+    #[test]
+    fn clear_clears_l1_too() {
+        clear_l1();
+        let cache = FeelAstCache::new();
+        let a = cache.get_or_parse("l1_clear_probe", ParseEntry::Expression);
+        let _ = a;
+        assert_eq!(cache.len(), 1);
+
+        cache.clear();
+        assert_eq!(cache.len(), 0, "shared map cleared");
+
+        // After clear(), the L1 is empty on this thread → genuine re-parse.
+        let _ = cache.get_or_parse("l1_clear_probe", ParseEntry::Expression);
+        assert_eq!(cache.len(), 1, "post-clear repeat is a real miss, not an L1 hit");
+        clear_l1();
+    }
+
+    /// `clear_l1` is callable and idempotent (no panic on empty or repeat).
+    #[test]
+    fn clear_l1_is_idempotent() {
+        clear_l1();
+        clear_l1(); // empty — no panic
+        let cache = FeelAstCache::new();
+        let _ = cache.get_or_parse("l1_idem", ParseEntry::Expression);
+        clear_l1();
+        clear_l1(); // populated then cleared twice — no panic
     }
 }

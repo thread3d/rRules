@@ -64,12 +64,14 @@ engine-leaps = ["engine-rete"]
 engine-phreak = ["engine-rete"]
 history = []
 
-# Benchmark target for the DMN subsystem (Phase 36).
-# Criterion's `harness = true` uses the default harness; benchmarks are written
-# with criterion_group!/criterion_main! and live in engine/benches/dmn_benchmarks.rs.
+# Benchmark target for the DMN subsystem (Phase 36+).
+# `harness = false` is REQUIRED for criterion: the bench file defines its own
+# `main` via criterion_main!, and the default libtest harness (harness = true)
+# would shadow it and run zero benchmarks. PERF-06 corrected this from
+# harness = true (under which `make bench` silently measured nothing).
 [[bench]]
 name = "dmn_benchmarks"
-harness = true
+harness = false
 
 # Memory baseline binary — runs once to capture RSS/allocations against the v6.0 corpus,
 # writes a JSON snapshot to engine/benches/snapshots/v6.0-baseline.json.
