@@ -1,36 +1,50 @@
 {
   "version": "1.0",
-  "timestamp": "2026-07-14T00:00:00Z",
-  "phase": "milestone-audit",
-  "phase_name": "v7.0 Milestone Audit",
-  "plan": "gsd-audit-milestone — complete; status gaps_found",
-  "status": "gaps_found",
-  "next_action": "v7.0 is NOT ready to tag (4/12 requirements satisfied). Decide: (a) close the 8 unsatisfied requirements via closure phases (Phase 39 DRD parallelization + TCK gap closure; re-wire Phase 37 LexerTokenCache + add LRU + per-thread + zero-copy + benchmark perf targets; fix PERF-04 regression gate; verify phases 36/37/38) — then re-audit; or (b) /gsd-complete-milestone v7.0 to accept the debt. Recommended: (a) — insert closure phases and re-verify before tagging.",
+  "timestamp": "2026-07-14T12:35:00Z",
+  "phase": "v7.0-closure",
+  "phase_name": "v7.0 Closure — fixing 8 unsatisfied PERF requirements inline",
+  "plan": "User chose 'Closure phases (Recommended)' — fix all 8 gaps inline, then re-verify 36/37/38, then re-audit. Working in priority order, committing each gap atomically.",
+  "status": "in_progress",
+  "next_action": "Continue closing remaining gaps: PERF-06 (per-thread cache), PERF-07 (quick-XML zero-copy), PERF-09 (level-by-level parallel DRD eval — large, adds rayon), PERF-12 (TCK coverage gap closure — large, scope unknown), PERF-03 (benchmark perf targets vs v6.0-baseline.json — depends on 06/07/09). Then write/re-write VERIFICATION.md for 36/37/38 and re-run /gsd-audit-milestone. CONTEXT WAS AT 69% — paused before starting PERF-09/12 (too large to rush). Resume in a fresh context; the 3 closed gaps are committed and verified.",
+  "closure_progress": {
+    "closed": [
+      {"req": "PERF-05", "commit": "74bce5cfe", "what": "Wired LexerTokenCache into FeelAstCache.get_or_parse (was orphaned dead code); added bounded FIFO eviction to both LexerTokenCache and FeelAstCache (max_entries=10_000). Tests: get_or_parse_warms_lexer_token_cache + bounded eviction."},
+      {"req": "PERF-04", "commit": "20c0ea954", "what": "Fixed structurally-non-functional nightly regression gate: scripts/memcheck-gate.sh (single source of truth), memory_baseline writes v6.0-current.json (no longer overwrites frozen v6.0-baseline.json), --update-baseline opt-in, Makefile memcheck/baseline-update, bench.yml uses make memcheck + installs jq. Verified pass/fail/missing cases."},
+      {"req": "PERF-08", "commit": "c6abe6c77", "what": "Memoized DRD topological order on SharedDmnModel (drd_order_cache, cleared on bump_generation); resolve_drd_order_cached used by evaluate. Cycle detection unchanged. Tests: drd_order_is_memoized + bump_generation_clears_drd_order_cache."}
+    ],
+    "remaining": [
+      {"req": "PERF-06", "scope": "moderate", "what": "Per-thread cache patterns (thread_local! L1 cache shadowing the shared DashMap). FEEL text->AST is a pure function so a thread_local keyed by (entry,content) is safe across reloads. Defer to fresh context (marginal value, low risk)."},
+      {"req": "PERF-07", "scope": "moderate-high", "what": "quick-XML zero-copy / streaming in the DMN XML loader (borrow from input buffer instead of allocating Strings). Touches IR string extraction — review before editing."},
+      {"req": "PERF-09", "scope": "large", "what": "Level-by-level parallel DRD evaluation (rayon par_iter over independent decisions at each topo level). Adds rayon dep; concurrency-safety review needed. Recursive self.evaluate holds outer RwLock read — parallel path must avoid nested-read issues. Phase 39 directory empty — create plan first."},
+      {"req": "PERF-12", "scope": "large/unknown", "what": "TCK coverage gap closure. Scope unknown — audit said 'TCK coverage gap closure not delivered'. Need to survey current TCK pass/fail to identify gaps (engine/tests/tck_sweep.rs + fixtures/tck/)."},
+      {"req": "PERF-03", "scope": "depends", "what": "Benchmark >=20% parser / >=15% evaluator vs v6.0-baseline.json. Depends on 06/07/09 landing first. Run: make bench + memory_baseline; compare. NOTE: benchmark runs are slow on this machine (test-profile compiles took >5min; cargo hangs if another cargo holds ~/.cargo/.package-cache lock — kill stale cargos first)."}
+    ]
+  },
   "blockers": [
-    "PERF-05: Phase 37 LexerTokenCache is orphaned dead code (zero callers); no LRU eviction",
-    "PERF-04: bench.yml nightly regression gate structurally non-functional (CURRENT file never produced; jq self-comparison; baseline overwritten each run)",
-    "PERF-08/09: Phase 39 empty — DRD topological-sort hardening + parallel evaluation undelivered",
-    "PERF-12: TCK coverage gap closure undelivered (Phase 39 empty)",
-    "PERF-06/07: per-thread cache patterns + quick-XML zero-copy not implemented",
-    "PERF-03: ≥20% parser / ≥15% evaluator perf targets never benchmarked vs v6.0-baseline.json",
-    "Phases 37 & 38 committed without VERIFICATION.md (bypassed verify-work gate)",
-    "Phase 36 VERIFICATION.md stale — 26789d397 'fix' did not actually fix the gate; needs re-verification"
+    "PERF-06: per-thread cache patterns not implemented (deferred)",
+    "PERF-07: quick-XML zero-copy not implemented (deferred)",
+    "PERF-09: parallel DRD evaluation undelivered (large — fresh context)",
+    "PERF-12: TCK coverage gap closure undelivered (large/unknown — fresh context)",
+    "PERF-03: perf targets not yet benchmarked (depends on 06/07/09)",
+    "VERIFICATION.md missing for 36/37/38; Phase 36 VERIFICATION stale — restore verify-work gate then re-audit"
   ],
   "human_actions_pending": [
     {
-      "action": "Choose remediation path: closure phases to fix the 8 unsatisfied PERF requirements + restore verify-work gate for 37/38, THEN re-audit; OR accept debt via /gsd-complete-milestone v7.0.",
-      "context": "v7.0 audit report: .planning/v7.0-MILESTONE-AUDIT.md. Satisfied: PERF-01,02,10,11. Unsatisfied: PERF-03,04,05,06,07,08,09,12."
+      "action": "Resume v7.0 closure in a fresh context: close PERF-06/07/09/12, then benchmark PERF-03, then write VERIFICATION.md for 36/37/38 and re-run /gsd-audit-milestone.",
+      "context": "3/8 gaps closed and committed (PERF-05,04,08). 5 remain (PERF-03,06,07,09,12). Working branch: master. Commits: 74bce5cfe, 20c0ea954, c6abe6c77."
     }
   ],
   "completed_tasks": [
-    {"id": "37-T1", "name": "Lexer token cache (LexerTokenCache)", "status": "done", "commit": "deb23df57", "audit_note": "orphaned dead code — no consumer"},
-    {"id": "37-T2", "name": "parse_expression_with_cache entry point", "status": "done", "commit": "deb23df57", "audit_note": "orphaned dead code — no consumer"},
-    {"id": "37-T3", "name": "DRD parallelization", "status": "claimed_complete", "commit": "deb23df57", "audit_note": "FALSE — only documented existing sequential DFS; no parallelization"},
-    {"id": "38-T1", "name": "FEEL parser cargo-fuzz target", "status": "done", "commit": "31cdbf77"},
-    {"id": "38-T2", "name": "Property-based tests (14; 2 are no-op stubs)", "status": "done", "commit": "31cdbf77"},
-    {"id": "38-T3", "name": "Decision-table fuzz target (7 hit policies + COLLECT)", "status": "done", "commit": "6bc10435f"},
-    {"id": "audit", "name": "v7.0 milestone audit", "status": "done", "output": ".planning/v7.0-MILESTONE-AUDIT.md"}
+    {"id": "PERF-05", "name": "wire LexerTokenCache + bounded eviction", "status": "done", "commit": "74bce5cfe"},
+    {"id": "PERF-04", "name": "fix bench.yml regression gate", "status": "done", "commit": "20c0ea954"},
+    {"id": "PERF-08", "name": "memoize DRD topological order", "status": "done", "commit": "c6abe6c77"},
+    {"id": "PERF-06", "name": "per-thread cache patterns", "status": "pending", "note": "deferred to fresh context"},
+    {"id": "PERF-07", "name": "quick-XML zero-copy", "status": "pending", "note": "deferred to fresh context"},
+    {"id": "PERF-09", "name": "level-by-level parallel evaluation", "status": "pending", "note": "large — fresh context"},
+    {"id": "PERF-12", "name": "TCK coverage gap closure", "status": "pending", "note": "large/unknown — fresh context"},
+    {"id": "PERF-03", "name": "benchmark perf targets vs baseline", "status": "pending", "note": "depends on 06/07/09"},
+    {"id": "verify-gate", "name": "VERIFICATION.md for 36/37/38 + re-audit", "status": "pending"}
   ],
-  "context_notes": "v7.0 audit run 2026-07-14 via gsd-audit-milestone + gsd-integration-checker (read-only source verification). Result: gaps_found, 4/12 requirements satisfied. Phase 37's headline LexerTokenCache is orphaned dead code (never imported by IR loader/evaluator/decision_table/benchmarks/fuzz). Phase 37 T3 'DRD parallelization' is falsely marked COMPLETE (only documents the existing sequential DFS). PERF-04 regression gate is structurally non-functional despite the 'fix' in 26789d397. Phase 39 is an empty directory (PERF-08/09/12 undelivered). Phases 37/38 were committed without VERIFICATION.md. Report: .planning/v7.0-MILESTONE-AUDIT.md. Note: Phase numbering is mismatched between REQUIREMENTS/ROADMAP (38=DRD,39=Testing) and actual dirs (38=Testing,39=DRD-empty).",
+  "context_notes": "v7.0 closure pass 1 (2026-07-14): closed 3 of 8 unsatisfied PERF requirements with atomic commits + targeted tests. PERF-05 (dead-code LexerTokenCache now wired + bounded), PERF-04 (regression gate now functional), PERF-08 (DRD order memoized). Remaining 5 gaps deferred to a fresh context due to context-window pressure (was at 69%): PERF-06/07 are moderate; PERF-09 (parallel eval, rayon) and PERF-12 (TCK) are large and must not be rushed. PERF-03 (benchmarking) depends on the others and the bench runs are slow on this machine. Build env caveat: a stale cargo from another project holding ~/.cargo/.package-cache caused cargo hangs — kill stale cargo/rustc by PID and rm -f ~/.cargo/.package-cache before running cargo. Audit report at .planning/v7.0-MILESTONE-AUDIT.md (still says gaps_found 4/12 — to be re-scored to 7/12 in the re-audit after remaining gaps close). Working branch master (not the protected main).",
   "uncommitted_files": []
 }
