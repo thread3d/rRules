@@ -10,6 +10,23 @@
 //!   whole DMN DOM is never loaded. We do NOT use the `quick_xml::de` serde-XML
 //!   deserializer (serde-xml loses attribute order and CDATA fidelity, which
 //!   breaks round-trip — Pitfall 11).
+//! - **Zero-copy event handling (PERF-07).** The default quick-xml idiom
+//!   `let e = e.into_owned();` re-copies the element name and every attribute
+//!   byte into a fresh heap allocation on *every* start event — defeating
+//!   zero-copy and duplicating the work `collect_attrs` then does again. We
+//!   drop it from every dispatch loop below the root. Each loop reads a
+//!   borrowed `Event::Start(e)`, extracts only what it needs — the local name
+//!   as an owned `String` and, when a sub-parse needs it, an owned `Attrs` map
+//!   — and then drops the borrow. `read_event_into` ties the event's lifetime
+//!   to `&mut self.reader`, so non-lexical lifetimes end `e`'s borrow at its
+//!   last use (`collect_attrs(&e)` or `local_name_str(e.name())`), and the
+//!   subsequent recursive `&mut self` parse is sound with no owned event copy.
+//!   Sub-parsers take the pre-collected `Attrs` / `parent` / `end_local`
+//!   (owned, no buffer borrow) rather than a `&BytesStart`, which is what
+//!   makes the borrow release possible. The single exception is the root
+//!   `<definitions>` element, which still uses `into_owned()` once per document
+//!   because resolving its namespace requires `&self.reader` while the qname
+//!   is live — one allocation per document, negligible.
 //! - **Namespace-aware, prefix-agnostic.** Elements are matched by local name
 //!   (the part after `:`), so any prefix works. The recognized DMN MODEL
 //!   namespace URIs (1.1 / 1.3 / 1.5) are accepted on `<definitions>`; the
@@ -51,6 +68,13 @@ use crate::dmn::model::{
 // `FeelAstCache` at load time. The cache is a sidecar to `DmnModel` — never
 // mutated by the IR loader beyond `get_or_parse` calls during the walk.
 use crate::dmn::feel::{FeelAstCache, ParseEntry};
+
+/// Owned attribute map for a start element, keyed by local name (namespace
+/// declarations excluded). PERF-07 zero-copy: collected directly from the
+/// buffer-backed `BytesStart` while its borrow is live, then carried as an
+/// owned value into the recursive parse so no `BytesStart::into_owned()` copy
+/// of the element name + attribute bytes is ever made.
+type Attrs = HashMap<String, String>;
 
 /// Recognized DMN MODEL namespace URIs (DMN 1.1 / 1.3 / 1.5 — DMN-04).
 const DMN_MODEL_NAMESPACES: [&str; 3] = [
@@ -121,8 +145,8 @@ fn walk_decision(decision: &Decision, cache: &FeelAstCache) {
         walk_decision_table(table, cache);
     }
     // A6 resolution (Phase 29): `Decision` carries only `decision_table`. Non-table
-    // boxed expressions are NOT in the IR yet — they will be parsed on demand by the
-    // evaluator when Phase 33 adds them. Documented: plan 31-09 Open Question A6.
+    // boxed expressions are NOT in the IR yet — they will be parsed on demand by
+    // the evaluator when Phase 33 adds them. Documented: plan 31-09 Open Question A6.
 }
 
 fn walk_decision_table(table: &DecisionTable, cache: &FeelAstCache) {
@@ -220,9 +244,21 @@ impl<'a> Parser<'a> {
                         "processing instructions are not permitted (XXE hardening)".into(),
                     ));
                 }
-                Ok(Event::Start(e)) => { let e = e.into_owned();
-                    if local_name_str(e.name()) == "definitions" {
+                Ok(Event::Start(e)) => {
+                    let ln = local_name_str(e.name());
+                    if ln == "definitions" {
+                        // PERF-07: this is the ONE element per document that
+                        // still uses `into_owned()`. Resolving the root namespace
+                        // requires `self.resolve_element_ns` (`&self.reader`),
+                        // but `read_event_into` ties the borrowed event's
+                        // lifetime to `&mut self.reader` — so we cannot touch the
+                        // reader while the borrowed event is held. `into_owned()`
+                        // severs that borrow. This is a single allocation per
+                        // *document* (negligible); every element below the root
+                        // stays zero-copy.
+                        let e = e.into_owned();
                         source_ns = self.resolve_element_ns(e.name());
+                        let attrs = collect_attrs(&e)?;
                         // Lenient namespace check: record but do not hard-reject
                         // unrecognized roots (T-29-04 accept). The three recognized
                         // DMN MODEL namespaces (1.1/1.3/1.5) are all accepted;
@@ -230,7 +266,7 @@ impl<'a> Parser<'a> {
                         if let Some(ref ns) = source_ns {
                             let _recognized = DMN_MODEL_NAMESPACES.contains(&ns.as_str());
                         }
-                        definitions = Some(self.parse_definitions(&e)?);
+                        definitions = Some(self.parse_definitions(attrs)?);
                     }
                     // Non-definitions start elements outside the root are
                     // ignored (foreign content / comments).
@@ -263,9 +299,8 @@ impl<'a> Parser<'a> {
 
     // ---- <definitions> root + ordered children ---------------------------
 
-    fn parse_definitions(&mut self, start: &BytesStart) -> Result<Definitions, DmnParseError> {
+    fn parse_definitions(&mut self, attrs: Attrs) -> Result<Definitions, DmnParseError> {
         let mut defs = Definitions::default();
-        let attrs = collect_attrs(start)?;
         if let Some(v) = attrs.get("id") {
             defs.id = Some(v.clone());
         }
@@ -291,44 +326,52 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "description" => defs.description = Some(self.read_text_content(&ln)?),
                         "itemDefinition" => {
-                            let item = self.parse_item_definition_body(&e, "itemDefinition")?;
+                            let attrs = collect_attrs(&e)?;
+                            let item = self.parse_item_definition_body(attrs, "itemDefinition")?;
                             defs.children.push(DefinitionsChild::ItemDefinition(item));
                         }
                         "decision" => {
-                            let d = self.parse_decision(&e)?;
+                            let attrs = collect_attrs(&e)?;
+                            let d = self.parse_decision(attrs)?;
                             defs.children.push(DefinitionsChild::Decision(d));
                         }
                         "inputData" => {
-                            let d = self.parse_input_data(&e)?;
+                            let attrs = collect_attrs(&e)?;
+                            let d = self.parse_input_data(attrs)?;
                             defs.children.push(DefinitionsChild::InputData(d));
                         }
                         "businessKnowledgeModel" => {
-                            let b = self.parse_bkm(&e)?;
+                            let attrs = collect_attrs(&e)?;
+                            let b = self.parse_bkm(attrs)?;
                             defs.children.push(DefinitionsChild::BusinessKnowledgeModel(b));
                         }
                         "decisionService" => {
-                            let ds = self.parse_decision_service(&e)?;
+                            let attrs = collect_attrs(&e)?;
+                            let ds = self.parse_decision_service(attrs)?;
                             defs.children.push(DefinitionsChild::DecisionService(ds));
                         }
                         "knowledgeSource" => {
-                            let ks = self.parse_knowledge_source(&e)?;
+                            let attrs = collect_attrs(&e)?;
+                            let ks = self.parse_knowledge_source(attrs)?;
                             defs.children.push(DefinitionsChild::KnowledgeSource(ks));
                         }
                         "textAnnotation" => {
-                            let ta = self.parse_text_annotation(&e)?;
+                            let attrs = collect_attrs(&e)?;
+                            let ta = self.parse_text_annotation(attrs)?;
                             defs.children.push(DefinitionsChild::TextAnnotation(ta));
                         }
                         "association" => {
-                            let a = self.parse_association(&e)?;
+                            let attrs = collect_attrs(&e)?;
+                            let a = self.parse_association(attrs)?;
                             defs.children.push(DefinitionsChild::Association(a));
                         }
                         "DMNDI" => {
-                            let diags = self.parse_dmndi_block(&e)?;
+                            let diags = self.parse_dmndi_block()?;
                             defs.diagrams.extend(diags);
                         }
                         _ => {
@@ -374,10 +417,9 @@ impl<'a> Parser<'a> {
     /// distinguishes the two closing tags so recursion works.
     fn parse_item_definition_body(
         &mut self,
-        start: &BytesStart,
+        attrs: Attrs,
         end_local: &str,
     ) -> Result<ItemDefinition, DmnParseError> {
-        let attrs = collect_attrs(start)?;
         let mut item = ItemDefinition {
             id: attrs.get("id").cloned(),
             name: attrs.get("name").cloned().unwrap_or_default(),
@@ -395,7 +437,7 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "description" => {
@@ -405,16 +447,18 @@ impl<'a> Parser<'a> {
                             item.type_ref = Some(self.read_text_string(&ln)?);
                         }
                         "allowedValues" => {
-                            item.allowed_values = Some(self.parse_allowed_values(&e)?);
+                            item.allowed_values = Some(self.parse_allowed_values(&ln)?);
                         }
                         "itemComponent" => {
                             // Nested item definition — recurse with its own
                             // closing tag.
-                            let comp = self.parse_item_definition_body(&e, "itemComponent")?;
+                            let attrs = collect_attrs(&e)?;
+                            let comp = self.parse_item_definition_body(attrs, "itemComponent")?;
                             item.item_components.push(comp);
                         }
                         "annotation" => {
-                            item.annotations.push(self.parse_annotation(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            item.annotations.push(self.parse_annotation(attrs)?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -457,17 +501,13 @@ impl<'a> Parser<'a> {
     /// A single `<text>` child → [`AllowedValues::UnaryTests`]; one or more
     /// `<itemComponent>` children → [`AllowedValues::Enumeration`] (each
     /// itemComponent's text content preserved as [`TextContent`]).
-    fn parse_allowed_values(
-        &mut self,
-        start: &BytesStart,
-    ) -> Result<AllowedValues, DmnParseError> {
-        let parent = local_name_str(start.name());
+    fn parse_allowed_values(&mut self, parent: &str) -> Result<AllowedValues, DmnParseError> {
         let mut unary: Option<String> = None;
         let mut enum_items: Vec<TextContent> = Vec::new();
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "text" => {
@@ -522,8 +562,7 @@ impl<'a> Parser<'a> {
 
     // ---- <decision> + <decisionTable> -----------------------------------
 
-    fn parse_decision(&mut self, start: &BytesStart) -> Result<Decision, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_decision(&mut self, attrs: Attrs) -> Result<Decision, DmnParseError> {
         let id = attrs
             .get("id")
             .cloned()
@@ -544,7 +583,7 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "description" => {
@@ -557,19 +596,22 @@ impl<'a> Parser<'a> {
                             dec.allowed_answers = Some(self.read_text_string(&ln)?);
                         }
                         "variable" | "informationItem" => {
-                            dec.variable = Some(self.parse_information_item(&e, &ln)?);
+                            let attrs = collect_attrs(&e)?;
+                            dec.variable = Some(self.parse_information_item(attrs, &ln)?);
                         }
                         "informationRequirement" => {
-                            self.parse_information_requirement(&e, &mut dec)?;
+                            self.parse_information_requirement(&ln, &mut dec)?;
                         }
                         "knowledgeRequirement" => {
-                            self.parse_knowledge_requirement(&e, &mut dec)?;
+                            self.parse_knowledge_requirement(&ln, &mut dec)?;
                         }
                         "decisionTable" => {
-                            dec.decision_table = Some(self.parse_decision_table(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            dec.decision_table = Some(self.parse_decision_table(attrs)?);
                         }
                         "annotation" => {
-                            dec.annotations.push(self.parse_annotation(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            dec.annotations.push(self.parse_annotation(attrs)?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -607,10 +649,9 @@ impl<'a> Parser<'a> {
 
     fn parse_information_item(
         &mut self,
-        start: &BytesStart,
+        attrs: Attrs,
         end_local: &str,
     ) -> Result<InformationItem, DmnParseError> {
-        let attrs = collect_attrs(start)?;
         let mut item = InformationItem {
             id: attrs.get("id").cloned(),
             name: attrs.get("name").cloned().unwrap_or_default(),
@@ -621,7 +662,7 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "description" => {
@@ -631,7 +672,8 @@ impl<'a> Parser<'a> {
                             item.type_ref = Some(self.read_text_string(&ln)?);
                         }
                         "annotation" => {
-                            item.annotations.push(self.parse_annotation(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            item.annotations.push(self.parse_annotation(attrs)?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -671,14 +713,13 @@ impl<'a> Parser<'a> {
 
     fn parse_information_requirement(
         &mut self,
-        start: &BytesStart,
+        parent: &str,
         dec: &mut Decision,
     ) -> Result<(), DmnParseError> {
-        let parent = local_name_str(start.name());
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "requiredDecision" => {
@@ -728,14 +769,13 @@ impl<'a> Parser<'a> {
 
     fn parse_knowledge_requirement(
         &mut self,
-        start: &BytesStart,
+        parent: &str,
         dec: &mut Decision,
     ) -> Result<(), DmnParseError> {
-        let parent = local_name_str(start.name());
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "requiredKnowledge" => {
@@ -776,11 +816,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn parse_decision_table(
-        &mut self,
-        start: &BytesStart,
-    ) -> Result<DecisionTable, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_decision_table(&mut self, attrs: Attrs) -> Result<DecisionTable, DmnParseError> {
         let mut dt = DecisionTable::default();
         if let Some(v) = attrs.get("id") {
             dt.id = Some(v.clone());
@@ -814,15 +850,22 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
-                        "input" => dt.input_clauses.push(self.parse_input_clause(&e)?),
-                        "output" => dt.output_clauses.push(self.parse_output_clause(&e)?),
+                        "input" => {
+                            let attrs = collect_attrs(&e)?;
+                            dt.input_clauses.push(self.parse_input_clause(attrs)?);
+                        }
+                        "output" => {
+                            let attrs = collect_attrs(&e)?;
+                            dt.output_clauses.push(self.parse_output_clause(attrs)?);
+                        }
                         "rule" => {
                             let n_in = dt.input_clauses.len();
                             let n_out = dt.output_clauses.len();
-                            dt.rules.push(self.parse_rule(&e, n_in, n_out)?);
+                            let attrs = collect_attrs(&e)?;
+                            dt.rules.push(self.parse_rule(attrs, n_in, n_out)?);
                         }
                         "description" => {
                             // decisionTable-level description (rare) — skip.
@@ -862,8 +905,7 @@ impl<'a> Parser<'a> {
         Ok(dt)
     }
 
-    fn parse_input_clause(&mut self, start: &BytesStart) -> Result<InputClause, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_input_clause(&mut self, attrs: Attrs) -> Result<InputClause, DmnParseError> {
         let mut ic = InputClause {
             id: attrs.get("id").cloned(),
             label: attrs.get("label").cloned(),
@@ -874,17 +916,17 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "description" => {
                             ic.description = Some(self.read_text_content(&ln)?);
                         }
                         "inputExpression" => {
-                            ic.input_expression = self.parse_feel_text_child(&e, &ln)?;
+                            ic.input_expression = self.parse_feel_text_child(&ln)?;
                         }
                         "inputValues" => {
-                            ic.input_values = Some(self.parse_allowed_values(&e)?);
+                            ic.input_values = Some(self.parse_allowed_values(&ln)?);
                         }
                         "label" => {
                             ic.label = Some(self.read_text_string(&ln)?);
@@ -923,8 +965,7 @@ impl<'a> Parser<'a> {
         Ok(ic)
     }
 
-    fn parse_output_clause(&mut self, start: &BytesStart) -> Result<OutputClause, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_output_clause(&mut self, attrs: Attrs) -> Result<OutputClause, DmnParseError> {
         let mut oc = OutputClause {
             id: attrs.get("id").cloned(),
             label: attrs.get("label").cloned(),
@@ -937,17 +978,17 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "description" => {
                             oc.description = Some(self.read_text_content(&ln)?);
                         }
                         "outputValues" => {
-                            oc.output_values = Some(self.parse_allowed_values(&e)?);
+                            oc.output_values = Some(self.parse_allowed_values(&ln)?);
                         }
                         "defaultOutputEntry" => {
-                            oc.default_output_entry = Some(self.parse_feel_text_child(&e, &ln)?);
+                            oc.default_output_entry = Some(self.parse_feel_text_child(&ln)?);
                         }
                         "typeRef" => {
                             oc.type_ref = Some(self.read_text_string(&ln)?);
@@ -991,11 +1032,10 @@ impl<'a> Parser<'a> {
 
     fn parse_rule(
         &mut self,
-        start: &BytesStart,
+        attrs: Attrs,
         n_inputs: usize,
         n_outputs: usize,
     ) -> Result<DmnRule, DmnParseError> {
-        let attrs = collect_attrs(start)?;
         let mut rule = DmnRule {
             id: attrs.get("id").cloned(),
             description: None,
@@ -1006,22 +1046,22 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "description" => {
                             rule.description = Some(self.read_text_content(&ln)?);
                         }
                         "inputEntry" => {
-                            rule.input_entries.push(self.parse_rule_entry(&e, "inputEntry")?);
+                            rule.input_entries.push(self.parse_rule_entry("inputEntry")?);
                         }
                         "outputEntry" => {
-                            rule.output_entries.push(self.parse_rule_entry(&e, "outputEntry")?);
+                            rule.output_entries.push(self.parse_rule_entry("outputEntry")?);
                         }
                         "annotationEntry" => {
                             rule
                                 .annotation_entries
-                                .push(self.parse_rule_entry(&e, "annotationEntry")?);
+                                .push(self.parse_rule_entry("annotationEntry")?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -1074,16 +1114,12 @@ impl<'a> Parser<'a> {
         Ok(rule)
     }
 
-    fn parse_rule_entry(
-        &mut self,
-        _start: &BytesStart,
-        end_local: &str,
-    ) -> Result<RuleEntry, DmnParseError> {
+    fn parse_rule_entry(&mut self, end_local: &str) -> Result<RuleEntry, DmnParseError> {
         let mut text = TextContent::plain(String::new());
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "text" => {
@@ -1132,8 +1168,7 @@ impl<'a> Parser<'a> {
 
     // ---- DRG nodes: inputData / BKM / decisionService / knowledgeSource ---
 
-    fn parse_input_data(&mut self, start: &BytesStart) -> Result<InputData, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_input_data(&mut self, attrs: Attrs) -> Result<InputData, DmnParseError> {
         let id = attrs
             .get("id")
             .cloned()
@@ -1148,17 +1183,19 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "description" => {
                             input.description = Some(self.read_text_content(&ln)?);
                         }
                         "variable" | "informationItem" => {
-                            input.variable = Some(self.parse_information_item(&e, &ln)?);
+                            let attrs = collect_attrs(&e)?;
+                            input.variable = Some(self.parse_information_item(attrs, &ln)?);
                         }
                         "annotation" => {
-                            input.annotations.push(self.parse_annotation(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            input.annotations.push(self.parse_annotation(attrs)?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -1190,8 +1227,7 @@ impl<'a> Parser<'a> {
         Ok(input)
     }
 
-    fn parse_bkm(&mut self, start: &BytesStart) -> Result<BusinessKnowledgeModel, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_bkm(&mut self, attrs: Attrs) -> Result<BusinessKnowledgeModel, DmnParseError> {
         let id = attrs.get("id").cloned().ok_or_else(|| {
             DmnParseError::MissingElement("businessKnowledgeModel id attribute".into())
         })?;
@@ -1206,20 +1242,22 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "description" => {
                             bkm.description = Some(self.read_text_content(&ln)?);
                         }
                         "variable" | "informationItem" => {
-                            bkm.variable = Some(self.parse_information_item(&e, &ln)?);
+                            let attrs = collect_attrs(&e)?;
+                            bkm.variable = Some(self.parse_information_item(attrs, &ln)?);
                         }
                         "knowledgeRequirement" => {
-                            self.collect_required_knowledge(&e, &mut bkm.knowledge_requirement)?;
+                            self.collect_required_knowledge(&ln, &mut bkm.knowledge_requirement)?;
                         }
                         "annotation" => {
-                            bkm.annotations.push(self.parse_annotation(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            bkm.annotations.push(self.parse_annotation(attrs)?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -1251,8 +1289,7 @@ impl<'a> Parser<'a> {
         Ok(bkm)
     }
 
-    fn parse_decision_service(&mut self, start: &BytesStart) -> Result<DecisionService, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_decision_service(&mut self, attrs: Attrs) -> Result<DecisionService, DmnParseError> {
         let id = attrs
             .get("id")
             .cloned()
@@ -1269,7 +1306,7 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "description" => {
@@ -1294,7 +1331,8 @@ impl<'a> Parser<'a> {
                             self.skip_element(&ln)?;
                         }
                         "annotation" => {
-                            ds.annotations.push(self.parse_annotation(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            ds.annotations.push(self.parse_annotation(attrs)?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -1326,8 +1364,7 @@ impl<'a> Parser<'a> {
         Ok(ds)
     }
 
-    fn parse_knowledge_source(&mut self, start: &BytesStart) -> Result<KnowledgeSource, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_knowledge_source(&mut self, attrs: Attrs) -> Result<KnowledgeSource, DmnParseError> {
         let id = attrs
             .get("id")
             .cloned()
@@ -1342,14 +1379,15 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "description" => {
                             ks.description = Some(self.read_text_content(&ln)?);
                         }
                         "annotation" => {
-                            ks.annotations.push(self.parse_annotation(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            ks.annotations.push(self.parse_annotation(attrs)?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -1383,8 +1421,7 @@ impl<'a> Parser<'a> {
 
     // ---- Artifacts: textAnnotation / association / annotation ------------
 
-    fn parse_text_annotation(&mut self, start: &BytesStart) -> Result<TextAnnotation, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_text_annotation(&mut self, attrs: Attrs) -> Result<TextAnnotation, DmnParseError> {
         let mut ta = TextAnnotation {
             id: attrs.get("id").cloned(),
             text: TextContent::plain(attrs.get("text").cloned().unwrap_or_default()),
@@ -1393,7 +1430,7 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "text" => {
@@ -1429,8 +1466,7 @@ impl<'a> Parser<'a> {
         Ok(ta)
     }
 
-    fn parse_association(&mut self, start: &BytesStart) -> Result<Association, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_association(&mut self, attrs: Attrs) -> Result<Association, DmnParseError> {
         let mut a = Association {
             id: attrs.get("id").cloned(),
             source_ref: attrs.get("sourceRef").cloned(),
@@ -1441,11 +1477,12 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "annotation" => {
-                            a.annotation = Some(self.parse_annotation(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            a.annotation = Some(self.parse_annotation(attrs)?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -1477,8 +1514,7 @@ impl<'a> Parser<'a> {
         Ok(a)
     }
 
-    fn parse_annotation(&mut self, start: &BytesStart) -> Result<Annotation, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_annotation(&mut self, attrs: Attrs) -> Result<Annotation, DmnParseError> {
         let mut ann = Annotation {
             id: attrs.get("id").cloned(),
             text: TextContent::plain(String::new()),
@@ -1488,7 +1524,7 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "text" => {
@@ -1527,17 +1563,18 @@ impl<'a> Parser<'a> {
 
     // ---- DMNDI passthrough (opaque structural carriers) -----------------
 
-    fn parse_dmndi_block(&mut self, _start: &BytesStart) -> Result<Vec<DmnDiagram>, DmnParseError> {
+    fn parse_dmndi_block(&mut self) -> Result<Vec<DmnDiagram>, DmnParseError> {
         let parent = "DMNDI";
         let mut diagrams = Vec::new();
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "DMNDiagram" => {
-                            diagrams.push(self.parse_dmndi_diagram(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            diagrams.push(self.parse_dmndi_diagram(attrs)?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -1570,8 +1607,7 @@ impl<'a> Parser<'a> {
         Ok(diagrams)
     }
 
-    fn parse_dmndi_diagram(&mut self, start: &BytesStart) -> Result<DmnDiagram, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_dmndi_diagram(&mut self, attrs: Attrs) -> Result<DmnDiagram, DmnParseError> {
         let mut diag = DmnDiagram {
             id: attrs.get("id").cloned(),
             name: attrs.get("name").cloned(),
@@ -1581,11 +1617,17 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
-                        "DMNShape" => diag.shapes.push(self.parse_dmn_shape(&e)?),
-                        "DMNEdge" => diag.edges.push(self.parse_dmn_edge(&e)?),
+                        "DMNShape" => {
+                            let attrs = collect_attrs(&e)?;
+                            diag.shapes.push(self.parse_dmn_shape(attrs)?);
+                        }
+                        "DMNEdge" => {
+                            let attrs = collect_attrs(&e)?;
+                            diag.edges.push(self.parse_dmn_edge(attrs)?);
+                        }
                         _ => self.skip_element(&ln)?,
                     }
                 }
@@ -1616,8 +1658,7 @@ impl<'a> Parser<'a> {
         Ok(diag)
     }
 
-    fn parse_dmn_shape(&mut self, start: &BytesStart) -> Result<DmnShape, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_dmn_shape(&mut self, attrs: Attrs) -> Result<DmnShape, DmnParseError> {
         let element_id = attrs
             .get("dmnElementRef")
             .cloned()
@@ -1627,14 +1668,15 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "Bounds" => {
-                            bounds = Some(self.parse_dc_bounds(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            bounds = Some(self.parse_dc_bounds(attrs)?);
                         }
                         "DMNLabel" | "label" => {
-                            labels.push(self.parse_dmn_label(&e)?);
+                            labels.push(self.parse_dmn_label(&ln)?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -1670,8 +1712,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_dmn_edge(&mut self, start: &BytesStart) -> Result<DmnEdge, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_dmn_edge(&mut self, attrs: Attrs) -> Result<DmnEdge, DmnParseError> {
         let mut edge = DmnEdge {
             id: attrs.get("id").cloned(),
             source_id: attrs.get("source").cloned().unwrap_or_default(),
@@ -1681,11 +1722,12 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "waypoint" => {
-                            edge.waypoints.push(self.parse_dc_point(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            edge.waypoints.push(self.parse_dc_point(attrs)?);
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -1717,8 +1759,7 @@ impl<'a> Parser<'a> {
         Ok(edge)
     }
 
-    fn parse_dc_bounds(&mut self, start: &BytesStart) -> Result<crate::dmn::model::DcBounds, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_dc_bounds(&mut self, attrs: Attrs) -> Result<crate::dmn::model::DcBounds, DmnParseError> {
         let x = attrs.get("x").and_then(|v| v.parse().ok()).unwrap_or(0.0);
         let y = attrs.get("y").and_then(|v| v.parse().ok()).unwrap_or(0.0);
         let width = attrs.get("width").and_then(|v| v.parse().ok()).unwrap_or(0.0);
@@ -1732,26 +1773,25 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_dc_point(&mut self, start: &BytesStart) -> Result<crate::dmn::model::DcPoint, DmnParseError> {
-        let attrs = collect_attrs(start)?;
+    fn parse_dc_point(&mut self, attrs: Attrs) -> Result<crate::dmn::model::DcPoint, DmnParseError> {
         let x = attrs.get("x").and_then(|v| v.parse().ok()).unwrap_or(0.0);
         let y = attrs.get("y").and_then(|v| v.parse().ok()).unwrap_or(0.0);
         self.skip_element("waypoint")?;
         Ok(crate::dmn::model::DcPoint { x, y })
     }
 
-    fn parse_dmn_label(&mut self, start: &BytesStart) -> Result<DmnLabel, DmnParseError> {
+    fn parse_dmn_label(&mut self, parent: &str) -> Result<DmnLabel, DmnParseError> {
         let mut bounds = None;
         let mut text = None;
-        let parent = local_name_str(start.name());
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     match ln.as_str() {
                         "Bounds" => {
-                            bounds = Some(self.parse_dc_bounds(&e)?);
+                            let attrs = collect_attrs(&e)?;
+                            bounds = Some(self.parse_dc_bounds(attrs)?);
                         }
                         "text" => {
                             text = Some(self.read_text_string(&ln)?);
@@ -1789,20 +1829,16 @@ impl<'a> Parser<'a> {
 
     // ---- Shared helpers -------------------------------------------------
 
-    /// Collect the attributes of a start element into a map keyed by local
-    /// name (namespace declarations skipped). Escapes are decoded.
-
     /// Collect `<requiredKnowledge>` hrefs into a BKM's knowledge_requirement.
     fn collect_required_knowledge(
         &mut self,
-        start: &BytesStart,
+        parent: &str,
         out: &mut Vec<String>,
     ) -> Result<(), DmnParseError> {
-        let parent = local_name_str(start.name());
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     if ln == "requiredKnowledge" {
                         if let Some(h) = read_href_attribute(&e)? {
@@ -1844,16 +1880,12 @@ impl<'a> Parser<'a> {
     /// Parse an element whose body is a single `<text>` child carrying FEEL
     /// text (e.g. `<inputExpression>`, `<defaultOutputEntry>`). Returns the
     /// unescaped text content.
-    fn parse_feel_text_child(
-        &mut self,
-        _start: &BytesStart,
-        end_local: &str,
-    ) -> Result<String, DmnParseError> {
+    fn parse_feel_text_child(&mut self, end_local: &str) -> Result<String, DmnParseError> {
         let mut text = String::new();
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     if ln == "text" {
                         text = self.read_text_string(&ln)?;
@@ -1903,7 +1935,7 @@ impl<'a> Parser<'a> {
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
-                Ok(Event::Start(e)) => { let e = e.into_owned();
+                Ok(Event::Start(e)) => {
                     let ln = local_name_str(e.name());
                     if ln == "text" {
                         saw_text_child = true;
@@ -2121,19 +2153,29 @@ impl<'a> Parser<'a> {
 // Free helpers
 // =========================================================================
 
-/// The local name (post-`:` part) of a qualified name, as a `String`.
+/// The local name (post-`:` part) of a qualified name, as an owned `String`.
+///
+/// PERF-07 note: this is the one owned `String` we still allocate per start
+/// element. It is unavoidable for the `match ln.as_str()` dispatch (a `&str`
+/// borrowing the reusable read buffer would be invalidated by the next
+/// `read_event_into`). The allocation is a single short `String` per element —
+/// far cheaper than the `BytesStart::into_owned()` it replaces, which
+/// re-copied the element name *and every attribute byte*.
 fn local_name_str(qname: QName) -> String {
     String::from_utf8_lossy(qname.local_name().as_ref()).into_owned()
 }
 
-/// Collect a start element's attributes into a `HashMap<String, String>`
-/// keyed by local name. XML namespace declarations (`xmlns` / `xmlns:*`)
-/// are skipped.
+/// Collect a start element's attributes into a [`Attrs`] map keyed by local
+/// name. XML namespace declarations (`xmlns` / `xmlns:*`) are skipped.
+///
+/// PERF-07: called while the `BytesStart` event still borrows the reusable read
+/// buffer; returns owned `String`s so the result outlives the buffer borrow and
+/// can be carried into a recursive `&mut self` parse.
 #[allow(deprecated)] // `unescape_value` is deprecated in quick-xml 0.40 but
                      // still functional; the replacement needs an `XmlVersion`
                      // context not available without the reader. Behavior is
                      // identical per the changelog.
-fn collect_attrs(e: &BytesStart) -> Result<HashMap<String, String>, DmnParseError> {
+fn collect_attrs(e: &BytesStart) -> Result<Attrs, DmnParseError> {
     let mut map = HashMap::new();
     for attr in e.attributes() {
         let attr = attr.map_err(|err| DmnParseError::XmlError(err.to_string()))?;
@@ -2231,5 +2273,61 @@ mod tests {
 </definitions>"#;
         let res = parse_dmn(xxe);
         assert!(matches!(res, Err(DmnParseError::XxeRejected(_))), "got {:?}", res);
+    }
+
+    /// PERF-07 regression guard: a decision table with attributes, a
+    /// `hitPolicy`, CDATA cell text, and a numeric entity reference (`&gt;`)
+    /// must all survive the zero-copy refactor intact. Exercises every
+    /// refactored path: definitions attrs → decision attrs → decisionTable
+    /// attrs/hitPolicy → input/output clause attrs → rule attrs → ruleEntry
+    /// text (CDATA + GeneralRef) → FEEL text child.
+    #[test]
+    fn parser_zero_copy_preserves_attrs_cdata_and_entities() {
+        let doc = r#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20200524/MODEL/" id="_d1" name="Eligibility" namespace="https://example.com/elig">
+  <decision id="_dec" name="Approve">
+    <decisionTable id="_dt" hitPolicy="UNIQUE">
+      <input id="_in" label="Applicant age">
+        <inputExpression><text>applicant.age</text></inputExpression>
+      </input>
+      <output id="_out" name="result" typeRef="feel:string"/>
+      <rule id="_r1">
+        <inputEntry><text><![CDATA[>= 18]]></text></inputEntry>
+        <outputEntry><text>"adult"</text></outputEntry>
+      </rule>
+      <rule id="_r2">
+        <inputEntry><text>&lt; 18</text></inputEntry>
+        <outputEntry><text>"minor"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>"#;
+        let model = parse_dmn(doc).expect("decision-table doc should parse");
+        let decision = model
+            .definitions
+            .children
+            .iter()
+            .find_map(|c| match c {
+                DefinitionsChild::Decision(d) => Some(d),
+                _ => None,
+            })
+            .expect("a decision exists");
+        assert_eq!(decision.id, "_dec");
+        assert_eq!(decision.name.as_deref(), Some("Approve"));
+        let table = decision.decision_table.as_ref().expect("has table");
+        assert_eq!(table.id.as_deref(), Some("_dt"));
+        assert_eq!(table.hit_policy, HitPolicy::Unique);
+        assert_eq!(table.input_clauses.len(), 1);
+        assert_eq!(table.input_clauses[0].label.as_deref(), Some("Applicant age"));
+        assert_eq!(table.input_clauses[0].input_expression, "applicant.age");
+        assert_eq!(table.output_clauses.len(), 1);
+        assert_eq!(table.output_clauses[0].name.as_deref(), Some("result"));
+        assert_eq!(table.rules.len(), 2);
+        // CDATA cell must carry the is_cdata flag and the raw text.
+        assert_eq!(table.rules[0].input_entries[0].text.content, ">= 18");
+        assert!(table.rules[0].input_entries[0].text.is_cdata);
+        // Numeric-less named entity `&lt;` must resolve (GeneralRef path).
+        assert_eq!(table.rules[1].input_entries[0].text.content, "< 18");
+        assert_eq!(table.rules[0].output_entries[0].text.content, "\"adult\"");
     }
 }
