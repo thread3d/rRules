@@ -47,6 +47,8 @@ gherkin = { workspace = true }
 assert_cmd = { workspace = true }
 wiremock = { workspace = true }
 proptest = { workspace = true }
+arbitrary = "1.0"
+criterion-cycles-per-byte = "0.8"
 
 [features]
 default = []
@@ -68,4 +70,4 @@ harness = true
 # writes a JSON snapshot to engine/benches/snapshots/v6.0-baseline.json.
 [[bin]]
 name = "memory_baseline"
-path = "benches/memory_baseline.rs"
+path = "tools/memory_baseline.rs"
