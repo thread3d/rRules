@@ -36,6 +36,11 @@ dashmap = "6.2.1"
 # crate covers the TCK-exercised subset (31-RESEARCH.md Pitfall 7).
 # Supply-chain verified: repo rust-lang/regex, ~12 yrs, ~15M downloads/wk, OK.
 regex = "1.12.4"
+# Data-parallel DRD evaluation (Phase 39 / PERF-09). Used only for CPU-bound
+# level-by-level evaluation of independent decisions within a single
+# `DecisionEvaluator::evaluate` call. Supply-chain: rayon is maintained by
+# crates.io team members, ~10 yrs, ~30M downloads/wk, OK/Approved.
+rayon = "1.10"
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
