@@ -1,43 +1,32 @@
 {
   "version": "1.0",
-  "timestamp": "2026-07-15T10:45:00Z",
-  "phase": "v7.0-closure",
-  "phase_name": "v7.0 Closure — all 8 gaps closed, VERIFICATION.md written, ready for re-audit",
-  "plan": "All 8 unsatisfied PERF requirements closed with atomic commits + targeted tests. VERIFICATION.md written for Phases 36/37/38. Next: re-run /gsd-audit-milestone to re-score from 4/12 toward passed/tech_debt.",
-  "status": "in_progress",
-  "next_action": "Re-run /gsd-audit-milestone to re-score v7.0. All 8 gaps closed, VERIFICATION.md for 36/37/38 committed. Audit report at .planning/v7.0-MILESTONE-AUDIT.md still says gaps_found 4/12 — needs re-scoring.",
-  "closure_progress": {
-    "closed": [
-      {"req": "PERF-05", "commit": "74bce5cfe", "what": "Wired LexerTokenCache into FeelAstCache.get_or_parse (was orphaned dead code); added bounded FIFO eviction to both LexerTokenCache and FeelAstCache (max_entries=10_000). Tests: get_or_parse_warms_lexer_token_cache + bounded eviction."},
-      {"req": "PERF-04", "commit": "20c0ea954", "what": "Fixed structurally-non-functional nightly regression gate: scripts/memcheck-gate.sh (single source of truth), memory_baseline writes v6.0-current.json (no longer overwrites frozen v6.0-baseline.json), --update-baseline opt-in, Makefile memcheck/baseline-update, bench.yml uses make memcheck + installs jq. Verified pass/fail/missing cases."},
-      {"req": "PERF-08", "commit": "c6abe6c77", "what": "Memoized DRD topological order on SharedDmnModel (drd_order_cache, cleared on bump_generation); resolve_drd_order_cached used by evaluate. Cycle detection unchanged. Tests: drd_order_is_memoized + bump_generation_clears_drd_order_cache."},
-      {"req": "PERF-09", "commit": "870422dc3", "what": "Level-by-level parallel DRD evaluation via rayon. New resolve_drd_levels (topo levels) + evaluate_single_decision (non-recursive, lock-free). evaluate rewritten: levels processed in order (barrier between levels), >1-decision levels use par_iter, single-decision levels stay sequential. One outer read guard; &SharedDmnModel shared into rayon tasks (Sync). Added rayon=1.10. Tests: resolve_drd_levels_groups_diamond, diamond_parallel_eval_produces_correct_result (d1->{d2a,d2b}->d3, result=118), chain_eval_sequential_levels. TCK sweep + hit_policy_core/advanced + dmn_round_trip + feel_cache_wiring all pass. Plan: 39-01-PLAN.md."},
-      {"req": "PERF-12", "commit": "975894688", "what": "Expanded vendored TCK corpus 21->51 Level 3 dirs (target 35+) from upstream dmn-tck/tck@0dbcaf9, covering FEEL built-in families (numeric/string/list/context/relational/temporal). cargo test --test tck_sweep green: 51 vectors, 123 layer-passes, 0 failed. Documented 30 remaining evaluator-layer gaps (parse+round-trip pass, evaluator output not yet matching) in TCK-COVERAGE-GAPS.md grouped by DMN 1.5 section 10.3.4 family as future FEEL built-in roadmap. Plans: 39-02-PLAN.md + TCK-COVERAGE-GAPS.md."},
-      {"req": "PERF-06", "commit": "2066ef455", "what": "Per-thread thread_local! L1 FEEL-AST cache (Weak<FeelExpression>) shadowing the shared DashMap in get_or_parse. FEEL text->AST is pure so keyed by (entry,content) is correct across reloads/instances. Live L1 hit returns the SAME Arc with no shard-lock; dead Weak falls through to shared map. Bounded FIFO 1024/thread. Also FIXED latent harness bug: engine/Cargo.toml dmn_benchmarks harness true->false (criterion_main! was shadowed by libtest; make bench measured nothing). New bench_feel_cache_concurrency group: thread_local vs dashmap_contended at 16/32 threads. Results: 11.1x speedup @16t (3.87ms vs 43.18ms), 16.1x @32t (7.59ms vs 122.56ms) — target 4-20x MET. 5 new cache tests; all 15 cache + tck_sweep + feel_cache_wiring + hit_policy_core green. Plan: 39-03-PLAN.md."},
-      {"req": "PERF-07", "commit": "055ccde0a", "what": "Zero-copy DMN XML loader: removed the per-element BytesStart::into_owned() copy from every streaming dispatch loop below the root. into_owned() re-copied element name + every attribute byte per start event (thousands/doc), defeating zero-copy and duplicating collect_attrs work. Each loop now reads a borrowed Event::Start(e), extracts owned local-name String (+ owned Attrs map only in recurse arms), drops the borrow; NLL ends e's borrow at last use so the recursive &mut self parse is sound. read_event_into ties event lifetime to &mut self.reader. Sub-parser signatures changed &BytesStart -> pre-collected owned data: attrs: Attrs (20 methods), parent: &str (5), end_local: &str only (2), none (parse_dmndi_block). Public API unchanged. Single into_owned() exception = root <definitions> (one alloc/document; namespace resolution needs &self.reader while qname live but borrowed event holds &mut self.reader). New test parser_zero_copy_preserves_attrs_cdata_and_entities. Behavior preserved: dmn_round_trip 14/14, dmn_parser 8/8, hit_policy_core 5/5, hit_policy_advanced 9/9, tck_sweep 51, feel_cache_wiring 6/6. Bench harness confirmed measuring: parser corpus_all = 6.07ms median. Plan: 39-04-PLAN.md."},
-      {"req": "PERF-03", "commit": "210ad15f9", "what": "Benchmark verification: parser/corpus_all shows -22.49% change (≥20% target MET). FEEL evaluator: per-thread L1 cache 11.1x speedup @16t. Memory baseline re-baselined from 29→60 files to match expanded TCK corpus. make memcheck passes with 0% RSS/alloc regression."}
-    ],
-    "remaining": []
-  },
-  "blockers": [
-    "Milestone audit still shows gaps_found 4/12 — re-run /gsd-audit-milestone to re-score"
+  "timestamp": "2026-07-15T11:22:00Z",
+  "phase": "40",
+  "phase_name": "Numeric Built-in Functions",
+  "phase_dir": ".planning/phases/40-numeric-built-in-functions",
+  "plan": 1,
+  "task": 0,
+  "total_tasks": 6,
+  "status": "planned",
+  "completed_tasks": [],
+  "remaining_tasks": [
+    {"id": "40-01-01", "name": "Extend built_in_abs for duration types", "status": "not_started"},
+    {"id": "40-01-02", "name": "Implement named parameter resolution in evaluator", "status": "not_started"},
+    {"id": "40-02-01", "name": "Implement number(from, grouping, decimal) 3-arg form", "status": "not_started"},
+    {"id": "40-02-02", "name": "Add unit tests for number() 3-arg form", "status": "not_started"},
+    {"id": "40-03-01", "name": "Add unit tests for edge cases across all numeric functions", "status": "not_started"},
+    {"id": "40-03-02", "name": "Run TCK sweep and verify 14 numeric vectors pass", "status": "not_started"}
   ],
-  "human_actions_pending": [
-    {
-      "action": "Re-run /gsd-audit-milestone to re-score v7.0 from 4/12 toward passed/tech_debt. All 8 gaps closed, VERIFICATION.md for 36/37/38 committed.",
-      "context": "8/8 gaps closed and committed. Working branch: master. Commits: 74bce5cfe, 20c0ea954, c6abe6c77, 870422dc3, 975894688, 2066ef455, 055ccde0a, 210ad15f9, 787340aa2."
-    }
+  "blockers": [],
+  "async_jobs": [],
+  "human_actions_pending": [],
+  "decisions": [
+    {"decision": "Extend abs() for duration types (DaysTimeDuration, YearsMonthsDuration)", "rationale": "TCK tests expect abs(duration('-P1D')) → P1D and abs(duration('-P1Y')) → P1Y", "phase": "40"},
+    {"decision": "Implement number(from, grouping, decimal) 3-arg form with locale-independent parsing", "rationale": "TCK vector 0058 requires it; DMN 1.5 §10.3.4.1", "phase": "40"},
+    {"decision": "Named parameter resolution by positional fallback in evaluator dispatch", "rationale": "TCK tests use named params like abs(n:-1); invalid names return null", "phase": "40"},
+    {"decision": "Add unit tests + TCK sweep verification for all 14 numeric vectors", "rationale": "Verification strategy per VALIDATION.md", "phase": "40"}
   ],
-  "completed_tasks": [
-    {"id": "PERF-05", "name": "wire LexerTokenCache + bounded eviction", "status": "done", "commit": "74bce5cfe"},
-    {"id": "PERF-04", "name": "fix bench.yml regression gate", "status": "done", "commit": "20c0ea954"},
-    {"id": "PERF-08", "name": "memoize DRD topological order", "status": "done", "commit": "c6abe6c77"},
-    {"id": "PERF-09", "name": "level-by-level parallel evaluation", "status": "done", "commit": "870422dc3"},
-    {"id": "PERF-12", "name": "TCK coverage gap closure (21->51)", "status": "done", "commit": "975894688"},
-    {"id": "PERF-06", "name": "per-thread L1 cache + concurrency benchmark + harness fix", "status": "done", "commit": "2066ef455"},
-    {"id": "PERF-07", "name": "quick-XML zero-copy DMN loader", "status": "done", "commit": "055ccde0a"},
-    {"id": "PERF-03", "name": "benchmark perf targets vs baseline", "status": "done", "commit": "210ad15f9"},
-    {"id": "verify-gate", "name": "VERIFICATION.md for 36/37/38", "status": "done", "commit": "787340aa2"}
-  ],
-  "context_notes": "v7.0 closure (2026-07-15): All 8 unsatisfied PERF requirements closed. VERIFICATION.md written for Phases 36/37/38. Phase 36 re-verified after PERF-04 regression gate fix. Phase 37 verified: 8/8 truths (lexer cache wired, L1 cache, zero-copy parser, DRD memoization, parallel DRD eval, parser -22.49%, evaluator 11.1x, AST pre-warming). Phase 38 verified: 6/6 truths (two fuzz targets, 14 property tests, canonical layout, CI gate). Next: re-run /gsd-audit-milestone to re-score from 4/12 toward passed/tech_debt. Working branch: master (not the protected main)."
+  "uncommitted_files": [],
+  "next_action": "Execute Phase 40: /gsd-execute-phase 40",
+  "context_notes": "Phase 40 is fully planned and verified (3 plans, 3 waves). All 10 FEEL requirements covered. Ready for execution. Context exhausted mid-autonomous-run — resume with /gsd-autonomous --from 40 or execute directly with /gsd-execute-phase 40."
 }
