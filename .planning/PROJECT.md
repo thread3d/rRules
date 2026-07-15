@@ -73,24 +73,24 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 - **v2.0:** Testing Framework Foundation — Rust testing stack, working memory fixtures, forward/backward chaining verification, snapshot testing, deterministic firing mode
 - **v3.0:** Pluggable Engine Architecture — multiple Rete-family algorithms (Rete, TREAT, LEAPS, PHREAK) with runtime selection and engine-specific metrics
 
-## Current Milestone: v6.0 DMN Level 3 Compliance
+## Current Milestone: v8.0 DMN Level 3 Compliance — close Phases 30–35
 
-**Goal:** Make DMN real — deliver a DMN 1.5 parser, a complete FEEL expression-language evaluator, and a decision-table engine with all hit policies, exposed via a decision-evaluation API and wired to the existing frontend editor. Closes the stubbed Phase 6 / `DMN-01..03` gap.
+**Goal:** Complete the DMN Level 3 Compliance work by delivering the remaining phases: FEEL parser + evaluator + built-in function library (Phase 31), decision-table engine with all hit policies (Phase 32), decision evaluator + DRD resolution + REST API + metrics (Phase 33), frontend wiring + hit-policy model refactor (Phase 34), and conformance verification + round-trip + monitoring close-out (Phase 35).
 
 **Target features:**
-- DMN 1.5 model + parser (standard `.dmn` XML import) and exporter for round-trip
 - Full FEEL expression-language evaluator — boxed expressions (literal/context/list/relation/function invocation), if/for/quantified, arithmetic/comparison/boolean/string/date-time operators, the DMN built-in function library, and formal semantics (coercion, null, three-valued logic)
 - Decision-table engine with all hit policies (UNIQUE, ANY, PRIORITY, FIRST, RULE ORDER, OUTPUT ORDER, COLLECT) and COLLECT aggregators (SUM/MIN/MAX/COUNT)
 - Decision evaluation API (`POST /v1/decisions/{id}/evaluate`) integrated with the existing engine registry / metrics / inference-trace surfaces from v5.0
 - Wire the existing frontend `DecisionTable.tsx` + `HitPolicySelector.tsx` (built in v4.0) to the real backend DMN evaluator; surface results + trace in the UI
+- Conformance verification against OMG DMN TCK with round-trip fidelity and monitoring close-out
 
-**Key context:** The frontend decision-table editor already exists (v4.0) — this milestone wires it to a real backend, it does **not** rebuild the editor. `DMN-01..03` are marked "validated v1.0" above but are stubs (no `dmn` module in source); v6.0 makes that claim genuinely true. Phase numbering continues from 29 (v5.0 ended at Phase 28). "Full DMN Level 3 FEEL" was selected → complete FEEL semantics, larger scope.
+**Key context:** Phase 29 (DMN model + parser) and Phase 30 (FEEL value types) are complete. Phases 31–35 remain. The v7.0 perf work (zero-copy parser, per-thread AST cache, parallel DRD eval) directly benefits this milestone. Phase numbering continues from 40 (v7.0 ended at Phase 39).
 
-**Progress:** Phase 30 complete (2026-07-07) — FEEL value domain in place: Decimal128 numeric path, temporal types with IANA tz + DST-correct arithmetic, type lattice (conformance/equivalence/3 implicit conversions), `Value` extended additively with zero Rete regression; validated against OMG TCK numeric + temporal vectors (verifier 4/4 passed). Next: Phase 31 — FEEL parser + evaluator + built-in function library, which builds the operator/evaluator layer on this value-domain foundation.
+**Progress:** Not started. Phase 29 (DMN model + parser) and Phase 30 (FEEL value types) are complete from the v6.0 effort. Phases 31–35 are the remaining scope.
 
 ---
 
-**Milestone v5.0 shipped 2026-07-06** (audit `passed`). Per-phase detail archived in `.planning/milestones/v5.0-ROADMAP.md`. Optionally add a git remote and push tags `v1.0`–`v5.0` (currently local-only).
+**Milestone v7.0 shipped 2026-07-15** (audit `passed`). v7.0 delivered benchmark infrastructure, parser/evaluator optimizations (zero-copy, per-thread L1 cache, parallel DRD eval), fuzzing, property tests, and TCK corpus expansion. All 12/12 PERF requirements satisfied.
 
 ## Context
 
@@ -145,4 +145,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-07 — Phase 30 (FEEL Value Types + Type Lattice + Temporal Domain) complete; DMN-08/09/10 moved to Validated; v6.0 progress updated. v5.0 per-phase detail archived in `milestones/v5.0-ROADMAP.md`.*
+*Last updated: 2026-07-15 — Milestone v8.0 started: DMN Level 3 Compliance — close Phases 30–35. v7.0 shipped (12/12 PERF satisfied).*

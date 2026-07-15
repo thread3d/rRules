@@ -1,21 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v7.0
-milestone_name: Performance + Production Readiness
-status: ready_for_audit
-stopped_at: null
-paused_at: null
-last_updated: "2026-07-15T10:50:00Z"
+milestone: v8.0
+milestone_name: DMN Level 3 Compliance — close Phases 30–35
+status: planning
+last_updated: "2026-07-15T09:00:40.137Z"
 last_activity: 2026-07-15
-last_activity_desc: All 8 PERF gaps closed; VERIFICATION.md for 36/37/38 committed; ready for re-audit
 progress:
-  total_phases: 7
-  completed_phases: 5
-  total_plans: 25
-  completed_plans: 25
-  percent: 100
-current_phase: 39
-current_phase_name: Closure — all gaps closed, awaiting re-audit
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -29,9 +24,10 @@ See: `.planning/PROJECT.md` (updated 2026-07-10)
 
 ## Current Position
 
-Milestone: v7.0 (Performance + Production Readiness) — ALL GAPS CLOSED
-Status: 12/12 PERF requirements satisfied. Ready for re-audit.
-Last activity: 2026-07-15 — All 8 PERF gaps closed; VERIFICATION.md for 36/37/38 committed
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-07-15 — Milestone v8.0 started
 
 ### Milestone v6.0 Phases
 
