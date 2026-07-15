@@ -1,12 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v8.0
-milestone_name: DMN Level 3 Compliance — close Phases 30–35
+milestone_name: Close TCK Evaluator Gaps
+current_phase_name: defining requirements
 status: planning
-last_updated: "2026-07-15T09:00:40.137Z"
+stopped_at: ""
+paused_at: ""
+last_updated: "2026-07-15T09:04:31.469Z"
 last_activity: 2026-07-15
+last_activity_desc: Milestone v8.0 started — roadmap created with Phases 40-43
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,382 +21,107 @@ progress:
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-07-10)
+See: `.planning/PROJECT.md` (updated 2026-07-15)
 
 **Core value:** Users can define complex business decisions as reusable rules, deploy them instantly, and monitor their impact — all without modifying code.
-**Current focus:** v7.0 RE-AUDIT — all 8 gaps closed. Re-run /gsd-audit-milestone to re-score.
+**Current focus:** v8.0 Close TCK Evaluator Gaps — implement missing FEEL built-in functions to raise TCK evaluator coverage from 21/51 to 51/51 vectors.
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Not started (roadmap created)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-07-15 — Milestone v8.0 started
+Status: Planning
+Last activity: 2026-07-15 — Milestone v8.0 roadmap created
 
-### Milestone v6.0 Phases
+### Milestone v8.0 Phases
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
-| 29 | DMN 1.5 Model + XML Parser + Canonical IR | DMN-04, DMN-05, DMN-06 | complete (29-01, 29-02, 29-03 all done) |
-| 30 | FEEL Value Types + Type Lattice + Temporal Domain | DMN-08, DMN-09, DMN-10 | not_started (research-needed) |
-| 31 | FEEL Parser + Evaluator + Built-in Function Library | DMN-11..DMN-18 | not_started (research-needed; largest) |
-| 32 | Decision-Table Engine + Hit Policies | DMN-19, DMN-20, DMN-21 | not_started |
-| 33 | Decision Evaluator + DRD Resolution + REST API + Metrics | DMN-22..DMN-26, DMN-28 | not_started |
-| 34 | Frontend Wiring + Hit-Policy Model Refactor | DMN-29..DMN-32 | not_started |
-| 35 | Conformance Verification + Round-trip + Monitoring Close-out | DMN-07, DMN-27, DMN-33, DMN-34 | not_started (research-needed; gate) |
+| 40 | Numeric Built-in Functions | FEEL-01..FEEL-10 | not_started |
+| 41 | String + List Built-in Functions | FEEL-11..FEEL-17 | not_started |
+| 42 | Context + Relational + Temporal Built-in Functions | FEEL-18..FEEL-24 | not_started |
+| 43 | TCK Conformance Verification + Close-out | FEEL-25, FEEL-26 | not_started |
 
-**Coverage:** 31/31 v6.0 requirements (DMN-04..DMN-34) mapped to exactly one phase, 0 orphans, 7/7 phases with ≥1 requirement.
-
-### Milestone v4.0 Plans Status
-
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 17-01 | Production Frontend Architecture Plan | [x] COMPLETE |
-| 17-02 | Rule Management Dashboard | [x] IMPLEMENTED (frontend/src/features/rules/) |
-| 18-01 | RBAC Implementation | [x] PLAN & IMPLEMENTATION COMPLETE |
-| 18-02 | Approval Workflow | [x] PLAN & IMPLEMENTATION COMPLETE |
-| 18-03a | Audit Event Types | [x] COMPLETE |
-| 18-03 | Audit Trail | [x] PLAN & IMPLEMENTATION COMPLETE |
-| 18-04 | Git Version Control | [x] PLAN & IMPLEMENTATION COMPLETE |
-| 19 | Monitoring & Metrics | [x] PLAN & IMPLEMENTATION COMPLETE |
-| 20 | Complete Management API | [x] IMPLEMENTATION COMPLETE |
-| 21-01 | Docker Image Optimization | [x] COMPLETE (Alpine + multi-stage, verification passed) |
-| 21-02 | Kubernetes Manifests | [x] COMPLETE (Helm chart + values files) |
-| 21-03 | Hot Reload Mechanism | [x] COMPLETE (async reload with job tracking) |
-
-**Phase 21 UAT Results:**
-
-- Total tests: 4
-- Passed: 4
-- Issues: 0
-- Pending: 0
-
-**Fixes Applied (UAT 21-01):**
-
-- Created Helm secret template with DATABASE_URL and API_SECRET_KEY placeholders
-- Generated environment-specific values files (dev/staging/prod) with correct replica counts
-- Registered reload job routes in main.rs (GET /v1/jobs/{job_id}, GET /v1/jobs)
-
-**Phase 18 UAT Results:**
-
-- Total tests: 8
-- Passed: 8
-- Issues: 0
-- Pending: 0
-
-**Fixes Applied (UAT 18-07):**
-
-- usePermission.ts - Fixed AuthContext import and Permission type mismatch
-- ProtectedRoute.tsx - Fixed generic component typing for withPermissionProtection
+**Coverage:** 26/26 v8.0 requirements (FEEL-01..FEEL-26) mapped to exactly one phase, 0 orphans, 4/4 phases with >=1 requirement.
 
 ### Previous Milestones Summary
 
-#### Milestone v3.0 - Complete (Pluggable Engine Architecture)
+#### Milestone v7.0 - Complete (Performance + Production Readiness)
 
-| Phase | Plans Complete | Status |
-|-------|----------------|--------|
-| 10 | 5/8 | Complete (dashboard deferred to v4.0) |
-
-## Multi-Track Execution Progress (2026-07-01)
-
-**Status**: Paused due to context limits  
-**Progress**: ~90% complete across all three tracks  
-
-### Track 1: Hardening ✅ COMPLETE
-
-- H1: Engine Retraction - Fixed retract_fact() in Rete/TREAT/LEAPS (187 tests pass)
-- H2: Metrics Infrastructure - Real data via singleton collector, Prometheus enabled at runtime
-- H3: Frontend Charts - Replaced placeholders with recharts LineChart/PieChart
-- H4: TREAT LRU Eviction - VecDeque+HashMap for deterministic eviction (9 tests pass)
-
-### Track 2: Production Readiness ✅ COMPLETE
-
-- P1: Authentication Hardening - JWT validation, login/refresh endpoints at /v1/auth/*
-- P2: Security Headers & CORS - actix-cors with configurable origins, 5 security headers added
-- P3: Structured Logging - tracing/tracing-subscriber, all println!() replaced
-- P4: Error Handling Cleanup - Removed 52+ unwrap() calls, created api/src/error.rs
-- P6: CI/CD Pipeline - Makefile, .github/workflows/ci.yml and deploy.yml
-
-### Track 3: New Features ✅ MOSTLY COMPLETE
-
-- F1: Multi-Tenancy - TenantStore trait, MemoryTenantStore impl, CRUD endpoints at /v1/tenants/*
-- F2: Rule Diff API - GET /rules/:id/diff endpoint (11 tests pass)
-- F3: Frontend Governance Routes - /governance/approvals and /governance/audit routes wired up
-- F5: Batch Execution - POST /rules/batch-execute with tokio::Semaphore concurrency control
-- F7: What-If Simulation - POST /simulation/run, simulation runner with comparison logic
-
-### Remaining Work (~10%)
-
-1. Fix git integration compilation errors in versioning/mod.rs (CURRENT BLOCKER)
-2. Run cargo clippy and fix warnings
-3. Wire tenant_id into rule CRUD endpoints for actual tenant isolation
-4. Add missing integration tests (metrics, batch execution, simulation)
-5. Complete API documentation (OpenAPI/Swagger or manual comments)
-
-**Estimated time to completion**: ~8 hours of focused work
-
-**Phase 10 Status:**
-
-- Architecture foundation (registry, selector, metrics) ✅
-- Rete algorithm implementation ✅
-- TREAT algorithm with caching ✅
-- LEAPS algorithm with aggregations ✅
-- PHREAK algorithm with truth maintenance ✅
-
-From v3.0 milestone:
-| Phase | Plan | Reason |
+| Phase | Name | Status |
 |-------|------|--------|
-| 10 | 10-06, 10-08 | Config/API integration and frontend dashboard deferred to v4.0 |
+| 36 | Benchmarks + Memory Profiling Gates | Complete |
+| 37 | Parser/Evaluator Optimization + AST Cache Warming | Complete |
+| 38 | Testing Expansion: Fuzzing + Property-Based Tests | Complete |
+| 39 | DRD Parallelization + Topological Sort | Complete |
 
-From v2.0 milestone:
+#### Milestone v6.0 - Complete (DMN Level 3 Compliance)
 
-| Phase | Plans Complete | Status |
-|-------|----------------|--------|
-| 7 | 6/6 | Complete - Core Testing Infrastructure Foundation |
-| 8 | 5/5 | Complete - Advanced Testing Features |
-| 9 | 4/5 | Complete - Testing Framework Enhancements (1 deferred) |
+| Phase | Name | Status |
+|-------|------|--------|
+| 29 | DMN 1.5 Model + XML Parser + Canonical IR | Complete |
+| 30 | FEEL Value Types + Type Lattice + Temporal Domain | Complete |
+| 31 | FEEL Parser + Evaluator + Built-in Function Library | Complete |
+| 32 | Decision-Table Engine + Hit Policies | Complete |
+| 33 | Decision Evaluator + DRD Resolution + REST API + Metrics | Complete |
+| 34 | Frontend Wiring + Hit-Policy Model Refactor | Not started |
+| 35 | Conformance Verification + Round-trip + Monitoring Close-out | Not started |
 
-**Total v2.0 Progress: 21/22 plans complete (95%)**
+#### Milestone v5.0 - Complete (Live Execution)
 
-#### Milestone v1.0 - Completed
-
-| Phase | Plans Complete | Status |
-|-------|----------------|--------|
-| 1 | 6/6 | Complete - Core Engine Foundation |
-| 2 | 5/5 | Complete - Rule Authoring Interface |
-| 3 | 6/6 | Complete - REST API Layer |
-| 4 | 5/5 | Complete - Governance & Access Control (stub) |
-| 5 | 6/6 | Complete - Testing & Monitoring (stub) |
-| 6 | 3/3 | Complete - DMN Compliance (stub) |
-
-**Total v1.0 Progress: 31/31 plans complete (100%)**
+| Phase | Name | Status |
+|-------|------|--------|
+| 23 | Execute evaluator + wiring | Complete |
+| 24 | Execution counters + metrics broadcast | Complete |
+| 25 | Real reload + JobStore | Complete |
+| 26 | RuleExecutionTracker singleton + dead-rule live data | Complete |
+| 27 | Stateful sessions | Complete |
+| 28 | Frontend test-runner | Complete |
 
 ## Accumulated Context
 
 ### Roadmap Evolution
 
-- Phase 22 added: Close v4.0 frontend integration gaps: wire orphaned UI to backend
-- v5.0 milestone added (2026-07-02): Phases 23–28 — Live Execution (wire /v1/execute stub to real engine; auto-populate trackers + metrics)
+- v8.0 milestone added (2026-07-15): Phases 40-43 — Close TCK Evaluator Gaps (implement missing FEEL built-in functions to raise TCK evaluator coverage from 21/51 to 51/51 vectors)
 
 ### Decisions
 
-**Phase 1 Core Engine Foundation:**
+**v8.0 Milestone Decisions:**
 
-- D-01 to D-12 (core engine, chaining, validation, API, governance)
+- D-40-01: v8.0 is a focused built-in-function gap-closing milestone — no new DMN features, no frontend changes, no new API endpoints.
+- D-40-02: All 30 vectors that already parse and round-trip cleanly must continue to do so (zero regression).
+- D-40-03: Each new built-in function must handle null propagation per DMN 1.5 Section 10.3.4.
+- D-40-04: The existing Rete rule-execution path (`/v1/execute`, `EngineRegistry`) is unchanged — zero regression.
+- D-40-05: Phase numbering continues from 40 (v7.0 ended at Phase 39).
 
-**Phase 2 Rule Authoring Interface:**
+### Blockers/Concerns
 
-- D-21 to D-25 (CodeMirror IDE, ag-Grid tables, guided editors, templates, validation)
-
-**Phase 3 REST API Layer:**
-
-- D-31 to D-36 (URL versioning, flexible payload, trace output, Docker, K8s manifests)
-
-**Phase 4 Governance & Access Control:**
-
-- D-41 to D-45 (RBAC, approval workflows, ownership, audit trails, version control)
-
-**Phase 5 Testing & Monitoring:**
-
-- D-51 to D-55 (BDD testing, simulation, coverage metrics, monitoring dashboards, dead rule detection)
-
-**Phase 6 DMN Compliance:**
-
-- D-61 to D-63 (DMN 1.5 parser, decision tables with hit policies, FEEL expression language)
-
-**Phase 29 DMN 1.5 Model + XML Parser + Canonical IR (v6.0):**
-
-- D-29-03a: Use quick_xml::writer::Writer with Event::CData/Event::Text directly (not quick_xml::se serde serializer) — serde-XML loses attribute order and CDATA fidelity (Pitfall 11)
-- D-29-03b: Always emit hitPolicy (default Unique -> "UNIQUE") so the default is structural on export; parse("UNIQUE")==Unique round-trips cleanly
-- D-29-03c: CDATA branch on TextContent.is_cdata — Event::CData when true, escaped BytesText otherwise (T-29-05 XML-injection mitigation)
-- D-29-03d: Round-trip is structural IR-equality (PartialEq), not byte-exact; byte-exact round-trip is Phase 35 (DMN-07)
-
-**Phase 7 Core Testing Infrastructure Foundation (v2.0):**
-
-- D-71 to D-76 (Rust testing stack, TestSession, FixtureBuilder, ForwardChainingTester, InferenceTrace exposure, DeterministicMode)
-
-**Phase 8 Advanced Testing Features (v2.0):**
-
-- D-81 to D-84 (ConstraintVerifier with locked_groups, WorkingMemorySnapshot JSON serialization, SnapshotDiff/SnapshotChange, RuleCoverage reporting)
-
-**Phase 9 Testing Framework Enhancements (v2.0):**
-
-- D-91 to D-95 (SnapshotManager, JSON helpers with deterministic output, HTML report generator, CLI flags via SnapshotMode enum)
-
-**Phase 10 Pluggable Engine Architecture (v3.0) - IN PROGRESS:**
-
-- D-101: Trait-based engine interface for pluggability ✅
-- D-102: Factory pattern for dynamic engine registration ✅
-- D-103: Configuration file + API endpoint for runtime selection 🟡
-- D-104: Cross-engine verification via shared test suite ⏳
-
-**Phase 17 Production Frontend (v4.0) - PLANNING:**
-
-- D-171 to be defined: React component architecture for rule authoring
-- D-172 to be defined: Dashboard patterns for rule management
-- [Phase ?]: Phase 23-01: Extended EngineResult with pub fired_rule_ids: Vec<String> field (RESEARCH Open Q#5) rather than a trait method.
-- [Phase ?]: Phase 23-01: Registered all four engine factories under static cfg gates (D-01) — available_engines() truthfully returns rete/treat/leaps/phreak. load_ruleset/get_facts default impls return Err/empty; engines override in Plan 03 (Rete) and Plan 06 (others).
-- [Phase ?]: Phase 23-02: Built Expression AST (D-06) + rewrote Condition::evaluate (D-05) with shared compare_values helper; Action::UpdateFact.fields now HashMap<String, Expression>; Condition::Pattern gained op field with real matching.
-- [Phase ?]: Phase 23-03: Rewrote ReteEngine::execute_rules into a real direct evaluator (D-04) with fixpoint cap (D-07); keystone score+10 scenario passes at engine level.
-- [Phase ?]: Phase 23-03: Pitfall 6 fixed — fired/evaluated ids in HashSet, record_rule_fire/record_rule_eval once per rule after the fixpoint loop; stale per-nagram record removed.
-- [Phase ?]: Phase 23-03: Action::UpdateFact.id matched as fact_type_id with exact-key fast path; each rule fires at most once per execute() (fired_set guard).
-- [Phase ?]: Phase 23-04: Renamed metrics::EngineState -> MetricsSnapshot (L-05 / Pitfall 10) to disambiguate from execution::EngineState before Plan 23-05 adds execute logic; execution.rs::EngineState intentionally untouched. Landed Wave 0 RED scaffolds (engine/tests/coverage.rs record_once_per_rule GREEN; api/tests/execute_integration.rs five RED scaffolds for EXEC-01/02, ENGINE-07/08, MON-05).
-- [Phase ?]: Phase 23-05: execute_single constructs a fresh Box<dyn ExecutionEngine> per request via create_engine_by_name and moves it into web::block — no shared &mut engine in the execute path (Pitfall 1/9 per-request isolation).
-- [Phase ?]: Phase 23-05: facts_after serialized from post-execution engine.get_facts() via reverse engine_value_to_json mapping (D-08 / Pitfall 11) — the request-input echo bug is removed.
-- [Phase ?]: Phase 23-05: Engine param validated via registry.available_engines() (&self) — 400 on unknown (ENGINE-07); omitted resolves to RRULES_DEFAULT_ENGINE env > selector.current_engine() (ENGINE-08). selector.select_engine (&mut self) is NOT called per request (Pitfall 7).
-- [Phase ?]: Phase 23-05: build_ruleset_from_dir returns empty RuleSet + warning on missing/empty dir (D-03a); live rule-file parsing deferred to Phase 25. All five Plan 23-04 RED scaffolds now GREEN — all four ROADMAP success criteria pass.
-- [Phase ?]: .planning/phases/23-execute-evaluator-wiring/23-06-SUMMARY.md
-- [Phase ?]: .planning/phases/23-execute-evaluator-wiring/23-06-SUMMARY.md
-- [Phase 26]: Phase 26-01: RuleExecutionTracker converted to `LazyLock<Mutex<TrackerState>>` singleton mirroring CoverageTracking; `new()` marked `#[deprecated]` (D-04) to catch stray local instantiation; `clear()` for `#[serial]` test isolation; internal `chrono::Utc::now().to_rfc3339()` timestamp (D-06).
-- [Phase 26]: Phase 26-02: `record_evaluation`/`record_fire` wired at BOTH post-fixpoint evaluator sites (`direct_eval.rs` for Treat/Leaps/Phreak + `rete/mod.rs` for Rete's inlined `execute_rules` — C1); `dead_rules_endpoint` reads `RuleExecutionTracker::find_dead_rules()` singleton (no `new()` per call); `engine/src/engine/metrics.rs` untouched (C4 — CoverageTracking remains canonical fire source, no three-counter drift).
-- [Phase ?]: D-03: TTL+LRU+max-count+sweep+gauge ship TOGETHER (Pitfall 5)
-- [Phase 27]: D-01: StatefulSession wraps per-session Box<dyn ExecutionEngine> (Phase-23 surface), NOT v1.0 environment::Session stub
-- [Phase 27]: D-02: Arc<DashMap<String, Arc<Mutex<StatefulSessionEntry>>>> sharded registry (DashMap 6.2.1 pinned)
-- [Phase 27]: D-03: TTL+LRU+max-count+sweep+gauge ship TOGETHER (Pitfall 5 — OOM is silent)
-- [Phase 27]: D-04: Server UUID v4 primary key + client session_id as idempotency alias
-- [Phase 27]: D-11: Per-session std::sync::Mutex; engine.execute() in web::block (Pitfall 7 guard-scope pattern)
-- [Phase ?]: DMN IR is the sole store; frontend is a projection (round-trip fidelity structural from day one — Pitfall 11)
-- [Phase ?]: DMN IR does NOT reuse crate::data_types::Value or the rule-engine Expression AST (milestone research Anti-Pattern avoided)
-- [Phase ?]: HitPolicy::default() = Unique so DecisionTable::default() yields UNIQUE (Phase 29 success criterion 3 at IR level)
-- [Phase ?]: DmnParseError declared in model.rs (single error-type home); parser.rs (29-02) returns Result<_, DmnParseError>
-- [Phase ?]: DMN parser uses quick-xml NsReader streaming pull parser
-- [Phase ?]: Event::GeneralRef resolved explicitly — quick-xml 0.40 emits entity refs as separate events, not inlined into Event::Text
-- [Phase ?]: hitPolicy absent defaults to HitPolicy::Unique (DMN-04); FEEL stored as String, parsed in Phase 31
-- [Phase ?]: D-30-01a: chrono-tz added with serde feature (DateTimeValue Iana arm requires Tz: Serialize+Deserialize)
-- [Phase ?]: D-30-01b: Manual serde for DateTimeValue via (NaiveDateTime, chrono_tz::Tz) repr
-- [Phase ?]: D-30-01c: FeelType derives Serialize+Deserialize (FeelFunction serde bound propagates)
-- [Phase ?]: D-30-01d: Exhaustive-match FEEL-variant arms preserve the safety net
-- [Phase ?]: D-30-01e: TCK precision-audit tokenizer is boundary-aware to exclude hex-hash ID fragments
-- [Phase ?]: D-30-01f: A1 CONFIRMED — no TCK value-domain literal exceeds 29 sig digits; rust_decimal locked
-- [Phase ?]: D-30-02a: feel_numeric_eq returns Option<bool> (null-propagating) for Phase 31 three-valued logic
-- [Phase ?]: D-30-02b: Number<->Integer cross-type equality via Decimal::from(i) (spec 10.3.2.2); Number<->String returns None (no implicit conversion, Phase 31 built-in)
-- [Phase ?]: D-30-02d: Division-by-zero TCK vectors skipped with documented reason, NOT mapped to null (Err->null is Phase 31 Security Domain)
-- [Phase ?]: D-30-03a: parse_at_literal dispatches by first-separator position (colon vs dash) to handle negative-offset times correctly
-- [Phase ?]: D-30-03c: DST re-attachment policy via reattach_zone helper — None to null, Ambiguous to earliest (Pitfall 5, Open Question 2 RESOLVED)
-- [Phase ?]: D-30-03d: TCK string wrapper stripped before parsing — the @Zone/Name suffix preservation is what the TCK string() expectation tests
-- [Phase ?]: D-30-04a: equivalent is structural equality only (NOT Date≡DateTime) — type-level Date≡DateTime would break equivalence-implies-conformance; Date<:DateTime lives in conforms
-- [Phase ?]: D-30-04b: conforms function contravariance per spec §10.3.2.9.2 verbatim (Si<:Ti, U<:V); plan Test 5 prose inverted — must_haves verbatim-spec wins
-- [Phase ?]: D-30-04c: implicit_convert EXACTLY three §10.3.2.9.4 conversions; NO number↔string in any ConvertCtx (Pitfall 6)
-- [Phase ?]: D-30-04d: type_of exhaustive over all 16 Value variants (no wildcard); Integer/Float→Number per §10.3.2.2
-- [Phase ?]: D-30-04f: regression audit documented every Value wildcard in validation.rs/rules.rs as Rete-only (Pitfall 1 citations); testing/mod.rs confirmed exhaustive
-- [Phase ?]: Single FeelExpression enum (not non_exhaustive) — exhaustive match is safety net
-- [Phase ?]: Pratt precedence ladder: or=10 and=20 comparison=30 instance-of=35 additive=40 mult=50 **=60 RIGHT-assoc
-- [Phase ?]: Error recovery: partial AST with Err nodes carrying spans (user override, not fail-fast)
-- [Phase ?]: FeelFunction carrier extended with param_names/body/captured (Arc-backed data-model decision)
-- [Phase ?]: Private mod cmp (not pub) makes Rust ==/Ord reuse a visibility error; no_rust_eq test enforces no PartialEq/PartialOrd/partial_cmp outside cmp (31-02)
-- [Phase ?]: feel_equals/feel_compare return Option<bool>/Option<Ordering> (None=null) — the 3VL boundary; opt_bool maps None→Value::Null (31-02)
-- [Phase ?]: evaluate(&FeelExpression, &Scope) is the sole entry point — NO evaluate(&str) overload (type-level no-re-parse contract, DMN-18) (31-02)
-- [Phase ?]: Tests flattened into mod eval (not nested mod tests) so VALIDATION.md filter substrings like dmn::feel::eval::dmn12_ match directly (31-02)
-
-### Blockers/Concerns (All Resolved from v2.0)
-
-1. Engine must exist before testing - **RESOLVED**
-2. WorkingMemory API exposure for test fixtures - **RESOLVED**
-3. InferenceTrace structure public API access - **RESOLVED**
-4. Deterministic conflict resolution mode - **RESOLVED**
+None currently.
 
 ### Deferred Items
 
-From v1.0 milestone:
-| Category | Item | Status |
-|----------|------|--------|
-| Governance | Real RBAC implementation | Stub only (v1.0) |
-
-From v2.0 milestone:
-| Phase | Plan | Reason |
-|-------|------|--------|
-| 9 | 09-05 | Integration tests for snapshot filesystem operations - deferred to future iteration |
-
-From v3.0 milestone:
-| Phase | Plan | Reason |
-|-------|------|--------|
-| 10 | 10-06, 10-08 | Config/API integration and frontend dashboard deferred to v4.0 |
+None currently.
 
 ## Session Continuity
 
-**Resume file:** None (stale .continue-here.md from v4.0 — not applicable)
+**Resume file:** None
 
-**Stopped at:** context exhaustion at 75% (2026-07-14)
+**Stopped at:** N/A
 
-Last session: 2026-07-14T10:39:22.367Z
+Last session: 2026-07-15 — Milestone v8.0 roadmap created
 
 **Completed Phases:**
 
-- Phase 17: Production Frontend Architecture (Rule dashboard, Decision table, Validation Display) ✅
-- Phase 18: Enterprise Governance (RBAC, Approval Workflow, Audit Trail) ✅
-- Phase 19: Monitoring & Metrics (Prometheus, Dashboard, Dead Rules, Coverage) ✅
-- Phase 20: Complete Management API (Rules CRUD, Categories, Tags, Approvals, Audit, Branches) ✅
-- Phase 21: Deployment & CI/CD (Helm charts, K8s manifests, hot reload) ✅
-- Phase 36: Benchmarks + Memory Profiling Gates ✅
-
-**Phase 10 Status (Completed):**
-
-- Architecture foundation (registry, selector, metrics) ✅
-- Rete algorithm implementation ✅
-- TREAT algorithm with caching ✅
-- LEAPS algorithm with aggregations ✅
-- PHREAK algorithm with truth maintenance ✅
-
----
+None for v8.0 yet.
 
 ---
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Start planning Phase 40 with `/gsd-plan-phase 40`
 
 ## Performance Metrics
 
 | Phase | Plan | Duration | Notes |
 |-------|------|----------|-------|
-| Phase 23 P01 | 4min | 2 tasks | 6 files |
-| Phase 23 P02 | 10min | 2 tasks | 4 files |
-| Phase 23 P03 | 7min | 2 tasks | 2 files |
-| Phase 23 P04 | 4min | 2 tasks | 8 files |
-| Phase 27 P01 | 90min | 3 tasks | 8 files |
-| Phase 29 P01 | 4min | 3 tasks | 7 files |
-| Phase 29 P02 | 45min | 2 tasks | 8 files |
-| Phase 29 P03 | 15min | 2 tasks | 2 files |
-| Phase 30 P01 | 12min | 2 tasks | 16 files |
-| Phase 30 P02 | 10min | 2 tasks | 2 files |
-| Phase 30 P03 | 9min | 2 tasks | 2 files |
-| Phase 30 P04 | 7min | 2 tasks | 4 files |
-| Phase 31 P01 | 9m | 3 tasks | 11 files |
-| Phase 31 P02 | 12min | 2 tasks | 1 files |
-| Phase 31 P03 | ~20min | 2 tasks | 3 files |
-| Phase 31-feel-parser-evaluator-built-in-function-library P05 | 20min | 2 tasks | - files |
-
-## Session Continuity (Updated 2026-07-13)
-
-**Paused at:** 2026-07-14 — Phase 37 + Phase 38 T1/T2 committed; T3 (decision-table fuzzing) queued
-**Resume command:** `/gsd-resume-work` or say "continue"
-
-**Completed in this session:**
-
-- Phase 36 (Benchmarks + Memory Profiling Gates) — COMPLETE & committed
-  - Criterion benchmark harness with four groups (parser, FEEL evaluator, decision-table, DRD)
-  - Memory profiling utility with RSS measurement and baseline snapshots
-  - CI integration with nightly regression gates
-- Phase 37 (Parser/Evaluator Optimization + AST Cache Warming) — COMPLETE & committed (deb23df57)
-  - T1: Lexer token cache (`LexerTokenCache`) — DashMap-backed
-  - T2: Parser entry points extended with cache support (`parse_expression_with_cache`)
-  - T3: DRD resolution documentation and parallelization infrastructure ready
-- Phase 38 T1/T2 — COMPLETE & committed (31cdbf77)
-  - T1: FEEL parser cargo-fuzz target (`feel_parser`)
-  - T2: 14 property-based tests (`engine/tests/feel_properties.rs`)
-
-**Phase 37 Tasks:**
-| ID | Name | Status |
-|----|------|--------|
-| T1 | Parser optimization (lexer caching) | COMPLETE (committed) |
-| T2 | Evaluator optimization (AST cache warming) | COMPLETE (committed) |
-| T3 | DRD parallelization | COMPLETE (committed) |
-
-**Phase 38 Tasks:**
-| ID | Name | Status |
-|----|------|--------|
-| T1 | Fuzzing for FEEL parser (cargo-fuzz) | COMPLETE (committed) |
-| T2 | Property-based tests for FEEL evaluator | COMPLETE (committed) |
-| T3 | Fuzzing for decision-table evaluation | COMPLETE (committed) |
-
----
+| (v8.0 not yet started) | | | |

@@ -13,7 +13,9 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 - ✅ **v3.0 Pluggable Engines** — Phase 10 (shipped 2026-06-xx) — Rete/TREAT/LEAPS/PHREAK with runtime selection
 - ✅ **v4.0 Production Platform** — Phases 17–22 (shipped 2026-07-02) — Full frontend, governance, monitoring, management API, deployment
 - ✅ **v5.0 Live Execution** — Phases 23–28 (shipped 2026-07-06) — Real rule evaluator + `/v1/execute` wiring; auto-populated trackers + metrics so v4.0 monitoring surfaces read live data; stateful sessions + frontend test-runner. Full per-phase detail archived in `milestones/v5.0-ROADMAP.md`.
-- 🚧 **v6.0 DMN Level 3 Compliance** — Phases 29–35 (in progress) — Make DMN real: DMN 1.5 parser, complete FEEL expression-language evaluator, decision-table engine with all hit policies, decision-evaluation API, and frontend wiring. Closes the stubbed Phase 6 / `DMN-01..03` gap. Milestone-level success criterion: OMG DMN 1.5 Level 3 conformance (DMN-34 checklist 100% + TCK pass) with the existing Rete rule-execution path unchanged (zero regression).
+- ✅ **v6.0 DMN Level 3 Compliance** — Phases 29–35 (shipped 2026-07-10) — Real DMN parser, FEEL evaluator, decision-table engine with all hit policies, REST API + metrics, frontend wiring; closes stubbed Phase 6 gap. [Archive](milestones/v6.0-ROADMAP.md)
+- ✅ **v7.0 Performance + Production Readiness** — Phases 36–39 (shipped 2026-07-15) — Benchmarks + memory profiling gates, parser/evaluator optimization with AST cache warming, DRD parallelization with topological sort, testing expansion with fuzzing and property-based tests. [Archive](milestones/v7.0-ROADMAP.md)
+- 🚧 **v8.0 Close TCK Evaluator Gaps** — Phases 40–43 (in progress) — Implement missing FEEL built-in functions to raise TCK evaluator coverage from 21/51 to 51/51 vectors. Numeric, string, list, context, relational, and temporal built-in function families, followed by conformance verification and milestone close-out.
 
 ## Phases
 
@@ -72,228 +74,94 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
 > **v5.0 phase detail archived:** See `.planning/milestones/v5.0-ROADMAP.md` for full per-phase goals, deliverables, pitfalls, and success criteria.
 
 - ✅ **v6.0 DMN Level 3 Compliance** — Phases 29–35 (shipped 2026-07-10) — Real DMN parser, FEEL evaluator, decision-table engine with all hit policies, REST API + metrics, frontend wiring; closes stubbed Phase 6 gap. [Archive](milestones/v6.0-ROADMAP.md)
-- 🚧 **v7.0 Performance + Production Readiness** — Phases 36–39 (in progress) — Benchmarks + memory profiling gates, parser/evaluator optimization with AST cache warming, DRD parallelization with topological sort, testing expansion with fuzzing and property-based tests.
+- ✅ **v7.0 Performance + Production Readiness** — Phases 36–39 (shipped 2026-07-15) — Benchmarks + memory profiling gates, parser/evaluator optimization with AST cache warming, DRD parallelization with topological sort, testing expansion with fuzzing and property-based tests. [Archive](milestones/v7.0-ROADMAP.md)
+- 🚧 **v8.0 Close TCK Evaluator Gaps** — Phases 40–43 (in progress) — Implement missing FEEL built-in functions to raise TCK evaluator coverage from 21/51 to 51/51 vectors. Numeric, string, list, context, relational, and temporal built-in function families, followed by conformance verification and milestone close-out.
 
-**Milestone Goal:** Make DMN real — deliver a DMN 1.5 parser, a complete FEEL expression-language evaluator, and a decision-table engine with all hit policies, exposed via a decision-evaluation API and wired to the existing frontend editor. Closes the stubbed Phase 6 / `DMN-01..03` gap. Milestone-level success criterion: OMG DMN 1.5 Level 3 conformance (DMN-34 checklist 100% + TCK pass) with the existing Rete rule-execution path unchanged (zero regression).
+**Milestone Goal:** Raise TCK evaluator coverage from 21/51 to 51/51 vectors by implementing the missing FEEL built-in functions across numeric, string, list, context, relational, and temporal families, then verify conformance and close out the milestone.
 
 **Scope locks (user decisions):**
 
-- "Full DMN Level 3 FEEL" — complete FEEL semantics (the ambitious option).
-- All four v6.x differentiators in-scope: inference trace, per-decision Prometheus metrics + dashboard, hot-reload, DMNDI round-trip.
-- Decision evaluation MVP = FULL §10.4 decision-service support (multi-output) + DRD chaining, NOT single-decision-only.
-- New parallel evaluation surface (`engine/src/dmn/` + `POST /v1/decisions/{id}/evaluate`); NOT routed through `/v1/execute` or `EngineRegistry`.
-- Build FEEL from scratch (no `dsntk` dependency); stack: `quick-xml 0.40`, `rust_decimal 1.42`, `chrono-tz 0.10`, hand-written recursive-descent FEEL parser.
+- v8.0 is a focused built-in-function gap-closing milestone — no new DMN features, no frontend changes, no new API endpoints.
+- All 30 vectors that already parse and round-trip cleanly must continue to do so (zero regression).
+- Each new built-in function must handle null propagation per DMN 1.5 Section 10.3.4.
+- The existing Rete rule-execution path (`/v1/execute`, `EngineRegistry`) is unchanged — zero regression.
+- Phase numbering continues from 40 (v7.0 ended at Phase 39).
 
-- [x] **Phase 29: DMN 1.5 Model + XML Parser + Canonical IR** — DMN 1.1–1.5 `.dmn` import into a canonical IR (round-trip foundation) (completed 2026-07-06)
-- [x] **Phase 30: FEEL Value Types + Type Lattice + Temporal Domain** — Decimal128, date/time/duration types, type lattice (research-needed) (completed 2026-07-07)
-- [x] **Phase 31: FEEL Parser + Evaluator + Built-in Function Library** — Full FEEL grammar 1–65, ternary logic, 10 boxed expressions, ~70 builtins, AST cache (research-needed; largest phase) (completed 2026-07-08)
-- [x] **Phase 32: Decision-Table Engine + Hit Policies** — All 7 hit policies + COLLECT aggregators + allowed-values validation (completed 2026-07-09)
-- [x] **Phase 33: Decision Evaluator + DRD Resolution + REST API + Metrics** — `POST /v1/decisions/{id}/evaluate` (multi-output decision services + DRD chaining), metrics, trace, hot-reload (planned 2026-07-09)
-- [ ] **Phase 34: Frontend Wiring + Hit-Policy Model Refactor** — Wire existing v4.0 editor to the real backend; refactor `HitPolicySelector` to DMN canonical
-- [ ] **Phase 35: Conformance Verification + Round-trip + Monitoring Close-out** — OMG DMN TCK pass, exporter round-trip, `DmnDecisionTracker`, Level 3 checklist gate (research-needed)
+- [ ] **Phase 40: Numeric Built-in Functions** — Implement abs, sqrt, exp, log, even/odd, modulo, number(), median/mode/stddev, product, and arithmetic edge cases (FEEL-01..FEEL-10)
+- [ ] **Phase 41: String + List Built-in Functions** — Implement split, filter, concatenate, insert/remove, sort/list contains, all/any, and singleton/list semantics (FEEL-11..FEEL-17)
+- [ ] **Phase 42: Context + Relational + Temporal Built-in Functions** — Implement context construction/navigation, get value, get entries, deep equality, between, temporal built-ins, and remaining families (FEEL-18..FEEL-24)
+- [ ] **Phase 43: TCK Conformance Verification + Close-out** — Full 51/51 TCK evaluator sweep, milestone audit, tag v8.0 (FEEL-25, FEEL-26)
 
 ## Phase Details
 
-### Phase 29: DMN 1.5 Model + XML Parser + Canonical IR
+### Phase 40: Numeric Built-in Functions
 
-**Goal**: Users can import DMN 1.1–1.5 `.dmn` files into a canonical in-memory IR with annotations, IDs, and element order preserved — the round-trip foundation that every downstream phase parses into or evaluates against.
-**Depends on**: Nothing (first phase of v6.0; builds on the existing `engine` crate)
-**Requirements**: DMN-04, DMN-05, DMN-06
-**Key deliverables**: `engine/src/dmn/model.rs` (DMN 1.5 in-memory model / canonical IR); `engine/src/dmn/parser.rs` (namespace-aware `quick-xml` `NsReader`, XXE-hardened, CDATA-handled, `hitPolicy` defaults to UNIQUE, annotation/description preservation); `engine/src/dmn/exporter.rs` skeleton; item definitions + information items (Clause 7) parsed and represented in the IR; import corpus (DMN 1.1/1.3/1.5 files) passes.
+**Goal**: All 14 numeric TCK vectors pass the evaluator layer — users can use abs, sqrt, exp, log, even/odd, modulo, number(), median/mode/stddev, and product in FEEL expressions with correct DMN 1.5 semantics.
+**Depends on**: Phase 31 (FEEL evaluator core + built-in function registry), Phase 30 (FEEL value types + Decimal128 numeric domain)
+**Requirements**: FEEL-01, FEEL-02, FEEL-03, FEEL-04, FEEL-05, FEEL-06, FEEL-07, FEEL-08, FEEL-09, FEEL-10
 **Success Criteria** (what must be TRUE):
 
-  1. A `.dmn` file from DMN 1.1, 1.3, or 1.5 imports into the canonical IR without error, preserving item definitions, information items, descriptions, annotations, IDs, and element order.
-  2. The parser is XXE-hardened — external entity references are rejected — and CDATA sections are handled.
-  3. A decision table imported with no explicit `hitPolicy` attribute defaults to UNIQUE.
-  4. The canonical IR is the sole store: nothing downstream reconstructs DMN from a non-IR shape (round-trip fidelity is structural from day one).**Plans**: 3/3 plans complete
+  1. `abs(number)` returns the absolute value for Integer and Number inputs, and propagates null — TCK vector `0050-feel-abs-function` passes.
+  2. `sqrt(number)` returns the square root for positive inputs and null for negative inputs — TCK vector `0051-feel-sqrt-function` passes.
+  3. `exp(number)` and `log(number)` compute correctly; `log` returns null for non-positive inputs — TCK vectors `0052-feel-exp-function` and `0053-feel-log-function` pass.
+  4. `even(number)` / `odd(number)`, `modulo(dividend, divisor)`, `number(from, grouping, decimal)`, `median(list)`, `mode(list)`, `stddev(list)`, and `product(list)` all return correct results per DMN 1.5 Section 10.3.4.1 — TCK vectors `0054`–`0056`, `0058`, `0061`–`0063`, `0094` pass.
+  5. Arithmetic edge cases (empty-list SUM/MIN/MAX returns null, negation edge cases) are handled correctly — TCK vectors `0100-arithmetic` and `0099-arithmetic-negation` pass.
 
-**Wave 1**
+**Plans**: TBD
 
-- [x] 29-01-PLAN.md — Canonical DMN 1.5 IR + module wiring + locked stack deps (DMN-05)
+### Phase 41: String + List Built-in Functions
 
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 29-02-PLAN.md — Namespace-aware XXE-hardened CDATA-handled DMN parser + import corpus + parser tests (DMN-04, DMN-05)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 29-03-PLAN.md — DMN XML exporter + round-trip DOM-compare tests against import corpus (DMN-06)
-
-### Phase 30: FEEL Value Types + Type Lattice + Temporal Domain
-
-**Goal**: FEEL's semantic value domain — Decimal128 numbers, date/time/duration types, and the type lattice with conformance and implicit conversions — is in place and validated against OMG TCK numeric vectors, so the evaluator can be built on a correct foundation.
-**Depends on**: Phase 29 (the IR holds item definitions and allowed value types that the value domain must represent)
-**Requirements**: DMN-08, DMN-09, DMN-10
-**Key deliverables**: `engine::data_types::Value` extended additively (no fork) with `Date(NaiveDate)`, `Time(NaiveTime)`, `DaysTimeDuration(TimeDelta)`, `YearsMonthsDuration{years,months}`, `Range{...}`, `Function{...}`; `rust_decimal::Decimal` numeric path for FEEL; FEEL type lattice + conformance (`<:`) + equivalence (`≡`) + to/from-singleton-list conversions; temporal lexical formats (ISO 8601 `@""` literals); `0.1 + 0.2 = 0.3` passes.
-**Research needed**: Validate 28–29-digit `rust_decimal` precision against OMG TCK numeric conformance vectors BEFORE Phase 31 builds operators on top. If any TCK vector fails, switch to `bigdecimal` here. Run `/gsd-plan-phase --research-phase 30`.
+**Goal**: All string and list TCK vectors pass the evaluator layer — users can use split, filter, concatenate, insert/remove, sort/list contains, all/any, and singleton/list semantics in FEEL expressions with correct DMN 1.5 semantics.
+**Depends on**: Phase 40 (numeric built-in functions establish the built-in registry pattern)
+**Requirements**: FEEL-11, FEEL-12, FEEL-13, FEEL-14, FEEL-15, FEEL-16, FEEL-17
 **Success Criteria** (what must be TRUE):
 
-  1. `0.1 + 0.2 = 0.3` holds in the FEEL numeric domain (Decimal128 via `rust_decimal`), validated against OMG TCK numeric vectors — or, if TCK vectors demand 34 digits, a documented fallback to `bigdecimal` is in place before Phase 31.
-  2. ISO 8601 `@""` lexical literals for `date`, `time`, `date and time`, `days and time duration`, and `years and months duration` parse and round-trip, with IANA timezones via `chrono-tz` (DST-correct duration arithmetic).
-  3. FEEL type-lattice conformance (`<:`), equivalence (`≡`), and implicit conversions (number↔string, singleton-list↔value) behave per spec, with null propagating through the lattice.
-  4. `engine::data_types::Value` is extended additively (not forked) and the existing Rete rule-execution path is unchanged (zero regression).
+  1. `split(string, delimiter)` returns a list of substrings per DMN 1.5 Section 10.3.4.2 — TCK vector `0067-feel-split-function` passes.
+  2. `filter(list, function)` returns a filtered list using a FEEL lambda/function as the second argument — TCK vector `0001-filter` passes.
+  3. `concatenate(list1, list2, ...)` returns a concatenated list — TCK vector `0010-concatenate` passes.
+  4. `insert(list, position, element)` and `remove(list, position)` return new lists with correct element manipulation — TCK vector `0011-insert-remove` passes.
+  5. `sort(list)` / `sort(list, function)` and `list contains(list, element)` return correct ordering and membership results — TCK vectors `0013-sort` and `0069-feel-list` pass.
+  6. `all(list)` and `any(list)` return correct quantifier results — TCK vectors `0059-feel-all-function` and `0060-feel-any-function` pass.
+  7. Singleton lists and single elements behave correctly per DMN 1.5 singleton/list semantics — TCK vector `0021-singleton-list` passes.
 
-**Plans**: 4/4 plans complete
+**Plans**: TBD
 
-**Wave 1**
+### Phase 42: Context + Relational + Temporal Built-in Functions
 
-- [x] 30-01-PLAN.md — Foundation: chrono-tz dep + feel/ module skeleton + Value additive extension (8 variants) + TCK vendoring + precision-audit gate (DMN-08 gate, DMN-10 setup)
-
-**Wave 2** *(blocked on Wave 1 completion; 02/03/04 parallel, no file overlap)*
-
-- [x] 30-02-PLAN.md — FEEL Decimal128 numeric domain: feel_numeric_eq + 0.1+0.2=0.3 proof + vendored TCK numeric vectors (DMN-08)
-- [x] 30-03-PLAN.md — FEEL temporal domain: parse_at_literal/format_value/add_months_zoned (IANA tz, DST-correct) + vendored TCK temporal vectors (DMN-09)
-- [x] 30-04-PLAN.md — FEEL type lattice (conforms/equivalent/3 implicit conversions, 1+"2"→null prohibition) + additive-extension regression audit (DMN-10, Success Criterion 4)
-
-### Phase 31: FEEL Parser + Evaluator + Built-in Function Library
-
-**Goal**: FEEL expressions parse and evaluate with full Level-3 semantics — grammar rules 1–65, three-valued logic, all 10 boxed expressions, ~70+ built-in functions, and user-defined lambdas — with cells pre-parsed to a cached AST so the #1 DMN performance bug (4–6× re-parse throughput loss) is prevented.
-**Depends on**: Phase 30 (Value extension + type lattice + temporal domain are the evaluator's semantic foundation)
-**Requirements**: DMN-11, DMN-12, DMN-13, DMN-14, DMN-15, DMN-16, DMN-17, DMN-18
-**Key deliverables**: `engine/src/dmn/feel/{ast.rs, parser.rs, eval.rs, builtins.rs, temporal.rs, coercion.rs}`; `FeelExpression` enum distinct from the rule `Expression` AST; `evaluate(&Scope)` signature; `feel_equals`/`feel_compare` returning `Option<_>` (null → `Value::Null`); explicit `and`/`or`/`not` truth tables; arithmetic/comparison/boolean/string-concat/date-time operators; `if`/`for`/`some`/`every`/path/filter/`instance of`; all 10 boxed expressions (recursive); boxed-context dependency-order (topological) evaluation with cycle detection; user-defined FEEL lambdas (grammar rule 55); full built-in library (~70+ functions across conversion/string/list/numeric/date-time/context/boolean/range/equality); AST cache primitive (`DashMap<String, Arc<FeelExpression>>`).
-**Research needed**: Largest phase — FEEL grammar 1–65, ~70 builtins, 10 boxed expressions, ternary logic, scope/longest-match QN resolution. Likely needs `/gsd-plan-phase --research-phase 31` and may warrant sub-phase splitting during planning. Three-valued-logic leak (Pitfall 1) must be prevented here: never reuse Rust `==`/`compare_values` for FEEL.
+**Goal**: All context, relational, and temporal TCK vectors pass the evaluator layer — users can use context construction/navigation, get value, get entries, deep equality, between, and temporal built-in functions in FEEL expressions with correct DMN 1.5 semantics.
+**Depends on**: Phase 41 (string/list built-in functions establish the pattern for context/temporal families)
+**Requirements**: FEEL-18, FEEL-19, FEEL-20, FEEL-21, FEEL-22, FEEL-23, FEEL-24
 **Success Criteria** (what must be TRUE):
 
-  1. Any FEEL expression within grammar rules 1–65 parses via the hand-written recursive-descent parser, with dual entry points (`SimpleUnaryTests`, `Expression`) and keyword-as-name disambiguation.
-  2. Three-valued logic is correct: `"a"=1`→null, `null<3`→null, `null=null`→true, `not(null)`→null; `and`/`or`/`not` use explicit truth tables (no Rust `==`/`compare_values` reuse for FEEL equality).
-  3. All 10 boxed expression types evaluate recursively; boxed contexts evaluate in dependency (topological) order with cycle detection.
-  4. The ~70+ FEEL built-in functions are available across conversion/string/list/numeric/date-time/context/boolean/range/equality families, and user-defined lambdas (grammar rule 55) evaluate.
-  5. Cell/expression FEEL is pre-parsed to `Arc<FeelExpression>` at load time; the evaluator takes `&FeelExpression` and never re-parses (a 30-cell table × 10k evals ≈ 30 parses, not 300k).
+  1. Context literal evaluation with proper scoping works correctly — TCK vector `0057-feel-context` passes.
+  2. `get value(context, key)` returns the value for a given key in a context — TCK vector `0080-feel-getvalue-function` passes.
+  3. `get entries(context)` returns a list of key-value entries from a context — TCK vector `0081-feel-getentries-function` passes.
+  4. Deep equality (`=` / `!=`) works correctly across all FEEL types including context, list, and temporal types — TCK vector `0068-feel-equality` passes.
+  5. `between(value, start, end)` returns true when value is in the range [start, end] — TCK vector `0071-feel-between` passes.
+  6. Temporal built-in functions (`date()`, `time()`, `date and time()`, `duration()`) handle string-to-temporal parsing and temporal arithmetic correctly — temporal family TCK vectors pass.
+  7. All remaining Section 10.3.4 built-in functions not covered in Phases 40-41 are implemented — all 51 TCK vectors have evaluator-layer passes.
 
-**Plans**: 5/9 plans executed
+**Plans**: TBD
 
-Plans:
-**Wave 1**
+### Phase 43: TCK Conformance Verification + Close-out
 
-- [x] 31-01-PLAN.md — DMN-11: Lexer + recursive-descent Pratt parser (grammar 1-65), dual entry points, error-recovery partial AST, FeelExpression enum skeleton (wave 1)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 31-02-PLAN.md — DMN-12: Evaluator core + three-valued logic (feel_equals/feel_compare → Option<_>, explicit and/or/not truth tables, null → Value::Null, MANDATORY conformance cases) (wave 2)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 31-03-PLAN.md — DMN-13: Operators (arithmetic, comparison, boolean, string concat, date-time arithmetic, duration) + coercion.rs; div-by-zero/overflow → Null (wave 3)
-
-**Wave 4** *(blocked on Wave 3 completion)*
-
-- [x] 31-04-PLAN.md — DMN-14: Control + quantified (if, for, some/every, path, filter, instance of against Phase 30 FeelType lattice) (wave 4)
-
-**Wave 5** *(blocked on Wave 4 completion)*
-
-- [x] 31-05-PLAN.md — DMN-15: All 10 boxed expressions (recursive); boxed-context topological (dependency-order) evaluation with DFS color-marking cycle detection via flat Scope + deps map (wave 5)
-
-**Wave 6** *(blocked on Wave 5 completion)*
-
-- [x] 31-06-PLAN.md — DMN-16: User-defined lambdas (grammar rule 55, non-external); extend FeelFunction with closure body + captured scope (lexical capture) (wave 6)
-
-**Wave 7** *(blocked on Wave 6 completion)*
-
-- [x] 31-07-PLAN.md — DMN-17 part 1: Built-in functions (conversion/string/list/numeric families) + HashMap<&str, BuiltinFn> registry + FunctionInvocation dispatch wiring (wave 7)
-
-**Wave 8** *(blocked on Wave 7 completion)*
-
-- [x] 31-08-PLAN.md — DMN-17 part 2: Built-in functions (date-time/context/boolean/range/equality families); `is` never-null Pitfall-6 enforcement; Allen interval algebra range built-ins (wave 8)
-
-**Wave 9** *(blocked on Wave 8 completion)*
-
-- [x] 31-09-PLAN.md — DMN-18: AST cache (DashMap<String, Arc<FeelExpression>>), IR-loader pre-parse wiring, evaluator-takes-&FeelExpression type contract, TCK FEEL harness scaffold (wave 9)
-
-### Phase 32: Decision-Table Engine + Hit Policies
-
-**Goal**: Decision tables evaluate correctly under all 7 DMN hit policies — with their aggregators, allowed-values validation, and conflict semantics — input entries evaluated as FEEL unary tests, and all cell FEEL pre-parsed into ASTs at table-load time.
-**Depends on**: Phase 31 (input entries are FEEL unary tests; output entries are FEEL expressions)
-**Requirements**: DMN-19, DMN-20, DMN-21
-**Key deliverables**: `engine/src/dmn/decision_table.rs`; all 7 hit policies (UNIQUE, ANY, PRIORITY, FIRST, RULE ORDER, OUTPUT ORDER, COLLECT); COLLECT aggregators (SUM/MIN/MAX/COUNT); `allowedValues` validation for PRIORITY/OUTPUT ORDER; default output values; `HitPolicyViolation` error type for ANY conflicts and UNIQUE violations; multi-output rejection for aggregator tables; empty-match semantics (`C+`→null, `C#`→0); pre-parse all cell FEEL into ASTs at table-load time (closes the cache loop from Phase 31).
+**Goal**: All 51 TCK vectors pass the evaluator layer, the milestone is audited, and v8.0 is tagged — users can rely on complete FEEL built-in function coverage verified against the OMG DMN TCK.
+**Depends on**: Phases 40, 41, 42 (all built-in functions must be implemented before the final sweep)
+**Requirements**: FEEL-25, FEEL-26
 **Success Criteria** (what must be TRUE):
 
-  1. All 7 hit policies (UNIQUE, ANY, PRIORITY, FIRST, RULE ORDER, OUTPUT ORDER, COLLECT) evaluate per Clause 8, with input entries evaluated as FEEL unary tests.
-  2. PRIORITY orders by the output column's `allowedValues` enumeration (not by row order); ANY conflicts raise an error rather than silently picking the first match; output `allowedValues` lists and default output values are validated at table load.
-  3. COLLECT aggregators (SUM/MIN/MAX/COUNT) compute correctly; multi-output aggregator tables are rejected; empty-match semantics hold (empty SUM/MIN/MAX → null, empty COUNT → 0).
-  4. All cell FEEL is pre-parsed into ASTs at table-load time — the evaluator never re-parses a cell on each evaluation.
+  1. `cargo test --test tck_sweep` reports 51/51 vectors passing all three layers (parser, round-trip, evaluator) — zero regressions in the 30 vectors that already pass parser and round-trip.
+  2. Any remaining known divergences are documented with spec references in TCK-COVERAGE-GAPS.md.
+  3. TCK-COVERAGE-GAPS.md is updated to reflect 51/51 evaluator coverage.
+  4. VERIFICATION.md is written for all v8.0 phases (40-43) documenting what was delivered and how it was verified.
+  5. Milestone audit passes and v8.0 is tagged.
 
-**Plans**: 2/2 plans complete
-
-Plans:
-
-- [x] 32-01-PLAN.md — Core decision-table evaluator (UNIQUE/ANY/FIRST hit policies, input clause matching via FEEL unary tests)
-- [x] 32-02-PLAN.md — Advanced hit policies + COLLECT aggregators (PRIORITY/OUTPUT ORDER/RULE ORDER/COLLECT with SUM/MIN/MAX/COUNT; load-time validation)
-
-### Phase 33: Decision Evaluator + DRD Resolution + REST API + Metrics
-
-**Goal**: Users can evaluate decisions end-to-end via `POST /v1/decisions/{id}/evaluate` — full §10.4 decision-service support with multi-output and DRD chaining (the MVP is multi-output, not single-decision-only) — with per-decision Prometheus metrics, inference trace, and hot-reload wired to the v5.0 observability surfaces.
-**Depends on**: Phase 32 (decision-table engine), Phase 29 (canonical IR for persistence)
-**Requirements**: DMN-22, DMN-23, DMN-24, DMN-25, DMN-26, DMN-28
-**Key deliverables**: `engine/src/dmn/evaluator.rs` (decision orchestrator + topological DRD resolution for multi-output decision-service scope with cycle detection); `api/src/v1/decisions.rs` (`POST /v1/decisions/{id}/evaluate` + CRUD + import/export); `DecisionCounters` on the existing dedicated Prometheus registry (`rrules_dmn_evaluations_total`, `rrules_dmn_decision_duration_seconds`, `rrules_dmn_hit_policy_violations_total`); WS `MetricsSnapshot` broadcast reuse; `TraceEvent` emission with new `event_type` constants (two-site pattern, opt-in via request flag); `SharedDmnModel{model, generation}` under `Arc<RwLock>` with file-watcher reload-then-swap (mirrors v5.0 `SharedRuleSet`); `utoipa` OpenAPI schemas; `DMN_HIT_POLICY_VIOLATION` error code; `web::block` per-request pattern; stateless `DecisionEvaluator` (NOT routed through `EngineRegistry`).
-**Success Criteria** (what must be TRUE):
-
-  1. `POST /v1/decisions/{id}/evaluate` resolves a multi-output decision service and returns all output decisions (§10.4), with enclosures (input data, decisions) wired per the decision service.
-  2. DRD topological resolution resolves required-decision inputs with cycle detection; downstream decisions evaluate before their dependents.
-  3. Decisions support CRUD + persistence (Git `.dmn` files + PostgreSQL metadata) and import/export endpoints.
-  4. Per-decision Prometheus counters register on the existing dedicated registry (NOT a second registry); WebSocket `MetricsSnapshot` broadcasts after each evaluate.
-  5. Inference trace (`TraceEvent`/`TraceData`, new `event_type` constants) is opt-in via request flag, and `SharedDmnModel{model, generation}` reloads via file-watcher (hot-reload of decisions).
-
-**Plans**: 3 plans complete (Wave 1: route wiring + metrics; Wave 2: DRD resolution + multi-output; Wave 3: integration tests)
-
-Plans:
-
-- [x] 33-01-PLAN.md — Wire DecisionEvaluator into main.rs + register /v1/decisions routes + Prometheus metrics instrumentation (DMN-22, DMN-26)
-- [x] 33-02-PLAN.md — Topological DRD resolution with cycle detection + multi-output evaluation enhancement (DMN-23)
-- [x] 33-03-PLAN.md — Wave 0 integration tests: evaluate endpoint, trace emission, hot-reload, metrics verification (DMN-25, DMN-26, DMN-28)
-
-### Phase 34: Frontend Wiring + Hit-Policy Model Refactor
-
-**Goal**: The existing v4.0 decision-table editor is wired to the real backend evaluator — users can edit, evaluate, and see results/trace in the UI — with the hit-policy data model refactored to DMN canonical and the frontend editing through an IR projection (never reconstructing DMN from the frontend model).
-**Depends on**: Phase 33 (the API contract: evaluate, CRUD, import/export, trace)
-**Requirements**: DMN-29, DMN-30, DMN-31, DMN-32
-**Key deliverables**: `HitPolicySelector` refactor to `{policy, aggregator?}` with FIRST and OUTPUT ORDER added and spec-accurate descriptions (backend enum from Phase 32 is canonical; frontend maps TO it); `dmnSerializer.ts` (editor-shape ↔ backend DMN-model mapper, edit-through-IR-projection); `frontend/src/api/decisions.ts` client; "Evaluate Decision" button + results/trace panel (reuse v5.0 `InferenceTrace` rendering); allowed-values editor for output columns; engine-dropdown hidden on the DMN view.
-**Success Criteria** (what must be TRUE):
-
-  1. `DecisionTable.tsx` + `HitPolicySelector.tsx` call the real backend evaluator via an "Evaluate Decision" action; results and trace render in a panel reusing v5.0 `InferenceTrace` rendering.
-  2. `HitPolicySelector` uses the `{policy, aggregator?}` data model with FIRST and OUTPUT ORDER added and spec-accurate descriptions; the engine-dropdown is hidden on the DMN view.
-  3. `dmnSerializer.ts` maps editor-shape ↔ backend DMN model via edit-through-IR-projection — it never reconstructs DMN from the frontend model (round-trip fidelity preserved).
-  4. An allowed-values editor for output columns supports PRIORITY/OUTPUT ORDER usability.
-
-**Plans**: 3 plans in 3 waves
-
-Plans:
-
-- [ ] 34-01-PLAN.md — Refactor HitPolicy data model to DMN canonical (7 policies + COLLECT aggregator sub-type); update HitPolicySelector and DecisionTable
-- [ ] 34-02-PLAN.md — Create dmnSerializer.ts (editor-shape ↔ backend IR mapper) + add GET /v1/decisions/{id}/ir endpoint returning parsed decision table as JSON
-- [ ] 34-03-PLAN.md — Wire DecisionTable evaluate button to real backend via serializer; display results/trace in UI; create AllowedValuesEditor for PRIORITY/OUTPUT ORDER columns
-
-**UI hint**: yes
-
-### Phase 35: Conformance Verification + Round-trip + Monitoring Close-out
-
-**Goal**: The v6.0 milestone passes the OMG DMN 1.5 Level 3 conformance gate — TCK vectors pass, the exporter round-trips (including DMNDI), monitoring surfaces are live, and the Level 3 conformance checklist is 100% before the v6.0 tag. This phase is the phase-exit gate: no "Level 3-ish" claim is allowed.
-**Depends on**: Phases 29–34 (everything must be in place before the gate)
-**Requirements**: DMN-07, DMN-27, DMN-33, DMN-34
-**Key deliverables**: OMG DMN TCK test vectors as the acceptance suite (import + evaluation) with documented known divergences (e.g. DMN15-31 Collect distinct-sum, `sum([])`) if any; `engine/src/dmn/exporter.rs` round-trip (model → `.dmn` XML preserving annotations, DMNDI layout, IDs, element order; byte/DOM-compare against the import corpus; XSD-valid output); `DmnDecisionTracker` (separate from `RuleExecutionTracker`) powering dead-decision-row detection, coverage extension, and a dashboard panel reading the new metrics; Level 3 conformance checklist (one item per built-in family, grammar rule, boxed expression type) as phase-exit criterion.
-**Research needed**: OMG DMN TCK availability and distribution format (TC archive vs public repo) needs confirmation during planning. If the TCK is unavailable, fall back to DMN 1.5 spec examples + Camunda feel-scala test corpus and document the gap. Run `/gsd-plan-phase --research-phase 35`.
-**Success Criteria** (what must be TRUE):
-
-  1. OMG DMN TCK test vectors pass as the acceptance suite (import + evaluation); known divergences (e.g. DMN15-31 Collect distinct-sum, `sum([])`) are documented.
-  2. The DMN XML exporter serializes the canonical IR back to `.dmn` XML preserving annotations, descriptions, IDs, element order, and DMNDI layout (DMN-07 round-trip); round-trip byte/DOM-compare passes against the import corpus; output is XSD-valid.
-  3. `DmnDecisionTracker` (separate from `RuleExecutionTracker`) powers dead-decision-row detection, coverage extension, and a dashboard panel reading the new metrics — `RuleExecutionTracker`/`CoverageTracking` are not contaminated (separate `source` tag or tracker).
-  4. The Level 3 conformance checklist (one item per built-in family, grammar rule, and boxed expression type) is 100% complete and is the phase-exit gate — the v6.0 tag is not cut until the checklist is complete and the TCK passes.
-  5. The existing Rete rule-execution path (`/v1/execute`, `EngineRegistry`) is unchanged — zero regression.
-
-**Plans**: 4 plans in 4 waves
-
-Plans:
-
-- [ ] 35-01-PLAN.md — TCK test infrastructure: expanded vector discovery, structural XML comparison helper, TCK runner scaffold (DMN-33)
-- [ ] 35-02-PLAN.md — Full TCK sweep execution + DMNDI round-trip verification with human review gate (DMN-07, DMN-33)
-- [ ] 35-03-PLAN.md — Extended DMN metrics: per-output counters, DRD chain depth gauge, decision service invocation traces (DMN-27)
-- [ ] 35-04-PLAN.md — Level 3 conformance checklist verification + zero-regression audit + phase-exit gate (DMN-34)
-
-**UI hint**: no
+**Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
+Phases execute in numeric order: 40 → 41 → 42 → 43.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -319,13 +187,21 @@ Phases execute in numeric order: 29 → 30 → 31 → 32 → 33 → 34 → 35.
 | 26. RuleExecutionTracker singleton + dead-rule live data | v5.0 | 2/2 | Complete | 2026-07-03 |
 | 27. Stateful sessions | v5.0 | 1/1 | Complete | 2026-07-06 |
 | 28. Frontend test-runner | v5.0 | 5/5 | Complete | 2026-07-06 |
-| 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 3/3 | Complete   | 2026-07-06 |
-| 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 4/4 | Complete    | 2026-07-07 |
-| 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 9/9 | Complete    | 2026-07-08 |
-| 32. Decision-Table Engine + Hit Policies | v6.0 | 2/2 | Complete   | 2026-07-09 |
-| 33. Decision Evaluator + DRD Resolution + REST API + Metrics | v6.0 | 3/3 | Planned (2026-07-09) | - |
+| 29. DMN 1.5 Model + XML Parser + Canonical IR | v6.0 | 3/3 | Complete | 2026-07-06 |
+| 30. FEEL Value Types + Type Lattice + Temporal Domain | v6.0 | 4/4 | Complete | 2026-07-07 |
+| 31. FEEL Parser + Evaluator + Built-in Function Library | v6.0 | 9/9 | Complete | 2026-07-08 |
+| 32. Decision-Table Engine + Hit Policies | v6.0 | 2/2 | Complete | 2026-07-09 |
+| 33. Decision Evaluator + DRD Resolution + REST API + Metrics | v6.0 | 3/3 | Complete | 2026-07-09 |
 | 34. Frontend Wiring + Hit-Policy Model Refactor | v6.0 | 0/TBD | Not started | - |
 | 35. Conformance Verification + Round-trip + Monitoring Close-out | v6.0 | 0/TBD | Not started | - |
+| 36. Benchmarks + Memory Profiling Gates | v7.0 | — | Complete | 2026-07-13 |
+| 37. Parser/Evaluator Optimization + AST Cache Warming | v7.0 | — | Complete | 2026-07-14 |
+| 38. Testing Expansion: Fuzzing + Property-Based Tests | v7.0 | — | Complete | 2026-07-14 |
+| 39. DRD Parallelization + Topological Sort | v7.0 | — | Complete | 2026-07-15 |
+| 40. Numeric Built-in Functions | v8.0 | 0/TBD | Not started | - |
+| 41. String + List Built-in Functions | v8.0 | 0/TBD | Not started | - |
+| 42. Context + Relational + Temporal Built-in Functions | v8.0 | 0/TBD | Not started | - |
+| 43. TCK Conformance Verification + Close-out | v8.0 | 0/TBD | Not started | - |
 
 ---
-*Roadmap last updated: 2026-07-06 — v6.0 DMN Level 3 Compliance roadmap added (Phases 29–35); v5.0 per-phase detail archived in `milestones/v5.0-ROADMAP.md`*
+*Roadmap last updated: 2026-07-15 — v8.0 Close TCK Evaluator Gaps roadmap added (Phases 40–43); v7.0 per-phase detail archived in `milestones/v7.0-ROADMAP.md`*
