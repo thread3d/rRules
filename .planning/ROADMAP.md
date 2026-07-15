@@ -107,7 +107,12 @@ A production-grade Business Rules Management System (BRMS) in Rust: define compl
   4. `even(number)` / `odd(number)`, `modulo(dividend, divisor)`, `number(from, grouping, decimal)`, `median(list)`, `mode(list)`, `stddev(list)`, and `product(list)` all return correct results per DMN 1.5 Section 10.3.4.1 — TCK vectors `0054`–`0056`, `0058`, `0061`–`0063`, `0094` pass.
   5. Arithmetic edge cases (empty-list SUM/MIN/MAX returns null, negation edge cases) are handled correctly — TCK vectors `0100-arithmetic` and `0099-arithmetic-negation` pass.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 40-01-PLAN.md — abs() duration support + named parameter resolution
+- [ ] 40-02-PLAN.md — number(from, grouping, decimal) 3-arg form
+- [ ] 40-03-PLAN.md — Edge case unit tests + TCK verification
 
 ### Phase 41: String + List Built-in Functions
 
