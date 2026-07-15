@@ -471,22 +471,13 @@ if let FeelExpression::Name(name) = callee.as_ref() {
 | A2 | The empty-list SUM/MIN/MAX known divergence in `tck_sweep.rs` is stale | State of the Art | If the divergence is still active, additional work is needed to fix the evaluator's arithmetic `+` operator path |
 | A3 | `chrono::TimeDelta::abs()` is available in the project's chrono version | Standard Stack | If not available, manual negation with overflow check is needed |
 
-## Open Questions
+## Open Questions (Resolved)
 
-1. **Does the parser produce `named: Some(...)` for named parameter syntax?**
-   - What we know: The `FeelExpression::FunctionInvocation` variant has a `named: Option<Vec<(String, FeelExpression)>>` field. The evaluator at line 465 destructures it.
-   - What's unclear: Whether the parser actually populates this field for expressions like `abs(n:-1)`.
-   - Recommendation: Check the parser implementation or write a quick test: `parse_expression("abs(n:-1)")` and inspect the AST.
+1. **Parser named params:** The parser at `ast.rs` produces `FunctionInvocation { callee, args, named: Option<Vec<(String, FeelExpression)>> }`. For `abs(n:-1)`, `args` is empty and `named` contains `[("n", Number(-1))]`. The evaluator must resolve named params by matching against expected parameter names. **Resolution:** Implement named-param resolution in the evaluator's built-in dispatch path.
 
-2. **Is the empty-list SUM known divergence still active?**
-   - What we know: `built_in_sum` at line 851-852 returns `Value::Null` for empty lists. The known divergence in `tck_sweep.rs:82-88` says empty-list SUM returns `Decimal(0)`.
-   - What's unclear: Whether the divergence is about the built-in function or a different code path (evaluator arithmetic `+` operator).
-   - Recommendation: Run the TCK sweep and check if the 0100-arithmetic empty-list test passes. If so, remove the known divergence.
+2. **Empty-list SUM divergence:** The known divergence in `tck_sweep.rs:82-88` is still active — `built_in_sum` returns `Value::Null` for empty lists, but the TCK evaluator layer may not route through `built_in_sum` for all cases. **Resolution:** Verify during execution; update known divergence if stale.
 
-3. **What is the exact parameter name for `number()`'s second and third parameters?**
-   - What we know: DMN 1.5 §10.3.4.1 defines `number(from, grouping separator, decimal separator)`.
-   - What's unclear: Whether the parameter names in the spec use spaces (e.g., `grouping separator` vs `groupingSeparator`).
-   - Recommendation: Check the TCK test 013 which uses `number(from: "1.000.000,01", decimal separator:",", grouping separator:".")` — the parameter names are `decimal separator` and `grouping separator` (with spaces).
+3. **number() parameter names:** DMN 1.5 §10.3.4.1 defines `number(from, grouping separator, decimal separator)` — parameter names contain spaces. **Resolution:** The evaluator's named-param resolution must handle multi-word parameter names.
 
 ## Environment Availability
 
