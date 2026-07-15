@@ -1,8 +1,8 @@
-# Requirements: rRules — Milestone v7.0 Performance + Production Readiness
+# Requirements: rRules — Milestone v8.0 Close TCK Evaluator Gaps
 
-**Created:** 2026-07-10  
-**Status:** Draft (pending user approval)  
-**Scope:** Benchmarks, parser/evaluator optimization, DRD parallelization, testing expansion  
+**Created:** 2026-07-15
+**Status:** Approved
+**Scope:** Implement missing FEEL built-in functions to raise TCK evaluator coverage from 21/51 to 51/51 vectors
 
 ---
 
@@ -10,129 +10,177 @@
 
 | # | Name | Requirements | Status |
 |---|------|--------------|--------|
-| 36 | Benchmarks + Memory Profiling Gates | PERF-01, PERF-02, PERF-03, PERF-04 | not_started |
-| 37 | Parser/Evaluator Optimization with AST Cache Warming | PERF-05, PERF-06, PERF-07 | not_started |
-| 38 | DRD Parallelization with Topological Sort | PERF-08, PERF-09 | not_started |
-| 39 | Testing Expansion with Fuzzing and Property-Based Tests | PERF-10, PERF-11, PERF-12 | not_started |
+| 40 | Numeric Built-in Functions | FEEL-01..FEEL-10 | not_started |
+| 41 | String + List Built-in Functions | FEEL-11..FEEL-17 | not_started |
+| 42 | Context + Relational + Temporal Built-in Functions | FEEL-18..FEEL-24 | not_started |
+| 43 | TCK Conformance Verification + Close-out | FEEL-25, FEEL-26 | not_started |
 
-**Coverage:** 12/12 v7.0 requirements (PERF-01..PERF-12) mapped to exactly one phase, 0 orphans, 4/4 phases with ≥1 requirement.
-
----
-
-## Phase 36: Benchmarks + Memory Profiling Gates
-
-**Requirements:** PERF-01, PERF-02, PERF-03, PERF-04  
-**Goal:** Establish performance measurement infrastructure and memory profiling gates to catch regressions early.
-
-### PERF-01: Criterion Benchmark Suite
-- `benches/dmn_parser.rs` — benchmark DMN XML parsing throughput (rows/sec)
-- `benches/feel_evaluator.rs` — benchmark FEEL expression evaluation throughput
-- `benches/decision_table.rs` — benchmark decision table evaluation with all hit policies
-- All benchmarks use criterion 0.5 with t-test analysis, outlier detection, flame graphs
-
-### PERF-02: Memory Profiling Infrastructure
-- Integrate dhat for line-level allocation attribution in parser and evaluator hot paths
-- Add heaptrack CI integration (system package) for zero-code-changes heap tracking
-- Establish baseline memory profiles for parser + FEEL evaluator before optimization
-
-### PERF-03: Allocation Reduction Targets
-- Identify top 5 allocation hotspots via dhat profiling
-- Set reduction targets: 20% allocations in parser, 15% in FEEL evaluator
-- Measure improvement with criterion benchmarks after each optimization wave
-
-### PERF-04: CI Performance Regression Gates
-- Add `ci/perf/regression.yml` GitHub Actions workflow
-- Run criterion benchmarks on every PR; compare against baseline
-- Fail PR if regression >5% on any benchmark (configurable threshold)
+**Coverage:** 26/26 v8.0 requirements (FEEL-01..FEEL-26) mapped to exactly one phase, 0 orphans, 4/4 phases with ≥1 requirement.
 
 ---
 
-## Phase 37: Parser/Evaluator Optimization with AST Cache Warming
+## Phase 40: Numeric Built-in Functions
 
-**Requirements:** PERF-05, PERF-06, PERF-07  
-**Goal:** Optimize parser and FEEL evaluator throughput using cache warming and allocation reduction.
+**Requirements:** FEEL-01..FEEL-10
+**Goal:** Implement all missing numeric FEEL built-in functions (§10.3.4.1) so the 14 numeric TCK vectors pass the evaluator layer.
 
-### PERF-05: AST Cache Warming (LRU Eviction)
-- Extend DashMap-based AST cache with LRU eviction policy (max 10k entries per model)
-- Implement per-thread pre-warming strategy for high-concurrency workloads
-- Target: eliminate re-parse on hot paths; cache hit rate >95% for repeated evaluations
+### FEEL-01: `abs()` — Absolute value
+- Implement `abs(number)` → returns absolute value of number
+- Must handle Integer, Float (Number), and null (propagates)
+- TCK vector: `0050-feel-abs-function`
 
-### PERF-06: Per-Thread Cache Patterns
-- Add `ThreadLocal<FeelAstCache>` pattern for single-request evaluation
-- Benchmark ThreadLocal vs DashMap under 16+ concurrent request scenarios
-- Target: 4-20x throughput improvement at high concurrency (matches DashMap advantage)
+### FEEL-02: `sqrt()` — Square root
+- Implement `sqrt(number)` → returns square root
+- Must return null for negative inputs (per DMN spec)
+- TCK vector: `0051-feel-sqrt-function`
 
-### PERF-07: Quick-XML Streaming Patterns
-- Optimize parser to use quick-xml streaming patterns for zero-copy parsing where possible
-- Reduce allocation in hot paths identified by PERF-03 profiling
-- Target: 20% allocations reduction in parser; measurable improvement via criterion benchmarks
+### FEEL-03: `exp()` — Exponential
+- Implement `exp(number)` → returns e^n
+- TCK vector: `0052-feel-exp-function`
+
+### FEEL-04: `log()` — Natural logarithm
+- Implement `log(number)` → returns ln(n)
+- Must return null for non-positive inputs
+- TCK vector: `0053-feel-log-function`
+
+### FEEL-05: `even()` / `odd()` — Parity checks
+- Implement `even(number)` → returns true if integer part is even
+- Implement `odd(number)` → returns true if integer part is odd
+- TCK vectors: `0054-feel-even-function`, `0055-feel-odd-function`
+
+### FEEL-06: `modulo()` — Modulo operation
+- Implement `modulo(dividend, divisor)` → returns remainder
+- Must follow DMN 1.5 §10.3.4.1 semantics (not Rust %)
+- TCK vector: `0056-feel-modulo-function`
+
+### FEEL-07: `number()` — String to number conversion
+- Implement `number(from, grouping, decimal)` → parse string to number
+- Must handle grouping/decimal separators per locale-independent spec
+- TCK vector: `0058-feel-number-function`
+
+### FEEL-08: Statistical functions — `median()`, `mode()`, `stddev()`
+- Implement `median(list)` → returns median value
+- Implement `mode(list)` → returns mode (most frequent value)
+- Implement `stddev(list)` → returns population standard deviation
+- All must return null for empty lists
+- TCK vectors: `0061-feel-median-function`, `0062-feel-mode-function`, `0063-feel-stddev-function`
+
+### FEEL-09: `product()` — Product of list
+- Implement `product(list)` → returns product of all elements
+- Must return null for empty list
+- TCK vector: `0094-feel-product-function`
+
+### FEEL-10: Extended arithmetic edge cases
+- Handle empty-list SUM/MIN/MAX → null (known divergence)
+- Handle negation edge cases
+- TCK vectors: `0100-arithmetic`, `0099-arithmetic-negation`
 
 ---
 
-## Phase 38: DRD Parallelization with Topological Sort
+## Phase 41: String + List Built-in Functions
 
-**Requirements:** PERF-08, PERF-09  
-**Goal:** Enable parallel evaluation of independent decision chains via topological sort + level-by-level execution.
+**Requirements:** FEEL-11..FEEL-17
+**Goal:** Implement missing string and list FEEL built-in functions (§10.3.4.2, §10.3.4.3).
 
-### PERF-08: Topological Sort for DRD Graph
-- Implement topological sort over DRD dependency graph (already exists in Phase 33)
-- Identify independent nodes at each level that can be evaluated in parallel
-- Add `resolve_drd_order_parallel()` method alongside existing sequential resolver
+### FEEL-11: `split()` — String splitting
+- Implement `split(string, delimiter)` → returns list of substrings
+- TCK vector: `0067-feel-split-function`
 
-### PERF-09: Level-by-Level Parallel Evaluation
-- For each level in topological order, spawn tokio tasks for independent decisions
-- Use ThreadLocal engine pattern to avoid shared &mut engine contention
-- Target: 3-4x throughput gains on independent decision chains (measured via criterion benchmarks)
+### FEEL-12: `filter()` — List filtering
+- Implement `filter(list, function)` → returns filtered list
+- Must support FEEL lambda/function as second argument
+- TCK vector: `0001-filter`
+
+### FEEL-13: `concatenate()` — List concatenation
+- Implement `concatenate(list1, list2, ...)` → returns concatenated list
+- TCK vector: `0010-concatenate`
+
+### FEEL-14: `insert()` / `remove()` — List manipulation
+- Implement `insert(list, position, element)` → returns new list
+- Implement `remove(list, position)` → returns new list
+- TCK vector: `0011-insert-remove`
+
+### FEEL-15: `sort()` / `list contains()` — List ordering and membership
+- Implement `sort(list)` → returns sorted list (default ascending)
+- Implement `sort(list, function)` → returns sorted list with comparator
+- Implement `list contains(list, element)` → returns boolean
+- TCK vectors: `0013-sort`, `0069-feel-list`
+
+### FEEL-16: `all()` / `any()` — Quantifier functions
+- Implement `all(list)` → returns true if all elements are true
+- Implement `any(list)` → returns true if any element is true
+- TCK vectors: `0059-feel-all-function`, `0060-feel-any-function`
+
+### FEEL-17: Singleton/list semantics
+- Ensure singleton lists and single elements behave correctly per DMN 1.5
+- TCK vector: `0021-singleton-list`
 
 ---
 
-## Phase 39: Testing Expansion with Fuzzing and Property-Based Tests
+## Phase 42: Context + Relational + Temporal Built-in Functions
 
-**Requirements:** PERF-10, PERF-11, PERF-12  
-**Goal:** Expand test coverage with fuzzing infrastructure and property-based tests to catch boundary bugs.
+**Requirements:** FEEL-18..FEEL-24
+**Goal:** Implement missing context, relational, and temporal FEEL built-in functions (§10.3.4.4, §10.3.4.5, §10.3.4.9, temporal).
 
-### PERF-10: cargo-fuzz Infrastructure
-- Add `fuzz/` directory with libFuzzer-based fuzz targets for parser and FEEL evaluator
-- Use quick-xml's chunked-reader pattern as reference for fuzz target design
-- Integrate with CI (OSS-Fuzz compatible) for continuous fuzzing
+### FEEL-18: Context construction / navigation
+- Implement context literal evaluation with proper scoping
+- TCK vector: `0057-feel-context`
 
-### PERF-11: Property-Based Tests for FEEL Parser/Evaluator
-- Add `proptest` crate for property-based testing of FEEL expressions
-- Properties to verify: idempotency, associativity, commutativity where applicable
-- Target: catch edge cases in three-valued logic, temporal arithmetic, list operations
+### FEEL-19: `get value()` — Context value access
+- Implement `get value(context, key)` → returns value for key
+- TCK vector: `0080-feel-getvalue-function`
 
-### PERF-12: TCK Coverage Gap Closure
-- Identify gaps in vendored TCK vectors (currently 21 directories)
-- Expand to cover all Level 3 FEEL built-in function families
-- Document remaining coverage gaps and known divergences for future phases
+### FEEL-20: `get entries()` — Context entry listing
+- Implement `get entries(context)` → returns list of key-value entries
+- TCK vector: `0081-feel-getentries-function`
+
+### FEEL-21: Deep equality across types
+- Implement `=` / `!=` for all FEEL types (including context, list, temporal)
+- TCK vector: `0068-feel-equality`
+
+### FEEL-22: `between()` — Range check
+- Implement `between(value, start, end)` → returns true if value in [start, end]
+- TCK vector: `0071-feel-between`
+
+### FEEL-23: Temporal built-in functions
+- Implement missing temporal functions: `date()`, `time()`, `date and time()`, `duration()`
+- Handle string→temporal parsing and temporal arithmetic
+- TCK vectors: temporal family vectors
+
+### FEEL-24: Remaining built-in families
+- Implement any remaining §10.3.4 functions not covered above
+- Ensure all 51 TCK vectors have evaluator-layer passes
+
+---
+
+## Phase 43: TCK Conformance Verification + Close-out
+
+**Requirements:** FEEL-25, FEEL-26
+**Goal:** Verify all 51 TCK vectors pass the evaluator layer and close out the milestone.
+
+### FEEL-25: Full TCK evaluator sweep
+- Run `cargo test --test tck_sweep` and verify 51/51 vectors pass all three layers (parser, round-trip, evaluator)
+- Document any remaining known divergences with spec references
+- Update TCK-COVERAGE-GAPS.md to reflect 51/51 evaluator coverage
+
+### FEEL-26: Milestone verification and close-out
+- Write VERIFICATION.md for all phases
+- Run milestone audit
+- Tag v8.0
 
 ---
 
 ## Success Criteria
 
-### Performance Targets
-- Criterion benchmarks established with baseline measurements
-- Memory profiling shows allocation reduction targets met (PERF-03)
-- DRD parallelization achieves 3-4x throughput gains on independent chains (PERF-09)
+### Functional
+- All 51 vendored TCK vectors pass parser + round-trip + evaluator layers
+- Zero regressions in existing DMN evaluation path (hit policies, DRD, existing built-ins)
+- All FEEL built-in functions handle null propagation correctly per DMN 1.5 §10.3.4
 
-### Test Coverage
-- Fuzzing infrastructure catches at least 3 boundary bugs in parser/evaluator
-- Property-based tests cover all FEEL grammar rules 1–65
-- TCK coverage expanded from 21 to 35+ directories (Level 3 completeness)
-
-### Quality Gates
-- CI performance regression gates prevent >5% regressions on any benchmark
-- All new code has dhat profiling data showing allocation reduction
-- Zero regression in existing DMN evaluation path (PERF-08, PERF-09 additive only)
-
----
-
-## Scope Locks (from prior research and user decisions)
-
-- **No dsntk dependency** — Build FEEL from scratch; stack: `quick-xml 0.40`, `rust_decimal 1.42`, `chrono-tz 0.10`
-- **AST cache stays in engine/src/dmn/feel/cache.rs** — Browser can hint warm-up but cannot bypass server parse
-- **DRD parallelization additive only** — Existing sequential resolver unchanged; new parallel path alongside
-- **Fuzzing uses libFuzzer (cargo-fuzz)** — Not afl.rs (better coverage guidance)
+### Quality
+- Each new built-in function has unit tests covering normal, edge, and null cases
+- TCK sweep remains green (0 failed, 0 skipped)
+- No panics in fuzz targets after built-in additions
 
 ---
 
@@ -140,17 +188,31 @@
 
 | Requirement | Phase | Status | Notes |
 |-------------|-------|--------|-------|
-| PERF-01: Criterion benchmarks | 36 | not_started | Foundation for all performance work |
-| PERF-02: Memory profiling infra | 36 | not_started | dhat + heaptrack CI integration |
-| PERF-03: Allocation reduction targets | 37 | not_started | Driven by PERF-02 profiling data |
-| PERF-04: CI regression gates | 36 | not_started | Prevents performance regressions |
-| PERF-05: AST cache warming (LRU) | 37 | not_started | Extends Phase 31 DashMap cache |
-| PERF-06: Per-thread cache patterns | 37 | not_started | ThreadLocal for high concurrency |
-| PERF-07: Quick-XML streaming | 37 | not_started | Zero-copy parsing optimization |
-| PERF-08: Topological sort for DRD | 38 | not_started | Builds on Phase 33 resolver |
-| PERF-09: Parallel evaluation | 38 | not_started | tokio tasks for independent decisions |
-| PERF-10: cargo-fuzz infra | 39 | not_started | libFuzzer-based fuzz targets |
-| PERF-11: Property-based tests | 39 | not_started | proptest crate for FEEL properties |
-| PERF-12: TCK coverage gaps | 39 | not_started | Expand from 21 to 35+ directories |
+| FEEL-01: abs() | 40 | not_started | TCK 0050 |
+| FEEL-02: sqrt() | 40 | not_started | TCK 0051 |
+| FEEL-03: exp() | 40 | not_started | TCK 0052 |
+| FEEL-04: log() | 40 | not_started | TCK 0053 |
+| FEEL-05: even()/odd() | 40 | not_started | TCK 0054, 0055 |
+| FEEL-06: modulo() | 40 | not_started | TCK 0056 |
+| FEEL-07: number() | 40 | not_started | TCK 0058 |
+| FEEL-08: median()/mode()/stddev() | 40 | not_started | TCK 0061, 0062, 0063 |
+| FEEL-09: product() | 40 | not_started | TCK 0094 |
+| FEEL-10: arithmetic edge cases | 40 | not_started | TCK 0100, 0099 |
+| FEEL-11: split() | 41 | not_started | TCK 0067 |
+| FEEL-12: filter() | 41 | not_started | TCK 0001 |
+| FEEL-13: concatenate() | 41 | not_started | TCK 0010 |
+| FEEL-14: insert()/remove() | 41 | not_started | TCK 0011 |
+| FEEL-15: sort()/list contains() | 41 | not_started | TCK 0013, 0069 |
+| FEEL-16: all()/any() | 41 | not_started | TCK 0059, 0060 |
+| FEEL-17: singleton/list semantics | 41 | not_started | TCK 0021 |
+| FEEL-18: context construction | 42 | not_started | TCK 0057 |
+| FEEL-19: get value() | 42 | not_started | TCK 0080 |
+| FEEL-20: get entries() | 42 | not_started | TCK 0081 |
+| FEEL-21: deep equality | 42 | not_started | TCK 0068 |
+| FEEL-22: between() | 42 | not_started | TCK 0071 |
+| FEEL-23: temporal built-ins | 42 | not_started | temporal family |
+| FEEL-24: remaining families | 42 | not_started | catch-all |
+| FEEL-25: full TCK sweep | 43 | not_started | 51/51 verification |
+| FEEL-26: milestone close-out | 43 | not_started | audit + tag |
 
-**Coverage:** 12/12 v7.0 requirements (PERF-01..PERF-12) mapped to exactly one phase, 0 orphans, 4/4 phases with ≥1 requirement.
+**Coverage:** 26/26 v8.0 requirements (FEEL-01..FEEL-26) mapped to exactly one phase, 0 orphans, 4/4 phases with ≥1 requirement.
