@@ -4,6 +4,7 @@ use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest, SharedDmnModel}
 use engine::dmn::feel::cache::FeelAstCache;
 use engine::dmn::model::DmnModel;
 use engine::dmn::parser::parse_dmn;
+use serial_test::serial;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -26,11 +27,16 @@ fn make_evaluator(model: DmnModel) -> DecisionEvaluator {
 }
 
 fn reset_tracker() {
-    let mut guard = engine::dmn::tracker::DMN_DECISION_TRACKER.lock().unwrap();
+    // Recover from a poisoned lock rather than panicking: one failing test should
+    // not turn every later one into a `PoisonError`.
+    let mut guard = engine::dmn::tracker::DMN_DECISION_TRACKER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     *guard = engine::dmn::tracker::DmnDecisionTracker::new();
 }
 
 #[test]
+#[serial]
 fn test_output_evaluations_counter_increments() {
     reset_tracker();
     let evaluator = make_evaluator(make_test_model());
@@ -60,6 +66,7 @@ fn test_output_evaluations_counter_increments() {
 }
 
 #[test]
+#[serial]
 fn test_drd_chain_depth_observed() {
     reset_tracker();
     let evaluator = make_evaluator(make_test_model());
@@ -79,6 +86,7 @@ fn test_drd_chain_depth_observed() {
 }
 
 #[test]
+#[serial]
 fn test_dead_decision_detection() {
     reset_tracker();
     let known_ids = vec!["d_seen".into(), "d_dead".into(), "d_also_dead".into()];
@@ -101,6 +109,7 @@ fn test_dead_decision_detection() {
 }
 
 #[test]
+#[serial]
 fn test_coverage_for_single_decision() {
     reset_tracker();
     if let Ok(ref mut t) = engine::dmn::tracker::DMN_DECISION_TRACKER.lock() {
@@ -122,6 +131,7 @@ fn test_coverage_for_single_decision() {
 }
 
 #[test]
+#[serial]
 fn test_tracker_separate_from_rule_tracker() {
     reset_tracker();
     if let Ok(ref t) = engine::dmn::tracker::DMN_DECISION_TRACKER.lock() {
@@ -135,6 +145,7 @@ fn test_tracker_separate_from_rule_tracker() {
 }
 
 #[test]
+#[serial]
 fn test_snapshot_includes_extended_fields() {
     reset_tracker();
     let evaluator = make_evaluator(make_test_model());

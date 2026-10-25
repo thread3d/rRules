@@ -1,0 +1,11 @@
+[toolchain]
+# Components are pinned here; the *version* is pinned in CI (`.github/workflows/ci.yml`
+# installs Rust 1.94.1). Both matter, for one reason: a compiler that drifts between
+# a developer's machine and CI turns a new clippy lint or a rustfmt change into a
+# build failure nobody caused — which is what happened to this project.
+#
+# `channel = "stable"` deliberately: naming an exact version here makes rustup
+# *download* that toolchain, which fails on a machine without a writable toolchain
+# directory. CI asks for the exact version instead, where the download is normal.
+channel = "stable"
+components = ["clippy", "rustfmt"]

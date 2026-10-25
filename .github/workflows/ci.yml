@@ -33,10 +33,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # An exact compiler, not "whatever stable is today": a newer clippy or
+      # rustfmt then fails CI in a commit that changed neither the lint config nor
+      # the formatting. Bump this together with `rust-toolchain.toml`'s notes.
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+        uses: dtolnay/rust-toolchain@1.94.1
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
