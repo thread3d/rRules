@@ -289,7 +289,6 @@ fn resolve_drd_levels(
 ) -> Vec<Vec<String>> {
     let dmap: HashMap<&str, &Decision> = extract_decisions_for_drd(&shared.model)
         .into_iter()
-        .map(|(id, d)| (id, d))
         .collect();
 
     // Forward pass: deps precede dependents in drd_order, so their level is known.

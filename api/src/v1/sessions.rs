@@ -35,6 +35,16 @@ use crate::v1::execution::SharedRuleSet;
 /// real Phase-23 evaluator — D-01; NOT the v1.0 `engine::environment::Session`
 /// stub which is a non-functional placeholder), its captured ruleset
 /// generation (D-07), and the metadata the TTL/LRU sweep needs (D-03).
+/// Shared handle to a live session entry.
+///
+/// The lookup path clones this `Arc` out of the `DashMap` and then releases the
+/// shard guard, so a slow per-session operation never holds a map guard.
+pub type SessionHandle = Arc<Mutex<StatefulSessionEntry>>;
+
+/// Result of [`SessionManager::lookup_or_create`]: the server UUID plus the
+/// shared session handle, or an HTTP status + message pair on validation error.
+pub type SessionLookupResult = Result<(Uuid, SessionHandle), (StatusCode, String)>;
+
 pub struct StatefulSessionEntry {
     /// The per-session engine. `!Sync` (`execute(&mut self)`) — serialized by
     /// the per-session `std::sync::Mutex` (D-11). Holds accumulated working
@@ -117,6 +127,11 @@ impl SessionManager {
         self.sessions.len()
     }
 
+    /// True when no sessions are registered (companion to [`Self::len`]).
+    pub fn is_empty(&self) -> bool {
+        self.sessions.is_empty()
+    }
+
     /// Test-isolation primitive (D-09): drain both maps + reset the gauge.
     /// Called by `reset_test_env()` in the integration tests so SC-1..SC-4
     /// start from a known-empty state.
@@ -145,7 +160,7 @@ impl SessionManager {
         req_engine: Option<&str>,
         registry: &EngineRegistry,
         ruleset: &Arc<std::sync::RwLock<SharedRuleSet>>,
-    ) -> Result<(Uuid, Arc<Mutex<StatefulSessionEntry>>), (StatusCode, String)> {
+    ) -> SessionLookupResult {
         // --- Resume path (D-04 / Pattern 3) ---
         // Clone the alias→UUID out of the aliases map, then drop the Ref guard
         // immediately (Pitfall 1 — no shard guard held across anything slow).
@@ -188,7 +203,7 @@ impl SessionManager {
 
         // 2. Validate against registered factories (ENGINE-07).
         let available = registry.available_engines();
-        if !available.iter().any(|name| *name == engine_name.as_str()) {
+        if !available.contains(&engine_name.as_str()) {
             return Err((
                 StatusCode::BAD_REQUEST,
                 format!("unknown engine: {}", engine_name),

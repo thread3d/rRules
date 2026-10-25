@@ -17,6 +17,12 @@ pub struct DmnDecisionTracker {
     last_evaluated: HashMap<String, String>,
 }
 
+impl Default for DmnDecisionTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DmnDecisionTracker {
     pub fn new() -> Self {
         Self {

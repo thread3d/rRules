@@ -328,7 +328,7 @@ impl DecisionTableEvaluator {
 
         // Apply aggregator if present.
         if let Some(aggregator) = &table.aggregation {
-            return Ok(Self::apply_aggregator(aggregator, &values)?);
+            return Self::apply_aggregator(aggregator, &values);
         }
 
         // No aggregation: return raw list.
@@ -418,7 +418,7 @@ impl DecisionTableEvaluator {
         for v in values {
             match v {
                 Value::Number(d) => {
-                    let d_clone = d.clone();
+                    let d_clone = *d;
                     if min.is_none() || d_clone < *min.as_ref().unwrap() {
                         min = Some(d_clone);
                     }
@@ -440,7 +440,7 @@ impl DecisionTableEvaluator {
         for v in values {
             match v {
                 Value::Number(d) => {
-                    let d_clone = d.clone();
+                    let d_clone = *d;
                     if max.is_none() || d_clone > *max.as_ref().unwrap() {
                         max = Some(d_clone);
                     }

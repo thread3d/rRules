@@ -10,7 +10,7 @@ use actix::{Actor, AsyncContext, StreamHandler};
 use actix_web::{web, HttpRequest, HttpResponse};
 use actix_web_actors::ws::{self, Message, ProtocolError, WebsocketContext};
 
-use crate::v1::dmn_metrics::{DmnMetricsSnapshot, DmnMetricsTx};
+use crate::v1::dmn_metrics::DmnMetricsTx;
 
 /// Cadence for polling the broadcast channel and forwarding buffered frames.
 const BROADCAST_POLL_INTERVAL: Duration = Duration::from_millis(50);

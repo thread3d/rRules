@@ -97,15 +97,15 @@ pub fn direct_execute(
         let mut newly_fired_this_pass = false;
         // Index-based iteration so we can mutate `working_facts` while
         // reading `rules` without conflicting borrows.
-        for rule_idx in 0..rules.len() {
-            let rule_id = rules[rule_idx].id.clone();
+        for rule in rules.iter() {
+            let rule_id = rule.id.clone();
             if fired_set.contains(&rule_id) {
                 continue;
             }
             // Evaluate the condition against the current working memory.
             let facts: Vec<&Fact> = working_facts.values().collect();
             evaluated_set.insert(rule_id.clone());
-            if rules[rule_idx].condition.evaluate(&facts) {
+            if rule.condition.evaluate(&facts) {
                 // Phase 28 (D-01): emit a TraceEvent at the moment the rule
                 // fires — IN FIRING ORDER. Guarded by `collect_trace` so the
                 // off path skips the chrono call + String allocation entirely
@@ -123,7 +123,7 @@ pub fn direct_execute(
                 // Apply actions. Clone the actions Vec so the immutable
                 // borrow of `rules` ends before we mutably borrow
                 // `working_facts`.
-                let actions = rules[rule_idx].actions.clone();
+                let actions = rule.actions.clone();
                 for action in &actions {
                     apply_action(action, working_facts);
                 }

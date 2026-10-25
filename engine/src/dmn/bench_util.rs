@@ -4,7 +4,6 @@
 //! using Criterion's allocation tracking. Used by `engine/benches/memory_baseline.rs`
 //! to capture baseline snapshots of the v6.0 corpus.
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -167,7 +166,7 @@ impl MemoryBaseline {
 }
 
 /// Extract a string field value from JSON (simplified parser).
-fn extract_field<'a>(json: &'a str, field: &str) -> Result<String, String> {
+fn extract_field(json: &str, field: &str) -> Result<String, String> {
     let key = format!("\"{}\":", field);
     let pos = json.find(&key)
         .ok_or_else(|| format!("field {} not found", field))? + key.len();
@@ -229,7 +228,7 @@ pub fn collect_dmn_files(root: &Path) -> Vec<PathBuf> {
             let p = e.path();
             if p.is_dir() {
                 walk(&p, out);
-            } else if p.extension().map_or(false, |ext| ext == "dmn") {
+            } else if p.extension().is_some_and(|ext| ext == "dmn") {
                 out.push(p);
             }
         }

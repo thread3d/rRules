@@ -398,15 +398,14 @@ pub fn compare_values(op: ComparisonOp, left: &Value, right: &Value) -> bool {
             // float/string/boolean fallback paths below; FEEL variants return
             // `false` from those fallbacks (as_float/as_string return None for
             // them). The FEEL comparison path is Phase 31 DMN-13.
-            match (left, right) {
-                (Value::Integer(l), Value::Integer(r)) => return match op {
+            if let (Value::Integer(l), Value::Integer(r)) = (left, right) {
+                return match op {
                     ComparisonOp::Lt => l < r,
                     ComparisonOp::Le => l <= r,
                     ComparisonOp::Gt => l > r,
                     ComparisonOp::Ge => l >= r,
                     _ => unreachable!(),
-                },
-                _ => {}
+                };
             }
             // Any Float operand: promote both to f64.
             if left.as_float().is_some() && right.as_float().is_some() {

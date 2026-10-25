@@ -115,8 +115,8 @@ pub fn parse_dmn_file(path: &str) -> Result<DmnModel, DmnParseError> {
 /// after the first parse per unique key).
 pub fn parse_dmn_with_cache(input: &str) -> Result<(DmnModel, FeelAstCache), DmnParseError> {
     let model = parse_dmn_bytes(input.as_bytes())?;
-    let mut cache = FeelAstCache::new();
-    walk_ir_and_populate_cache(&model, &mut cache);
+    let cache = FeelAstCache::new();
+    walk_ir_and_populate_cache(&model, &cache);
     Ok((model, cache))
 }
 

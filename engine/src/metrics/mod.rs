@@ -1,3 +1,4 @@
+#![allow(unexpected_cfgs)]
 /// Trait for collecting runtime metrics from the rule engine.
 pub trait MetricsCollector: Send + Sync {
     /// Current rate of rule firings per second (moving average).

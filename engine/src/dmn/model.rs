@@ -39,6 +39,7 @@ use thiserror::Error;
 /// needed for round-trip (e.g. the prefix map observed by the parser, so the
 /// exporter can re-emit equivalent `xmlns:*` declarations).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct DmnModel {
     /// The `<definitions>` element — single root of a DMN document.
     pub definitions: Definitions,
@@ -48,14 +49,6 @@ pub struct DmnModel {
     pub source_namespace: Option<String>,
 }
 
-impl Default for DmnModel {
-    fn default() -> Self {
-        Self {
-            definitions: Definitions::default(),
-            source_namespace: None,
-        }
-    }
-}
 
 /// The `<definitions>` element — the single root of a DMN document.
 ///
@@ -65,6 +58,7 @@ impl Default for DmnModel {
 /// `diagrams` carries DMNDI layout through the IR (populated in Plan 29-02;
 /// emitted in Plan 29-03 / Phase 35).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct Definitions {
     /// `id` attribute (optional on `<definitions>`).
     pub id: Option<String>,
@@ -90,22 +84,6 @@ pub struct Definitions {
     pub diagrams: Vec<DmnDiagram>,
 }
 
-impl Default for Definitions {
-    fn default() -> Self {
-        Self {
-            id: None,
-            name: None,
-            description: None,
-            namespace: String::new(),
-            type_language: None,
-            expression_language: None,
-            exporter: None,
-            exporter_version: None,
-            children: Vec::new(),
-            diagrams: Vec::new(),
-        }
-    }
-}
 
 /// Ordered top-level child of [`Definitions`]. Each variant carries the
 /// element so `Vec<DefinitionsChild>` preserves cross-type document order.
@@ -114,6 +92,9 @@ impl Default for Definitions {
 /// annotation/association variants ([`Self::TextAnnotation`], [`Self::Association`])
 /// are also valid top-level children.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// The IR mirrors the DMN XML element tree directly; boxing the large variants
+// would push that noise onto every producer/consumer for a one-off parse cost.
+#[allow(clippy::large_enum_variant)]
 pub enum DefinitionsChild {
     /// `<itemDefinition>` — Clause 7 item definition (DMN-05).
     ItemDefinition(ItemDefinition),
@@ -325,6 +306,7 @@ pub struct Association {
 /// `hit_policy` defaults to [`HitPolicy::Unique`] when the parser sees no
 /// explicit `hitPolicy` attribute (Phase 29 success criterion 3).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct DecisionTable {
     pub id: Option<String>,
     pub name: Option<String>,
@@ -345,21 +327,6 @@ pub struct DecisionTable {
     pub rules: Vec<DmnRule>,
 }
 
-impl Default for DecisionTable {
-    fn default() -> Self {
-        Self {
-            id: None,
-            name: None,
-            hit_policy: HitPolicy::default(),
-            aggregation: None,
-            preferred_orientation: None,
-            output_label: None,
-            input_clauses: Vec::new(),
-            output_clauses: Vec::new(),
-            rules: Vec::new(),
-        }
-    }
-}
 
 /// `<input>` — an input clause (column) of a decision table.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

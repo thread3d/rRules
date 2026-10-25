@@ -233,8 +233,7 @@ impl DependencyGraph {
         let mut result = HashSet::new();
         let mut stack = vec![fact_id.to_string()];
 
-        while !stack.is_empty() {
-            let current = stack.pop().unwrap();
+        while let Some(current) = stack.pop() {
             if result.contains(&current) {
                 continue;
             }
@@ -372,6 +371,12 @@ pub struct ExecutionTrace {
     pub unsupportable_facts: Vec<String>,
 }
 
+impl Default for ExecutionTrace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExecutionTrace {
     pub fn new() -> Self {
         Self {
@@ -457,7 +462,7 @@ impl PhreakEngine {
     }
 
     /// Inserts a fact and propagates it through the network.
-    pub fn assert_fact(&mut self, mut fact: Fact) {
+    pub fn assert_fact(&mut self, fact: Fact) {
         let fact_id = fact.id.to_string();
         // Clone before moving fact
         let fact_type = fact.fact_type_id.clone();
@@ -506,7 +511,7 @@ impl PhreakEngine {
     }
 
     /// Propagates from join node to action nodes.
-    fn join_propagation(&mut self, join_node: &crate::engine::rete::JoinNode, fact_id: &str) {
+    fn join_propagation(&mut self, join_node: &crate::engine::rete::JoinNode, _fact_id: &str) {
         // Collect all data before any mutation - get test_facts and existing_nagrams in one scope
         let (test_facts_from_alpha, existing_nagrams, predecessor_facts_for_beta): (
             Vec<String>,

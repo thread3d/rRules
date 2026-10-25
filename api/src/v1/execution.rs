@@ -605,7 +605,7 @@ pub async fn execute_single(
     // 2. Validate the engine param against registered factories (ENGINE-07).
     //    Do NOT call selector.select_engine (it takes &mut self).
     let available = registry.available_engines();
-    if !available.iter().any(|name| *name == engine_name.as_str()) {
+    if !available.contains(&engine_name.as_str()) {
         return Err((
             actix_web::http::StatusCode::BAD_REQUEST,
             format!("unknown engine: {}", engine_name),

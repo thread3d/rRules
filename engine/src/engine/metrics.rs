@@ -3,6 +3,8 @@
 //! This module provides traits for collecting performance metrics from different
 //! engine algorithms, with support for Prometheus export.
 
+#![allow(unexpected_cfgs, dead_code)]
+#![allow(unused_imports, unreachable_pub, unused_variables, unused_mut)]
 use std::collections::HashMap;
 #[cfg(feature = "metrics")]
 use prometheus::{self, Encoder, TextEncoder};

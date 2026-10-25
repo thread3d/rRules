@@ -107,7 +107,7 @@ async fn main() -> std::io::Result<()> {
             Err(_) => vec![],
         };
         let dmn_files: Vec<_> = entries.iter()
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "dmn"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "dmn"))
             .collect();
         if !dmn_files.is_empty() {
             tracing::info!(path = %dmn_storage_path, files = dmn_files.len(), "Loading DMN model from storage");

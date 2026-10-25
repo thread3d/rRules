@@ -110,6 +110,7 @@ fn default_per_page() -> u32 { 20 }
 // Helper: extract decisions from Definitions children
 // =========================================================================
 
+#[allow(dead_code)]
 fn extract_decisions(definitions: &DmnModel) -> Vec<&Decision> {
     definitions
         .definitions
@@ -208,7 +209,7 @@ pub async fn list_decisions(
     let offset = (page.saturating_sub(1)) * per_page;
 
     // Dereference Arc to access the underlying FileSystemDmnStore methods.
-    let store: &FileSystemDmnStore = &*persistence;
+    let store: &FileSystemDmnStore = &persistence;
     match store.list().await {
         Ok(summaries) => {
             let total = summaries.len();
@@ -399,6 +400,7 @@ pub async fn import_dmn(
 }
 
 /// Export a DMN decision — `GET /v1/decisions/{id}/export`.
+#[allow(deprecated)]
 pub async fn export_dmn(
     persistence: web::Data<FileSystemDmnStore>,
     path: web::Path<String>,

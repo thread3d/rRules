@@ -8,12 +8,10 @@
 //!
 //! The trait uses native async methods (Rust 1.75+), avoiding the `async-trait` dependency.
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value as JsonValue;
 use thiserror::Error;
 use tokio::fs;
@@ -53,6 +51,7 @@ pub struct DmnDocument {
 /// them via dependency injection without handler changes.
 ///
 /// Uses native async methods (Rust 1.75+) — no `async-trait` dependency needed.
+#[allow(async_fn_in_trait)]
 pub trait DmnPersistence: Send + Sync {
     async fn list(&self) -> Result<Vec<DmnSummary>, PersistenceError>;
     async fn get(&self, id: &str) -> Result<DmnDocument, PersistenceError>;
@@ -175,7 +174,7 @@ impl DmnPersistence for FileSystemDmnStore {
 
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "dmn") {
+            if path.extension().is_some_and(|ext| ext == "dmn") {
                 let id = path
                     .file_stem()
                     .and_then(|s| s.to_str())
@@ -363,27 +362,27 @@ impl DmnPersistence for PostgresDmnStore {
         todo!("PostgresDmnStore::list — SELECT id, name, version, updated_at FROM dmn_documents ORDER BY updated_at DESC")
     }
 
-    async fn get(&self, id: &str) -> Result<DmnDocument, PersistenceError> {
+    async fn get(&self, _id: &str) -> Result<DmnDocument, PersistenceError> {
         todo!("PostgresDmnStore::get — SELECT content, metadata, created_at, updated_at FROM dmn_documents WHERE id = $1")
     }
 
-    async fn create(&self, doc: DmnDocument) -> Result<DmnDocument, PersistenceError> {
+    async fn create(&self, _doc: DmnDocument) -> Result<DmnDocument, PersistenceError> {
         todo!("PostgresDmnStore::create — INSERT INTO dmn_documents (id, name, content, metadata, created_at, updated_at) VALUES (...)")
     }
 
-    async fn update(&self, id: &str, doc: DmnDocument) -> Result<DmnDocument, PersistenceError> {
+    async fn update(&self, _id: &str, _doc: DmnDocument) -> Result<DmnDocument, PersistenceError> {
         todo!("PostgresDmnStore::update — UPDATE dmn_documents SET content = $2, metadata = $3, updated_at = NOW() WHERE id = $1")
     }
 
-    async fn delete(&self, id: &str) -> Result<(), PersistenceError> {
+    async fn delete(&self, _id: &str) -> Result<(), PersistenceError> {
         todo!("PostgresDmnStore::delete — DELETE FROM dmn_documents WHERE id = $1")
     }
 
-    async fn save_file(&self, filename: &str, content: &[u8]) -> Result<(), PersistenceError> {
+    async fn save_file(&self, _filename: &str, _content: &[u8]) -> Result<(), PersistenceError> {
         todo!("PostgresDmnStore::save_file — INSERT INTO dmn_files (filename, content) VALUES ($1, $2)")
     }
 
-    async fn load_file(&self, filename: &str) -> Result<Vec<u8>, PersistenceError> {
+    async fn load_file(&self, _filename: &str) -> Result<Vec<u8>, PersistenceError> {
         todo!("PostgresDmnStore::load_file — SELECT content FROM dmn_files WHERE filename = $1")
     }
 }
