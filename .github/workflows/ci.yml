@@ -23,6 +23,12 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   NODE_VERSION: "22"
+  # `rust-toolchain.toml` says `channel = "stable"` (so a developer's rustup never
+  # downloads a second toolchain), and rustup ranks the file above the toolchain the
+  # action installed — which is how CI ended up compiling with clippy 1.99 and
+  # failing on lints the pinned compiler does not have. The environment variable
+  # outranks the file, so this is the pin that actually applies.
+  RUSTUP_TOOLCHAIN: "1.94.1"
 
 jobs:
   gates:
@@ -37,7 +43,9 @@ jobs:
       # rustfmt then fails CI in a commit that changed neither the lint config nor
       # the formatting. Bump this together with `rust-toolchain.toml`'s notes.
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@1.94.1
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
@@ -101,7 +109,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@1.94.1
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2

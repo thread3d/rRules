@@ -41,6 +41,11 @@ verification, and the measured state below is the only state worth quoting.
 - **Build:** `cargo test --workspace` green, `cargo clippy --workspace -- -D warnings` clean,
   `cargo fmt --all -- --check` clean.
 
+The compiler is pinned (1.94.1, in `.github/workflows/ci.yml` and the Dockerfile's
+builder), because a drifting compiler fails a commit that changed nothing: clippy 1.99
+already reports about twenty-five findings in this tree that 1.94.1 does not. Bumping
+the pin is therefore a deliberate task — expect to fix those lints in the same change.
+
 **A claim without a gate behind it is not a claim this project should make.** The v8.0
 "51/51 TCK vectors" figure was written from phase summaries and did not survive execution; it is now
 recorded as wrong wherever it appeared outside the historical archives.

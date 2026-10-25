@@ -18,7 +18,10 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- 2. Server binary ------------------------------------------------------
-FROM rust:1-slim-bookworm AS backend
+# The same compiler CI tests with. `rust:1-slim` follows stable, so the released
+# binary would otherwise be built by a different compiler than the one the gates ran
+# on — and the two only disagree at the worst moment.
+FROM rust:1.94.1-slim-bookworm AS backend
 
 WORKDIR /src
 
