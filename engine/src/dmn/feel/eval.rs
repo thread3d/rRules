@@ -1611,6 +1611,97 @@ fn evaluate_path(target: &FeelExpression, name: &str, scope: &Scope) -> Value {
     match t {
         Value::Object(map) => map.get(name).cloned().unwrap_or(Value::Null),
         Value::Array(elems) => Value::Array(elems.into_iter().map(|e| path_nav(e, name)).collect()),
+        // DMN 1.5 §10.3.2.3.4: a temporal value exposes its components as
+        // properties — `Date.fromString.day`, `Date-Time2.hour`,
+        // `dtDuration1.seconds`, `Date-Time2.time offset`.
+        Value::Date(_)
+        | Value::DateTime(_)
+        | Value::DateTimeTz(_)
+        | Value::Time(_)
+        | Value::DaysTimeDuration(_)
+        | Value::YearsMonthsDuration(_) => temporal_property(&t, name),
+        _ => Value::Null,
+    }
+}
+
+/// The component a property name selects from a temporal value.
+fn temporal_property(value: &Value, name: &str) -> Value {
+    use crate::dmn::feel::temporal::{DateTimeValue, TimeValue};
+    use chrono::{Datelike, Timelike};
+    // The date and the time parts, whichever the value carries.
+    let date = match value {
+        Value::Date(date) => Some(*date),
+        Value::DateTime(naive) => Some(naive.date()),
+        Value::DateTimeTz(DateTimeValue::Fixed(zoned)) => Some(zoned.date_naive()),
+        Value::DateTimeTz(DateTimeValue::Iana(zoned)) => Some(zoned.date_naive()),
+        Value::DateTimeTz(DateTimeValue::Local(naive)) => Some(naive.date()),
+        _ => None,
+    };
+    let time = match value {
+        Value::Time(TimeValue::Fixed(naive)) | Value::Time(TimeValue::Local(naive)) => Some(*naive),
+        Value::Time(TimeValue::Offset(zoned)) => Some(zoned.time()),
+        Value::DateTime(naive) => Some(naive.time()),
+        Value::DateTimeTz(DateTimeValue::Fixed(zoned)) => Some(zoned.time()),
+        Value::DateTimeTz(DateTimeValue::Iana(zoned)) => Some(zoned.time()),
+        Value::DateTimeTz(DateTimeValue::Local(naive)) => Some(naive.time()),
+        _ => None,
+    };
+    match name {
+        "year" => date.map_or(Value::Null, |d| Value::Integer(Datelike::year(&d) as i64)),
+        "month" => date.map_or(Value::Null, |d| Value::Integer(Datelike::month(&d) as i64)),
+        "day" => date.map_or(Value::Null, |d| Value::Integer(Datelike::day(&d) as i64)),
+        "hour" => time.map_or(Value::Null, |t| Value::Integer(Timelike::hour(&t) as i64)),
+        "minute" => time.map_or(Value::Null, |t| Value::Integer(Timelike::minute(&t) as i64)),
+        "second" => time.map_or(Value::Null, |t| Value::Integer(Timelike::second(&t) as i64)),
+        "weekday" => date.map_or(Value::Null, |d| {
+            Value::String(format!("{:?}", Datelike::weekday(&d)))
+        }),
+        // A date-time's UTC offset, as a days-time duration.
+        // A date-time's UTC offset, as a days-time duration.
+        "time offset" => {
+            use chrono::Offset;
+            let offset = match value {
+                Value::DateTimeTz(DateTimeValue::Fixed(zoned)) => Some(*zoned.offset()),
+                Value::DateTimeTz(DateTimeValue::Iana(zoned)) => Some(zoned.offset().fix()),
+                Value::Time(TimeValue::Offset(zoned)) => Some(*zoned.offset()),
+                _ => None,
+            };
+            offset.map_or(Value::Null, |offset| {
+                let seconds = i64::from(offset.local_minus_utc());
+                Value::DaysTimeDuration(chrono::TimeDelta::seconds(seconds))
+            })
+        }
+        // Duration components.
+        "years" => match value {
+            Value::YearsMonthsDuration(duration) => Value::Integer(duration.months / 12),
+            _ => Value::Null,
+        },
+        "months" => match value {
+            Value::YearsMonthsDuration(duration) => Value::Integer(duration.months % 12),
+            _ => Value::Null,
+        },
+        "days" => match value {
+            Value::DaysTimeDuration(duration) => Value::Integer(duration.num_days()),
+            _ => Value::Null,
+        },
+        "hours" => match value {
+            Value::DaysTimeDuration(duration) => Value::Integer((duration.num_hours() % 24).abs()),
+            _ => Value::Null,
+        },
+        "minutes" => match value {
+            Value::DaysTimeDuration(duration) => {
+                Value::Integer((duration.num_minutes() % 60).abs())
+            }
+            _ => Value::Null,
+        },
+        // `seconds` for a date-time is the clock second; for a duration it is the
+        // remaining seconds within the minute.
+        "seconds" => match value {
+            Value::DaysTimeDuration(duration) => {
+                Value::Integer((duration.num_seconds() % 60).abs())
+            }
+            _ => time.map_or(Value::Null, |t| Value::Integer(Timelike::second(&t) as i64)),
+        },
         _ => Value::Null,
     }
 }
@@ -1889,6 +1980,14 @@ fn datetime_add(l: &Value, r: &Value) -> Option<Value> {
                 .map(|r| r.date())
                 .map(Value::Date)
         }
+        // DateTime + DaysTimeDuration -> DateTime (an offset-less date-time).
+        (Value::DateTime(naive), Value::DaysTimeDuration(td)) => {
+            naive.checked_add_signed(*td).map(Value::DateTime)
+        }
+        // DateTime + YearsMonthsDuration -> DateTime.
+        (Value::DateTime(naive), Value::YearsMonthsDuration(ymd)) => {
+            add_months_to_naive_dt(*naive, ymd.months).map(Value::DateTime)
+        }
         // DateTimeTz + DaysTimeDuration -> DateTimeTz
         (Value::DateTimeTz(dt), Value::DaysTimeDuration(td)) => match dt {
             super::temporal::DateTimeValue::Iana(zdt) => {
@@ -1957,6 +2056,15 @@ fn datetime_add(l: &Value, r: &Value) -> Option<Value> {
 /// - `YearsMonthsDuration - YearsMonthsDuration -> YearsMonthsDuration`.
 fn datetime_sub(l: &Value, r: &Value) -> Option<Value> {
     match (l, r) {
+        // DateTime - DaysTimeDuration / YearsMonthsDuration -> DateTime.
+        (Value::DateTime(naive), Value::DaysTimeDuration(td)) => {
+            naive.checked_sub_signed(*td).map(Value::DateTime)
+        }
+        (Value::DateTime(naive), Value::YearsMonthsDuration(ymd)) => {
+            add_months_to_naive_dt(*naive, -ymd.months).map(Value::DateTime)
+        }
+        // DateTime - DateTime -> DaysTimeDuration.
+        (Value::DateTime(a), Value::DateTime(b)) => Some(Value::DaysTimeDuration(*a - *b)),
         // Date - Date -> DaysTimeDuration
         (Value::Date(a), Value::Date(b)) => Some(Value::DaysTimeDuration(*a - *b)),
         // DateTimeTz - DateTimeTz -> DaysTimeDuration (within-form only)

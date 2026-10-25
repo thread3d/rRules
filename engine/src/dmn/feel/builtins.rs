@@ -159,21 +159,31 @@ fn built_in_time(args: &[Value]) -> Value {
     match args.len() {
         // `time(hour, minute, second)` and `time(hour, minute, second, offset)`.
         3 | 4 => {
-            let (Some(hour), Some(minute), Some(second)) = (
-                integer_argument(&args[0]),
-                integer_argument(&args[1]),
-                integer_argument(&args[2]),
-            ) else {
+            let (Some(hour), Some(minute)) =
+                (integer_argument(&args[0]), integer_argument(&args[1]))
+            else {
                 return Value::Null;
             };
-            let (Ok(hour), Ok(minute), Ok(second)) = (
-                u32::try_from(hour),
-                u32::try_from(minute),
-                u32::try_from(second),
-            ) else {
+            // The seconds component may carry a fraction (`time(12, 59, 1.3)`).
+            let Some(seconds) = number_of(&args[2]) else {
                 return Value::Null;
             };
-            let Some(naive) = chrono::NaiveTime::from_hms_opt(hour, minute, second) else {
+            let (Ok(hour), Ok(minute)) = (u32::try_from(hour), u32::try_from(minute)) else {
+                return Value::Null;
+            };
+            let whole = seconds.trunc();
+            let fraction = seconds.fract();
+            let Ok(second) = u32::try_from(whole.to_string().parse::<i64>().unwrap_or(-1)) else {
+                return Value::Null;
+            };
+            let nanos = (fraction * Decimal::from(1_000_000_000u64))
+                .round()
+                .to_string()
+                .parse::<u32>()
+                .unwrap_or(0)
+                .min(999_999_999);
+            let Some(naive) = chrono::NaiveTime::from_hms_nano_opt(hour, minute, second, nanos)
+            else {
                 return Value::Null;
             };
             if args.len() == 3 {
@@ -201,6 +211,29 @@ fn built_in_time(args: &[Value]) -> Value {
         }
         1 => match &args[0] {
             Value::Null => Value::Null,
+            // `time(date and time)` extracts the time part.
+            Value::Time(_) => args[0].clone(),
+            Value::DateTime(naive) => {
+                Value::Time(crate::dmn::feel::temporal::TimeValue::Local(naive.time()))
+            }
+            Value::DateTimeTz(zone) => match zone {
+                crate::dmn::feel::temporal::DateTimeValue::Fixed(zoned) => {
+                    Value::Time(crate::dmn::feel::temporal::TimeValue::Offset(*zoned))
+                }
+                crate::dmn::feel::temporal::DateTimeValue::Iana(zoned) => {
+                    use chrono::{Offset, TimeZone};
+                    let offset = zoned.offset().fix();
+                    match offset.from_local_datetime(&zoned.naive_local()).single() {
+                        Some(fixed) => {
+                            Value::Time(crate::dmn::feel::temporal::TimeValue::Offset(fixed))
+                        }
+                        None => Value::Null,
+                    }
+                }
+                crate::dmn::feel::temporal::DateTimeValue::Local(naive) => {
+                    Value::Time(crate::dmn::feel::temporal::TimeValue::Local(naive.time()))
+                }
+            },
             Value::String(text) => {
                 crate::dmn::feel::temporal::parse_at_literal(text).unwrap_or(Value::Null)
             }
@@ -1726,9 +1759,9 @@ fn iso_week_num(d: chrono::NaiveDate) -> u32 {
 ///
 /// DMN 1.5 §10.3.2.3.7: Returns an integer in `[1, 366]`. Null arg → null.
 pub fn built_in_day_of_year(args: &[Value]) -> Value {
-    let d = match args.first() {
-        Some(Value::Date(d)) => *d,
-        _ => return Value::Null,
+    let d = match args.first().and_then(date_of) {
+        Some(d) => d,
+        None => return Value::Null,
     };
     Value::Integer(day_of_year(d) as i64)
 }
@@ -1803,9 +1836,9 @@ pub fn built_in_month_of_year(args: &[Value]) -> Value {
 ///
 /// DMN 1.5 §10.3.2.3.7: Returns an integer in `[1, 53]`. Null arg → null.
 pub fn built_in_week_of_year(args: &[Value]) -> Value {
-    let d = match args.first() {
-        Some(Value::Date(d)) => *d,
-        _ => return Value::Null,
+    let d = match args.first().and_then(date_of) {
+        Some(d) => d,
+        None => return Value::Null,
     };
     Value::Integer(iso_week_num(d) as i64)
 }

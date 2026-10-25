@@ -1054,6 +1054,11 @@ use crate::data_types::Value;
 const DEFAULT_MAX_DEPTH: u32 = 256;
 
 /// The recursive-descent + Pratt parser over `Vec<TokenSpan>`.
+/// Properties whose name contains a space.
+fn is_multiword_property(name: &str) -> bool {
+    matches!(name, "time offset")
+}
+
 /// Parse a FEEL numeric literal, including scientific notation.
 ///
 /// `rust_decimal` parses a plain decimal exactly; the exponent is applied here by
@@ -1345,9 +1350,11 @@ impl Parser {
                         };
                         continue;
                     }
-                    // Regular path: `target.name`
+                    // Regular path: `target.name`. A property name may contain
+                    // spaces (`dateValue.time offset`), so a run of words that
+                    // forms a known property name is one path segment.
                     self.advance();
-                    let name = match self.advance() {
+                    let mut name = match self.advance() {
                         Some(TokenSpan {
                             token: Token::Name(n),
                             ..
@@ -1357,6 +1364,15 @@ impl Parser {
                             return self.err_here("expected name after '.'");
                         }
                     };
+                    while let Token::Name(next) = self.peek().clone() {
+                        let merged = format!("{name} {next}");
+                        if is_multiword_property(&merged) {
+                            name = merged;
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
                     base = FeelExpression::Path {
                         target: Box::new(base),
                         name,
@@ -1821,6 +1837,12 @@ impl Parser {
             }
             self.advance(); // consume :
             let val = self.parse_expr(0);
+            if entries.iter().any(|(existing, _)| *existing == key) {
+                // A duplicate key makes the context invalid (`0057-feel-context`,
+                // `decision008`), so this is a parse error rather than last-wins.
+                self.sync_to_boundary();
+                return self.err_here("duplicate key in context");
+            }
             entries.push((key, val));
             if matches!(self.peek(), Token::Comma) {
                 self.advance();

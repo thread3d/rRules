@@ -506,13 +506,29 @@ fn parse_fixed_offset(s: &str) -> Option<FixedOffset> {
 // ----- format helpers -----
 
 fn format_time_value(tv: &TimeValue) -> String {
+    // Whole seconds print without a fraction; a fraction keeps only its
+    // significant digits (`12:59:01.3`, not `12:59:01.300`), which is how the
+    // TCK writes them.
+    fn clock(time: chrono::NaiveTime) -> String {
+        use chrono::Timelike;
+        let base = format!(
+            "{:02}:{:02}:{:02}",
+            Timelike::hour(&time),
+            Timelike::minute(&time),
+            Timelike::second(&time)
+        );
+        let nanos = Timelike::nanosecond(&time);
+        if nanos == 0 {
+            return base;
+        }
+        let fraction = format!("{:09}", nanos);
+        format!("{base}.{}", fraction.trim_end_matches('0'))
+    }
     match tv {
-        TimeValue::Fixed(t) | TimeValue::Local(t) => t.format("%H:%M:%S").to_string(),
-        TimeValue::Offset(dt) => format!(
-            "{}{}",
-            dt.format("%H:%M:%S"),
-            format_fixed_offset(dt.offset())
-        ),
+        TimeValue::Fixed(t) | TimeValue::Local(t) => clock(*t),
+        TimeValue::Offset(dt) => {
+            format!("{}{}", clock(dt.time()), format_fixed_offset(dt.offset()))
+        }
     }
 }
 

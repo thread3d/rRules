@@ -108,10 +108,10 @@ struct DmndiLoss {
 /// `tck_baseline_matches_documentation` fails the suite when the two disagree —
 /// so the gate and the document cannot drift apart silently. Closing a gap means
 /// raising both, deliberately.
-const TCK_BASELINE_PASSED: usize = 158;
+const TCK_BASELINE_PASSED: usize = 164;
 
 /// Layer results that fail at the documented conformance baseline.
-const TCK_BASELINE_FAILED: usize = 16;
+const TCK_BASELINE_FAILED: usize = 10;
 
 // =========================================================================
 // Known divergences
@@ -503,6 +503,16 @@ fn execute_evaluator_layer(vector: &test_util::TckVector) -> VectorResult {
                     },
                 ) {
                     Ok(result) => {
+                        // A decision's value is the context of its output clauses,
+                        // so a multi-output decision is compared as one context
+                        // when the vector expects an object (`0010-multi-output-U`).
+                        let outputs_as_context = engine::data_types::Value::Object(
+                            result
+                                .outputs
+                                .iter()
+                                .map(|(name, value)| (name.clone(), value.clone()))
+                                .collect(),
+                        );
                         let matched = result
                             .outputs
                             .get(expected_name)
@@ -510,7 +520,8 @@ fn execute_evaluator_layer(vector: &test_util::TckVector) -> VectorResult {
                             || result
                                 .outputs
                                 .values()
-                                .any(|value| tck_values::deep_equal(value, &expected));
+                                .any(|value| tck_values::deep_equal(value, &expected))
+                            || tck_values::deep_equal(&outputs_as_context, &expected);
                         if !matched {
                             case_ok = false;
                             failures.push(format!(

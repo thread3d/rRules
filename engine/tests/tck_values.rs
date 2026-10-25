@@ -409,6 +409,23 @@ fn scalar_to_value(xsi_type: Option<&str>, text: &str) -> Value {
             Ok(d) => Value::Date(d),
             Err(_) => Value::String(text.to_string()),
         },
+        // A TCK input can be a `dateTime`, and the evaluator distinguishes it
+        // from a string: `day of week(@dateTime)` and `dateTime + duration` both
+        // depend on the value being temporal.
+        "dateTime" | "datetime" => {
+            match chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S") {
+                Ok(value) => Value::DateTime(value),
+                Err(_) => match chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S%.f")
+                {
+                    Ok(value) => Value::DateTime(value),
+                    Err(_) => Value::String(text.to_string()),
+                },
+            }
+        }
+        "time" => Value::String(text.to_string()),
+        "duration" | "dayTimeDuration" | "yearMonthDuration" => {
+            engine::dmn::feel::temporal::parse_at_literal(text).unwrap_or(Value::Null)
+        }
         _ => {
             // No type information: infer from the text.
             if text.eq_ignore_ascii_case("null") || text.is_empty() {
@@ -462,6 +479,21 @@ pub fn deep_equal(actual: &Value, expected: &Value) -> bool {
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Date(a), Value::Date(b)) => a == b,
+        // Temporal values of the same kind compare through the FEEL rules (two
+        // offset times denote instants; durations compare as durations).
+        (a, b)
+            if is_temporal(a)
+                && is_temporal(b)
+                && std::mem::discriminant(a) == std::mem::discriminant(b) =>
+        {
+            engine::dmn::feel::eval::feel_equals_public(a, b).unwrap_or(false)
+        }
+        // Ranges compare by their written form and bounds.
+        (Value::Range(a), Value::Range(b)) => engine::dmn::feel::eval::feel_equals_public(
+            &Value::Range(a.clone()),
+            &Value::Range(b.clone()),
+        )
+        .unwrap_or(false),
         (Value::Array(a), Value::Array(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| deep_equal(x, y))
         }
