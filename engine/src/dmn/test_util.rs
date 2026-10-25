@@ -118,33 +118,27 @@ pub fn structurally_equal(xml_a: &str, xml_b: &str) -> bool {
 }
 
 fn normalize_xml(input: &str) -> String {
-    let mut s = input.to_string();
+    let mut s = input.trim().to_string();
 
-    // Step 1: strip XML declaration (the entire <?xml ... ?> block)
+    // Step 1: strip the XML declaration (the entire <?xml ... ?> block).
     while let Some(rest) = s.strip_prefix("<?xml") {
         if let Some(end) = rest.find("?>") {
-            s = rest[end + 2..].to_string();
+            s = rest[end + 2..].trim_start().to_string();
         } else {
             break;
         }
     }
 
-    // Step 2: remove all whitespace between tags (collapse runs of whitespace to nothing)
-    eprintln!("After step 1: {:?}", s);
+    // Step 2: drop comments and unwrap CDATA sections so `<![CDATA[x]]>` and
+    // plain `x` compare equal (CDATA is only an escaping device).
+    s = unwrap_cdata_and_strip_comments(&s);
+
+    // Step 3: remove whitespace outside tags.
     s = collapse_whitespace_outside_tags(&s);
-    eprintln!("After step 2: {:?}", s);
 
-    // Step 3: sort attributes within each tag alphabetically by key
-    s = sort_attributes_in_all_tags(&s);
-    eprintln!("After step 3: {:?}", s);
-
-    // Step 4: normalize self-closing tags `<x/>` into open/close pairs `<x></x>`
-    s = expand_self_closing_tags(&s);
-    eprintln!("After step 4: {:?}", s);
-
-    // Step 5: strip CDATA and comments (they don't affect structure)
-    s = strip_cdata_and_comments(&s);
-    eprintln!("After step 5: {:?}", s);
+    // Step 4: canonicalize tags — sort attributes by key and rewrite self-closing
+    // tags as open/close pairs so `<x/>` and `<x></x>` compare equal.
+    s = canonicalize_tags(&s);
 
     s.trim().to_string()
 }
@@ -182,152 +176,202 @@ fn collapse_whitespace_outside_tags(input: &str) -> String {
     result
 }
 
-fn sort_attributes_in_all_tags(input: &str) -> String {
-    let mut result = input.to_string();
+/// Rewrite every tag into canonical form: attributes sorted by name, whitespace
+/// inside the tag collapsed to single spaces, and self-closing tags expanded to
+/// open/close pairs.
+///
+/// This replaces the previous implementation, which looped forever on the first
+/// tag that had no attributes (it never advanced the scan position) and rebuilt
+/// tags without their closing `>`.
+fn canonicalize_tags(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
 
-    while let Some(start) = result.find('<') {
-        if start + 1 < result.len() && (result.as_bytes()[start + 1] == b'/' || result.as_bytes()[start + 1].is_ascii_alphabetic()) {
-            let end = match result[start..].find('>') {
-                Some(e) => start + e,
-                None => break,
-            };
+    while let Some(lt) = rest.find('<') {
+        // Text before the tag: copy verbatim.
+        out.push_str(&rest[..lt]);
+        let after = &rest[lt + 1..];
 
-            let tag_content = &result[start + 1..end];
-            // Only try to sort attributes if there's at least one space (indicating attributes exist).
-            if tag_content.contains(' ') || tag_content.contains('\t') {
-                if let Some(sorted_tag) = sort_attributes_in_single_tag(tag_content) {
-                    result.replace_range(start + 1..=end, &sorted_tag);
-                } else {
-                    break;
+        // Declarations, doctypes, CDATA and comments are copied verbatim.
+        if after.starts_with('!') || after.starts_with('?') {
+            match after.find('>') {
+                Some(gt) => {
+                    out.push('<');
+                    out.push_str(&after[..gt]);
+                    out.push('>');
+                    rest = &after[gt + 1..];
+                }
+                None => {
+                    out.push('<');
+                    out.push_str(after);
+                    rest = "";
                 }
             }
-            // If no attributes, leave the tag as-is.
-        } else {
-            break;
+            continue;
+        }
+
+        // End tags: `<name>` (whitespace inside end tags is irrelevant).
+        if let Some(name) = after.strip_prefix('/') {
+            match name.find('>') {
+                Some(gt) => {
+                    out.push_str("</");
+                    out.push_str(name[..gt].trim());
+                    out.push('>');
+                    rest = &name[gt + 1..];
+                }
+                None => {
+                    out.push_str("</");
+                    out.push_str(name);
+                    rest = "";
+                }
+            }
+            continue;
+        }
+
+        // Start or self-closing tag.
+        match after.find('>') {
+            Some(gt) => {
+                let raw_tag = &after[..gt];
+                let trimmed = raw_tag.trim_end();
+                let self_closing = trimmed.ends_with('/');
+                let body = if self_closing {
+                    trimmed[..trimmed.len() - 1].trim_end()
+                } else {
+                    trimmed
+                };
+
+                match sort_attributes_in_single_tag(body) {
+                    Some((name, attrs)) => {
+                        out.push('<');
+                        out.push_str(&name);
+                        if !attrs.is_empty() {
+                            out.push(' ');
+                            out.push_str(&attrs.join(" "));
+                        }
+                        if self_closing {
+                            out.push_str("></");
+                            out.push_str(&name);
+                            out.push('>');
+                        } else {
+                            out.push('>');
+                        }
+                    }
+                    None => {
+                        // Malformed/unrecognized tag shape — copy verbatim.
+                        out.push('<');
+                        out.push_str(raw_tag);
+                        out.push('>');
+                    }
+                }
+                rest = &after[gt + 1..];
+            }
+            None => {
+                out.push('<');
+                out.push_str(after);
+                rest = "";
+            }
         }
     }
 
-    result
+    out.push_str(rest);
+    out
 }
 
-fn sort_attributes_in_single_tag(tag_content: &str) -> Option<String> {
+/// Split a tag body (`name attr="v" other='w'`) into its name and a sorted list
+/// of canonical `attr="value"` strings.
+///
+/// Returns `None` only when the body is empty or has no tag name.
+fn sort_attributes_in_single_tag(tag_content: &str) -> Option<(String, Vec<String>)> {
     let tag_content = tag_content.trim();
     if tag_content.is_empty() {
         return None;
     }
 
-    // Extract the tag name (everything before the first whitespace).
-    let space_pos = tag_content.find(|c: char| c.is_whitespace()).unwrap_or(tag_content.len());
-    let tag_name = &tag_content[..space_pos];
-
-    // If there's no whitespace after the tag name, there are no attributes — return early.
-    if space_pos >= tag_content.len() {
+    let name_end = tag_content
+        .find(|c: char| c.is_whitespace())
+        .unwrap_or(tag_content.len());
+    let name = tag_content[..name_end].to_string();
+    if name.is_empty() {
         return None;
     }
 
-    // Parse attributes from the rest of the string.
-    let attrs_str = &tag_content[space_pos..];
-
-    let mut attrs: Vec<String> = Vec::new();
-    let mut i = 0;
+    let attrs_str = &tag_content[name_end..];
     let chars: Vec<char> = attrs_str.chars().collect();
     let len = chars.len();
+    let mut i = 0;
+    let mut attrs: Vec<String> = Vec::new();
 
     while i < len {
-        if chars[i].is_whitespace() {
-            // Skip whitespace.
+        // Skip whitespace and any stray separators.
+        if chars[i].is_whitespace() || chars[i] == '/' {
+            i += 1;
+            continue;
+        }
+
+        // Attribute name.
+        let attr_start = i;
+        while i < len && !chars[i].is_whitespace() && chars[i] != '=' {
+            i += 1;
+        }
+        let attr_name: String = chars[attr_start..i].iter().collect();
+        if attr_name.is_empty() {
+            i += 1;
+            continue;
+        }
+
+        // Optional `= value`.
+        if i < len && chars[i] == '=' {
+            i += 1;
             while i < len && chars[i].is_whitespace() {
                 i += 1;
             }
-            continue;
-        }
-
-        // Read attribute name.
-        let attr_start = i;
-        while i < len && !chars[i].is_whitespace() && chars[i] != '=' && chars[i] != '/' {
-            i += 1;
-        }
-        let attr_name = &attrs_str[attr_start..i];
-
-        if i >= len || chars[i] == '/' {
-            // Self-closing or no value.
-            attrs.push(attr_name.to_string());
-            if chars[i] == '/' {
+            if i < len && (chars[i] == '"' || chars[i] == '\'') {
+                let quote = chars[i];
                 i += 1;
-            }
-            continue;
-        }
-
-        if chars[i] == '=' {
-            i += 1; // Skip '='.
-            let quote = if i < len && (chars[i] == '"' || chars[i] == '\'') {
-                Some(chars[i])
-            } else {
-                None
-            };
-
-            if let Some(q) = quote {
-                i += 1; // Skip opening quote.
                 let val_start = i;
-                while i < len && chars[i] != q {
+                while i < len && chars[i] != quote {
                     i += 1;
                 }
-                let attr_val = &attrs_str[val_start..i];
+                let value: String = chars[val_start..i].iter().collect();
                 if i < len {
-                    i += 1; // Skip closing quote.
+                    i += 1; // closing quote
                 }
-                attrs.push(format!("{}=\"{}\"", attr_name, attr_val));
+                attrs.push(format!("{}=\"{}\"", attr_name, value));
             } else {
-                // Unquoted value.
                 let val_start = i;
-                while i < len && !chars[i].is_whitespace() && chars[i] != '/' {
+                while i < len && !chars[i].is_whitespace() {
                     i += 1;
                 }
-                let attr_val = &attrs_str[val_start..i];
-                attrs.push(format!("{}={}", attr_name, attr_val));
+                let value: String = chars[val_start..i].iter().collect();
+                attrs.push(format!("{}=\"{}\"", attr_name, value));
             }
         } else {
-            // Boolean attribute (no value).
-            attrs.push(attr_name.to_string());
+            // Valueless attribute.
+            attrs.push(attr_name);
         }
     }
 
-    // Sort attributes alphabetically.
     attrs.sort();
-
-    Some(format!("<{} {}", tag_name, attrs.join(" ")))
+    Some((name, attrs))
 }
 
-fn expand_self_closing_tags(input: &str) -> String {
+fn unwrap_cdata_and_strip_comments(input: &str) -> String {
     let mut result = input.to_string();
 
-    while let Some(pos) = result.find(" />") {
-        if pos > 0 && result.as_bytes()[pos - 1] == b'>' {
-            result.replace_range(pos..pos + 2, "></");
-        } else {
-            break;
-        }
-    }
-
-    if result.ends_with(" />") {
-        result.truncate(result.len() - 3);
-        result.push_str("></");
-    }
-
-    result
-}
-
-fn strip_cdata_and_comments(input: &str) -> String {
-    let mut result = input.to_string();
-
-    while let Some(start) = result.find("<![CDATA[") {
+    // Unwrap `<![CDATA[content]]>` to `content`.
+    const CDATA_OPEN: &str = "<![CDATA[";
+    while let Some(start) = result.find(CDATA_OPEN) {
         if let Some(end) = result[start..].find("]]>") {
-            result.replace_range(start..start + end + 3, "");
+            let content_start = start + CDATA_OPEN.len();
+            let content_end = start + end;
+            let content = result[content_start..content_end].to_string();
+            result.replace_range(start..content_end + 3, &content);
         } else {
             break;
         }
     }
 
+    // Remove comments entirely.
     while let Some(start) = result.find("<!--") {
         if let Some(end) = result[start..].find("-->") {
             result.replace_range(start..start + end + 3, "");
@@ -425,24 +469,43 @@ mod tests {
 
     #[test]
     fn discover_vectors_finds_valid_vector() {
+        // Vector directories are discovered one level below the TCK root and
+        // follow the upstream naming convention (`<vector>.dmn` +
+        // `<vector>-test-NN.xml`) — see `engine/tests/fixtures/tck/`.
         let tmp = std::env::temp_dir().join("tck_test_valid");
-        let _ = std::fs::create_dir_all(&tmp);
-        std::fs::write(tmp.join("model.dmn"), "<definitions/>").ok();
-        std::fs::write(tmp.join("test-01.xml"), "<testCases/>").ok();
+        let _ = std::fs::remove_dir_all(&tmp);
+        let vector_dir = tmp.join("0001-input-data-string");
+        let _ = std::fs::create_dir_all(&vector_dir);
+        std::fs::write(vector_dir.join("0001-input-data-string.dmn"), "<definitions/>").ok();
+        std::fs::write(
+            vector_dir.join("0001-input-data-string-test-01.xml"),
+            "<testCases/>",
+        )
+        .ok();
         let vectors = discover_tck_vectors(&tmp);
         assert_eq!(vectors.len(), 1);
-        assert!(vectors[0].dmn_path.to_str().unwrap().ends_with("model.dmn"));
+        assert!(vectors[0]
+            .dmn_path
+            .to_str()
+            .unwrap()
+            .ends_with("0001-input-data-string.dmn"));
         assert!(vectors[0].test_xml_path.to_str().unwrap().contains("-test-"));
+        assert_eq!(vectors[0].dir_name, "0001-input-data-string");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn discover_vectors_nested_dirs() {
         let tmp = std::env::temp_dir().join("tck_test_nested");
-        let _ = std::fs::create_dir_all(tmp.join("compliance-level-2").join("0001-input-data-string"));
+        let _ = std::fs::remove_dir_all(&tmp);
         let leaf = tmp.join("compliance-level-2").join("0001-input-data-string");
-        std::fs::write(leaf.join("model.dmn"), "<definitions/>").ok();
-        std::fs::write(leaf.join("test-01.xml"), "<testCases/>").ok();
+        let _ = std::fs::create_dir_all(&leaf);
+        std::fs::write(leaf.join("0001-input-data-string.dmn"), "<definitions/>").ok();
+        std::fs::write(
+            leaf.join("0001-input-data-string-test-01.xml"),
+            "<testCases/>",
+        )
+        .ok();
 
         let vectors = discover_tck_vectors(&tmp);
         assert_eq!(vectors.len(), 1);
