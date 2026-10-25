@@ -17,8 +17,10 @@ pub mod rules;
 pub mod sessions;
 pub mod simulation;
 pub mod tags;
-// NOTE: multi-tenancy (TenantStore/MemoryTenantStore) exists but a v1 tenants
-// route module is not yet wired — see .planning/STATE.md deferred items.
+// Multi-tenancy: tenant (organization/workspace) CRUD. Rule CRUD is already
+// scoped by the `X-Tenant-ID` header; this module manages the tenants
+// themselves.
+pub mod tenants;
 
 // Export common types for use in main.rs
 pub use execution::{ReloadRequest, ReloadResponse};

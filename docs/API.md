@@ -23,9 +23,9 @@ prose. For the live spec, see Swagger UI at `/swagger-ui`.
   `/swagger-ui`, `/api-docs`, `/metrics` and `/v1/metrics/ws` (a browser
   WebSocket upgrade cannot carry an Authorization header, and the stream is
   read-only). See the **Authentication** section below.
-- **Multi-tenancy:** header-based for rule CRUD — send `X-Tenant-ID: <tenant>`
-  (defaults to `"default"` when absent). Per-tenant *route* management
-  (`/v1/tenants`) is not wired yet; see `.planning/TECH-DEBT.md`.
+- **Multi-tenancy:** rule CRUD is scoped by the `X-Tenant-ID` header (defaults to
+  `"default"` when absent); two tenants never see each other's rules. Tenants
+  themselves are managed through `/v1/tenants` (see **Tenants** below).
 - **Rule execution is real:** `POST /v1/execute` builds a fresh engine from
   `EngineRegistry` per request and fires the rules in the shared `RuleSet`, so
   `rules_fired`, `rules_not_fired` and `facts_after` reflect actual inference.
@@ -440,6 +440,35 @@ Parsed canonical IR as JSON — what the frontend decision-table editor binds to
 ## POST /v1/decisions/reload
 Hot-reload the in-memory shared model after external file changes.
 **Request** (`ReloadDmnRequest`): `{ "dmn_content": "<dmn ...>" }`.
+
+---
+
+# Tenants
+
+Organisation/workspace registry. **Auth:** Bearer JWT on every endpoint.
+
+## GET /v1/tenants
+List tenants, newest first. **Response:** `200`
+```json
+{ "total_count": 1,
+  "tenants": [ { "id": "uuid", "name": "Acme Corp",
+    "created_at": "2026-10-25T07:00:00Z" } ] }
+```
+
+## POST /v1/tenants
+**Request:** `{ "name": "Acme Corp" }` (names are trimmed).
+**Response:** `201` `TenantResponse`. `400` for a blank name; `409` when the name
+is already taken.
+
+## GET /v1/tenants/{id}
+**Response:** `200` `TenantResponse`, `404` if unknown.
+
+## DELETE /v1/tenants/{id}
+**Response:** `204` on delete, `404` if unknown (deleting twice is a `404`).
+
+> The store is an in-memory `MemoryTenantStore`; the `SqlxTenantStore` backend in
+> `engine::governance::tenant` is a placeholder pending a PostgreSQL-backed
+> tenant table.
 
 ---
 

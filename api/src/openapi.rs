@@ -41,6 +41,11 @@ use utoipa::OpenApi;
         crate::v1::tags::delete_tag,
         crate::v1::tags::assign_tag_to_rule,
         crate::v1::tags::remove_tag_from_rule,
+        // Tenants
+        crate::v1::tenants::create_tenant,
+        crate::v1::tenants::list_tenants,
+        crate::v1::tenants::get_tenant,
+        crate::v1::tenants::delete_tenant,
         // Approvals
         crate::v1::approvals::submit_for_approval,
         crate::v1::approvals::list_pending_approvals,
@@ -70,6 +75,10 @@ use utoipa::OpenApi;
         crate::metrics::coverage_endpoint,
     ),
     components(schemas(
+        // Tenant types
+        engine::governance::tenant::CreateTenantRequest,
+        engine::governance::tenant::TenantResponse,
+        engine::governance::tenant::TenantListResponse,
         // Execution types
         crate::v1::execution::ExecuteRequest,
         crate::v1::execution::RuleFilter,

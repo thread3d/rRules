@@ -12,7 +12,7 @@ Milestone v8.0 (Close TCK Evaluator Gaps) — **complete** as of 2026-07-15 (Pha
 
 Shipped milestones: v1.0 MVP → v2.0 Testing Framework → v3.0 Pluggable Engines (Rete/TREAT/LEAPS/PHREAK) → v4.0 Production Platform (frontend + governance + monitoring + deployment) → v5.0 Live Execution (`/v1/execute`, sessions, metrics) → v6.0 DMN Level 3 Compliance (parser, FEEL, decision tables, DRD) → v7.0 Performance + Production Readiness (benchmarks, memory gates, AST cache, DRD parallelization, fuzzing) → v8.0 TCK evaluator gaps.
 
-**Next Step:** no milestone is in flight. Scope the next one from the recorded backlog in `.planning/TECH-DEBT.md`, `TCK-COVERAGE-GAPS.md`, and the v8.0 audit — leading candidates: DMN 1.6 / FEEL 1.6 extensions (COLLECT `distinct`), finishing multi-tenancy (`/v1/tenants` + rule-CRUD isolation), and real `PostgresDmnStore` queries. (Engine retraction was completed on 2026-10-25 — it is no longer outstanding.)
+**Next Step:** no milestone is in flight. Scope the next one from the recorded backlog in `.planning/TECH-DEBT.md`, `TCK-COVERAGE-GAPS.md`, and the v8.0 audit — leading candidates: DMN 1.6 / FEEL 1.6 extensions (COLLECT `distinct`), and real `PostgresDmnStore` queries. (Engine retraction was completed on 2026-10-25 — it is no longer outstanding.)
 
 ## Project Structure
 

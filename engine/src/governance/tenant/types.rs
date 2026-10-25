@@ -35,14 +35,14 @@ impl Tenant {
 }
 
 /// Request body for creating a tenant.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct CreateTenantRequest {
     /// Human-readable display name (required).
     pub name: String,
 }
 
 /// Response shape for tenant data.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct TenantResponse {
     pub id: String,
     pub name: String,
@@ -60,7 +60,7 @@ impl From<&Tenant> for TenantResponse {
 }
 
 /// Paginated list response.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct TenantListResponse {
     pub total_count: usize,
     pub tenants: Vec<TenantResponse>,

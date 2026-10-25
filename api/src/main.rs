@@ -186,6 +186,8 @@ async fn main() -> std::io::Result<()> {
     let rule_store = v1::rules::init_store();
     let category_store = v1::categories::init_store();
     let (tag_store, rule_tag_store) = v1::tags::init_stores();
+    // Multi-tenancy: in-memory tenant registry (organisation/workspace CRUD).
+    let tenant_store = v1::tenants::init_store();
     let approval_store = v1::approvals::init_store();
     let audit_store = v1::audit::init_store();
     let job_store = v1::execution::init_job_store();
@@ -293,6 +295,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(category_store.clone()))
             .app_data(web::Data::new(tag_store.clone()))
             .app_data(web::Data::new(rule_tag_store.clone()))
+            .app_data(web::Data::new(tenant_store.clone()))
             .app_data(web::Data::new(approval_store.clone()))
             .app_data(web::Data::new(audit_store.clone()))
             .app_data(branch_store.clone())
@@ -378,6 +381,11 @@ async fn main() -> std::io::Result<()> {
                     .route("/tags/{name}", web::get().to(v1::tags::get_tag))
                     .route("/tags/{name}", web::put().to(v1::tags::update_tag))
                     .route("/tags/{name}", web::delete().to(v1::tags::delete_tag))
+                    // Tenant (organisation/workspace) management.
+                    .route("/tenants", web::get().to(v1::tenants::list_tenants))
+                    .route("/tenants", web::post().to(v1::tenants::create_tenant))
+                    .route("/tenants/{id}", web::get().to(v1::tenants::get_tenant))
+                    .route("/tenants/{id}", web::delete().to(v1::tenants::delete_tenant))
                     .route("/rules/{id}/tags", web::post().to(v1::tags::assign_tag_to_rule))
                     .route("/rules/{id}/tags/{tag_name}", web::delete().to(v1::tags::remove_tag_from_rule))
                     // Branch endpoints (Phase 20-05)

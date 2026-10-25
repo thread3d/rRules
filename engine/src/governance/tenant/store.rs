@@ -6,7 +6,6 @@
 #![allow(async_fn_in_trait)]
 
 use crate::governance::tenant::types::Tenant;
-use chrono::{DateTime, Utc};
 
 /// Trait for tenant storage backends.
 pub trait TenantStoreBackend {
@@ -97,6 +96,28 @@ pub struct MemoryTenantStore {
     tenants: Vec<Tenant>,
 }
 
+/// Why a tenant operation failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TenantStoreError {
+    /// Another tenant already uses this name.
+    DuplicateName(String),
+    /// The name was empty or whitespace-only.
+    EmptyName,
+}
+
+impl std::fmt::Display for TenantStoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DuplicateName(name) => {
+                write!(f, "Tenant with name '{name}' already exists")
+            }
+            Self::EmptyName => write!(f, "name is required and cannot be empty"),
+        }
+    }
+}
+
+impl std::error::Error for TenantStoreError {}
+
 impl MemoryTenantStore {
     /// Create a new in-memory tenant store.
     pub fn new() -> Self {
@@ -112,6 +133,42 @@ impl MemoryTenantStore {
     pub fn clear(&mut self) {
         self.tenants.clear();
     }
+
+    /// Create a tenant (synchronous core used by the async trait impl and by
+    /// callers that already hold a lock, such as the HTTP layer).
+    ///
+    /// Rejects empty names and duplicate names.
+    pub fn create(&mut self, name: &str) -> Result<Tenant, TenantStoreError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(TenantStoreError::EmptyName);
+        }
+        if self.tenants.iter().any(|t| t.name == name) {
+            return Err(TenantStoreError::DuplicateName(name.to_string()));
+        }
+        let tenant = Tenant::new(name);
+        self.tenants.push(tenant.clone());
+        Ok(tenant)
+    }
+
+    /// Look up a tenant by id.
+    pub fn get(&self, id: &str) -> Option<&Tenant> {
+        self.tenants.iter().find(|t| t.id == id)
+    }
+
+    /// All tenants, newest first.
+    pub fn list(&self) -> Vec<Tenant> {
+        let mut tenants = self.tenants.clone();
+        tenants.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        tenants
+    }
+
+    /// Delete a tenant by id. Returns `true` when it existed.
+    pub fn delete(&mut self, id: &str) -> bool {
+        let before = self.tenants.len();
+        self.tenants.retain(|t| t.id != id);
+        self.tenants.len() < before
+    }
 }
 
 impl Default for MemoryTenantStore {
@@ -125,40 +182,25 @@ impl TenantStoreBackend for MemoryTenantStore {
         &mut self,
         name: &str,
     ) -> Result<Tenant, Box<dyn std::error::Error + Send + Sync>> {
-        // Check for duplicate names.
-        if self.tenants.iter().any(|t| t.name == name) {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                format!("Tenant with name '{name}' already exists"),
-            )));
-        }
-
-        let tenant = Tenant::with_id(uuid::Uuid::new_v4().to_string(), name.to_string());
-        self.tenants.push(tenant.clone());
-        Ok(tenant)
+        self.create(name).map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn get_tenant(
         &self,
         id: &str,
     ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        let tenant = self.tenants.iter().find(|t| t.id == id).cloned();
-        Ok(tenant)
+        Ok(self.get(id).cloned())
     }
 
     async fn list_tenants(&self) -> Result<Vec<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        let mut tenants = self.tenants.clone();
-        tenants.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        Ok(tenants)
+        Ok(self.list())
     }
 
     async fn delete_tenant(
         &mut self,
         id: &str,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let initial_len = self.tenants.len();
-        self.tenants.retain(|t| t.id != id);
-        Ok(self.tenants.len() < initial_len)
+        Ok(self.delete(id))
     }
 }
 

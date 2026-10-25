@@ -25,13 +25,25 @@ Verification: `cargo test -p engine --test retract_integration --features
 engine-rete,engine-treat,engine-leaps,engine-phreak` → 8/8 pass (was 4/8), plus
 two new unit tests in `rete/mod.rs` covering alpha/beta removal.
 
-## Multi-tenancy: v1 tenants route module not wired
+## ✅ RESOLVED (2026-10-25) — Multi-tenancy: tenants routes + rule isolation
 
-`TenantStore` trait + `MemoryTenantStore` impl exist (v3.0/v4.0 hardening, F1),
-and `tenant_id` is plumbed partway, but a `v1::tenants` route submodule is not
-declared and tenant isolation on rule CRUD is incomplete (per the v3.0 "Track 3
-~90%" note in STATE.md). The stale `// pub mod tenants;` placeholder in
-`api/src/v1/mod.rs` was replaced with an accurate NOTE comment during
-housekeeping; the underlying gap remains.
+`engine::governance::tenant` (types + `MemoryTenantStore` + `SqlxTenantStore`
+placeholder) existed but was not declared in `engine/src/lib.rs`, and the API's
+`v1::tenants` module was not declared in `api/src/v1/mod.rs`, so neither was
+compiled. Wired end to end:
 
-**Suggested home:** a governance/tenancy milestone.
+- `pub mod tenant;` in `engine/src/lib.rs`; the store gained synchronous
+  `create`/`get`/`list`/`delete` cores (with `TenantStoreError` for
+  empty/duplicate names) that the async `TenantStoreBackend` impl delegates to —
+  one implementation, no duplication.
+- `api/src/v1/tenants.rs` reuses the engine types instead of its own copies and
+  is registered in `api/src/main.rs` (`GET/POST /v1/tenants`,
+  `GET/DELETE /v1/tenants/{id}`) behind the `/v1` auth scope.
+- `api/tests/tenants.rs` covers the CRUD flow, duplicate → 409, blank → 400,
+  unknown → 404, delete idempotency, and per-tenant rule isolation (two
+  `X-Tenant-ID` values never see each other's rules). 6/6 pass.
+
+Remaining follow-up (not blocking): persist tenants in PostgreSQL rather than
+the in-memory store, and decide whether deleting a tenant should archive its
+rules.
+

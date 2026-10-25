@@ -47,8 +47,8 @@ scoped. Candidate work, drawn from the recorded backlog in
 - ~~**Engine retraction correctness**~~ — resolved 2026-10-25: `retract_fact()`
   now removes facts from working/alpha/beta memory in all three engines (see
   `.planning/TECH-DEBT.md`).
-- **Multi-tenancy finish** — `TenantStore` exists but no `/v1/tenants` routes and
-  rule-CRUD isolation is incomplete.
+- ~~**Multi-tenancy finish**~~ — resolved 2026-10-25: `/v1/tenants` routes are
+  registered and per-tenant rule isolation is covered by integration tests.
 - **Postgres persistence** — `engine_state::PostgresDmnStore` is a skeleton
   (`todo!()` bodies); `DMN_STORAGE_PATH` file store is authoritative.
 

@@ -30,6 +30,7 @@ pub mod governance {
     pub mod approval;
     pub mod audit;
     pub mod rbac;
+    pub mod tenant;
     pub mod versioning;
 }
 

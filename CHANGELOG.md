@@ -12,6 +12,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Tenant management API** — `GET/POST /v1/tenants` and
+  `GET/DELETE /v1/tenants/{id}` are now registered behind the `/v1` auth scope.
+  The handlers build on `engine::governance::tenant::MemoryTenantStore`, which
+  was previously uncompiled dead code: it gained synchronous
+  `create`/`get`/`list`/`delete` cores plus `TenantStoreError`
+  (blank name → `400`, duplicate name → `409`), and the async
+  `TenantStoreBackend` trait impl now delegates to them instead of duplicating
+  the logic.
+- `api/tests/tenants.rs` — tenant CRUD contract plus a per-tenant rule-isolation
+  test proving two `X-Tenant-ID` values never see each other's rules.
+
 ### Housekeeping
 - Updated stale `CLAUDE.md` to reflect v5.0 (was a full milestone behind, still
   describing v4.0 as current with v5.0 as a "candidate thesis").
