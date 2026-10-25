@@ -399,11 +399,17 @@ impl ReteEngine {
         // the once-per-rule semantic that makes coverage recording truthful
         // (L-06 / Pitfall 6). The max_iter cap is the ultimate safety net
         // for pathological rule sets.
+        // Salience decides the order rules are considered in each pass: higher
+        // salience first, ties in load order (stable sort). Rete keeps its own
+        // loop, so this ordering is mirrored here rather than shared.
+        let mut firing_order: Vec<usize> = (0..self.rules.len()).collect();
+        firing_order.sort_by(|a, b| self.rules[*b].salience.cmp(&self.rules[*a].salience));
+
         for _pass in 0..max_iter {
             let mut newly_fired_this_pass = false;
             // Index-based iteration so we can mutate `working_facts` while
             // reading `rules` without conflicting borrows.
-            for rule_idx in 0..self.rules.len() {
+            for &rule_idx in &firing_order {
                 let rule_id = self.rules[rule_idx].id.clone();
                 if fired_set.contains(&rule_id) {
                     continue;

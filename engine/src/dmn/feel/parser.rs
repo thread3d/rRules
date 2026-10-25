@@ -1318,19 +1318,27 @@ impl Parser {
             return (args, named);
         }
         loop {
-            // Check for named arg: Name : expr
-            let is_named = match (self.tokens.get(self.pos), self.tokens.get(self.pos + 1)) {
-                (Some(ts), Some(next)) if matches!(ts.token, Token::Name(_)) => {
-                    matches!(next.token, Token::Colon)
-                }
-                _ => false,
-            };
+            // Check for a named argument. FEEL parameter names can contain
+            // spaces (`decimal separator: ","`, `grouping separator: "."`), so a
+            // name is a run of adjacent `Name` tokens terminated by `:`.
+            let mut lookahead = self.pos;
+            let mut words: Vec<String> = Vec::new();
+            while let Some(TokenSpan {
+                token: Token::Name(word),
+                ..
+            }) = self.tokens.get(lookahead)
+            {
+                words.push(word.clone());
+                lookahead += 1;
+            }
+            let is_named = !words.is_empty()
+                && matches!(
+                    self.tokens.get(lookahead).map(|span| &span.token),
+                    Some(Token::Colon)
+                );
             if is_named {
-                let name = match self.advance() {
-                    Some(TokenSpan { token: Token::Name(n), .. }) => n,
-                    _ => unreachable!(),
-                };
-                self.advance(); // consume :
+                let name = words.join(" ");
+                self.pos = lookahead + 1; // consume the names and the ':'
                 let val = self.parse_expr(0);
                 named.get_or_insert_with(Vec::new).push((name, val));
             } else {

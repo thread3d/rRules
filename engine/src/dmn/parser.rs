@@ -575,6 +575,7 @@ impl<'a> Parser<'a> {
             question: attrs.get("question").cloned(),
             allowed_answers: attrs.get("allowedAnswers").cloned(),
             decision_table: None,
+            literal_expression: None,
             required_decisions: Vec::new(),
             required_inputs: Vec::new(),
             required_knowledge: Vec::new(),
@@ -608,6 +609,10 @@ impl<'a> Parser<'a> {
                         "decisionTable" => {
                             let attrs = collect_attrs(&e)?;
                             dec.decision_table = Some(self.parse_decision_table(attrs)?);
+                        }
+                        "literalExpression" => {
+                            let attrs = collect_attrs(&e)?;
+                            dec.literal_expression = Some(self.parse_literal_expression(attrs)?);
                         }
                         "annotation" => {
                             let attrs = collect_attrs(&e)?;
@@ -814,6 +819,56 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Parse `<literalExpression>` (DMN 1.5 §10.3.2): an id/typeRef plus the
+    /// `<text>` child holding the FEEL expression.
+    fn parse_literal_expression(
+        &mut self,
+        attrs: Attrs,
+    ) -> Result<crate::dmn::model::LiteralExpression, DmnParseError> {
+        let mut literal = crate::dmn::model::LiteralExpression {
+            id: attrs.get("id").cloned(),
+            type_ref: attrs.get("typeRef").cloned(),
+            text: crate::dmn::model::TextContent::plain(String::new()),
+            description: None,
+        };
+
+        loop {
+            self.buf.clear();
+            match self.reader.read_event_into(&mut self.buf) {
+                Ok(Event::Start(e)) => {
+                    let ln = local_name_str(e.name());
+                    match ln.as_str() {
+                        "description" => {
+                            literal.description = Some(self.read_text_content(&ln)?);
+                        }
+                        "text" => {
+                            literal.text = self.read_text_content(&ln)?;
+                        }
+                        _ => self.skip_element(&ln)?,
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    if local_name_str(e.name()) == "literalExpression" {
+                        break;
+                    }
+                    return Err(DmnParseError::UnexpectedElement(format!(
+                        "unexpected end </{}> while parsing <literalExpression>",
+                        local_name_str(e.name())
+                    )));
+                }
+                Ok(Event::Eof) => {
+                    return Err(DmnParseError::UnexpectedElement(
+                        "unexpected end of document inside <literalExpression>".into(),
+                    ))
+                }
+                Ok(_) => {}
+                Err(e) => return Err(DmnParseError::XmlError(e.to_string())),
+            }
+        }
+
+        Ok(literal)
     }
 
     fn parse_decision_table(&mut self, attrs: Attrs) -> Result<DecisionTable, DmnParseError> {

@@ -129,7 +129,7 @@ impl DecisionTableEvaluator {
         let input_value = eval::evaluate(&input_expr_ast, scope);
 
         // 3. Use eval_in_unary_test — returns Option<bool> (None → null propagation).
-        match eval::eval_in_unary_test(input_value, &ast) {
+        match eval::eval_in_unary_test_with_scope(input_value, &ast, scope) {
             Some(true) => true,
             _ => false, // None or Some(false) both mean "does not fire".
         }

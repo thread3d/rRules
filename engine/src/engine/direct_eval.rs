@@ -93,11 +93,19 @@ pub fn direct_execute(
     // the once-per-rule semantic that makes coverage recording truthful
     // (L-06 / Pitfall 6). The max_iter cap is the ultimate safety net
     // for pathological rule sets.
+    // Salience decides the order rules are considered in each pass: higher
+    // salience first, ties in load order (a stable sort, so the same rule set
+    // always fires in the same order). Without this the agenda would simply be
+    // the rule vector, and `Rule::salience` would be a field nobody reads.
+    let mut firing_order: Vec<usize> = (0..rules.len()).collect();
+    firing_order.sort_by(|a, b| rules[*b].salience.cmp(&rules[*a].salience));
+
     for _pass in 0..max_iter {
         let mut newly_fired_this_pass = false;
         // Index-based iteration so we can mutate `working_facts` while
         // reading `rules` without conflicting borrows.
-        for rule in rules.iter() {
+        for &rule_index in &firing_order {
+            let rule = &rules[rule_index];
             let rule_id = rule.id.clone();
             if fired_set.contains(&rule_id) {
                 continue;

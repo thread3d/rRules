@@ -172,21 +172,19 @@ impl Default for SyntaxValidator {
 }
 
 /// Semantic validator that checks type compatibility and references.
-pub struct SemanticValidator<'a> {
+pub struct SemanticValidator {
     /// Known fact types in the registry
     fact_types: HashMap<String, Vec<String>>,
     /// Known functions available for call actions
     known_functions: Vec<String>,
-    _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl<'a> SemanticValidator<'a> {
+impl SemanticValidator {
     /// Creates a new semantic validator with provided type registry.
     pub fn new(fact_types: HashMap<String, Vec<String>>) -> Self {
         Self {
             fact_types,
             known_functions: Vec::new(),
-            _marker: std::marker::PhantomData,
         }
     }
 
@@ -362,7 +360,7 @@ impl<'a> SemanticValidator<'a> {
 #[allow(dead_code)]
 pub struct ValidationPipeline {
     syntax_validator: SyntaxValidator,
-    semantic_validator: Option<SemanticValidator<'static>>,
+    semantic_validator: Option<SemanticValidator>,
 }
 
 impl ValidationPipeline {
@@ -379,13 +377,10 @@ impl ValidationPipeline {
         mut self,
         types: std::collections::HashMap<String, Vec<String>>,
     ) -> Self {
-        // Safety: We're creating a static lifetime for the validator
-        let static_validator = unsafe {
-            std::mem::transmute::<SemanticValidator<'_>, SemanticValidator<'static>>(
-                SemanticValidator::new(types),
-            )
-        };
-        self.semantic_validator = Some(static_validator);
+        // The validator owns its registry, so there is no borrow to launder: an
+        // earlier version wrapped this in `mem::transmute` to force a `'static`
+        // lifetime that the type never needed.
+        self.semantic_validator = Some(SemanticValidator::new(types));
         self
     }
 

@@ -387,47 +387,63 @@ fn numeric_op(
 ///   (T-23-03 mitigation — never panic).
 pub fn compare_values(op: ComparisonOp, left: &Value, right: &Value) -> bool {
     use crate::data_types::DynamicCast;
-    match op {
-        ComparisonOp::Eq => left == right,
-        ComparisonOp::Ne => left != right,
-        ComparisonOp::Lt | ComparisonOp::Le | ComparisonOp::Gt | ComparisonOp::Ge => {
-            // Integer + Integer: stay integral (avoid f64 precision loss).
-            // Rete-only — FEEL variants handled in engine/src/dmn/feel/
-            // (30-RESEARCH.md Pitfall 1). The `_ => {}` here lets non-Integer
-            // operands (including FEEL variants) fall through to the
-            // float/string/boolean fallback paths below; FEEL variants return
-            // `false` from those fallbacks (as_float/as_string return None for
-            // them). The FEEL comparison path is Phase 31 DMN-13.
-            if let (Value::Integer(l), Value::Integer(r)) = (left, right) {
-                return match op {
-                    ComparisonOp::Lt => l < r,
-                    ComparisonOp::Le => l <= r,
-                    ComparisonOp::Gt => l > r,
-                    ComparisonOp::Ge => l >= r,
-                    _ => unreachable!(),
-                };
+    use std::cmp::Ordering;
+
+    /// Order two numeric operands, promoting across the numeric carriers.
+    ///
+    /// `Value::Integer`, `Value::Number` (FEEL Decimal) and `Value::Float` are
+    /// all numeric, so any pair of them orders by value. Pairs that are not both
+    /// numeric return `None`, which sends the caller down the non-numeric paths.
+    fn numeric_order(left: &Value, right: &Value) -> Option<Ordering> {
+        fn to_decimal(value: &Value) -> Option<rust_decimal::Decimal> {
+            match value {
+                Value::Integer(i) => Some(rust_decimal::Decimal::from(*i)),
+                Value::Number(d) => Some(*d),
+                Value::Float(f) => rust_decimal::Decimal::from_f64_retain(*f),
+                _ => None,
             }
-            // Any Float operand: promote both to f64.
-            if left.as_float().is_some() && right.as_float().is_some() {
-                let l = left.as_float().unwrap();
-                let r = right.as_float().unwrap();
-                return match op {
-                    ComparisonOp::Lt => l < r,
-                    ComparisonOp::Le => l <= r,
-                    ComparisonOp::Gt => l > r,
-                    ComparisonOp::Ge => l >= r,
-                    _ => unreachable!(),
-                };
+        }
+
+        match (left, right) {
+            // Exact decimal comparison when both sides fit the decimal domain.
+            (Value::Integer(_) | Value::Number(_), Value::Integer(_) | Value::Number(_)) => {
+                to_decimal(left)?.partial_cmp(&to_decimal(right)?)
+            }
+            // A float operand makes the comparison floating point.
+            _ => left.as_float()?.partial_cmp(&right.as_float()?),
+        }
+    }
+
+    let ordered = |ordering: Ordering| match op {
+        ComparisonOp::Lt => ordering == Ordering::Less,
+        ComparisonOp::Le => ordering != Ordering::Greater,
+        ComparisonOp::Gt => ordering == Ordering::Greater,
+        ComparisonOp::Ge => ordering != Ordering::Less,
+        // `Eq`/`Ne` never reach this closure.
+        ComparisonOp::Eq | ComparisonOp::Ne => unreachable!(),
+    };
+
+    match op {
+        ComparisonOp::Eq | ComparisonOp::Ne => {
+            let equal = match numeric_order(left, right) {
+                Some(ordering) => ordering == Ordering::Equal,
+                // Non-numeric operands compare structurally (String, Bool,
+                // Null, Array, Object, and mixed incomparable pairs).
+                None => left == right,
+            };
+            if op == ComparisonOp::Eq {
+                equal
+            } else {
+                !equal
+            }
+        }
+        ComparisonOp::Lt | ComparisonOp::Le | ComparisonOp::Gt | ComparisonOp::Ge => {
+            if let Some(ordering) = numeric_order(left, right) {
+                return ordered(ordering);
             }
             // String: lexicographic.
             if let (Some(l), Some(r)) = (left.as_string(), right.as_string()) {
-                return match op {
-                    ComparisonOp::Lt => l < r,
-                    ComparisonOp::Le => l <= r,
-                    ComparisonOp::Gt => l > r,
-                    ComparisonOp::Ge => l >= r,
-                    _ => unreachable!(),
-                };
+                return ordered(l.cmp(r));
             }
             // Boolean / Null / Array / Object: ordered ops return false (no panic).
             false

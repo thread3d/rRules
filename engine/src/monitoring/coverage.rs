@@ -89,13 +89,24 @@ static INSTANCE: LazyLock<Mutex<TrackingState>> = LazyLock::new(|| {
     })
 });
 
+/// Locks the process-wide tracker, recovering from a poisoned mutex.
+///
+/// A tracker lock is only ever held for a handful of field updates, so if a
+/// thread panicked while holding it the state is still structurally sound: the
+/// useful behaviour is to keep serving metrics rather than to panic every
+/// subsequent monitoring call. Panicking here would turn one failed test into a
+/// process-wide observability outage.
+fn lock_state() -> std::sync::MutexGuard<'static, TrackingState> {
+    INSTANCE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Singleton for tracking coverage across multiple engine runs.
 pub struct CoverageTracking;
 
 impl CoverageTracking {
     /// Records that a rule was evaluated (conditions were checked).
     pub fn record_rule_eval(rule_id: impl Into<String>) {
-        let mut state = INSTANCE.lock().unwrap();
+        let mut state = lock_state();
         let entry = state.rules.entry(rule_id.into()).or_default();
         entry.evaluated = true;
         entry.evaluation_count += 1;
@@ -103,7 +114,7 @@ impl CoverageTracking {
 
     /// Records that a rule fired (actions were executed).
     pub fn record_rule_fire(rule_id: impl Into<String>) {
-        let mut state = INSTANCE.lock().unwrap();
+        let mut state = lock_state();
         let entry = state.rules.entry(rule_id.into()).or_default();
         entry.fired = true;
         entry.fire_count += 1;
@@ -111,7 +122,7 @@ impl CoverageTracking {
 
     /// Records that a rule was skipped with a reason.
     pub fn record_rule_skipped(rule_id: impl Into<String>, reason: impl Into<String>) {
-        let mut state = INSTANCE.lock().unwrap();
+        let mut state = lock_state();
         let entry = state.rules.entry(rule_id.into()).or_default();
         entry.skipped_reason = Some(reason.into());
         entry.evaluation_count += 1;
@@ -119,20 +130,20 @@ impl CoverageTracking {
 
     /// Gets the current coverage state for a specific rule.
     pub fn get_rule_state(&self, rule_id: &str) -> Option<RuleCoverageState> {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         state.rules.get(rule_id).cloned()
     }
 
     /// Returns all rules with their coverage states (owned data).
     pub fn get_all_states(&self) -> Vec<(String, RuleCoverageState)> {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         // Collect as owned data since we can't return references from inside the lock
         state.rules.iter().map(|(id, s)| (id.clone(), s.clone())).collect()
     }
 
     /// Gets a summary of coverage across all tracked rules.
     pub fn get_summary(&self) -> CoverageSummary {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         let mut total_evaluated = 0;
         let mut total_fired = 0;
 
@@ -159,13 +170,13 @@ impl CoverageTracking {
 
     /// Clears all tracking data for a fresh start.
     pub fn clear(&self) {
-        let mut state = INSTANCE.lock().unwrap();
+        let mut state = lock_state();
         state.rules.clear();
     }
 
     /// Exports coverage data as JSON.
     pub fn to_json(&self) -> String {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
 
         let rules_data: Vec<_> = state.rules.iter().map(|(id, rule)| {
             serde_json::json!({
@@ -208,7 +219,7 @@ impl CoverageTracking {
 
     /// Exports all rules to CSV format.
     pub fn to_csv(&self) -> String {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         let mut lines = vec!["rule_id,status,fire_count".to_string()];
 
         for (id, rule) in &state.rules {

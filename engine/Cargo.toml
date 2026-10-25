@@ -56,7 +56,11 @@ arbitrary = "1.0"
 criterion-cycles-per-byte = "0.8"
 
 [features]
-default = []
+# The four Rete-family engines are the crate's core surface, so they are on by
+# default: `cargo test -p engine` and `cargo build -p engine` must exercise the
+# real engines rather than a feature-less shell. Disable individual engines with
+# `--no-default-features` when a lighter build is wanted.
+default = ["engine-rete", "engine-treat", "engine-leaps", "engine-phreak"]
 engine-rete = []
 # Enable individual engine implementations (all require engine-rete as dependency)
 engine-treat = ["engine-rete"]

@@ -63,6 +63,10 @@ pub use salience::conflict_resolution::{ConflictResolver, ConflictStrategy};
 
 // Re-exports for convenient access to core types
 pub use data_types::{FactType, Value};
+// The numeric carrier of [`Value::Number`] is part of this crate's public API
+// (callers construct and inspect FEEL numbers), so it is re-exported rather than
+// leaving consumers to depend on `rust_decimal` themselves.
+pub use rust_decimal::Decimal;
 pub use environment::EngineBuilder;
 pub use fact::{Fact, WorkingMemory};
 pub use rules::{Action, Condition, Rule, RuleSet};

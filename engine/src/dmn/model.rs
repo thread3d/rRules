@@ -211,6 +211,10 @@ pub struct Decision {
     pub allowed_answers: Option<String>,
     /// The decision's decision table, if its expression is a `<decisionTable>`.
     pub decision_table: Option<DecisionTable>,
+    /// The decision's literal expression, if its expression is a
+    /// `<literalExpression>` (DMN 1.5 §10.3.2). A decision has at most one of
+    /// `decision_table` / `literal_expression`.
+    pub literal_expression: Option<LiteralExpression>,
     /// IDs of upstream decisions (DRD edges from `informationRequirement`).
     pub required_decisions: Vec<String>,
     /// IDs of upstream input data.
@@ -327,6 +331,21 @@ pub struct DecisionTable {
     pub rules: Vec<DmnRule>,
 }
 
+
+/// `<literalExpression>` — a decision whose value is one FEEL expression.
+///
+/// The IR keeps the expression text verbatim (with its CDATA flag) rather than
+/// re-shaping it: the evaluator parses it on demand through the AST cache, and
+/// the exporter writes it back unchanged, so a literal decision round-trips.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiteralExpression {
+    pub id: Option<String>,
+    /// `typeRef` attribute, when the model states one.
+    pub type_ref: Option<String>,
+    /// The FEEL expression text.
+    pub text: TextContent,
+    pub description: Option<TextContent>,
+}
 
 /// `<input>` — an input clause (column) of a decision table.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

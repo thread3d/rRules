@@ -161,8 +161,11 @@ pub(crate) mod cmp {
     /// `true` (§10.3.2.2 — integers and numbers are one numeric domain).
     /// `Date = DateTimeTz` at UTC midnight → `true` (§10.3.2.3.5).
     pub fn feel_equals(a: &Value, b: &Value) -> Option<bool> {
-        // Rule 49.a null arms (verbatim): null=null → true; null=non-null →
-        // false (because `FEEL(e) is null` is false when e is non-null).
+        // FEEL equality treats null as an ordinary value: `null = null` is true
+        // and `null = value` is false. This matches the OMG DMN TCK vector
+        // `0068-feel-equality` (case `null_001`, "null equals null") and the
+        // behaviour of the mainstream FEEL engines; `_ != null` is therefore the
+        // way to test that a value is present.
         match (a, b) {
             (Value::Null, Value::Null) => return Some(true),
             (Value::Null, _) | (_, Value::Null) => return Some(false),
@@ -473,8 +476,31 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
             if let FeelExpression::Name(name) = callee.as_ref() {
                 let reg = crate::dmn::feel::builtins::builtin_registry();
                 if let Some(f) = reg.get(name.as_str()) {
-                    // Evaluate args and call the built-in.
-                    let evaluated_args: Vec<Value> = args.iter().map(|a| evaluate(a, scope)).collect();
+                    // Reject a call that supplies more arguments than the
+                    // built-in declares: the TCK marks such calls as invalid
+                    // (an `errorResult` case), so they must evaluate to null
+                    // rather than silently ignoring the extra arguments.
+                    if !crate::dmn::feel::builtins::is_variadic_builtin(name) {
+                        if let Some(params) = crate::dmn::feel::builtins::builtin_param_names(name) {
+                            let supplied = args.len().max(
+                                named.as_ref().map(|entries| entries.len()).unwrap_or(0),
+                            );
+                            if supplied > params.len() {
+                                return Value::Null;
+                            }
+                        }
+                    }
+                    let evaluated_args: Vec<Value> = match named {
+                        None => args.iter().map(|a| evaluate(a, scope)).collect(),
+                        Some(named_args) => {
+                            match bind_named_arguments(name, named_args, args.as_slice(), scope) {
+                                Some(values) => values,
+                                // Unknown or misordered parameter names: the
+                                // specification makes the call null.
+                                None => return Value::Null,
+                            }
+                        }
+                    };
                     return f(&evaluated_args);
                 }
             }
@@ -579,6 +605,52 @@ fn lambda_apply(
     // Evaluate the body against the merged scope.
     let body = func.body.as_ref().expect("body.is_some() checked at call site");
     evaluate(body, &working_scope)
+}
+
+/// Bind named arguments to a built-in function's declared parameter names.
+///
+/// DMN 1.5 §10.3.4.1 names the parameters of every built-in (`abs(n: -1)`,
+/// `round half up(n: 1.25, scale: 1)`), and a name that is not a parameter of
+/// that function makes the call null. Positional and named arguments are never
+/// mixed in one call.
+///
+/// Returns `None` when the call cannot be bound — an undeclared built-in, an
+/// unknown parameter name, or a gap in the parameter list (a later parameter
+/// named while an earlier one is omitted). Trailing omissions are allowed, so
+/// `round half up(n: 1.25)` leaves `scale` at the function's default.
+fn bind_named_arguments(
+    name: &str,
+    named_args: &[(String, FeelExpression)],
+    positional_args: &[FeelExpression],
+    scope: &Scope,
+) -> Option<Vec<Value>> {
+    let params = crate::dmn::feel::builtins::builtin_param_names(name)?;
+    if !positional_args.is_empty() {
+        return None;
+    }
+    if named_args
+        .iter()
+        .any(|(argument, _)| !params.contains(&argument.as_str()))
+    {
+        return None;
+    }
+
+    let mut values = Vec::with_capacity(params.len());
+    let mut saw_omission = false;
+    for param in params {
+        match named_args.iter().find(|(argument, _)| argument == param) {
+            Some((_, expression)) => {
+                if saw_omission {
+                    // A later parameter cannot be supplied while an earlier
+                    // one is missing: positional order would be ambiguous.
+                    return None;
+                }
+                values.push(evaluate(expression, scope));
+            }
+            None => saw_omission = true,
+        }
+    }
+    Some(values)
 }
 
 /// Apply a FEEL function *value* to already-evaluated argument values.
@@ -850,6 +922,47 @@ pub struct ContextCycleError {
 /// Arithmetic (`+`/`-`/`*`/`/`/`**`) and `in` (positive unary test) are
 /// stubbed to `Value::Null` — they land in 31-03 (coercion) where the
 /// numeric/string coercion rules live.
+/// Apply `scale` to a duration operand multiplied/divided by a number.
+///
+/// Accepts the duration on either side (`2 * duration("P1D")` and
+/// `duration("P2D") / 2`); returns `None` when neither operand is a duration, so
+/// the caller falls back to numeric arithmetic. `seconds` is set for a
+/// days-and-time duration and `months` for a years-and-months duration.
+fn duration_binop<F>(
+    left: &Value,
+    right: &Value,
+    scale: F,
+) -> Option<Value>
+where
+    F: Fn(Option<chrono::TimeDelta>, Option<i64>, f64) -> Option<Value>,
+{
+    fn parts(value: &Value) -> Option<(Option<chrono::TimeDelta>, Option<i64>)> {
+        match value {
+            Value::DaysTimeDuration(duration) => Some((Some(*duration), None)),
+            Value::YearsMonthsDuration(months) => Some((None, Some(months.months))),
+            _ => None,
+        }
+    }
+
+    fn as_factor(value: &Value) -> Option<f64> {
+        match value {
+            Value::Integer(i) => Some(*i as f64),
+            Value::Number(d) => {
+                use rust_decimal::prelude::ToPrimitive;
+                d.to_f64()
+            }
+            _ => None,
+        }
+    }
+
+    let (duration, factor) = match (parts(left), parts(right)) {
+        (Some((seconds, months)), None) => ((seconds, months), as_factor(right)?),
+        (None, Some((seconds, months))) => ((seconds, months), as_factor(left)?),
+        _ => return None,
+    };
+    scale(duration.0, duration.1, factor)
+}
+
 fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope: &Scope) -> Value {
     // `between` has a `List([b, c])` rhs (parser desugaring); handle it
     // before evaluating rhs as a value (the List arm is still stubbed).
@@ -889,13 +1002,48 @@ fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope:
         // the only such path.
         BinOpKind::Add => eval_add(l, r),
         BinOpKind::Sub => eval_sub(l, r),
-        BinOpKind::Mul => numeric_binop(l, r, |x, y| Some(x * y)),
-        BinOpKind::Div => numeric_binop(l, r, |x, y| {
-            if y.is_zero() {
-                None
+        // A duration times a number is a duration (DMN 1.5 §10.3.2.4):
+        // `2 * duration("P1D")` is `P2D`, `duration("-P1D") * 2` is `-P2D`.
+        BinOpKind::Mul => duration_binop(&l, &r, |seconds, months, factor| {
+            if let Some(duration) = seconds {
+                let scaled = duration.to_std().ok().map(|std| std.mul_f64(factor))?;
+                Some(Value::DaysTimeDuration(chrono::TimeDelta::from_std(scaled).ok()?))
             } else {
-                x.checked_div(y)
+                let months = months?;
+                let total = (months as f64 * factor).trunc();
+                Some(Value::YearsMonthsDuration(
+                    crate::dmn::feel::temporal::YearsMonthsDuration {
+                        months: total as i64,
+                    },
+                ))
             }
+        })
+        .unwrap_or_else(|| numeric_binop(l, r, |x, y| Some(x * y))),
+        BinOpKind::Div => duration_binop(&l, &r, |seconds, months, factor| {
+            if factor == 0.0 || !factor.is_finite() {
+                return None;
+            }
+            if let Some(duration) = seconds {
+                let scaled = duration.to_std().ok().map(|std| std.div_f64(factor))?;
+                Some(Value::DaysTimeDuration(chrono::TimeDelta::from_std(scaled).ok()?))
+            } else {
+                let months = months?;
+                let total = (months as f64 / factor).trunc();
+                Some(Value::YearsMonthsDuration(
+                    crate::dmn::feel::temporal::YearsMonthsDuration {
+                        months: total as i64,
+                    },
+                ))
+            }
+        })
+        .unwrap_or_else(|| {
+            numeric_binop(l, r, |x, y| {
+                if y.is_zero() {
+                    None
+                } else {
+                    x.checked_div(y)
+                }
+            })
         }),
         BinOpKind::Pow => eval_pow(l, r),
         // `in` (DMN-13/DMN-14): positive unary test membership.
@@ -1363,53 +1511,90 @@ fn eval_in_with_ast(l: Value, rhs_expr: &FeelExpression) -> Value {
 /// `None` for three-valued null propagation. Used by the decision-table evaluator to
 /// check whether an input clause fires for a given rule entry.
 pub fn eval_in_unary_test(input: Value, test: &FeelExpression) -> Option<bool> {
+    eval_in_unary_test_with_scope(input, test, &Scope::empty())
+}
+
+/// Evaluate a unary test against `input`, resolving names in `scope`.
+///
+/// `scope` supplies the decision-table inputs, so an entry may be written in
+/// terms of another input (`> otherInput`) as well as in terms of `?`.
+pub fn eval_in_unary_test_with_scope(
+    input: Value,
+    test: &FeelExpression,
+    scope: &Scope,
+) -> Option<bool> {
+    // `-` (dash) means "any input matches".
+    if matches!(test, FeelExpression::Literal(Value::Bool(true))) {
+        return Some(true);
+    }
+
+    let mut unary_scope = scope.clone();
+    unary_scope.bind("?".to_string(), input.clone(), vec![]);
+
     match test {
-        // Or-chain (comma-list): fold via or_3vl.
-        FeelExpression::BinOp { op: BinOpKind::Or, lhs, rhs } => {
-            let left = eval_in_unary_test(input.clone(), lhs);
-            let right = eval_in_unary_test(input, rhs);
-            // Three-valued OR over the two test results.
+        // Comma lists are `or` chains of tests: `1, 5, 9` and `> 3, < 2`.
+        FeelExpression::BinOp {
+            op: BinOpKind::Or,
+            lhs,
+            rhs,
+        } => {
+            let left = eval_in_unary_test_with_scope(input.clone(), lhs, scope);
+            let right = eval_in_unary_test_with_scope(input, rhs, scope);
             match (left, right) {
                 (Some(true), _) | (_, Some(true)) => Some(true),
                 (Some(false), Some(false)) => Some(false),
-                _ => None, // null propagates if either side is null and no true found
+                _ => None,
             }
         }
-        // Comparison with Name("?") on left: `? < 10` → substitute input for ?.
-        FeelExpression::BinOp { op, lhs, rhs } if matches!(lhs.as_ref(), FeelExpression::Name(n) if n == "?") => {
-            let r_val = evaluate(rhs, &Scope::empty());
-            feel_compare_with_op(&input, &r_val, op)
+        // `not(...)` parses to Neg of a positive unary test, while a negative
+        // literal (`-5`) parses to Neg of a numeric literal: the shape tells
+        // them apart.
+        FeelExpression::Neg(inner)
+            if matches!(
+                inner.as_ref(),
+                FeelExpression::BinOp { .. }
+                    | FeelExpression::Range { .. }
+                    | FeelExpression::Name(_)
+            ) =>
+        {
+            eval_in_unary_test_with_scope(input, inner, scope).map(|matched| !matched)
         }
-        // Comparison with Name("?") on right: `10 > ?` → invert operator.
-        FeelExpression::BinOp { op, lhs, rhs } if matches!(rhs.as_ref(), FeelExpression::Name(n) if n == "?") => {
-            let l_val = evaluate(lhs, &Scope::empty());
-            let inverted = match *op {
-                BinOpKind::Lt => BinOpKind::Gt,
-                BinOpKind::Le => BinOpKind::Ge,
-                BinOpKind::Gt => BinOpKind::Lt,
-                BinOpKind::Ge => BinOpKind::Le,
-                BinOpKind::Eq => BinOpKind::Eq,
-                BinOpKind::NotEq => BinOpKind::NotEq,
-                _ => return None,
-            };
-            feel_compare_with_op(&l_val, &input, &inverted)
+        _ => {
+            match evaluate(test, &unary_scope) {
+                // A boolean result is the test itself (`? > 3`, `not(...)`).
+                Value::Bool(matched) => Some(matched),
+                // A range is a membership test: `[1..10]`, `(1..10]`.
+                Value::Range(range) => Some(range_contains(&input, &range)),
+                // A null result is an undecided test: it does not match. It must
+                // not fall through to equality, because `null = null` is true and
+                // that would make a null input match every null-valued test.
+                Value::Null => None,
+                // Any other value is an equality test: `5`, `"Medium"`, `true`.
+                other => cmp::feel_equals(&input, &other),
+            }
         }
-        FeelExpression::Literal(Value::Bool(true)) => Some(true), // empty tests → always true
-        _ => None,
     }
 }
 
-/// Apply a comparison operator to two values.
-fn feel_compare_with_op(a: &Value, b: &Value, op: &BinOpKind) -> Option<bool> {
-    match op {
-        BinOpKind::Eq => cmp::feel_equals(a, b),
-        BinOpKind::NotEq => cmp::feel_equals(a, b).map(|v| !v),
-        BinOpKind::Lt => cmp::feel_compare(a, b).map(|o| o == Ordering::Less),
-        BinOpKind::Le => cmp::feel_compare(a, b).map(|o| o != Ordering::Greater),
-        BinOpKind::Gt => cmp::feel_compare(a, b).map(|o| o == Ordering::Greater),
-        BinOpKind::Ge => cmp::feel_compare(a, b).map(|o| o != Ordering::Less),
-        _ => None,
-    }
+/// Membership of `input` in `range`, honouring inclusive/exclusive endpoints.
+fn range_contains(input: &Value, range: &crate::dmn::feel::types::FeelRange) -> bool {
+    let above_start = match &range.start {
+        None => true,
+        Some(start) => match cmp::feel_compare(input, start) {
+            Some(Ordering::Greater) => true,
+            Some(Ordering::Equal) => range.start_incl,
+            _ => false,
+        },
+    };
+    let below_end = match &range.end {
+        None => true,
+        Some(end) => match cmp::feel_compare(input, end) {
+            Some(Ordering::Less) => true,
+            Some(Ordering::Equal) => range.end_incl,
+            _ => false,
+        },
+    };
+    above_start && below_end
 }
 
 // =====================================================================
@@ -1670,16 +1855,15 @@ fn dmn12_null_lt_three_yields_null() {
     );
 }
 
-/// DMN-12: `null = null` → `true` (rule 49.a: `e = null` → `FEEL(e) is
-/// null`; `null is null` is `true`).
+/// TCK `0068-feel-equality` / `null_001`: `null = null` is true.
 #[cfg(test)]
 #[test]
 fn dmn12_null_equals_null_yields_true() {
     assert_eq!(cmp::feel_equals(&Value::Null, &Value::Null), Some(true));
 }
 
-/// DMN-12: `null = 5` → `false` (`e = null` → `FEEL(e) is null` → false
-/// when e is non-null). Pitfall 4: this is a definite `false`, NOT null.
+/// TCK `0068-feel-equality`: `null = 5` is false (null is an ordinary value for
+/// equality), not unknown.
 #[cfg(test)]
 #[test]
 fn dmn12_null_equals_nonnull_yields_false() {
@@ -1688,6 +1872,7 @@ fn dmn12_null_equals_nonnull_yields_false() {
         Some(false)
     );
 }
+
 
 /// DMN-12: `not(null)` → `null` (negation table: "otherwise" → null).
 #[cfg(test)]
@@ -2240,12 +2425,20 @@ fn scope_with_x_5() -> Scope {
     s
 }
 
-/// `null = null` → `Bool(true)` (rule 49.a via the Eq BinOp arm).
+/// `null = null` → `Bool(true)` (TCK `0068-feel-equality`).
 #[cfg(test)]
 #[test]
 fn eval_null_equals_null() {
     let e = parse_expression("null = null");
     assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
+}
+
+/// `null != null` → `Bool(false)`.
+#[cfg(test)]
+#[test]
+fn eval_null_not_equals_null() {
+    let e = parse_expression("null != null");
+    assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(false));
 }
 
 /// `null < 3` → `Null` (null operand in comparison → None → Null).

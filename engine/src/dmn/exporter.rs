@@ -29,7 +29,7 @@ use crate::dmn::model::{
     AllowedValues, Annotation, Association, BusinessKnowledgeModel, Decision, DecisionService,
     DecisionTable, Definitions, DefinitionsChild, DmnDiagram, DmnEdge, DmnLabel, DmnModel,
     DmnRule, DmnShape, HitPolicy, InformationItem, InputClause, InputData, ItemDefinition,
-    KnowledgeSource, OutputClause, RuleEntry, TextAnnotation, TextContent,
+    KnowledgeSource, LiteralExpression, OutputClause, RuleEntry, TextAnnotation, TextContent,
 };
 
 /// The DMN MODEL 1.5 namespace used as the default `xmlns` when the IR's
@@ -305,6 +305,9 @@ fn emit_decision(writer: &mut Writer<Vec<u8>>, dec: &Decision) -> Result<(), Dmn
         writer.write_event(Event::Empty(rk))?;
         writer.write_event(Event::End(BytesEnd::new("knowledgeRequirement")))?;
     }
+    if let Some(literal) = dec.literal_expression.as_ref() {
+        emit_literal_expression(writer, literal)?;
+    }
     if let Some(dt) = dec.decision_table.as_ref() {
         emit_decision_table(writer, dt)?;
     }
@@ -343,6 +346,30 @@ fn emit_information_item(
         emit_annotation(writer, ann)?;
     }
     writer.write_event(Event::End(BytesEnd::new(tag)))?;
+    Ok(())
+}
+
+/// Emit a `<literalExpression>` element (DMN 1.5 §10.3.2).
+///
+/// The expression text is written back through [`emit_text_element`], so a
+/// CDATA-encoded expression stays CDATA and a plain one stays escaped.
+fn emit_literal_expression(
+    writer: &mut Writer<Vec<u8>>,
+    literal: &LiteralExpression,
+) -> Result<(), DmnExportError> {
+    let mut start = BytesStart::new("literalExpression");
+    if let Some(id) = literal.id.as_deref() {
+        start.push_attribute(("id", id));
+    }
+    if let Some(type_ref) = literal.type_ref.as_deref() {
+        start.push_attribute(("typeRef", type_ref));
+    }
+    writer.write_event(Event::Start(start))?;
+    if let Some(description) = literal.description.as_ref() {
+        emit_text_element(writer, "description", description)?;
+    }
+    emit_text_element(writer, "text", &literal.text)?;
+    writer.write_event(Event::End(BytesEnd::new("literalExpression")))?;
     Ok(())
 }
 
@@ -849,6 +876,7 @@ mod tests {
             question: None,
             allowed_answers: None,
             decision_table: None,
+            literal_expression: None,
             required_decisions: Vec::new(),
             required_inputs: Vec::new(),
             required_knowledge: Vec::new(),
@@ -892,6 +920,7 @@ mod tests {
             variable: None,
             question: None,
             allowed_answers: None,
+            literal_expression: None,
             decision_table: Some(DecisionTable {
                 hit_policy: HitPolicy::Collect,
                 aggregation: Some(BuiltinAggregator::Sum),

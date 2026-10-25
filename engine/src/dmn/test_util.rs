@@ -10,6 +10,34 @@
 
 use std::path::{Path, PathBuf};
 
+/// A minimal, self-contained DMN 1.5 decision-table document.
+///
+/// Used by conformance scenarios and documentation examples so a caller can
+/// exercise parsing, export and evaluation without a fixture directory. The
+/// table has one input (`age`), one output (`status`) and two rules:
+/// `age >= 18 → "adult"`, `age < 18 → "minor"`, with hit policy `UNIQUE`.
+pub fn small_decision_table_dmn() -> &'static str {
+    r#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20230324/MODEL/" id="defs1" name="sample" namespace="http://example.com/sample">
+  <decision id="decision_1" name="age-status">
+    <variable name="status" typeRef="string"/>
+    <decisionTable id="dt1" hitPolicy="UNIQUE">
+      <input id="in1" label="Age"><inputExpression typeRef="number"><text>age</text></inputExpression></input>
+      <output id="out1" name="status" typeRef="string"/>
+      <rule id="r1">
+        <inputEntry id="ie1"><text>&gt;= 18</text></inputEntry>
+        <outputEntry id="oe1"><text>"adult"</text></outputEntry>
+      </rule>
+      <rule id="r2">
+        <inputEntry id="ie2"><text>&lt; 18</text></inputEntry>
+        <outputEntry id="oe2"><text>"minor"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>
+"#
+}
+
 /// A single TCK vector: one `.dmn` model plus its associated `-test-*.xml` test case file(s).
 #[derive(Debug, Clone)]
 pub struct TckVector {

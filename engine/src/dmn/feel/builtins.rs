@@ -172,8 +172,33 @@ fn built_in_number(args: &[Value]) -> Value {
         Value::Null => Value::Null,
         Value::Number(_) => args[0].clone(), // already a number → identity
         Value::String(s) => {
-            match s.trim().parse::<Decimal>() {
-                Ok(d) => Value::Number(d),
+            // `number(from, decimal separator, grouping separator)` — locale
+            // aware parsing: drop the grouping separator, normalise the decimal
+            // separator to '.', then parse exactly.
+            let decimal_separator = match args.get(1) {
+                None | Some(Value::Null) => None,
+                Some(Value::String(separator)) => Some(separator.as_str()),
+                _ => return Value::Null,
+            };
+            let grouping_separator = match args.get(2) {
+                None | Some(Value::Null) => None,
+                Some(Value::String(separator)) => Some(separator.as_str()),
+                _ => return Value::Null,
+            };
+
+            let mut normalised = s.trim().to_string();
+            if let Some(grouping) = grouping_separator {
+                if !grouping.is_empty() {
+                    normalised = normalised.replace(grouping, "");
+                }
+            }
+            if let Some(decimal) = decimal_separator {
+                if !decimal.is_empty() {
+                    normalised = normalised.replace(decimal, ".");
+                }
+            }
+            match normalised.parse::<Decimal>() {
+                Ok(value) => Value::Number(value),
                 Err(_) => Value::Null, // parse failure → null
             }
         }
@@ -267,12 +292,19 @@ fn built_in_decimal(args: &[Value]) -> Value {
         Value::Number(d) => *d,
         _ => return Value::Null,
     };
-    // `scale` is the number of decimal places (non-negative integer).
+    // `scale` is the number of decimal places (non-negative integer). It is
+    // clamped to `rust_decimal`'s maximum scale rather than cast: `as u32`
+    // would silently wrap a large scale (e.g. 4294967296 → 0) and round to the
+    // wrong place instead of failing.
+    let max_scale = rust_decimal::Decimal::MAX_SCALE;
     let scale: u32 = match &args[1] {
-        Value::Integer(n) => (*n).max(0) as u32,
+        Value::Integer(n) => u32::try_from((*n).clamp(0, i64::from(max_scale)))
+            .unwrap_or(max_scale),
         Value::Number(d) => {
-            // Truncate to integer first, then take absolute value.
-            d.trunc().abs().to_i64().unwrap_or(0) as u32
+            let truncated = d.trunc().abs();
+            u32::try_from(truncated)
+                .map(|value| value.min(max_scale))
+                .unwrap_or(max_scale)
         }
         _ => return Value::Null,
     };
@@ -356,9 +388,16 @@ fn built_in_round_half_down(args: &[Value]) -> Value {
 
 /// `abs(x)` — absolute value. Null propagates.
 fn built_in_abs(args: &[Value]) -> Value {
+    // DMN 1.5 §10.3.4.1 defines `abs` over numbers *and* durations.
     null_unary(args, |v| match v {
         Value::Number(d) => Value::Number(d.abs()),
         Value::Integer(i) => Value::Integer(i.abs()),
+        Value::DaysTimeDuration(td) => Value::DaysTimeDuration(td.abs()),
+        Value::YearsMonthsDuration(ymd) => {
+            Value::YearsMonthsDuration(crate::dmn::feel::temporal::YearsMonthsDuration {
+                months: ymd.months.abs(),
+            })
+        }
         _ => Value::Null,
     })
 }
@@ -382,7 +421,9 @@ fn built_in_modulo(args: &[Value]) -> Value {
             if *b == 0 {
                 return Value::Null;
             }
-            Value::Integer(a.rem_euclid(*b))
+            // Truncating remainder: the result takes the sign of the dividend,
+            // so `modulo(-12, 5)` is -2 (TCK `0056-feel-modulo-function`).
+            Value::Integer(a % b)
         }
         _ => Value::Null, // mixed types → null
     }
@@ -666,9 +707,18 @@ fn built_in_split(args: &[Value]) -> Value {
     if args.is_empty() || matches!(args[0], Value::Null) || matches!(args[1], Value::Null) {
         return Value::Null;
     }
-    // Split by literal substring (FEEL split uses literal delimiter, not regex).
-    let parts: Vec<String> = s.split(delim).map(|p| p.to_string()).collect();
-    Value::Array(parts.into_iter().map(Value::String).collect())
+    // The FEEL `split` delimiter is a regular expression (DMN 1.5 §10.3.4.2),
+    // so `split("John Doe", "\\s")` splits on whitespace. An invalid pattern
+    // makes the call null rather than panicking.
+    match regex::Regex::new(delim) {
+        Ok(pattern) => Value::Array(
+            pattern
+                .split(&s)
+                .map(|part| Value::String(part.to_string()))
+                .collect(),
+        ),
+        Err(_) => Value::Null,
+    }
 }
 
 /// `string join(list, delimiter)` — join string list with delimiter. Null propagates.
@@ -905,14 +955,21 @@ fn built_in_all(args: &[Value]) -> Value {
     if elems.is_empty() {
         return Value::Bool(true); // vacuously true per DMN 1.5
     }
-    for v in &elems {
-        match crate::dmn::feel::coercion::coerce_to_bool(v) {
-            Some(false) => return Value::Bool(false),
-            None => return Value::Null, // null element → null (null propagation)
+    // Three-valued `all`: true when every element is true, false as soon as one
+    // element is false (a false overrides an earlier null), null otherwise.
+    let mut saw_null = false;
+    for value in &elems {
+        match crate::dmn::feel::coercion::coerce_to_bool(value) {
             Some(true) => {}
+            Some(false) => return Value::Bool(false),
+            None => saw_null = true,
         }
     }
-    Value::Bool(true)
+    if saw_null {
+        Value::Null
+    } else {
+        Value::Bool(true)
+    }
 }
 
 /// `any(list)` — true if any element is truthy. any([]) == false.
@@ -927,14 +984,21 @@ fn built_in_any(args: &[Value]) -> Value {
     if elems.is_empty() {
         return Value::Bool(false); // vacuously false per DMN 1.5
     }
-    for v in &elems {
-        match crate::dmn::feel::coercion::coerce_to_bool(v) {
+    // Three-valued `any`: true as soon as one element is true, false when every
+    // element is false, null otherwise.
+    let mut saw_null = false;
+    for value in &elems {
+        match crate::dmn::feel::coercion::coerce_to_bool(value) {
             Some(true) => return Value::Bool(true),
-            None => return Value::Null, // null element → null (null propagation)
             Some(false) => {}
+            None => saw_null = true,
         }
     }
-    Value::Bool(false)
+    if saw_null {
+        Value::Null
+    } else {
+        Value::Bool(false)
+    }
 }
 
 /// `sublist(list, start)` or `sublist(list, start, length)` — extract sublist. Null propagates.
@@ -1459,15 +1523,13 @@ fn iso_weekday_num(d: chrono::NaiveDate) -> u32 {
 
 /// Helper: ISO week number (1–53) for a `NaiveDate`.
 fn iso_week_num(d: chrono::NaiveDate) -> u32 {
-    // Use format string to extract ISO week — avoids trait import issues.
-    let ndt = d.and_hms_opt(0, 0, 0).unwrap();
-    let s = ndt.format("%G-%V").to_string();
-    // Parse the "YYYY-WW" format: take last 2 chars as week number.
-    if let Some(yyww) = s.strip_prefix(&s[..4]) {
-        yyww.parse::<u32>().unwrap_or(1)
-    } else {
-        1
-    }
+    // ISO-8601 week number (1–53), i.e. the week of the calendar year that
+    // Thursday falls in. `%V` gives exactly that; `iso_week().week()` would too,
+    // but formatting keeps this helper free of extra trait imports.
+    d.format("%V")
+        .to_string()
+        .parse::<u32>()
+        .unwrap_or(1)
 }
 
 /// `day of year(<date>)` — day number within the year (1–366).
@@ -2147,6 +2209,89 @@ pub fn built_in_is(args: &[Value]) -> Value {
 
 /// Build the built-in function registry. Returns a `HashMap` mapping FEEL
 /// canonical names (with spaces) to their implementation pointers.
+/// Declared parameter names for the built-ins that the DMN specification
+/// documents by name, used to bind named arguments (`abs(n: -1)`).
+///
+/// A built-in that is absent from this table accepts positional arguments only;
+/// invoking it with named arguments evaluates to `null` rather than guessing
+/// which argument a name refers to.
+pub fn builtin_param_names(name: &str) -> Option<&'static [&'static str]> {
+    const ABS: &[&str] = &["n"];
+    const NUMBER_ARG: &[&str] = &["number"];
+    const ROUND: &[&str] = &["n", "scale"];
+    const LIST: &[&str] = &["list"];
+    const LIST_AND_VALUE: &[&str] = &["list", "element"];
+    Some(match name {
+        // Numeric family. Parameter names follow the DMN 1.5 pseudo-signatures
+        // (`sqrt(number)`, `abs(n)`, `round up(n, scale)`), which the vendored
+        // TCK encodes: `sqrt(number:4)` is valid and `sqrt(n:4)` is an error.
+        "abs" => ABS,
+        "sqrt" | "exp" | "log" | "even" | "odd" | "floor" | "ceiling" => NUMBER_ARG,
+        "round up" | "round down" | "round half up" | "round half down" => ROUND,
+        "modulo" => &["dividend", "divisor"],
+        "decimal" => &["n", "scale"],
+        "number" => &["from", "decimal separator", "grouping separator"],
+        "median" | "mode" | "stddev" | "product" | "sum" | "min" | "max" | "mean" => LIST,
+        // String family.
+        "substring" => &["string", "start position", "length"],
+        "string length" => &["string"],
+        "upper case" | "lower case" => &["string"],
+        "substring before" | "substring after" => &["string", "match"],
+        "replace" => &["input", "pattern", "replacement"],
+        "contains" => &["string", "match"],
+        "starts with" | "ends with" => &["string", "match"],
+        "matches" => &["input", "pattern"],
+        "split" => &["string", "delimiter"],
+        "string join" => &["list", "delimiter"],
+        // List family.
+        "list contains" => LIST_AND_VALUE,
+        "count" | "sort" | "all" | "any" => LIST,
+        "append" | "concatenate" => &["list", "item"],
+        "union" => &["list", "list"],
+        "insert before" => &["list", "position", "element"],
+        "remove" => &["list", "position"],
+        "index of" => LIST_AND_VALUE,
+        "sublist" => &["list", "start position", "length"],
+        "distinct values" => LIST,
+        // Context family.
+        "get value" => &["m", "key"],
+        "get entries" => &["m"],
+        "context" => &["entries"],
+        "context put" => &["context", "key", "value"],
+        "context merge" => &["contexts"],
+        // Conversion / temporal family.
+        "date" => &["from"],
+        "time" => &["from"],
+        "date and time" => &["from"],
+        "duration" => &["from"],
+        "years and months duration" => &["from", "to"],
+        "string" => &["from"],
+        // Temporal accessors take a `date` or `date and time` value.
+        "day of week" | "day of year" | "month of year" | "week of year" => &["date"],
+        _ => return None,
+    })
+}
+
+/// True for built-ins whose declared parameter list is a lower bound rather
+/// than the exact arity (they accept any number of list/context arguments).
+pub fn is_variadic_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "append"
+            | "concatenate"
+            | "sort"
+            | "context merge"
+            | "min"
+            | "max"
+            | "sum"
+            | "mean"
+            | "median"
+            | "mode"
+            | "stddev"
+            | "product"
+    )
+}
+
 /// Built-in function names that contain a space (`upper case`, `string join`,
 /// `list contains`, `date and time`, …).
 ///

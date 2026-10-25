@@ -12,7 +12,7 @@ use rayon::prelude::*;
 
 use crate::data_types::Value;
 use crate::dmn::decision_table::DecisionTableEvaluator;
-use crate::dmn::feel::cache::FeelAstCache;
+use crate::dmn::feel::cache::{FeelAstCache, ParseEntry};
 use crate::dmn::feel::eval::Scope;
 use crate::dmn::model::{DmnModel, DefinitionsChild, Decision};
 
@@ -326,6 +326,29 @@ fn resolve_drd_levels(
     levels
 }
 
+/// Project one output clause's value out of a decision-table result.
+///
+/// A multi-output table returns a context keyed by output name, and a
+/// rule-order/collect table returns a list of such contexts. The result is
+/// `Null` when the clause is absent, which is the table's "no value" answer.
+fn project_output(result: &Value, output_name: &str) -> Value {
+    match result {
+        Value::Object(map) => map.get(output_name).cloned().unwrap_or(Value::Null),
+        Value::Array(items) if items.iter().all(|item| matches!(item, Value::Object(_))) => {
+            Value::Array(
+                items
+                    .iter()
+                    .map(|item| match item {
+                        Value::Object(map) => map.get(output_name).cloned().unwrap_or(Value::Null),
+                        other => other.clone(),
+                    })
+                    .collect(),
+            )
+        }
+        other => other.clone(),
+    }
+}
+
 /// Output of evaluating a single decision (no recursion, no shared lock).
 /// Built by [`evaluate_single_decision`] and gathered by the level-by-level
 /// `evaluate` loop (PERF-09).
@@ -352,24 +375,62 @@ fn evaluate_single_decision(
     let rules_fired: u64;
 
     if let Some(table) = &decision.decision_table {
-        // Single aggregated result (current simplified semantics: every output
-        // clause receives the same result value).
         let result = DecisionTableEvaluator::evaluate(table, scope, &shared.ast_cache)?;
-        for (i, output_clause) in table.output_clauses.iter().enumerate() {
-            let name = output_clause
-                .name
-                .as_deref()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("output_{}", i));
-            outputs.insert(name.clone(), result.clone());
+
+        // A multi-output table aggregates into a context keyed by output name
+        // (or, for a COLLECT rule-order policy, a list of such contexts). Each
+        // output clause reports its own value; a single-output table reports
+        // the aggregated value as-is.
+        let names: Vec<String> = table
+            .output_clauses
+            .iter()
+            .enumerate()
+            .map(|(index, clause)| {
+                clause
+                    .name
+                    .as_deref()
+                    .map(|name| name.to_string())
+                    .unwrap_or_else(|| format!("output_{index}"))
+            })
+            .collect();
+        let multiple_outputs = names.len() > 1;
+
+        for name in &names {
+            let value = if !multiple_outputs {
+                result.clone()
+            } else {
+                project_output(&result, name)
+            };
+            outputs.insert(name.clone(), value);
             METRIC_OUTPUT_EVALUATIONS_TOTAL
                 .with_label_values(&[decision.id.as_str(), name.as_str()])
                 .inc();
-            outputs_evaluated.push(name);
+            outputs_evaluated.push(name.clone());
         }
         rules_fired = 1;
+    } else if let Some(literal) = &decision.literal_expression {
+        // DMN 1.5 §10.3.2: a literal-expression decision's value is the result
+        // of evaluating its FEEL text against the decision's scope.
+        let ast = shared
+            .ast_cache
+            .get_or_parse(&literal.text.content, ParseEntry::Expression);
+        let value = crate::dmn::feel::eval::evaluate(&ast, scope);
+        let name = decision
+            .variable
+            .as_ref()
+            .map(|variable| variable.name.clone())
+            .or_else(|| decision.name.clone())
+            .unwrap_or_else(|| decision.id.clone());
+        outputs.insert(name.clone(), value);
+        METRIC_OUTPUT_EVALUATIONS_TOTAL
+            .with_label_values(&[decision.id.as_str(), name.as_str()])
+            .inc();
+        outputs_evaluated.push(name);
+        rules_fired = 0;
     } else {
-        // No decision table — surface the scope bindings as outputs.
+        // Neither a table nor a literal expression — surface the scope bindings
+        // as outputs (this keeps a decision whose body is an unsupported boxed
+        // expression observable instead of silently empty).
         for (key, value) in &scope.bindings {
             outputs.insert(key.clone(), value.clone());
             METRIC_OUTPUT_EVALUATIONS_TOTAL
@@ -632,7 +693,7 @@ pub enum DecisionEvalError {
 #[cfg(test)]
 mod drd_cache_tests {
     use super::*;
-    use crate::dmn::feel::cache::FeelAstCache;
+    use crate::dmn::feel::cache::{FeelAstCache, ParseEntry};
     use crate::dmn::model::{Decision, Definitions, DefinitionsChild, DmnModel};
 
     /// Build a minimal 2-decision DRD: `d2` requires `d1`. No decision tables —
@@ -647,6 +708,7 @@ mod drd_cache_tests {
             question: None,
             allowed_answers: None,
             decision_table: None,
+            literal_expression: None,
             required_decisions: req,
             required_inputs: vec![],
             required_knowledge: vec![],
@@ -699,7 +761,7 @@ mod drd_cache_tests {
 #[cfg(test)]
 mod parallel_eval_tests {
     use super::*;
-    use crate::dmn::feel::cache::FeelAstCache;
+    use crate::dmn::feel::cache::{FeelAstCache, ParseEntry};
     use crate::dmn::model::{
         Decision, DecisionTable, Definitions, DefinitionsChild, DmnModel, DmnRule, HitPolicy,
         InformationItem, InputClause, OutputClause, RuleEntry, TextContent,
@@ -764,6 +826,7 @@ mod parallel_eval_tests {
             question: None,
             allowed_answers: None,
             decision_table: Some(table),
+            literal_expression: None,
             required_decisions: req,
             required_inputs: vec![],
             required_knowledge: vec![],

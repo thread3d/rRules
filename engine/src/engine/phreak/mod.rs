@@ -42,6 +42,16 @@ impl AlphaMemory {
         self.entries.get(fact_type_id).map(|s| s.iter().cloned().collect()).unwrap_or_default()
     }
 
+    /// Removes one fact from its fact type, pruning the bucket when it empties.
+    pub fn remove(&mut self, fact_type_id: &str, fact_id: &str) {
+        if let Some(bucket) = self.entries.get_mut(fact_type_id) {
+            bucket.remove(fact_id);
+            if bucket.is_empty() {
+                self.entries.remove(fact_type_id);
+            }
+        }
+    }
+
     pub fn size(&self) -> usize {
         self.entries.values().map(|v| v.len()).sum()
     }
@@ -66,6 +76,16 @@ impl BetaMemory {
 
     pub fn get_nagrams(&self, join_node_id: impl Into<String>) -> Vec<Nagram> {
         self.entries.get(&join_node_id.into()).cloned().unwrap_or_default()
+    }
+
+    /// Drops every partial match that references `fact_id`, pruning empty
+    /// join-node buckets. Mirrors the Rete `BetaMemory` contract so all four
+    /// engines retract identically.
+    pub fn remove_fact(&mut self, fact_id: &str) {
+        for nagrams in self.entries.values_mut() {
+            nagrams.retain(|nagram| nagram.iter().all(|reference| reference.fact_id != fact_id));
+        }
+        self.entries.retain(|_, nagrams| !nagrams.is_empty());
     }
 
     pub fn size(&self) -> usize {
@@ -313,6 +333,17 @@ impl TruthMaintenance {
         for dependent in dependents {
             self.supported_facts.remove(&dependent);
         }
+    }
+
+    /// Forgets a fact entirely: it loses support, its dependents lose support
+    /// with it, and the dependency edges that mention it are pruned.
+    ///
+    /// This is the truth-maintenance half of retraction — without it a
+    /// retracted fact keeps justifying conclusions that were derived from it.
+    pub fn forget_fact(&mut self, fact_id: &str) {
+        self.remove_unsupported(fact_id);
+        self.supported_facts.remove(fact_id);
+        self.dependencies.remove_fact(fact_id);
     }
 
     /// Gets the set of currently supported facts.
@@ -647,9 +678,21 @@ impl ExecutionEngine for PhreakEngine {
         Ok(())
     }
 
-    fn retract_fact(&mut self, _fact_id: &str) -> Result<bool, String> {
-        // Placeholder - would implement full maintenance
-        Ok(false)
+    fn retract_fact(&mut self, fact_id: &str) -> Result<bool, String> {
+        // Retraction: drop the fact from working memory, from alpha memory and
+        // every beta-memory partial match that references it, then forget its
+        // PHREAK justifications so the truth-maintenance graph does not keep
+        // treating a retracted fact as a premise.
+        let Some(fact) = self.working_facts.remove(fact_id) else {
+            return Ok(false);
+        };
+        self.alpha_memory.remove(&fact.fact_type_id, fact_id);
+        self.beta_memory.remove_fact(fact_id);
+        // Truth maintenance: a retracted fact is no longer supported, its
+        // dependents lose support with it, and the dependency edges that
+        // mention it are pruned.
+        self.network.tms_mut().forget_fact(fact_id);
+        Ok(true)
     }
 
     fn run(&mut self) -> usize {

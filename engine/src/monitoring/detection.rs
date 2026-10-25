@@ -96,6 +96,17 @@ static INSTANCE: LazyLock<Mutex<TrackerState>> = LazyLock::new(|| {
     })
 });
 
+/// Locks the process-wide tracker, recovering from a poisoned mutex.
+///
+/// A tracker lock is only ever held for a handful of field updates, so if a
+/// thread panicked while holding it the state is still structurally sound: the
+/// useful behaviour is to keep serving metrics rather than to panic every
+/// subsequent monitoring call. Panicking here would turn one failed test into a
+/// process-wide observability outage.
+fn lock_state() -> std::sync::MutexGuard<'static, TrackerState> {
+    INSTANCE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 impl RuleExecutionTracker {
     /// Creates a new empty tracker.
     ///
@@ -117,7 +128,7 @@ impl RuleExecutionTracker {
     pub fn record_evaluation(rule_id: impl Into<String>, rule_name: impl Into<String>) {
         let rule_id = rule_id.into();
         let rule_name = rule_name.into();
-        let mut state = INSTANCE.lock().unwrap();
+        let mut state = lock_state();
         state
             .rules
             .entry(rule_id.clone())
@@ -136,7 +147,7 @@ impl RuleExecutionTracker {
         let rule_id = rule_id.into();
         let rule_name = rule_name.into();
         let timestamp = chrono::Utc::now().to_rfc3339();
-        let mut state = INSTANCE.lock().unwrap();
+        let mut state = lock_state();
         let info = state
             .rules
             .entry(rule_id.clone())
@@ -149,7 +160,7 @@ impl RuleExecutionTracker {
     /// Records a rule's category.
     pub fn set_rule_category(rule_id: impl Into<String>, category: impl Into<String>) {
         let rule_id = rule_id.into();
-        let mut state = INSTANCE.lock().unwrap();
+        let mut state = lock_state();
         if let Some(info) = state.rules.get_mut(&rule_id) {
             info.category = Some(category.into());
         }
@@ -157,13 +168,13 @@ impl RuleExecutionTracker {
 
     /// Gets information about a specific rule (owned clone out of the lock).
     pub fn get_rule_info(rule_id: &str) -> Option<DeadRuleInfo> {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         state.rules.get(rule_id).cloned()
     }
 
     /// Returns all rules with their activity status (owned clones out of the lock).
     pub fn get_all_rules() -> Vec<DeadRuleInfo> {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         state.rules.values().cloned().collect()
     }
 
@@ -173,7 +184,7 @@ impl RuleExecutionTracker {
     /// regardless of whether it was evaluated. Returns owned data — references
     /// cannot escape a `Mutex` guard (anti-pattern flagged in 26-RESEARCH.md).
     pub fn find_dead_rules() -> Vec<DeadRuleInfo> {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         state
             .rules
             .values()
@@ -188,7 +199,7 @@ impl RuleExecutionTracker {
     /// Open Question 1): the singleton can only report rules it was told
     /// about — a rule that was never recorded cannot appear here.
     pub fn find_truly_inactive_rules() -> Vec<DeadRuleInfo> {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         state
             .rules
             .values()
@@ -199,25 +210,25 @@ impl RuleExecutionTracker {
 
     /// Gets the total number of rules being tracked.
     pub fn rule_count() -> usize {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         state.rules.len()
     }
 
     /// Gets the total evaluation count across all rules.
     pub fn get_total_evaluations() -> usize {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         state.total_evaluations
     }
 
     /// Gets the total fire count across all rules.
     pub fn get_total_fires() -> usize {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         state.total_fires
     }
 
     /// Calculates the rule activation rate (fired / evaluated).
     pub fn activation_rate() -> f64 {
-        let state = INSTANCE.lock().unwrap();
+        let state = lock_state();
         if state.total_evaluations == 0 {
             return 0.0;
         }
@@ -228,7 +239,7 @@ impl RuleExecutionTracker {
     /// (mirrors the original `reset` semantics — useful for beginning a new
     /// analysis period without losing the rule registry).
     pub fn reset() {
-        let mut state = INSTANCE.lock().unwrap();
+        let mut state = lock_state();
         for info in state.rules.values_mut() {
             *info = DeadRuleInfo::new(&info.rule_id, &info.rule_name);
         }
@@ -242,7 +253,7 @@ impl RuleExecutionTracker {
     /// calls `clear()` first so prior test fixtures do not leak across
     /// tests sharing the process-wide `INSTANCE`.
     pub fn clear() {
-        let mut state = INSTANCE.lock().unwrap();
+        let mut state = lock_state();
         state.rules.clear();
         state.total_evaluations = 0;
         state.total_fires = 0;
