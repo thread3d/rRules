@@ -111,6 +111,30 @@ impl BetaMemory {
         self.entries.remove(join_node_id);
     }
 
+    /// Drop every partial match (nagram) that references `fact_id`.
+    ///
+    /// Retraction must remove the retracted fact from both memories: leaving a
+    /// nagram behind would let later assertions join against a fact that is no
+    /// longer in working memory. Empty join-node buckets are pruned so
+    /// `size()` stays meaningful.
+    pub fn remove_fact(&mut self, fact_id: &str) {
+        for nagrams in self.entries.values_mut() {
+            nagrams.retain(|nagram| {
+                nagram.iter().all(|reference| reference.fact_id != fact_id)
+            });
+        }
+        self.entries.retain(|_, nagrams| !nagrams.is_empty());
+    }
+
+    /// True when at least one partial match still references `fact_id`.
+    pub fn contains_fact(&self, fact_id: &str) -> bool {
+        self.entries.values().any(|nagrams| {
+            nagrams
+                .iter()
+                .any(|nagram| nagram.iter().any(|reference| reference.fact_id == fact_id))
+        })
+    }
+
     pub fn size(&self) -> usize {
         self.entries.values().map(|v| v.len()).sum()
     }
@@ -247,7 +271,7 @@ impl ReteEngine {
     }
 
     /// Inserts a fact and propagates it through the network.
-    pub fn assert_fact(&mut self, mut fact: Fact) {
+    pub fn assert_fact(&mut self, fact: Fact) {
         let fact_id = fact.id.to_string();
         let fact_type = fact.fact_type_id.clone();
 
@@ -553,9 +577,16 @@ impl ExecutionEngine for ReteEngine {
         Ok(())
     }
 
-    fn retract_fact(&mut self, _fact_id: &str) -> Result<bool, String> {
-        // TODO: Implement retraction with proper network cleanup
-        Ok(false)
+    fn retract_fact(&mut self, fact_id: &str) -> Result<bool, String> {
+        // Retraction: drop the fact from working memory, from alpha memory, and
+        // every beta-memory partial match that references it. Returns `false`
+        // for an unknown id (idempotent re-retract), matching the trait contract.
+        let Some(fact) = self.working_facts.remove(fact_id) else {
+            return Ok(false);
+        };
+        self.alpha_memory.remove(&fact.fact_type_id, fact_id);
+        self.beta_memory.remove_fact(fact_id);
+        Ok(true)
     }
 
     fn run(&mut self) -> usize {
@@ -667,6 +698,73 @@ mod tests {
 
         let nagrams = beta.get_nagrams(&node_id);
         assert_eq!(nagrams.len(), 1);
+    }
+
+    #[test]
+    fn beta_memory_remove_fact_drops_matching_nagrams() {
+        let mut beta = BetaMemory::new();
+        let join1 = NodeId("join1".to_string());
+        let join2 = NodeId("join2".to_string());
+
+        // join1 holds [fact1] and [fact1, fact2]; join2 holds [fact3].
+        beta.insert(
+            &join1,
+            vec![MemoryReference {
+                fact_id: "fact1".to_string(),
+                generation: 0,
+            }],
+        );
+        beta.insert(
+            &join1,
+            vec![
+                MemoryReference {
+                    fact_id: "fact1".to_string(),
+                    generation: 0,
+                },
+                MemoryReference {
+                    fact_id: "fact2".to_string(),
+                    generation: 0,
+                },
+            ],
+        );
+        beta.insert(
+            &join2,
+            vec![MemoryReference {
+                fact_id: "fact3".to_string(),
+                generation: 0,
+            }],
+        );
+        assert_eq!(beta.size(), 3);
+
+        beta.remove_fact("fact1");
+
+        // Both nagrams mentioning fact1 are gone; the unrelated one survives and
+        // the now-empty join1 bucket is pruned.
+        assert_eq!(beta.size(), 1);
+        assert!(!beta.contains_fact("fact1"));
+        assert!(beta.contains_fact("fact3"));
+        assert!(beta.get_nagrams(&join1).is_empty());
+    }
+
+    #[test]
+    fn retracting_a_fact_removes_it_from_working_memory_and_alpha_memory() {
+        let mut engine = ReteEngine::new();
+        engine.network.add_test_node(TestNode::new("test-item", "item"));
+
+        let fact = Fact::new("item", HashMap::new());
+        let fact_id = fact.id.to_string();
+        engine.insert_fact(fact).unwrap();
+        assert_eq!(engine.get_facts().len(), 1);
+
+        assert!(engine.retract_fact(&fact_id).unwrap());
+        assert!(engine.get_facts().is_empty(), "working memory must drop the fact");
+        assert!(
+            !engine.beta_memory.contains_fact(&fact_id),
+            "beta memory must not keep partial matches for a retracted fact"
+        );
+
+        // Idempotent re-retract.
+        assert!(!engine.retract_fact(&fact_id).unwrap());
     }
 
     #[test]

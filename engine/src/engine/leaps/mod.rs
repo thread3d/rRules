@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
-use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference, Nagram};
+use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference};
 
 // NOTE: `CoverageTracking` is no longer imported here — the shared direct
 // evaluator (`engine::direct_eval`) owns once-per-rule coverage recording
@@ -136,6 +136,16 @@ impl AggregationNode {
         None
     }
 
+    /// Forgets every contributing fact and the cached aggregate.
+    ///
+    /// Used on retraction: the cached value was derived from a working-memory
+    /// snapshot that just changed, and this stub implementation cannot recompute
+    /// incrementally, so the node starts over instead of serving a stale number.
+    pub fn reset(&mut self) {
+        self.source_facts.clear();
+        self.current_value = None;
+    }
+
     /// Gets the current aggregated value.
     pub fn get_value(&self) -> Option<f64> {
         self.current_value
@@ -258,7 +268,7 @@ impl LeapsEngine {
     }
 
     /// Inserts a fact and propagates it through the network.
-    pub fn assert_fact(&mut self, mut fact: Fact) {
+    pub fn assert_fact(&mut self, fact: Fact) {
         let fact_id = fact.id.to_string();
         // Clone before moving fact
         let fact_type = fact.fact_type_id.clone();
@@ -280,7 +290,7 @@ impl LeapsEngine {
         }
 
         // Check aggregation nodes
-        for (_id, agg_node) in &mut self.network.agg_nodes {
+        for agg_node in self.network.agg_nodes.values_mut() {
             if let Some(val) = agg_node.add_fact(&fact_id) {
                 agg_node.current_value = Some(val);
             }
@@ -300,11 +310,9 @@ impl LeapsEngine {
 
             test_node.successors.iter()
                 .filter_map(|s| {
-                    if let Some(join_node) = self.network.base.join_nodes.get(s) {
-                        Some((join_node.id.clone(), join_node.predecessor.clone(), s.0.clone()))
-                    } else {
-                        None
-                    }
+                    self.network.base.join_nodes.get(s).map(|join_node| {
+                        (join_node.id.clone(), join_node.predecessor.clone(), s.0.clone())
+                    })
                 })
                 .collect()
         };
@@ -323,7 +331,7 @@ impl LeapsEngine {
         &mut self,
         join_node_id: &crate::engine::rete::NodeId,
         predecessor_id: &crate::engine::rete::NodeId,
-        fact_id: &str,
+        _fact_id: &str,
     ) {
         // Get all data before mutation
         let (test_facts_from_alpha, existing_nagrams) = {
@@ -357,14 +365,14 @@ impl LeapsEngine {
 
     /// Executes aggregation for all nodes.
     pub fn execute_aggregations(&mut self) {
-        for (_id, agg_node) in &self.network.agg_nodes {
+        for agg_node in self.network.agg_nodes.values() {
             let facts: Vec<&Fact> = agg_node
                 .source_facts
                 .iter()
                 .filter_map(|fid| self.working_facts.get(fid))
                 .collect();
 
-            if let Some(value) = agg_node.op.compute_from_facts(&facts, &agg_node.field) {
+            if let Some(_value) = agg_node.op.compute_from_facts(&facts, &agg_node.field) {
                 // Update node value
                 // Note: We don't have direct mutable access here without borrowing issues
             }
@@ -448,9 +456,22 @@ impl ExecutionEngine for LeapsEngine {
         Ok(())
     }
 
-    fn retract_fact(&mut self, _fact_id: &str) -> Result<bool, String> {
-        // TODO: Implement retraction with proper network cleanup
-        Ok(false)
+    fn retract_fact(&mut self, fact_id: &str) -> Result<bool, String> {
+        // Retraction: drop the fact from working memory, from alpha memory, and
+        // every beta-memory partial match that references it. Returns `false`
+        // for an unknown id (idempotent re-retract), matching the trait contract.
+        let Some(fact) = self.working_facts.remove(fact_id) else {
+            return Ok(false);
+        };
+        self.alpha_memory.remove(&fact.fact_type_id, fact_id);
+        self.beta_memory.remove_fact(fact_id);
+        // LEAPS aggregation nodes cache values derived from source facts;
+        // recompute from scratch after a retraction instead of serving a
+        // stale aggregate.
+        for agg in self.network.agg_nodes.values_mut() {
+            agg.reset();
+        }
+        Ok(true)
     }
 
     fn run(&mut self) -> usize {

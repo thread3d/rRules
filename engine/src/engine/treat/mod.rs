@@ -3,6 +3,7 @@
 //! TREAT (TREe Augmented by Caching) is an optimization of the Rete algorithm
 //! that uses LRU caching for join node partial matches to reduce redundant computations.
 
+#![allow(dead_code)]
 use std::collections::{HashMap, HashSet};
 use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::metrics::MetricsCollector;
@@ -16,6 +17,8 @@ use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference, Nagr
 // are gone.
 
 /// Cache entry with a generation timestamp for LRU ordering.
+#[allow(dead_code)]
+
 #[derive(Debug, Clone)]
 struct CacheEntry {
     nagram: Nagram,
@@ -75,6 +78,7 @@ impl LRUCache {
     }
 
     /// Gets the key of an arbitrary entry for eviction (not truly LRU due to HashMap ordering)
+#[allow(dead_code)]
     fn get_oldest_entry(&self) -> Option<String> {
         // Since we're using HashMap which has non-deterministic iteration order,
         // just return the first key
@@ -225,7 +229,7 @@ impl TreatEngine {
     }
 
     /// Inserts a fact and propagates it through the network.
-    pub fn assert_fact(&mut self, mut fact: Fact) {
+    pub fn assert_fact(&mut self, fact: Fact) {
         let fact_id = fact.id.to_string();
         // Clone before moving fact
         let fact_type = fact.fact_type_id.clone();
@@ -268,12 +272,10 @@ impl TreatEngine {
         for (successor_id, key) in successors_and_keys {
             let is_cached = self.network.is_cached(&successor_id.0);
 
-            if is_cached {
-                if self.network.cache.get(&key).is_some() {
-                    self.metrics.record_cache_hit();
-                    self.cache_hits += 1;
-                    continue; // Use cached result
-                }
+            if is_cached && self.network.cache.get(&key).is_some() {
+                self.metrics.record_cache_hit();
+                self.cache_hits += 1;
+                continue; // Use cached result
             }
 
             // Get join_node data (before mutable borrow)
@@ -424,9 +426,19 @@ impl ExecutionEngine for TreatEngine {
         Ok(())
     }
 
-    fn retract_fact(&mut self, _fact_id: &str) -> Result<bool, String> {
-        // TODO: Implement retraction with proper network cleanup
-        Ok(false)
+    fn retract_fact(&mut self, fact_id: &str) -> Result<bool, String> {
+        // Retraction: drop the fact from working memory, from alpha memory, and
+        // every beta-memory partial match that references it. Returns `false`
+        // for an unknown id (idempotent re-retract), matching the trait contract.
+        let Some(fact) = self.working_facts.remove(fact_id) else {
+            return Ok(false);
+        };
+        self.alpha_memory.remove(&fact.fact_type_id, fact_id);
+        self.beta_memory.remove_fact(fact_id);
+        // TREAT caches join results; a cached nagram may mention the retracted
+        // fact, so drop the cache entries rather than risk stale joins.
+        self.network.cache.clear();
+        Ok(true)
     }
 
     fn run(&mut self) -> usize {
