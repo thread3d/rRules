@@ -17,13 +17,26 @@ pub enum ApprovalState {
     /// Submitted and awaiting review
     Submitted { submitted_at: DateTime<Utc> },
     /// Currently being reviewed in a specific tier
-    InReview { started_at: DateTime<Utc>, current_tier: i32 },
+    InReview {
+        started_at: DateTime<Utc>,
+        current_tier: i32,
+    },
     /// Approved by all required reviewers
-    Approved { approved_by: Vec<String>, completed_at: DateTime<Utc> },
+    Approved {
+        approved_by: Vec<String>,
+        completed_at: DateTime<Utc>,
+    },
     /// Rejected by a reviewer
-    Rejected { rejected_by: String, reason: Option<String>, completed_at: DateTime<Utc> },
+    Rejected {
+        rejected_by: String,
+        reason: Option<String>,
+        completed_at: DateTime<Utc>,
+    },
     /// Escalated to next tier due to time limit
-    Escalated { escalated_to_tier: i32, escalated_at: DateTime<Utc> },
+    Escalated {
+        escalated_to_tier: i32,
+        escalated_at: DateTime<Utc>,
+    },
 }
 
 /// Configuration for a single approval tier

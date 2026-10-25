@@ -3,16 +3,19 @@
 //! Verifies end-to-end decision-table evaluation against real DMN fixtures.
 //! Filter: `cargo test -p engine --test hit_policy_core`
 
-use engine::dmn::decision_table::{DecisionTableEvaluator, DecisionTableError};
+use engine::data_types::Value;
+use engine::dmn::decision_table::{DecisionTableError, DecisionTableEvaluator};
 use engine::dmn::feel::eval::Scope;
 use engine::dmn::model::{DefinitionsChild, DmnModel};
 use engine::dmn::parser::parse_dmn_with_cache;
-use engine::data_types::Value;
 
 const DMN_HIT_POLICY_TEST: &str = include_str!("fixtures/dmn/hit_policy_test.dmn");
 
 /// Extract the DecisionTable from a parsed model by decision id.
-fn extract_table<'a>(model: &'a DmnModel, dec_id: &str) -> Option<&'a engine::dmn::model::DecisionTable> {
+fn extract_table<'a>(
+    model: &'a DmnModel,
+    dec_id: &str,
+) -> Option<&'a engine::dmn::model::DecisionTable> {
     for child in &model.definitions.children {
         if let DefinitionsChild::Decision(dec) = child {
             if dec.id == dec_id && dec.decision_table.is_some() {

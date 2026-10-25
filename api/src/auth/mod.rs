@@ -133,10 +133,7 @@ fn extract_bearer(req: &HttpRequest) -> Option<String> {
         (status = 401, description = "Invalid credentials"),
     ),
 )]
-pub async fn login(
-    req: web::Json<LoginRequest>,
-    store: web::Data<UserStore>,
-) -> impl Responder {
+pub async fn login(req: web::Json<LoginRequest>, store: web::Data<UserStore>) -> impl Responder {
     let identifier = req
         .username
         .clone()

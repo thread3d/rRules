@@ -27,9 +27,9 @@ use thiserror::Error;
 
 use crate::dmn::model::{
     AllowedValues, Annotation, Association, BusinessKnowledgeModel, Decision, DecisionService,
-    DecisionTable, Definitions, DefinitionsChild, DmnDiagram, DmnEdge, DmnLabel, DmnModel,
-    DmnRule, DmnShape, HitPolicy, InformationItem, InputClause, InputData, ItemDefinition,
-    KnowledgeSource, LiteralExpression, OutputClause, RuleEntry, TextAnnotation, TextContent,
+    DecisionTable, Definitions, DefinitionsChild, DmnDiagram, DmnEdge, DmnLabel, DmnModel, DmnRule,
+    DmnShape, HitPolicy, InformationItem, InputClause, InputData, ItemDefinition, KnowledgeSource,
+    LiteralExpression, OutputClause, RuleEntry, TextAnnotation, TextContent,
 };
 
 /// The DMN MODEL 1.5 namespace used as the default `xmlns` when the IR's
@@ -98,7 +98,11 @@ pub fn export_dmn_to_bytes(model: &DmnModel) -> Result<Vec<u8>, DmnExportError> 
 /// DMNDI, then the closing `</definitions>`.
 fn emit_document(writer: &mut Writer<Vec<u8>>, model: &DmnModel) -> Result<(), DmnExportError> {
     writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))?;
-    emit_definitions(writer, &model.definitions, model.source_namespace.as_deref())?;
+    emit_definitions(
+        writer,
+        &model.definitions,
+        model.source_namespace.as_deref(),
+    )?;
     Ok(())
 }
 
@@ -169,7 +173,9 @@ fn emit_definitions_child(
     child: &DefinitionsChild,
 ) -> Result<(), DmnExportError> {
     match child {
-        DefinitionsChild::ItemDefinition(item) => emit_item_definition(writer, item, "itemDefinition"),
+        DefinitionsChild::ItemDefinition(item) => {
+            emit_item_definition(writer, item, "itemDefinition")
+        }
         DefinitionsChild::Decision(dec) => emit_decision(writer, dec),
         DefinitionsChild::InputData(input) => emit_input_data(writer, input),
         DefinitionsChild::BusinessKnowledgeModel(bkm) => emit_bkm(writer, bkm),
@@ -259,10 +265,7 @@ fn emit_allowed_values(
 /// schema; a `None` id is an [`DmnExportError::InvalidModel`].
 fn emit_decision(writer: &mut Writer<Vec<u8>>, dec: &Decision) -> Result<(), DmnExportError> {
     let mut start = BytesStart::new("decision");
-    start.push_attribute((
-        "id",
-        dec.id.as_str(),
-    ));
+    start.push_attribute(("id", dec.id.as_str()));
     if let Some(name) = dec.name.as_deref() {
         start.push_attribute(("name", name));
     }
@@ -415,10 +418,7 @@ fn emit_decision_table(
 }
 
 /// Emit an `<input>` clause.
-fn emit_input_clause(
-    writer: &mut Writer<Vec<u8>>,
-    ic: &InputClause,
-) -> Result<(), DmnExportError> {
+fn emit_input_clause(writer: &mut Writer<Vec<u8>>, ic: &InputClause) -> Result<(), DmnExportError> {
     let mut start = BytesStart::new("input");
     if let Some(id) = ic.id.as_deref() {
         start.push_attribute(("id", id));
@@ -545,7 +545,10 @@ fn emit_input_data(writer: &mut Writer<Vec<u8>>, input: &InputData) -> Result<()
 }
 
 /// Emit a `<businessKnowledgeModel>` element.
-fn emit_bkm(writer: &mut Writer<Vec<u8>>, bkm: &BusinessKnowledgeModel) -> Result<(), DmnExportError> {
+fn emit_bkm(
+    writer: &mut Writer<Vec<u8>>,
+    bkm: &BusinessKnowledgeModel,
+) -> Result<(), DmnExportError> {
     let mut start = BytesStart::new("businessKnowledgeModel");
     start.push_attribute(("id", bkm.id.as_str()));
     if let Some(name) = bkm.name.as_deref() {
@@ -705,10 +708,7 @@ fn emit_annotation(writer: &mut Writer<Vec<u8>>, ann: &Annotation) -> Result<(),
 /// Emit a `<dmndi:DMNDI>` block carrying the [`DmnDiagram`] IR through
 /// round-trip. Uses the `dmndi`/`dc`/`di` namespace prefixes. The parser is
 /// prefix-agnostic (matches local names), so the prefix choice is cosmetic.
-fn emit_dmndi(
-    writer: &mut Writer<Vec<u8>>,
-    diagrams: &[DmnDiagram],
-) -> Result<(), DmnExportError> {
+fn emit_dmndi(writer: &mut Writer<Vec<u8>>, diagrams: &[DmnDiagram]) -> Result<(), DmnExportError> {
     let mut start = BytesStart::new("dmndi:DMNDI");
     start.push_attribute(("xmlns:dmndi", NS_DMNDI));
     start.push_attribute(("xmlns:dc", NS_DC));
@@ -772,7 +772,10 @@ fn emit_dmn_edge(writer: &mut Writer<Vec<u8>>, edge: &DmnEdge) -> Result<(), Dmn
     Ok(())
 }
 
-fn emit_dc_bounds(writer: &mut Writer<Vec<u8>>, b: &crate::dmn::model::DcBounds) -> Result<(), DmnExportError> {
+fn emit_dc_bounds(
+    writer: &mut Writer<Vec<u8>>,
+    b: &crate::dmn::model::DcBounds,
+) -> Result<(), DmnExportError> {
     let mut e = BytesStart::new("dc:Bounds");
     e.push_attribute(("x", format_f64(b.x).as_str()));
     e.push_attribute(("y", format_f64(b.y).as_str()));
@@ -913,24 +916,27 @@ mod tests {
     /// Build a `DmnModel` with one decision carrying a COLLECT + SUM table.
     fn collect_sum_model() -> DmnModel {
         let mut model = minimal_model();
-        model.definitions.children.push(DefinitionsChild::Decision(Decision {
-            id: "_d1".into(),
-            name: Some("Total".into()),
-            description: None,
-            variable: None,
-            question: None,
-            allowed_answers: None,
-            literal_expression: None,
-            decision_table: Some(DecisionTable {
-                hit_policy: HitPolicy::Collect,
-                aggregation: Some(BuiltinAggregator::Sum),
-                ..DecisionTable::default()
-            }),
-            required_decisions: Vec::new(),
-            required_inputs: Vec::new(),
-            required_knowledge: Vec::new(),
-            annotations: Vec::new(),
-        }));
+        model
+            .definitions
+            .children
+            .push(DefinitionsChild::Decision(Decision {
+                id: "_d1".into(),
+                name: Some("Total".into()),
+                description: None,
+                variable: None,
+                question: None,
+                allowed_answers: None,
+                literal_expression: None,
+                decision_table: Some(DecisionTable {
+                    hit_policy: HitPolicy::Collect,
+                    aggregation: Some(BuiltinAggregator::Sum),
+                    ..DecisionTable::default()
+                }),
+                required_decisions: Vec::new(),
+                required_inputs: Vec::new(),
+                required_knowledge: Vec::new(),
+                annotations: Vec::new(),
+            }));
         model
     }
 

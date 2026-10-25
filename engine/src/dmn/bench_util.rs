@@ -19,8 +19,7 @@ pub struct RssSnapshot {
 impl RssSnapshot {
     /// Take a current RSS snapshot from `/proc/self/status`.
     pub fn take() -> Self {
-        let content = fs::read_to_string("/proc/self/status")
-            .unwrap_or_default();
+        let content = fs::read_to_string("/proc/self/status").unwrap_or_default();
         let vm_rss = content
             .lines()
             .find(|line| line.starts_with("VmRSS:"))
@@ -80,18 +79,22 @@ pub struct MemoryBaseline {
 impl MemoryBaseline {
     /// Serialize the baseline to JSON format (human-readable and diffable).
     pub fn to_json(&self) -> String {
-        let phases_json: Vec<String> = self.phases.iter().map(|p| {
-            format!(
-                r#"    {{
+        let phases_json: Vec<String> = self
+            .phases
+            .iter()
+            .map(|p| {
+                format!(
+                    r#"    {{
       "phase": {},
       "rss_delta_bytes": {},
       "allocation_count": {}
     }}"#,
-                json_string(&p.phase),
-                p.rss_delta_bytes,
-                p.allocation_count
-            )
-        }).collect();
+                    json_string(&p.phase),
+                    p.rss_delta_bytes,
+                    p.allocation_count
+                )
+            })
+            .collect();
 
         format!(
             r#"{{
@@ -121,20 +124,28 @@ impl MemoryBaseline {
         // Parse the JSON manually for simplicity (no serde dependency in benchmarks).
         // This is a simplified parser that handles our known schema.
         let corpus_name = extract_field(&content, "corpus_name")?;
-        let file_count: usize = extract_field(&content, "file_count")?.parse()
+        let file_count: usize = extract_field(&content, "file_count")?
+            .parse()
             .map_err(|e| format!("invalid file_count: {}", e))?;
-        let cold_start_rss_bytes: u64 = extract_field(&content, "cold_start_rss_bytes")?.parse()
+        let cold_start_rss_bytes: u64 = extract_field(&content, "cold_start_rss_bytes")?
+            .parse()
             .map_err(|e| format!("invalid cold_start_rss_bytes: {}", e))?;
-        let peak_rss_bytes: u64 = extract_field(&content, "peak_rss_bytes")?.parse()
+        let peak_rss_bytes: u64 = extract_field(&content, "peak_rss_bytes")?
+            .parse()
             .map_err(|e| format!("invalid peak_rss_bytes: {}", e))?;
-        let total_duration_ns: u128 = extract_field(&content, "total_duration_ns")?.parse()
+        let total_duration_ns: u128 = extract_field(&content, "total_duration_ns")?
+            .parse()
             .map_err(|e| format!("invalid total_duration_ns: {}", e))?;
 
         // Parse phases array.
-        let phases_start = content.find("\"phases\": [")
-            .ok_or("missing phases field")? + "\"phases\": [".len();
-        let phases_end = content[phases_start..].find(']')
-            .ok_or("unclosed phases array")? + phases_start;
+        let phases_start = content
+            .find("\"phases\": [")
+            .ok_or("missing phases field")?
+            + "\"phases\": [".len();
+        let phases_end = content[phases_start..]
+            .find(']')
+            .ok_or("unclosed phases array")?
+            + phases_start;
 
         let phases_json = &content[phases_start..phases_end];
         let mut phases = Vec::new();
@@ -142,9 +153,11 @@ impl MemoryBaseline {
         // Split by "}" to get individual phase objects.
         for phase_str in phases_json.split('}').filter(|s| !s.trim().is_empty()) {
             let phase_name = extract_field(phase_str, "phase")?;
-            let rss_delta: i64 = extract_field(phase_str, "rss_delta_bytes")?.parse()
+            let rss_delta: i64 = extract_field(phase_str, "rss_delta_bytes")?
+                .parse()
                 .map_err(|e| format!("invalid rss_delta_bytes: {}", e))?;
-            let alloc_count: u64 = extract_field(phase_str, "allocation_count")?.parse()
+            let alloc_count: u64 = extract_field(phase_str, "allocation_count")?
+                .parse()
                 .map_err(|e| format!("invalid allocation_count: {}", e))?;
 
             phases.push(PhaseBreakdown {
@@ -168,8 +181,10 @@ impl MemoryBaseline {
 /// Extract a string field value from JSON (simplified parser).
 fn extract_field(json: &str, field: &str) -> Result<String, String> {
     let key = format!("\"{}\":", field);
-    let pos = json.find(&key)
-        .ok_or_else(|| format!("field {} not found", field))? + key.len();
+    let pos = json
+        .find(&key)
+        .ok_or_else(|| format!("field {} not found", field))?
+        + key.len();
 
     // Skip whitespace.
     let mut pos = pos;
@@ -185,8 +200,10 @@ fn extract_field(json: &str, field: &str) -> Result<String, String> {
     if c == b'"' {
         // String value.
         let start = pos + 1;
-        let end = json[start..].find('"')
-            .ok_or_else(|| format!("unclosed string for field {}", field))? + start;
+        let end = json[start..]
+            .find('"')
+            .ok_or_else(|| format!("unclosed string for field {}", field))?
+            + start;
         Ok(json[start..end].to_string())
     } else {
         // Numeric/boolean/null value — read until comma, }, or ].
@@ -261,7 +278,10 @@ pub fn load_corpus_files() -> Vec<PathBuf> {
 }
 
 /// Write a baseline snapshot to the snapshots directory (engine/benches/snapshots/).
-pub fn write_baseline_snapshot(baseline: &MemoryBaseline, corpus_name: &str) -> Result<PathBuf, String> {
+pub fn write_baseline_snapshot(
+    baseline: &MemoryBaseline,
+    corpus_name: &str,
+) -> Result<PathBuf, String> {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let repo_root = manifest.parent().unwrap_or_else(|| Path::new("."));
     let snapshots_dir = repo_root.join("engine/benches/snapshots");

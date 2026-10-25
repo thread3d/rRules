@@ -10,7 +10,6 @@
 //! working-memory-mutating, and two-valued. The two paths share neither an execution engine
 //! nor an expression AST (milestone research anti-pattern avoided).
 
-
 use crate::data_types::Value;
 use crate::dmn::feel::cache::{FeelAstCache, ParseEntry};
 use crate::dmn::feel::eval::{self, Scope};
@@ -103,11 +102,7 @@ impl DecisionTableEvaluator {
     }
 
     /// Evaluate a single output cell. Cell text is parsed as a FEEL expression via the cache.
-    fn evaluate_output_entry(
-        entry: &RuleEntry,
-        scope: &Scope,
-        cache: &FeelAstCache,
-    ) -> Value {
+    fn evaluate_output_entry(entry: &RuleEntry, scope: &Scope, cache: &FeelAstCache) -> Value {
         let ast = cache.get_or_parse(&entry.text.content, ParseEntry::Expression);
         eval::evaluate(&ast, scope)
     }
@@ -230,7 +225,10 @@ impl DecisionTableEvaluator {
 
         for (match_idx, (_rule_idx, outputs)) in matches.iter().enumerate() {
             if let Some(first_output) = outputs.first() {
-                if let Some(pos) = enum_order.iter().position(|v| eval::feel_equals_public(v, first_output) == Some(true)) {
+                if let Some(pos) = enum_order
+                    .iter()
+                    .position(|v| eval::feel_equals_public(v, first_output) == Some(true))
+                {
                     let pos_i64 = pos as i64;
                     if pos_i64 < best_pos {
                         best_idx = Some(match_idx);
@@ -261,14 +259,24 @@ impl DecisionTableEvaluator {
         // Sort matches by their first output's position in the enumeration.
         let mut sorted_matches: Vec<&(usize, Vec<Value>)> = matches.iter().collect();
         sorted_matches.sort_by(|a, b| {
-            let pos_a = a.1.first()
-                .and_then(|v| enum_order.iter().position(|ev| eval::feel_equals_public(ev, v) == Some(true)))
-                .map(|p| p as i64)
-                .unwrap_or(i64::MAX); // Non-enumerated values go last.
-            let pos_b = b.1.first()
-                .and_then(|v| enum_order.iter().position(|ev| eval::feel_equals_public(ev, v) == Some(true)))
-                .map(|p| p as i64)
-                .unwrap_or(i64::MAX);
+            let pos_a =
+                a.1.first()
+                    .and_then(|v| {
+                        enum_order
+                            .iter()
+                            .position(|ev| eval::feel_equals_public(ev, v) == Some(true))
+                    })
+                    .map(|p| p as i64)
+                    .unwrap_or(i64::MAX); // Non-enumerated values go last.
+            let pos_b =
+                b.1.first()
+                    .and_then(|v| {
+                        enum_order
+                            .iter()
+                            .position(|ev| eval::feel_equals_public(ev, v) == Some(true))
+                    })
+                    .map(|p| p as i64)
+                    .unwrap_or(i64::MAX);
             pos_a.cmp(&pos_b)
         });
 
@@ -410,7 +418,10 @@ impl DecisionTableEvaluator {
     }
 
     /// Apply an aggregator to a list of values.
-    fn apply_aggregator(aggregator: &BuiltinAggregator, values: &[Value]) -> Result<Value, DecisionTableError> {
+    fn apply_aggregator(
+        aggregator: &BuiltinAggregator,
+        values: &[Value],
+    ) -> Result<Value, DecisionTableError> {
         match aggregator {
             BuiltinAggregator::Sum => Self::aggregate_sum(values),
             BuiltinAggregator::Min => Self::aggregate_min(values),
@@ -429,7 +440,11 @@ impl DecisionTableEvaluator {
         for v in values {
             match v {
                 Value::Number(d) => sum += d,
-                _ => return Err(DecisionTableError::AggregatorMismatch("SUM requires numeric outputs".into())),
+                _ => {
+                    return Err(DecisionTableError::AggregatorMismatch(
+                        "SUM requires numeric outputs".into(),
+                    ))
+                }
             }
         }
         Ok(Value::Number(sum))
@@ -450,7 +465,11 @@ impl DecisionTableEvaluator {
                         min = Some(d_clone);
                     }
                 }
-                _ => return Err(DecisionTableError::AggregatorMismatch("MIN requires numeric outputs".into())),
+                _ => {
+                    return Err(DecisionTableError::AggregatorMismatch(
+                        "MIN requires numeric outputs".into(),
+                    ))
+                }
             }
         }
 
@@ -472,7 +491,11 @@ impl DecisionTableEvaluator {
                         max = Some(d_clone);
                     }
                 }
-                _ => return Err(DecisionTableError::AggregatorMismatch("MAX requires numeric outputs".into())),
+                _ => {
+                    return Err(DecisionTableError::AggregatorMismatch(
+                        "MAX requires numeric outputs".into(),
+                    ))
+                }
             }
         }
 
@@ -542,7 +565,10 @@ impl DecisionTableEvaluator {
             || format!("output_{idx}"),
             |clause| {
                 clause.label.clone().unwrap_or_else(|| {
-                    clause.name.clone().unwrap_or_else(|| format!("output_{idx}"))
+                    clause
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("output_{idx}"))
                 })
             },
         )
@@ -557,7 +583,10 @@ impl DecisionTableEvaluator {
 /// - aggregation attribute only valid with COLLECT hit policy
 pub fn validate_decision_table(table: &DecisionTable) -> Result<(), String> {
     // 1. Multi-output rejection for aggregator tables (DMN-20).
-    if table.hit_policy == HitPolicy::Collect && table.aggregation.is_some() && table.output_clauses.len() != 1 {
+    if table.hit_policy == HitPolicy::Collect
+        && table.aggregation.is_some()
+        && table.output_clauses.len() != 1
+    {
         return Err(format!(
             "COLLECT with aggregation requires exactly one output column, got {}",
             table.output_clauses.len()
@@ -568,7 +597,9 @@ pub fn validate_decision_table(table: &DecisionTable) -> Result<(), String> {
     if table.hit_policy == HitPolicy::Priority {
         if let Some(first_clause) = table.output_clauses.first() {
             if first_clause.output_values.is_none() {
-                return Err("PRIORITY hit policy requires allowedValues on the output column".into());
+                return Err(
+                    "PRIORITY hit policy requires allowedValues on the output column".into(),
+                );
             }
         }
     }
@@ -577,7 +608,9 @@ pub fn validate_decision_table(table: &DecisionTable) -> Result<(), String> {
     if table.hit_policy == HitPolicy::OutputOrder {
         if let Some(first_clause) = table.output_clauses.first() {
             if first_clause.output_values.is_none() {
-                return Err("OUTPUT ORDER hit policy requires allowedValues on the output column".into());
+                return Err(
+                    "OUTPUT ORDER hit policy requires allowedValues on the output column".into(),
+                );
             }
         }
     }
@@ -614,20 +647,14 @@ mod tests {
 
     /// Helper to load a DMN fixture and extract the first decision's table.
     fn load_fixture(name: &str) -> (crate::dmn::model::DmnModel, FeelAstCache) {
-        let path = format!(
-            "{}/tests/fixtures/dmn/{}",
-            env!("CARGO_MANIFEST_DIR"),
-            name
-        );
-        let src = fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read fixture {path}: {e}"));
+        let path = format!("{}/tests/fixtures/dmn/{}", env!("CARGO_MANIFEST_DIR"), name);
+        let src =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read fixture {path}: {e}"));
         parse_dmn_with_cache(&src).expect("fixture should parse cleanly")
     }
 
     /// Helper: extract the DecisionTable from a loaded model by decision id.
-    fn table_for<'a>(
-        model: &'a crate::dmn::model::DmnModel,
-        dec_id: &str,
-    ) -> Option<&'a DtModel> {
+    fn table_for<'a>(model: &'a crate::dmn::model::DmnModel, dec_id: &str) -> Option<&'a DtModel> {
         for child in &model.definitions.children {
             if let crate::dmn::model::DefinitionsChild::Decision(dec) = child {
                 if dec.id == dec_id && dec.decision_table.is_some() {
@@ -713,7 +740,11 @@ mod tests {
 
         let cache = FeelAstCache::new();
         let mut scope = Scope::empty();
-        scope.bind("x".into(), Value::Number(rust_decimal::Decimal::from(5)), vec![]);
+        scope.bind(
+            "x".into(),
+            Value::Number(rust_decimal::Decimal::from(5)),
+            vec![],
+        );
         let result = DecisionTableEvaluator::evaluate(&dt, &scope, &cache);
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -772,7 +803,11 @@ mod tests {
 
         let cache = FeelAstCache::new();
         let mut scope = Scope::empty();
-        scope.bind("x".into(), Value::Number(rust_decimal::Decimal::from(5)), vec![]);
+        scope.bind(
+            "x".into(),
+            Value::Number(rust_decimal::Decimal::from(5)),
+            vec![],
+        );
         let result = DecisionTableEvaluator::evaluate(&dt, &scope, &cache).unwrap();
         assert_eq!(result, Value::String("First".into()));
     }
@@ -825,7 +860,11 @@ mod tests {
 
         let cache = FeelAstCache::new();
         let mut scope = Scope::empty();
-        scope.bind("x".into(), Value::Number(rust_decimal::Decimal::from(5)), vec![]);
+        scope.bind(
+            "x".into(),
+            Value::Number(rust_decimal::Decimal::from(5)),
+            vec![],
+        );
         let result = DecisionTableEvaluator::evaluate(&dt, &scope, &cache).unwrap();
         assert_eq!(result, Value::String("High".into()));
     }
@@ -878,7 +917,11 @@ mod tests {
 
         let cache = FeelAstCache::new();
         let mut scope = Scope::empty();
-        scope.bind("x".into(), Value::Number(rust_decimal::Decimal::from(5)), vec![]);
+        scope.bind(
+            "x".into(),
+            Value::Number(rust_decimal::Decimal::from(5)),
+            vec![],
+        );
         let result = DecisionTableEvaluator::evaluate(&dt, &scope, &cache);
         assert!(result.is_err());
         match result.unwrap_err() {

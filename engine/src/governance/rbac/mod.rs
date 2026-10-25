@@ -79,9 +79,7 @@ impl Permission {
         let action_match = self.action == "*" || self.action == action;
 
         // Scope must match exactly, use wildcard, or this is admin (which has all scopes)
-        let scope_match = self.scope == "*"
-            || self.scope == scope
-            || self.scope == "admin"; // Admin gets all scopes
+        let scope_match = self.scope == "*" || self.scope == scope || self.scope == "admin"; // Admin gets all scopes
 
         resource_match && action_match && scope_match
     }
@@ -90,8 +88,8 @@ impl Permission {
 /// A user's role and permission claims
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UserClaims {
-    pub sub: String,          // User ID
-    pub roles: Vec<String>,   // Role names
+    pub sub: String,        // User ID
+    pub roles: Vec<String>, // Role names
     pub permissions: Vec<Permission>,
 }
 
@@ -100,9 +98,7 @@ impl UserClaims {
     pub fn with_role(user_id: &str, role: Role) -> Self {
         let (permissions, roles) = match role {
             Role::Admin => (
-                vec![
-                    Permission::new("*", "*", "*"),
-                ],
+                vec![Permission::new("*", "*", "*")],
                 vec![role.name().to_string()],
             ),
             Role::Author => (

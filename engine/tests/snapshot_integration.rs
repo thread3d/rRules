@@ -3,7 +3,7 @@
 //! These tests verify that the SnapshotManager correctly saves, loads,
 //! and compares working memory snapshots to/from the filesystem.
 
-use engine::testing::{FixtureBuilder, SnapshotMode, SnapshotManager};
+use engine::testing::{FixtureBuilder, SnapshotManager, SnapshotMode};
 use std::collections::HashMap;
 
 /// Create a temporary directory for snapshot testing using tempfile crate
@@ -27,13 +27,23 @@ fn test_snapshot_filesystem_roundtrip() {
 
     // Create a snapshot with some facts using the proper API
     let fixture = FixtureBuilder::new()
-        .with_fact("person", HashMap::from([
-            ("name".to_string(), engine::data_types::Value::String("Alice".to_string())),
-            ("age".to_string(), engine::data_types::Value::Integer(30)),
-        ]))
-        .with_fact("account", HashMap::from([
-            ("status".to_string(), engine::data_types::Value::String("active".to_string())),
-        ]))
+        .with_fact(
+            "person",
+            HashMap::from([
+                (
+                    "name".to_string(),
+                    engine::data_types::Value::String("Alice".to_string()),
+                ),
+                ("age".to_string(), engine::data_types::Value::Integer(30)),
+            ]),
+        )
+        .with_fact(
+            "account",
+            HashMap::from([(
+                "status".to_string(),
+                engine::data_types::Value::String("active".to_string()),
+            )]),
+        )
         .build();
 
     let snapshot = engine::testing::WorkingMemorySnapshot::from_working_memory(&fixture);
@@ -68,9 +78,13 @@ fn test_snapshot_manager_update_mode() {
 
     // Initial snapshot
     let initial_fixture = FixtureBuilder::new()
-        .with_fact("config", HashMap::from([
-            ("version".to_string(), engine::data_types::Value::String("1".to_string())),
-        ]))
+        .with_fact(
+            "config",
+            HashMap::from([(
+                "version".to_string(),
+                engine::data_types::Value::String("1".to_string()),
+            )]),
+        )
         .build();
 
     let initial_snapshot =
@@ -82,9 +96,13 @@ fn test_snapshot_manager_update_mode() {
 
     // Updated snapshot with different content
     let updated_fixture = FixtureBuilder::new()
-        .with_fact("config", HashMap::from([
-            ("version".to_string(), engine::data_types::Value::String("2".to_string())),
-        ]))
+        .with_fact(
+            "config",
+            HashMap::from([(
+                "version".to_string(),
+                engine::data_types::Value::String("2".to_string()),
+            )]),
+        )
         .build();
 
     let updated_snapshot =
@@ -101,9 +119,16 @@ fn test_snapshot_manager_update_mode() {
         .expect("Failed to load updated snapshot");
 
     // Check that version is now "2" by checking the payload
-    let config_fact = loaded.facts.iter().find(|f| f.fact_type == "config").unwrap();
+    let config_fact = loaded
+        .facts
+        .iter()
+        .find(|f| f.fact_type == "config")
+        .unwrap();
     let payload = &config_fact.payload;
-    assert_eq!(payload.get("version"), Some(&engine::testing::ValueSnapshot::String("2".to_string())));
+    assert_eq!(
+        payload.get("version"),
+        Some(&engine::testing::ValueSnapshot::String("2".to_string()))
+    );
 }
 
 #[test]
@@ -120,8 +145,7 @@ fn test_snapshot_baseline_directory_creation() {
         .with_fact("test", HashMap::new())
         .build();
 
-    let snapshot =
-        engine::testing::WorkingMemorySnapshot::from_working_memory(&fixture);
+    let snapshot = engine::testing::WorkingMemorySnapshot::from_working_memory(&fixture);
 
     manager
         .save_baseline("test_dir_create", &snapshot)
@@ -141,8 +165,7 @@ fn test_snapshot_manager_delete_baseline() {
         .with_fact("item", HashMap::new())
         .build();
 
-    let snapshot =
-        engine::testing::WorkingMemorySnapshot::from_working_memory(&fixture);
+    let snapshot = engine::testing::WorkingMemorySnapshot::from_working_memory(&fixture);
 
     manager
         .save_baseline("test_delete", &snapshot)
@@ -178,8 +201,7 @@ fn test_snapshot_manager_has_baseline() {
         .with_fact("test", HashMap::new())
         .build();
 
-    let snapshot =
-        engine::testing::WorkingMemorySnapshot::from_working_memory(&fixture);
+    let snapshot = engine::testing::WorkingMemorySnapshot::from_working_memory(&fixture);
 
     manager
         .save_baseline("test_exists", &snapshot)
@@ -207,13 +229,13 @@ fn test_update_mode_saves_baseline() {
 
     // Create a snapshot with specific content
     let fixture = FixtureBuilder::new()
-        .with_fact("record", HashMap::from([
-            ("value".to_string(), engine::data_types::Value::Integer(42)),
-        ]))
+        .with_fact(
+            "record",
+            HashMap::from([("value".to_string(), engine::data_types::Value::Integer(42))]),
+        )
         .build();
 
-    let snapshot =
-        engine::testing::WorkingMemorySnapshot::from_working_memory(&fixture);
+    let snapshot = engine::testing::WorkingMemorySnapshot::from_working_memory(&fixture);
 
     // In Update mode, assert_matches_baseline should save if no baseline exists
     manager
@@ -238,9 +260,13 @@ fn test_snapshot_manager_read_mode_rejects_mismatch() {
 
     // Initial snapshot
     let initial_fixture = FixtureBuilder::new()
-        .with_fact("config", HashMap::from([
-            ("version".to_string(), engine::data_types::Value::String("1".to_string())),
-        ]))
+        .with_fact(
+            "config",
+            HashMap::from([(
+                "version".to_string(),
+                engine::data_types::Value::String("1".to_string()),
+            )]),
+        )
         .build();
 
     let initial_snapshot =
@@ -252,16 +278,22 @@ fn test_snapshot_manager_read_mode_rejects_mismatch() {
 
     // Different content - should fail in Read mode
     let different_fixture = FixtureBuilder::new()
-        .with_fact("config", HashMap::from([
-            ("version".to_string(), engine::data_types::Value::String("99".to_string())),
-        ]))
+        .with_fact(
+            "config",
+            HashMap::from([(
+                "version".to_string(),
+                engine::data_types::Value::String("99".to_string()),
+            )]),
+        )
         .build();
 
     let different_snapshot =
         engine::testing::WorkingMemorySnapshot::from_working_memory(&different_fixture);
 
     // In Read mode, mismatch should return an error
-    assert!(manager.assert_matches_baseline("test_read_mismatch", &different_snapshot).is_err());
+    assert!(manager
+        .assert_matches_baseline("test_read_mismatch", &different_snapshot)
+        .is_err());
 }
 
 #[test]
@@ -274,8 +306,9 @@ fn test_snapshot_manager_skip_mode_always_succeeds() {
         .with_fact("test", HashMap::new())
         .build();
 
-    let snapshot =
-        engine::testing::WorkingMemorySnapshot::from_working_memory(&fixture);
+    let snapshot = engine::testing::WorkingMemorySnapshot::from_working_memory(&fixture);
 
-    assert!(manager.assert_matches_baseline("nonexistent", &snapshot).is_ok());
+    assert!(manager
+        .assert_matches_baseline("nonexistent", &snapshot)
+        .is_ok());
 }

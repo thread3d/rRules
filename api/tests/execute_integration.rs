@@ -167,8 +167,7 @@ fn score_plus_20_rule() -> Rule {
 /// before calling `POST /v1/rules/reload`.
 fn write_rule_file(dir: &std::path::Path, name: &str, rule: &Rule) -> PathBuf {
     let path = dir.join(format!("{name}.rules"));
-    let json = serde_json::to_string_pretty(rule)
-        .expect("serialize rule to JSON");
+    let json = serde_json::to_string_pretty(rule).expect("serialize rule to JSON");
     std::fs::write(&path, json)
         .unwrap_or_else(|e| panic!("write_rule_file: failed to write {}: {e}", path.display()));
     path
@@ -400,14 +399,8 @@ fn configure_test_routes(cfg: &mut web::ServiceConfig) {
             // Phase 27 (D-09 / D-05): lifecycle routes for SC-4. Registered
             // before any wildcard `/execute/{...}` route (none currently
             // exists, but the discipline holds per PATTERNS.md line 372).
-            .route(
-                "/execute/session/{id}",
-                web::delete().to(dispose_session),
-            )
-            .route(
-                "/execute/session/{id}/reset",
-                web::post().to(reset_session),
-            )
+            .route("/execute/session/{id}", web::delete().to(dispose_session))
+            .route("/execute/session/{id}/reset", web::post().to(reset_session))
             .route("/metrics/coverage", web::get().to(coverage_endpoint))
             .route("/metrics/dead-rules", web::get().to(dead_rules_endpoint))
             // Phase 25 (Plan 25-01 Task 2): reload + batch + jobs routes.
@@ -823,8 +816,12 @@ async fn response_includes_engine_generation() {
 /// responsible for cleanup (best-effort `fs::remove_dir_all` on drop).
 fn create_test_rules_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("rrules-test-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir)
-        .unwrap_or_else(|e| panic!("create_test_rules_dir: failed to create {}: {e}", dir.display()));
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| {
+        panic!(
+            "create_test_rules_dir: failed to create {}: {e}",
+            dir.display()
+        )
+    });
     dir
 }
 
@@ -1557,7 +1554,8 @@ async fn keystone_three_surfaces_agree() {
     );
     let prom_bytes = test::read_body(prom_resp).await;
     let prom_text = String::from_utf8_lossy(&prom_bytes);
-    let prom_fired_total = extract_prom_counter(&prom_text, "rrules_execute_rules_fired_total", "rete");
+    let prom_fired_total =
+        extract_prom_counter(&prom_text, "rrules_execute_rules_fired_total", "rete");
     assert!(
         prom_fired_total >= 1,
         "SC-3: Prometheus rrules_execute_rules_fired_total{{engine=\"rete\"}} should be >= 1; got {prom_fired_total}; text: {prom_text}"
@@ -2196,9 +2194,7 @@ async fn list_engines_returns_registry() {
     reset_test_env();
     let app = init_test_app!();
 
-    let req = test::TestRequest::get()
-        .uri("/v1/engines")
-        .to_request();
+    let req = test::TestRequest::get().uri("/v1/engines").to_request();
     let resp = test::call_service(&app, req).await;
     assert!(
         resp.status().is_success(),
@@ -2209,14 +2205,12 @@ async fn list_engines_returns_registry() {
     let body = json_body(resp).await;
 
     // engines is a non-empty array of strings.
-    let engines = body["engines"]
-        .as_array()
-        .unwrap_or_else(|| {
-            panic!(
-                "FRONTEND-04 / D-03: 'engines' should be an array; got {:?}; body: {body}",
-                body["engines"],
-            )
-        });
+    let engines = body["engines"].as_array().unwrap_or_else(|| {
+        panic!(
+            "FRONTEND-04 / D-03: 'engines' should be an array; got {:?}; body: {body}",
+            body["engines"],
+        )
+    });
     assert!(
         !engines.is_empty(),
         "FRONTEND-04 / D-03: 'engines' should be non-empty; got {:?}; body: {body}",
@@ -2231,14 +2225,12 @@ async fn list_engines_returns_registry() {
     }
 
     // default is a string.
-    let default = body["default"]
-        .as_str()
-        .unwrap_or_else(|| {
-            panic!(
-                "FRONTEND-04 / D-03: 'default' should be a string; got {:?}; body: {body}",
-                body["default"],
-            )
-        });
+    let default = body["default"].as_str().unwrap_or_else(|| {
+        panic!(
+            "FRONTEND-04 / D-03: 'default' should be a string; got {:?}; body: {body}",
+            body["default"],
+        )
+    });
     assert!(
         !default.is_empty(),
         "FRONTEND-04 / D-03: 'default' should be a non-empty string; got {:?}; body: {body}",

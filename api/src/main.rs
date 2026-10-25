@@ -2,8 +2,8 @@
 
 use actix_files as fs;
 use actix_web::{web, App, HttpServer};
-use utoipa_swagger_ui::SwaggerUi;
 use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 use crate::openapi::ApiDoc;
 
@@ -58,8 +58,8 @@ async fn main() -> std::io::Result<()> {
     let registry = web::Data::new(registry);
 
     let mut selector = EngineSelector::with_defaults();
-    let default_engine = std::env::var("RRULES_DEFAULT_ENGINE")
-        .unwrap_or_else(|_| "rete".to_string());
+    let default_engine =
+        std::env::var("RRULES_DEFAULT_ENGINE").unwrap_or_else(|_| "rete".to_string());
     if selector.select_engine(&default_engine).is_err() {
         tracing::warn!(
             engine = %default_engine,
@@ -89,8 +89,7 @@ async fn main() -> std::io::Result<()> {
     // The generation is bumped on each successful reload (Plan 25-02's
     // `reload_and_swap`). The `Arc<RwLock<...>>` pattern is preserved — no
     // `ArcSwap` (L-01).
-    let rules_dir = std::env::var("RULE_STORAGE_PATH")
-        .unwrap_or_else(|_| "./rules".to_string());
+    let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
     let ruleset = SharedRuleSet::new(v1::execution::build_ruleset_from_dir(&rules_dir));
     let ruleset = web::Data::new(std::sync::Arc::new(std::sync::RwLock::new(ruleset)));
 
@@ -99,47 +98,60 @@ async fn main() -> std::io::Result<()> {
     // exists and contains at least one `.dmn` file, load via `parse_dmn_with_cache()`;
     // otherwise construct an empty SharedDmnModel (do NOT crash — model can be loaded
     // later via hot-reload). This mirrors Phase 25's SharedRuleSet pattern.
-    let dmn_storage_path = std::env::var("DMN_STORAGE_PATH")
-        .unwrap_or_else(|_| "./dmn".to_string());
+    let dmn_storage_path =
+        std::env::var("DMN_STORAGE_PATH").unwrap_or_else(|_| "./dmn".to_string());
     let shared_dmn_model = if std::path::Path::new(&dmn_storage_path).is_dir() {
         let entries: Vec<_> = match std::fs::read_dir(&dmn_storage_path) {
             Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
             Err(_) => vec![],
         };
-        let dmn_files: Vec<_> = entries.iter()
+        let dmn_files: Vec<_> = entries
+            .iter()
             .filter(|e| e.path().extension().is_some_and(|ext| ext == "dmn"))
             .collect();
         if !dmn_files.is_empty() {
             tracing::info!(path = %dmn_storage_path, files = dmn_files.len(), "Loading DMN model from storage");
             let first_dmn = &dmn_files[0];
             match std::fs::read_to_string(first_dmn.path()) {
-                Ok(content) => {
-                    match engine::dmn::parser::parse_dmn_with_cache(&content) {
-                        Ok((model, ast_cache)) => SharedDmnModel::new(model, ast_cache),
-                        Err(e) => {
-                            tracing::warn!(error = %e, "Failed to parse first .dmn file, using empty model");
-                            SharedDmnModel::new(engine::dmn::model::DmnModel::default(), FeelAstCache::default())
-                        }
+                Ok(content) => match engine::dmn::parser::parse_dmn_with_cache(&content) {
+                    Ok((model, ast_cache)) => SharedDmnModel::new(model, ast_cache),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to parse first .dmn file, using empty model");
+                        SharedDmnModel::new(
+                            engine::dmn::model::DmnModel::default(),
+                            FeelAstCache::default(),
+                        )
                     }
-                }
+                },
                 Err(e) => {
                     tracing::warn!(error = %e, "Failed to read first .dmn file, using empty model");
-                    SharedDmnModel::new(engine::dmn::model::DmnModel::default(), FeelAstCache::default())
+                    SharedDmnModel::new(
+                        engine::dmn::model::DmnModel::default(),
+                        FeelAstCache::default(),
+                    )
                 }
             }
         } else {
             tracing::info!(path = %dmn_storage_path, "No .dmn files found in storage path; using empty DMN model");
-            SharedDmnModel::new(engine::dmn::model::DmnModel::default(), FeelAstCache::default())
+            SharedDmnModel::new(
+                engine::dmn::model::DmnModel::default(),
+                FeelAstCache::default(),
+            )
         }
     } else {
         tracing::info!(path = %dmn_storage_path, "DMN storage path does not exist; using empty DMN model");
-        SharedDmnModel::new(engine::dmn::model::DmnModel::default(), FeelAstCache::default())
+        SharedDmnModel::new(
+            engine::dmn::model::DmnModel::default(),
+            FeelAstCache::default(),
+        )
     };
 
     // Phase 33: create the DecisionEvaluator holding the shared snapshot.
     // Wrapped in `Arc` because actix-web's `web::Data<T>` requires `T: Clone`,
     // and `DecisionEvaluator` is not `Clone` (it holds an `Arc<RwLock<>>` internally).
-    let dmn_evaluator = std::sync::Arc::new(DecisionEvaluator::new(std::sync::Arc::new(std::sync::RwLock::new(shared_dmn_model))));
+    let dmn_evaluator = std::sync::Arc::new(DecisionEvaluator::new(std::sync::Arc::new(
+        std::sync::RwLock::new(shared_dmn_model),
+    )));
 
     // Phase 33 (Plan 33-01 Task 3): create the DMN metrics broadcast channel
     // for real-time WebSocket delivery of DmnMetricsSnapshot events. Capacity 16
@@ -167,19 +179,14 @@ async fn main() -> std::io::Result<()> {
     // The manager is wrapped in Arc and shared across actix workers via
     // web::Data; a clone is moved into the background sweep task (D-10).
     let session_config = read_session_config();
-    let sessions_active = prometheus::IntGauge::new(
-        "rrules_sessions_active",
-        "Active stateful session count",
-    )
-    .expect("construct rrules_sessions_active gauge");
+    let sessions_active =
+        prometheus::IntGauge::new("rrules_sessions_active", "Active stateful session count")
+            .expect("construct rrules_sessions_active gauge");
     counters
         .registry
         .register(Box::new(sessions_active.clone()))
         .expect("register rrules_sessions_active on dedicated Registry");
-    let session_manager = std::sync::Arc::new(SessionManager::new(
-        session_config,
-        sessions_active,
-    ));
+    let session_manager = std::sync::Arc::new(SessionManager::new(session_config, sessions_active));
     let sweep_manager = session_manager.clone();
 
     // Initialize in-memory stores
@@ -198,14 +205,13 @@ async fn main() -> std::io::Result<()> {
     let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
     std::fs::create_dir_all(&rules_dir)?;
 
-    let vcs_config = engine::governance::versioning::VcsConfig::new(
-        &format!("{}/.git", rules_dir),
-    );
+    let vcs_config = engine::governance::versioning::VcsConfig::new(&format!("{}/.git", rules_dir));
     let repo_path = vcs_config.repo_path.clone();
-    let branch_store: web::Data<tokio::sync::Mutex<engine::governance::versioning::VersionControlRepo>> = {
+    let branch_store: web::Data<
+        tokio::sync::Mutex<engine::governance::versioning::VersionControlRepo>,
+    > = {
         let repo = engine::governance::versioning::VersionControlRepo::open_or_init(
-            &repo_path,
-            vcs_config,
+            &repo_path, vcs_config,
         )
         .map_err(|e| std::io::Error::other(format!("Failed to init VCS: {}", e)))?;
         web::Data::new(tokio::sync::Mutex::from(repo))
@@ -214,8 +220,8 @@ async fn main() -> std::io::Result<()> {
     tracing::info!(vcs_repo = %branch_store.lock().await.repo().path().display(), "Initialized git-backed version control");
 
     // Get frontend dist path from environment or use default
-    let frontend_dist = std::env::var("FRONTEND_DIST")
-        .unwrap_or_else(|_| "../frontend/dist".to_string());
+    let frontend_dist =
+        std::env::var("FRONTEND_DIST").unwrap_or_else(|_| "../frontend/dist".to_string());
 
     println!("Frontend dist path: {}", frontend_dist);
 
@@ -234,7 +240,10 @@ async fn main() -> std::io::Result<()> {
     // calls SessionManager::sweep_expired (evicts by TTL/max-lifetime/LRU +
     // updates the gauge). Lives for the process lifetime (no explicit
     // CancellationToken — matches start_file_watcher).
-    println!("Starting session sweep task (interval: {:?})", session_manager.sweep_interval);
+    println!(
+        "Starting session sweep task (interval: {:?})",
+        session_manager.sweep_interval
+    );
     tokio::spawn(run_session_sweep(sweep_manager));
 
     // CORS allowed origins (D-22-05). Default: the vite dev origin
@@ -292,9 +301,7 @@ async fn main() -> std::io::Result<()> {
             // can push DmnMetricsSnapshot events after each evaluation (WS delivery).
             .app_data(web::Data::new(dmn_metrics_tx.clone()))
             // Phase 33 (Task 5): inject the FileSystemDmnStore for decision CRUD.
-            .app_data(web::Data::new(
-                engine_state::FileSystemDmnStore::default(),
-            ))
+            .app_data(web::Data::new(engine_state::FileSystemDmnStore::default()))
             .app_data(web::Data::new(rule_store.clone()))
             .app_data(web::Data::new(category_store.clone()))
             .app_data(web::Data::new(tag_store.clone()))
@@ -355,30 +362,66 @@ async fn main() -> std::io::Result<()> {
                     // Static rule sub-paths MUST be registered before /rules/{id}
                     // so actix matches the literal segment instead of binding it
                     // to the {id} wildcard.
-                    .route("/rules/batch-execute", web::post().to(v1::execution::batch_execute_rules))
+                    .route(
+                        "/rules/batch-execute",
+                        web::post().to(v1::execution::batch_execute_rules),
+                    )
                     // Hot reload endpoint for updating rules without restart
                     .route("/rules/reload", web::post().to(v1::execution::reload_rules))
                     .route("/rules/{id}", web::get().to(v1::rules::get_rule))
                     .route("/rules/{id}", web::put().to(v1::rules::update_rule))
                     .route("/rules/{id}", web::patch().to(v1::rules::update_rule))
-                    .route("/rules/{id}/undelete", web::post().to(v1::rules::undelete_rule))
+                    .route(
+                        "/rules/{id}/undelete",
+                        web::post().to(v1::rules::undelete_rule),
+                    )
                     // Soft delete (marks as archived)
                     .route("/rules/{id}", web::delete().to(v1::rules::delete_rule))
                     // Reload job status endpoints (Phase 21)
                     .route("/jobs/{job_id}", web::get().to(get_job_status))
                     .route("/jobs", web::get().to(list_jobs))
                     // Approval workflow endpoints (Phase 20-03)
-                    .route("/rules/{id}/submit", web::post().to(v1::approvals::submit_for_approval))
-                    .route("/approvals/pending", web::get().to(v1::approvals::list_pending_approvals))
-                    .route("/approvals/{id}/approve", web::post().to(v1::approvals::approve_request))
-                    .route("/approvals/{id}/reject", web::post().to(v1::approvals::reject_request))
+                    .route(
+                        "/rules/{id}/submit",
+                        web::post().to(v1::approvals::submit_for_approval),
+                    )
+                    .route(
+                        "/approvals/pending",
+                        web::get().to(v1::approvals::list_pending_approvals),
+                    )
+                    .route(
+                        "/approvals/{id}/approve",
+                        web::post().to(v1::approvals::approve_request),
+                    )
+                    .route(
+                        "/approvals/{id}/reject",
+                        web::post().to(v1::approvals::reject_request),
+                    )
                     // Category endpoints (Phase 20-02)
-                    .route("/categories", web::get().to(v1::categories::list_categories))
-                    .route("/categories", web::post().to(v1::categories::create_category))
-                    .route("/categories/{id}", web::get().to(v1::categories::get_category))
-                    .route("/categories/{id}", web::put().to(v1::categories::update_category))
-                    .route("/categories/{id}", web::patch().to(v1::categories::update_category))
-                    .route("/categories/{id}", web::delete().to(v1::categories::delete_category))
+                    .route(
+                        "/categories",
+                        web::get().to(v1::categories::list_categories),
+                    )
+                    .route(
+                        "/categories",
+                        web::post().to(v1::categories::create_category),
+                    )
+                    .route(
+                        "/categories/{id}",
+                        web::get().to(v1::categories::get_category),
+                    )
+                    .route(
+                        "/categories/{id}",
+                        web::put().to(v1::categories::update_category),
+                    )
+                    .route(
+                        "/categories/{id}",
+                        web::patch().to(v1::categories::update_category),
+                    )
+                    .route(
+                        "/categories/{id}",
+                        web::delete().to(v1::categories::delete_category),
+                    )
                     // Tag endpoints (Phase 20-02)
                     .route("/tags", web::get().to(v1::tags::list_tags))
                     .route("/tags", web::post().to(v1::tags::create_tag))
@@ -389,17 +432,35 @@ async fn main() -> std::io::Result<()> {
                     .route("/tenants", web::get().to(v1::tenants::list_tenants))
                     .route("/tenants", web::post().to(v1::tenants::create_tenant))
                     .route("/tenants/{id}", web::get().to(v1::tenants::get_tenant))
-                    .route("/tenants/{id}", web::delete().to(v1::tenants::delete_tenant))
-                    .route("/rules/{id}/tags", web::post().to(v1::tags::assign_tag_to_rule))
-                    .route("/rules/{id}/tags/{tag_name}", web::delete().to(v1::tags::remove_tag_from_rule))
+                    .route(
+                        "/tenants/{id}",
+                        web::delete().to(v1::tenants::delete_tenant),
+                    )
+                    .route(
+                        "/rules/{id}/tags",
+                        web::post().to(v1::tags::assign_tag_to_rule),
+                    )
+                    .route(
+                        "/rules/{id}/tags/{tag_name}",
+                        web::delete().to(v1::tags::remove_tag_from_rule),
+                    )
                     // Branch endpoints (Phase 20-05)
                     .route("/branches", web::get().to(v1::branches::list_branches))
                     .route("/branches", web::post().to(v1::branches::create_branch))
                     .route("/branches/{name}", web::get().to(v1::branches::get_branch))
-                    .route("/branches/{name}", web::delete().to(v1::branches::delete_branch))
-                    .route("/branches/{name}/merge", web::post().to(v1::branches::merge_branch))
+                    .route(
+                        "/branches/{name}",
+                        web::delete().to(v1::branches::delete_branch),
+                    )
+                    .route(
+                        "/branches/{name}/merge",
+                        web::post().to(v1::branches::merge_branch),
+                    )
                     // Git log endpoint (Phase 20-05)
-                    .route("/rules/{id}/git-log", web::get().to(v1::branches::get_git_log))
+                    .route(
+                        "/rules/{id}/git-log",
+                        web::get().to(v1::branches::get_git_log),
+                    )
                     // Audit trail endpoints (Phase 20-04)
                     .route("/audit", web::get().to(v1::audit::query_audit_events))
                     .route("/audit/export", web::get().to(v1::audit::export_audit_log))

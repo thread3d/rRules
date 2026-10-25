@@ -84,8 +84,14 @@ async fn metrics_json_engine_state() {
     let body = json_body(test::call_service(&app, req).await).await;
 
     assert_eq!(body["engine_name"], "default");
-    assert!(body["rules_fired"].is_number(), "rules_fired numeric: {body}");
-    assert!(body["memory_bytes"].is_number(), "memory_bytes numeric: {body}");
+    assert!(
+        body["rules_fired"].is_number(),
+        "rules_fired numeric: {body}"
+    );
+    assert!(
+        body["memory_bytes"].is_number(),
+        "memory_bytes numeric: {body}"
+    );
 }
 
 #[actix_web::test]
@@ -150,7 +156,9 @@ async fn coverage_endpoint_reads_tracked_data() {
     );
     // The summary must reflect at least one evaluated rule.
     assert!(
-        body["summary"]["evaluated_count"].as_u64().is_some_and(|c| c >= 1),
+        body["summary"]["evaluated_count"]
+            .as_u64()
+            .is_some_and(|c| c >= 1),
         "summary.evaluated_count must be >= 1; body: {body}"
     );
 }

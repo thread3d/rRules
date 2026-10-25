@@ -92,11 +92,7 @@ fn assert_keystone_fires<E: ExecutionEngine + 'static>(mut engine: E, engine_lab
         .unwrap_or_else(|e| panic!("{} insert_fact should succeed, got: {}", engine_label, e));
 
     let result = engine.execute();
-    assert!(
-        result.success,
-        "{}: execute should succeed",
-        engine_label
-    );
+    assert!(result.success, "{}: execute should succeed", engine_label);
     assert!(
         result.rules_fired >= 1,
         "{}: keystone rule should fire, got rules_fired = {}",
@@ -114,7 +110,12 @@ fn assert_keystone_fires<E: ExecutionEngine + 'static>(mut engine: E, engine_lab
     let scorecard = facts
         .iter()
         .find(|f| f.fact_type_id == "scorecard")
-        .unwrap_or_else(|| panic!("{}: scorecard fact should exist after execute", engine_label));
+        .unwrap_or_else(|| {
+            panic!(
+                "{}: scorecard fact should exist after execute",
+                engine_label
+            )
+        });
     assert_eq!(
         scorecard.payload.get("score"),
         Some(&Value::Integer(10)),

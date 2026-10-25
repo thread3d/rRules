@@ -7,8 +7,7 @@ use crate::salience::agenda::Activation;
 use std::cmp::Reverse;
 
 /// Conflict resolution strategy for ordering rule activations.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ConflictStrategy {
     /// Higher salience fires first (default)
     #[default]
@@ -22,7 +21,6 @@ pub enum ConflictStrategy {
     /// Alphabetical rule name for determinism
     Lexicographic,
 }
-
 
 /// Resolves conflicts between activated rules using a specified strategy.
 #[derive(Debug, Clone)]

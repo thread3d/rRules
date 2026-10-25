@@ -5,9 +5,9 @@
 
 #![allow(unexpected_cfgs, dead_code)]
 #![allow(unused_imports, unreachable_pub, unused_variables, unused_mut)]
-use std::collections::HashMap;
 #[cfg(feature = "metrics")]
 use prometheus::{self, Encoder, TextEncoder};
+use std::collections::HashMap;
 
 /// Metrics collected from a single engine execution.
 #[derive(Debug, Clone, Default)]
@@ -179,15 +179,20 @@ impl MetricsExporter for EngineMetrics {
         let mut output = String::new();
 
         // Add labels
-        let label_str = labels.map(|l| {
-            l.iter()
-                .map(|(k, v)| format!(r#"{}="{}""#, k, v))
-                .collect::<Vec<_>>()
-                .join(",")
-        }).unwrap_or_default();
+        let label_str = labels
+            .map(|l| {
+                l.iter()
+                    .map(|(k, v)| format!(r#"{}="{}""#, k, v))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_default();
 
         if !label_str.is_empty() {
-            output.push_str(&format!("# HELP {}_metrics Engine execution metrics\n", engine_name));
+            output.push_str(&format!(
+                "# HELP {}_metrics Engine execution metrics\n",
+                engine_name
+            ));
             output.push_str(&format!("# TYPE {}_metrics counter\n", engine_name));
         }
 
@@ -195,7 +200,11 @@ impl MetricsExporter for EngineMetrics {
         output.push_str(&format!(
             "{}_rules_fired{} {}\n",
             engine_name,
-            if !label_str.is_empty() { format!("{{{}}}", label_str) } else { String::new() },
+            if !label_str.is_empty() {
+                format!("{{{}}}", label_str)
+            } else {
+                String::new()
+            },
             self.rules_fired
         ));
 
@@ -203,14 +212,22 @@ impl MetricsExporter for EngineMetrics {
         output.push_str(&format!(
             "{}_facts_inserted{} {}\n",
             engine_name,
-            if !label_str.is_empty() { format!("{{{}}}", label_str) } else { String::new() },
+            if !label_str.is_empty() {
+                format!("{{{}}}", label_str)
+            } else {
+                String::new()
+            },
             self.facts_inserted
         ));
 
         output.push_str(&format!(
             "{}_facts_retracted{} {}\n",
             engine_name,
-            if !label_str.is_empty() { format!("{{{}}}", label_str) } else { String::new() },
+            if !label_str.is_empty() {
+                format!("{{{}}}", label_str)
+            } else {
+                String::new()
+            },
             self.facts_retracted
         ));
 
@@ -218,14 +235,22 @@ impl MetricsExporter for EngineMetrics {
         output.push_str(&format!(
             "{}_alpha_memory_size{} {}\n",
             engine_name,
-            if !label_str.is_empty() { format!("{{{}}}", label_str) } else { String::new() },
+            if !label_str.is_empty() {
+                format!("{{{}}}", label_str)
+            } else {
+                String::new()
+            },
             self.alpha_memory_size
         ));
 
         output.push_str(&format!(
             "{}_beta_memory_size{} {}\n",
             engine_name,
-            if !label_str.is_empty() { format!("{{{}}}", label_str) } else { String::new() },
+            if !label_str.is_empty() {
+                format!("{{{}}}", label_str)
+            } else {
+                String::new()
+            },
             self.beta_memory_size
         ));
 
@@ -233,7 +258,11 @@ impl MetricsExporter for EngineMetrics {
         output.push_str(&format!(
             "{}_network_traversals{} {}\n",
             engine_name,
-            if !label_str.is_empty() { format!("{{{}}}", label_str) } else { String::new() },
+            if !label_str.is_empty() {
+                format!("{{{}}}", label_str)
+            } else {
+                String::new()
+            },
             self.network_traversals
         ));
 
@@ -241,7 +270,11 @@ impl MetricsExporter for EngineMetrics {
         output.push_str(&format!(
             "{}_execution_seconds{} {:.6}\n",
             engine_name,
-            if !label_str.is_empty() { format!("{{{}}}", label_str) } else { String::new() },
+            if !label_str.is_empty() {
+                format!("{{{}}}", label_str)
+            } else {
+                String::new()
+            },
             self.execution_time_ms / 1000.0
         ));
 
@@ -249,14 +282,22 @@ impl MetricsExporter for EngineMetrics {
         output.push_str(&format!(
             "{}_cache_hits{} {}\n",
             engine_name,
-            if !label_str.is_empty() { format!("{{{}}}", label_str) } else { String::new() },
+            if !label_str.is_empty() {
+                format!("{{{}}}", label_str)
+            } else {
+                String::new()
+            },
             self.cache_hits
         ));
 
         output.push_str(&format!(
             "{}_cache_misses{} {}\n",
             engine_name,
-            if !label_str.is_empty() { format!("{{{}}}", label_str) } else { String::new() },
+            if !label_str.is_empty() {
+                format!("{{{}}}", label_str)
+            } else {
+                String::new()
+            },
             self.cache_misses
         ));
 

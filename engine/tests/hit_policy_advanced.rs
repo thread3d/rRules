@@ -4,16 +4,21 @@
 //! empty-match semantics, and load-time validation errors.
 //! Filter: `cargo test -p engine --test hit_policy_advanced`
 
-use engine::dmn::decision_table::{DecisionTableEvaluator, DecisionTableError, validate_decision_table};
+use engine::data_types::Value;
+use engine::dmn::decision_table::{
+    validate_decision_table, DecisionTableError, DecisionTableEvaluator,
+};
 use engine::dmn::feel::eval::Scope;
 use engine::dmn::model::{DefinitionsChild, DmnModel};
 use engine::dmn::parser::parse_dmn_with_cache;
-use engine::data_types::Value;
 
 const DMN_HIT_POLICY_TEST: &str = include_str!("fixtures/dmn/hit_policy_test.dmn");
 
 /// Extract the DecisionTable from a parsed model by decision id.
-fn extract_table<'a>(model: &'a DmnModel, dec_id: &str) -> Option<&'a engine::dmn::model::DecisionTable> {
+fn extract_table<'a>(
+    model: &'a DmnModel,
+    dec_id: &str,
+) -> Option<&'a engine::dmn::model::DecisionTable> {
     for child in &model.definitions.children {
         if let DefinitionsChild::Decision(dec) = child {
             if dec.id == dec_id && dec.decision_table.is_some() {
@@ -173,7 +178,9 @@ fn test_collect_multi_output_rejected_at_load() {
         // Validation should reject this table.
         let result = validate_decision_table(dt);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("COLLECT with aggregation requires exactly one output column"));
+        assert!(result
+            .unwrap_err()
+            .contains("COLLECT with aggregation requires exactly one output column"));
     } else {
         panic!("expected _dec_collect_multi decision in fixture");
     }
@@ -188,7 +195,9 @@ fn test_priority_no_allowed_values_rejected_at_load() {
         // Validation should reject this table.
         let result = validate_decision_table(dt);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("PRIORITY hit policy requires allowedValues"));
+        assert!(result
+            .unwrap_err()
+            .contains("PRIORITY hit policy requires allowedValues"));
     } else {
         panic!("expected _dec_priority_no_allowed decision in fixture");
     }

@@ -36,8 +36,8 @@
 //! Phase 37 adds:
 //! - [`LexerTokenCache`] — lexer token caching to avoid redundant lexing
 
-use rust_decimal::Decimal;
 use super::ast::Span;
+use rust_decimal::Decimal;
 
 // Forward declaration for ParseEntry (defined in cache.rs)
 #[allow(dead_code)]
@@ -208,10 +208,7 @@ impl<'a> Lexer<'a> {
                 // T-31-01-01 DoS guard: emit a LexError and stop.
                 let span = self.current_span(0);
                 out.push(TokenSpan {
-                    token: Token::LexError(format!(
-                        "max_tokens ({}) exceeded",
-                        self.max_tokens
-                    )),
+                    token: Token::LexError(format!("max_tokens ({}) exceeded", self.max_tokens)),
                     span,
                 });
                 return out;
@@ -413,9 +410,7 @@ impl<'a> Lexer<'a> {
             self.col += 1;
         }
         // Optional fractional part: "." followed by digits.
-        if self.peek_at(0) == Some(b'.')
-            && self.peek_at(1).is_some_and(|c| c.is_ascii_digit())
-        {
+        if self.peek_at(0) == Some(b'.') && self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
             self.cursor += 1;
             self.col += 1;
             while self.cursor < self.src.len() && self.src[self.cursor].is_ascii_digit() {
@@ -465,7 +460,9 @@ impl<'a> Lexer<'a> {
             // it for qualified-name handling).
             if (c == b'/' || c == b'\'' || c == b'+' || c == b'*' || c == b'-')
                 && start != self.cursor
-                && self.peek_at(1).is_some_and(|nc| nc.is_ascii_alphanumeric() || nc == b'_' || nc == b'?')
+                && self
+                    .peek_at(1)
+                    .is_some_and(|nc| nc.is_ascii_alphanumeric() || nc == b'_' || nc == b'?')
             {
                 self.cursor += 1;
                 self.col += 1;
@@ -624,7 +621,11 @@ mod lexer_tests {
     #[test]
     fn lex_number_plus_number() {
         let toks = Lexer::new("1 + 2.5").tokenize();
-        assert!(toks.len() >= 4, "expected at least 4 tokens, got {}", toks.len());
+        assert!(
+            toks.len() >= 4,
+            "expected at least 4 tokens, got {}",
+            toks.len()
+        );
         assert_eq!(toks[0].token, Token::Number(dec!(1)));
         assert_eq!(toks[1].token, Token::Plus);
         assert_eq!(toks[2].token, Token::Number(dec!(2.5)));
@@ -779,9 +780,9 @@ mod lexer_tests {
 // We cache the token stream keyed by source text + entry point kind.
 // The same source always yields identical tokens — lexing is deterministic.
 
+use dashmap::DashMap;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use dashmap::DashMap;
 
 /// Canonical cache key: `(entry-point kind, trimmed content)`.
 ///
@@ -924,8 +925,16 @@ mod lexer_cache_tests {
 
         assert_eq!(a.len(), b.len(), "same source yields same token count");
         for (ta, tb) in a.iter().zip(b.iter()) {
-            assert_eq!(ta.token, tb.token, "token at position {} differs", ta.span.start);
-            assert_eq!(ta.span, tb.span, "span at position {} differs", ta.span.start);
+            assert_eq!(
+                ta.token, tb.token,
+                "token at position {} differs",
+                ta.span.start
+            );
+            assert_eq!(
+                ta.span, tb.span,
+                "span at position {} differs",
+                ta.span.start
+            );
         }
     }
 
@@ -939,15 +948,25 @@ mod lexer_cache_tests {
         let expr_tokens = cache.get_or_lex(src, ParseEntry::Expression);
         let unary_tokens = cache.get_or_lex(src, ParseEntry::SimpleUnaryTests);
 
-        assert_eq!(expr_tokens.len(), unary_tokens.len(),
-            "lexer produces same token count regardless of entry point");
+        assert_eq!(
+            expr_tokens.len(),
+            unary_tokens.len(),
+            "lexer produces same token count regardless of entry point"
+        );
         for (ta, tb) in expr_tokens.iter().zip(unary_tokens.iter()) {
-            assert_eq!(ta.token, tb.token,
-                "token at position {} identical regardless of entry point", ta.span.start);
+            assert_eq!(
+                ta.token, tb.token,
+                "token at position {} identical regardless of entry point",
+                ta.span.start
+            );
         }
         // Same source = same cache key (key is just (entry, content), so different
         // entry points yield DIFFERENT entries even if tokens are the same).
-        assert_eq!(cache.len(), 2, "different entry points create separate cache entries");
+        assert_eq!(
+            cache.len(),
+            2,
+            "different entry points create separate cache entries"
+        );
     }
 
     /// Whitespace normalization works in token cache key.
@@ -1004,7 +1023,7 @@ mod lexer_cache_tests {
 // recursive-descent stack; past the cap emit
 // `FeelExpression::Err(span, "max recursion depth exceeded")`.
 
-use super::ast::{FeelExpression, BinOpKind, QuantKind};
+use super::ast::{BinOpKind, FeelExpression, QuantKind};
 use super::types::FeelType;
 use crate::data_types::Value;
 
@@ -1031,7 +1050,10 @@ impl Parser {
 
     /// The current token (or `Token::Eof` past end).
     fn peek(&self) -> &Token {
-        self.tokens.get(self.pos).map(|ts| &ts.token).unwrap_or(&Token::Eof)
+        self.tokens
+            .get(self.pos)
+            .map(|ts| &ts.token)
+            .unwrap_or(&Token::Eof)
     }
 
     /// The current token's span (or a zero span at end).
@@ -1265,7 +1287,10 @@ impl Parser {
                     // Regular path: `target.name`
                     self.advance();
                     let name = match self.advance() {
-                        Some(TokenSpan { token: Token::Name(n), .. }) => n,
+                        Some(TokenSpan {
+                            token: Token::Name(n),
+                            ..
+                        }) => n,
                         _ => {
                             self.sync_to_boundary();
                             return self.err_here("expected name after '.'");
@@ -1512,7 +1537,13 @@ impl Parser {
         // If parse_postfix already consumed `..` and produced a Range,
         // unwrap it and fix end_inclusivity from the closing bracket.
         // `start_inclusive` is always `true` (opening `[` is inclusive).
-        if let FeelExpression::Range { start, end, start_inclusive, .. } = first {
+        if let FeelExpression::Range {
+            start,
+            end,
+            start_inclusive,
+            ..
+        } = first
+        {
             let end_inclusive = matches!(self.peek(), Token::RBracket);
             if !matches!(self.peek(), Token::RBracket | Token::RParen) {
                 self.sync_to_boundary();
@@ -1581,8 +1612,14 @@ impl Parser {
         }
         loop {
             let key = match self.advance() {
-                Some(TokenSpan { token: Token::Name(n), .. }) => n,
-                Some(TokenSpan { token: Token::String(s), .. }) => s,
+                Some(TokenSpan {
+                    token: Token::Name(n),
+                    ..
+                }) => n,
+                Some(TokenSpan {
+                    token: Token::String(s),
+                    ..
+                }) => s,
                 _ => {
                     self.sync_to_boundary();
                     return self.err_here("expected context key (name or string)");
@@ -1621,7 +1658,10 @@ impl Parser {
         if !matches!(self.peek(), Token::RParen) {
             loop {
                 let name = match self.advance() {
-                    Some(TokenSpan { token: Token::Name(n), .. }) => n,
+                    Some(TokenSpan {
+                        token: Token::Name(n),
+                        ..
+                    }) => n,
                     _ => {
                         self.sync_to_boundary();
                         return self.err_here("expected parameter name");
@@ -1661,7 +1701,10 @@ impl Parser {
         let mut iters = Vec::new();
         loop {
             let var = match self.advance() {
-                Some(TokenSpan { token: Token::Name(n), .. }) => n,
+                Some(TokenSpan {
+                    token: Token::Name(n),
+                    ..
+                }) => n,
                 _ => {
                     self.sync_to_boundary();
                     return self.err_here("expected iteration variable name");
@@ -1717,7 +1760,10 @@ impl Parser {
         let mut iters = Vec::new();
         loop {
             let var = match self.advance() {
-                Some(TokenSpan { token: Token::Name(n), .. }) => n,
+                Some(TokenSpan {
+                    token: Token::Name(n),
+                    ..
+                }) => n,
                 _ => {
                     self.sync_to_boundary();
                     return self.err_here("expected iteration variable name");
@@ -1754,7 +1800,10 @@ impl Parser {
     /// type for now; 31-04 extends this).
     fn parse_type_ref(&mut self) -> FeelType {
         let name = match self.advance() {
-            Some(TokenSpan { token: Token::Name(n), .. }) => n,
+            Some(TokenSpan {
+                token: Token::Name(n),
+                ..
+            }) => n,
             _ => return FeelType::Any,
         };
         // Multi-word types: check for `and` following the first word
@@ -1899,7 +1948,10 @@ pub fn parse_simple_unary_tests(src: &str) -> FeelExpression {
 }
 
 /// Parse a FEEL `SimpleUnaryTests` (grammar rule 15) from `src` using an optional lexer cache.
-pub fn parse_simple_unary_tests_with_cache(src: &str, cache: Option<&LexerTokenCache>) -> FeelExpression {
+pub fn parse_simple_unary_tests_with_cache(
+    src: &str,
+    cache: Option<&LexerTokenCache>,
+) -> FeelExpression {
     let tokens = if let Some(cache) = cache {
         cache.get_or_lex(src, ParseEntry::SimpleUnaryTests)
     } else {
@@ -1946,7 +1998,7 @@ pub fn parse_simple_unary_tests_with_cache(src: &str, cache: Option<&LexerTokenC
 mod parser_tests {
     use super::*;
     use crate::data_types::Value;
-    use crate::dmn::feel::ast::{FeelExpression, BinOpKind, QuantKind};
+    use crate::dmn::feel::ast::{BinOpKind, FeelExpression, QuantKind};
 
     /// Helper: assert a `FeelExpression` matches a literal number.
     fn assert_num(expr: &FeelExpression, n: i64) {
@@ -1961,10 +2013,16 @@ mod parser_tests {
     fn parse_precedence_add_mul() {
         let expr = parse_expression("1 + 2 * 3");
         match expr {
-            FeelExpression::BinOp { op: BinOpKind::Add, lhs, rhs } => {
+            FeelExpression::BinOp {
+                op: BinOpKind::Add,
+                lhs,
+                rhs,
+            } => {
                 assert_num(&lhs, 1);
                 match rhs.as_ref() {
-                    FeelExpression::BinOp { op: BinOpKind::Mul, .. } => {}
+                    FeelExpression::BinOp {
+                        op: BinOpKind::Mul, ..
+                    } => {}
                     other => panic!("expected BinOp(Mul) on rhs, got {:?}", other),
                 }
             }
@@ -1977,10 +2035,16 @@ mod parser_tests {
     fn parse_pow_right_associative() {
         let expr = parse_expression("2 ** 3 ** 2");
         match expr {
-            FeelExpression::BinOp { op: BinOpKind::Pow, lhs, rhs } => {
+            FeelExpression::BinOp {
+                op: BinOpKind::Pow,
+                lhs,
+                rhs,
+            } => {
                 assert_num(&lhs, 2);
                 match rhs.as_ref() {
-                    FeelExpression::BinOp { op: BinOpKind::Pow, .. } => {}
+                    FeelExpression::BinOp {
+                        op: BinOpKind::Pow, ..
+                    } => {}
                     other => panic!("expected BinOp(Pow) on rhs (right-assoc), got {:?}", other),
                 }
             }
@@ -1993,13 +2057,19 @@ mod parser_tests {
     fn parse_or_and_precedence() {
         let expr = parse_expression("a or b and c");
         match expr {
-            FeelExpression::BinOp { op: BinOpKind::Or, lhs, rhs } => {
+            FeelExpression::BinOp {
+                op: BinOpKind::Or,
+                lhs,
+                rhs,
+            } => {
                 match lhs.as_ref() {
                     FeelExpression::Name(n) => assert_eq!(n, "a"),
                     other => panic!("expected Name(a) on lhs, got {:?}", other),
                 }
                 match rhs.as_ref() {
-                    FeelExpression::BinOp { op: BinOpKind::And, .. } => {}
+                    FeelExpression::BinOp {
+                        op: BinOpKind::And, ..
+                    } => {}
                     other => panic!("expected BinOp(And) on rhs, got {:?}", other),
                 }
             }
@@ -2014,7 +2084,10 @@ mod parser_tests {
         match expr {
             FeelExpression::Filter { target, predicate } => {
                 match target.as_ref() {
-                    FeelExpression::Path { target: inner, name } => {
+                    FeelExpression::Path {
+                        target: inner,
+                        name,
+                    } => {
                         match inner.as_ref() {
                             FeelExpression::Name(n) => assert_eq!(n, "a"),
                             other => panic!("expected Name(a) inside Path, got {:?}", other),
@@ -2039,7 +2112,9 @@ mod parser_tests {
         match expr {
             FeelExpression::InstanceOf { expr: inner, ty } => {
                 match inner.as_ref() {
-                    FeelExpression::BinOp { op: BinOpKind::Add, .. } => {}
+                    FeelExpression::BinOp {
+                        op: BinOpKind::Add, ..
+                    } => {}
                     other => panic!("expected BinOp(Add) inside InstanceOf, got {:?}", other),
                 }
                 assert_eq!(ty, crate::dmn::feel::types::FeelType::Number);
@@ -2069,7 +2144,9 @@ mod parser_tests {
     fn parse_function_keyword_params_and_body() {
         let expr = parse_expression("function(for, in, between) for + in + between");
         match expr {
-            FeelExpression::FunctionDefinition { params, external, .. } => {
+            FeelExpression::FunctionDefinition {
+                params, external, ..
+            } => {
                 assert_eq!(params.len(), 3);
                 assert_eq!(params[0].0, "for");
                 assert_eq!(params[1].0, "in");
@@ -2087,7 +2164,10 @@ mod parser_tests {
         // The sentinel is a Literal(Bool(true)) — "always true" for any input.
         match expr {
             FeelExpression::Literal(Value::Bool(true)) => {}
-            other => panic!("expected Literal(Bool(true)) sentinel for '-', got {:?}", other),
+            other => panic!(
+                "expected Literal(Bool(true)) sentinel for '-', got {:?}",
+                other
+            ),
         }
     }
 
@@ -2113,7 +2193,11 @@ mod parser_tests {
         let expr = parse_simple_unary_tests("1, 2, 3");
         // Comma-separated positive unary tests desugar to an Or-chain.
         // Either a nested BinOp(Or) chain or a single literal — assert no Err.
-        assert!(!matches!(expr, FeelExpression::Err(_, _)), "expected non-Err, got {:?}", expr);
+        assert!(
+            !matches!(expr, FeelExpression::Err(_, _)),
+            "expected non-Err, got {:?}",
+            expr
+        );
     }
 
     /// Test: parse_expression("1 + ") yields a FeelExpression::Err(span, msg) node (error recovery, not panic).
@@ -2135,8 +2219,11 @@ mod parser_tests {
         let expr = parse_expression(&deep);
         match expr {
             FeelExpression::Err(_, msg) => {
-                assert!(msg.contains("depth") || msg.contains("recursion") || msg.contains("max"),
-                    "expected depth-related error, got: {}", msg);
+                assert!(
+                    msg.contains("depth") || msg.contains("recursion") || msg.contains("max"),
+                    "expected depth-related error, got: {}",
+                    msg
+                );
             }
             other => panic!("expected Err node for deep nesting, got {:?}", other),
         }
@@ -2160,7 +2247,10 @@ mod parser_tests {
     fn parse_some_quantified() {
         let expr = parse_expression("some x in [1,2,3] satisfies x > 1");
         match expr {
-            FeelExpression::Quantified { kind: QuantKind::Some, .. } => {}
+            FeelExpression::Quantified {
+                kind: QuantKind::Some,
+                ..
+            } => {}
             other => panic!("expected Quantified(Some), got {:?}", other),
         }
     }
@@ -2197,7 +2287,9 @@ mod parser_tests {
     fn parse_function_definition_non_external() {
         let expr = parse_expression("function(a, b) a + b");
         match expr {
-            FeelExpression::FunctionDefinition { params, external, .. } => {
+            FeelExpression::FunctionDefinition {
+                params, external, ..
+            } => {
                 assert_eq!(params.len(), 2);
                 assert!(!external);
             }
@@ -2210,7 +2302,9 @@ mod parser_tests {
     fn parse_function_definition_external_recognized() {
         let expr = parse_expression("function(a, b) external a + b");
         match expr {
-            FeelExpression::FunctionDefinition { params, external, .. } => {
+            FeelExpression::FunctionDefinition {
+                params, external, ..
+            } => {
                 assert_eq!(params.len(), 2);
                 assert!(external, "external flag should be recognized at parse time");
             }
@@ -2223,7 +2317,10 @@ mod parser_tests {
     fn parse_between_desugaring() {
         let expr = parse_expression("a between b and c");
         match expr {
-            FeelExpression::BinOp { op: BinOpKind::Between, .. } => {}
+            FeelExpression::BinOp {
+                op: BinOpKind::Between,
+                ..
+            } => {}
             other => panic!("expected BinOp(Between, ...), got {:?}", other),
         }
     }

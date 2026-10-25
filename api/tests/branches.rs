@@ -113,8 +113,7 @@ async fn create_branch_two_distinct_names() {
         .map(|b| b["name"].as_str().expect("name").to_string())
         .collect();
     assert!(
-        names.contains(&"branch-a".to_string())
-            && names.contains(&"branch-b".to_string()),
+        names.contains(&"branch-a".to_string()) && names.contains(&"branch-b".to_string()),
         "expected both branch-a and branch-b, got {names:?}"
     );
 }

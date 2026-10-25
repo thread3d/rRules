@@ -266,14 +266,18 @@ impl EngineRegistry {
     }
 
     /// Creates an engine instance by type.
-    pub fn create_engine(&self, engine_type: EngineType) -> Option<Result<Box<dyn ExecutionEngine>, String>> {
-        self.factories
-            .get(&engine_type)
-            .map(|f| f.create_engine())
+    pub fn create_engine(
+        &self,
+        engine_type: EngineType,
+    ) -> Option<Result<Box<dyn ExecutionEngine>, String>> {
+        self.factories.get(&engine_type).map(|f| f.create_engine())
     }
 
     /// Creates an engine by name string.
-    pub fn create_engine_by_name(&self, name: &str) -> Option<Result<Box<dyn ExecutionEngine>, String>> {
+    pub fn create_engine_by_name(
+        &self,
+        name: &str,
+    ) -> Option<Result<Box<dyn ExecutionEngine>, String>> {
         let engine_type = match name.to_lowercase().as_str() {
             "rete" => EngineType::Rete,
             "treat" => EngineType::Treat,
@@ -286,10 +290,7 @@ impl EngineRegistry {
 
     /// Returns a list of available engine names.
     pub fn available_engines(&self) -> Vec<&'static str> {
-        self.factories
-            .keys()
-            .map(|k| k.name())
-            .collect()
+        self.factories.keys().map(|k| k.name()).collect()
     }
 
     /// Checks if an engine type is registered.
@@ -308,16 +309,16 @@ impl Default for EngineRegistry {
 #[cfg(feature = "engine-rete")]
 pub use crate::engine::rete::{ReteEngine, ReteEngineFactory};
 
+#[cfg(feature = "engine-leaps")]
+pub use crate::engine::leaps::LeapsEngineFactory;
+#[cfg(feature = "engine-phreak")]
+pub use crate::engine::phreak::PhreakEngineFactory;
 /// Re-export the non-Rete factory types under their feature gates so
 /// `register_default_engines` can name them. The engine structs themselves
 /// are not re-exported here (Rete's `ReteEngine` is the shared type the
 /// others build on; the per-engine structs stay internal to their modules).
 #[cfg(feature = "engine-treat")]
 pub use crate::engine::treat::TreatEngineFactory;
-#[cfg(feature = "engine-leaps")]
-pub use crate::engine::leaps::LeapsEngineFactory;
-#[cfg(feature = "engine-phreak")]
-pub use crate::engine::phreak::PhreakEngineFactory;
 
 #[cfg(test)]
 mod tests {
@@ -348,7 +349,12 @@ mod tests {
     /// via `.contains(...)` rather than positional indexing. This is the
     /// truthfulness guarantee for D-01 (register all four factories) that
     /// downstream `engine` param validation (Plan 05) depends on.
-    #[cfg(all(feature = "engine-rete", feature = "engine-treat", feature = "engine-leaps", feature = "engine-phreak"))]
+    #[cfg(all(
+        feature = "engine-rete",
+        feature = "engine-treat",
+        feature = "engine-leaps",
+        feature = "engine-phreak"
+    ))]
     #[test]
     fn test_register_default_engines_advertises_all_four() {
         let mut registry = EngineRegistry::new();
@@ -376,6 +382,11 @@ mod tests {
             "available_engines missing 'phreak': {:?}",
             names
         );
-        assert_eq!(names.len(), 4, "expected exactly four engines, got {:?}", names);
+        assert_eq!(
+            names.len(),
+            4,
+            "expected exactly four engines, got {:?}",
+            names
+        );
     }
 }

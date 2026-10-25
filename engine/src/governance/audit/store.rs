@@ -14,7 +14,10 @@ use uuid::Uuid;
 /// Trait for audit event storage backends
 pub trait AuditStoreBackend {
     /// Append an event to the audit log
-    async fn append_event(&mut self, event: &AuditEvent) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
+    async fn append_event(
+        &mut self,
+        event: &AuditEvent,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Query events with filters
     async fn query_events(
@@ -53,17 +56,14 @@ impl SqlxAuditStore {
 
 impl Default for SqlxAuditStore {
     fn default() -> Self {
-        Self::new_from_env().unwrap_or_else(|_| Self {
-            pool: None,
-        })
+        Self::new_from_env().unwrap_or_else(|_| Self { pool: None })
     }
 }
 
 impl SqlxAuditStore {
     /// Create a new store from DATABASE_URL environment variable
     pub fn new_from_env() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let _url = std::env::var("DATABASE_URL")
-            .map_err(|_| "DATABASE_URL not set")?;
+        let _url = std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL not set")?;
 
         // This would be: sqlx::PgPool::connect(&url).await
         Err(Box::new(std::io::Error::new(
@@ -74,7 +74,10 @@ impl SqlxAuditStore {
 }
 
 impl AuditStoreBackend for SqlxAuditStore {
-    async fn append_event(&mut self, _event: &AuditEvent) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    async fn append_event(
+        &mut self,
+        _event: &AuditEvent,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::NotConnected,
             "SqlxAuditStore requires sqlx with DATABASE_URL and runtime setup",
@@ -141,7 +144,10 @@ impl Default for MemoryAuditStore {
 }
 
 impl AuditStoreBackend for MemoryAuditStore {
-    async fn append_event(&mut self, event: &AuditEvent) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    async fn append_event(
+        &mut self,
+        event: &AuditEvent,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let event_id = Uuid::new_v4().to_string();
         self.events.push((Utc::now(), event.clone()));
         Ok(event_id)
@@ -225,7 +231,10 @@ mod tests {
         store.append_event(&event2).await.unwrap();
 
         // Query all events
-        let events = store.query_events(None, None, None, None, 10).await.unwrap();
+        let events = store
+            .query_events(None, None, None, None, 10)
+            .await
+            .unwrap();
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].event_type(), "rule.created");
@@ -244,7 +253,10 @@ mod tests {
 
         store.append_event(&event).await.unwrap();
 
-        let csv = store.export_csv(Utc::now() - chrono::Duration::days(365 * 10), Utc::now()).await.unwrap();
+        let csv = store
+            .export_csv(Utc::now() - chrono::Duration::days(365 * 10), Utc::now())
+            .await
+            .unwrap();
 
         assert!(csv.contains("user.login"));
         assert!(csv.contains("N/A"));

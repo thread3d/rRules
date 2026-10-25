@@ -3,12 +3,12 @@
 //! Measures RSS peak, allocation counts, and per-phase breakdown for the DMN subsystem.
 //! Runs against the v6.0 import corpus and saves results as JSON in `engine/benches/snapshots/`.
 
-use std::time::Instant;
 use engine::dmn::bench_util::{
-    load_corpus_files, MemoryBaseline, PhaseBreakdown, RssSnapshot,
-    tck_root, write_baseline_snapshot,
+    load_corpus_files, tck_root, write_baseline_snapshot, MemoryBaseline, PhaseBreakdown,
+    RssSnapshot,
 };
 use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest, SharedDmnModel};
+use std::time::Instant;
 
 fn main() {
     println!("=== DMN Memory Baseline Benchmark ===");
@@ -24,7 +24,10 @@ fn main() {
 
     // Take cold-start RSS snapshot.
     let cold_rss = RssSnapshot::take();
-    println!("Cold start RSS: {:.2} MB", cold_rss.vm_rss_bytes as f64 / 1024.0 / 1024.0);
+    println!(
+        "Cold start RSS: {:.2} MB",
+        cold_rss.vm_rss_bytes as f64 / 1024.0 / 1024.0
+    );
 
     let mut phases = Vec::new();
     let mut peak_rss = cold_rss.vm_rss_bytes;
@@ -63,9 +66,10 @@ fn main() {
         let decisions = extract_decisions(model);
         if !decisions.is_empty() {
             // Evaluate each decision with empty inputs.
-            let shared = std::sync::Arc::new(std::sync::RwLock::new(
-                SharedDmnModel::new((*model).clone(), engine::dmn::feel::cache::FeelAstCache::new())
-            ));
+            let shared = std::sync::Arc::new(std::sync::RwLock::new(SharedDmnModel::new(
+                (*model).clone(),
+                engine::dmn::feel::cache::FeelAstCache::new(),
+            )));
             let evaluator = DecisionEvaluator::new(shared);
 
             for decision in &decisions {
@@ -100,8 +104,8 @@ fn main() {
     let multi_path = tck_root_path.join("0010-multi-output-U/0010-multi-output-U.dmn");
     if multi_path.is_file() {
         let content = std::fs::read_to_string(&multi_path).expect("read multi-output DMN");
-        let (model, cache) = engine::dmn::parser::parse_dmn_with_cache(&content)
-            .expect("parse with cache");
+        let (model, cache) =
+            engine::dmn::parser::parse_dmn_with_cache(&content).expect("parse with cache");
 
         let shared = std::sync::Arc::new(std::sync::RwLock::new(SharedDmnModel::new(model, cache)));
         let evaluator = DecisionEvaluator::new(shared.clone());
@@ -152,20 +156,31 @@ fn main() {
     } else {
         "v6.0-current"
     };
-    let snapshot_path = write_baseline_snapshot(&baseline, snapshot_name)
-        .expect("write baseline snapshot");
+    let snapshot_path =
+        write_baseline_snapshot(&baseline, snapshot_name).expect("write baseline snapshot");
 
     println!("\n=== Memory Baseline Summary ===");
     println!("Corpus: {} files", baseline.file_count);
-    println!("Cold start RSS: {:.2} MB", baseline.cold_start_rss_bytes as f64 / 1024.0 / 1024.0);
-    println!("Peak RSS: {:.2} MB", baseline.peak_rss_bytes as f64 / 1024.0 / 1024.0);
+    println!(
+        "Cold start RSS: {:.2} MB",
+        baseline.cold_start_rss_bytes as f64 / 1024.0 / 1024.0
+    );
+    println!(
+        "Peak RSS: {:.2} MB",
+        baseline.peak_rss_bytes as f64 / 1024.0 / 1024.0
+    );
     println!("Total duration: {:?}", total_duration);
     println!("\nPer-phase breakdown:");
     for phase in &baseline.phases {
-        println!("  {}: RSS delta = {} bytes, allocations ≈ {}",
-            phase.phase, phase.rss_delta_bytes, phase.allocation_count);
+        println!(
+            "  {}: RSS delta = {} bytes, allocations ≈ {}",
+            phase.phase, phase.rss_delta_bytes, phase.allocation_count
+        );
     }
-    println!("\nBaseline snapshot written to: {}", snapshot_path.display());
+    println!(
+        "\nBaseline snapshot written to: {}",
+        snapshot_path.display()
+    );
 }
 
 /// Extract decision IDs from a DmnModel.

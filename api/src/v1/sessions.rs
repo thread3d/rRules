@@ -18,7 +18,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use actix_web::{web, HttpResponse, http::StatusCode};
+use actix_web::{http::StatusCode, web, HttpResponse};
 use dashmap::DashMap;
 use prometheus::IntGauge;
 use uuid::Uuid;
@@ -194,12 +194,9 @@ impl SessionManager {
 
         // --- Create path ---
         // 1. Resolve engine name: req > env RRULES_DEFAULT_ENGINE > "rete".
-        let engine_name = req_engine
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                std::env::var("RRULES_DEFAULT_ENGINE")
-                    .unwrap_or_else(|_| "rete".to_string())
-            });
+        let engine_name = req_engine.map(|s| s.to_string()).unwrap_or_else(|| {
+            std::env::var("RRULES_DEFAULT_ENGINE").unwrap_or_else(|_| "rete".to_string())
+        });
 
         // 2. Validate against registered factories (ENGINE-07).
         let available = registry.available_engines();
@@ -279,10 +276,14 @@ impl SessionManager {
             let uuid = *entry.key();
             // Lock the per-session Mutex to read timestamps. Skip on poison
             // (a poisoned session is likely broken anyway — evict it).
-            let should_evict = entry.value().lock().map(|g| {
-                now.duration_since(g.last_used) > self.idle_ttl
-                    || now.duration_since(g.created_at) > self.max_lifetime
-            }).unwrap_or(true);
+            let should_evict = entry
+                .value()
+                .lock()
+                .map(|g| {
+                    now.duration_since(g.last_used) > self.idle_ttl
+                        || now.duration_since(g.created_at) > self.max_lifetime
+                })
+                .unwrap_or(true);
             if should_evict {
                 to_evict.push(uuid);
             }
@@ -295,9 +296,14 @@ impl SessionManager {
         // the oldest last_used (min_by_key). Collect the key, drop the iter
         // guard, then remove — no shard lock held across remove.
         while self.sessions.len() > self.max_sessions {
-            let lru_uuid = self.sessions.iter()
+            let lru_uuid = self
+                .sessions
+                .iter()
                 .min_by_key(|e| {
-                    e.value().lock().map(|g| g.last_used).unwrap_or(Instant::now())
+                    e.value()
+                        .lock()
+                        .map(|g| g.last_used)
+                        .unwrap_or(Instant::now())
                 })
                 .map(|e| *e.key());
             match lru_uuid {
@@ -543,8 +549,6 @@ pub async fn reset_session(
             "status": "reset",
             "session_id": alias,
         })),
-        Err((code, msg)) => {
-            HttpResponse::build(code).json(serde_json::json!({ "error": msg }))
-        }
+        Err((code, msg)) => HttpResponse::build(code).json(serde_json::json!({ "error": msg })),
     }
 }

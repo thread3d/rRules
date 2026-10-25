@@ -27,7 +27,9 @@
 //! `TimeValue` mirrors the same three cases for the `time` type.
 
 use crate::data_types::Value;
-use chrono::{DateTime, FixedOffset, Months, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, TimeDelta};
+use chrono::{
+    DateTime, FixedOffset, Months, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, TimeZone,
+};
 use serde::{Deserialize, Serialize};
 
 // Note: `DateTimeValue` cannot `#[derive(Serialize, Deserialize)]` because
@@ -221,7 +223,9 @@ pub fn parse_at_literal(s: &str) -> Option<Value> {
     if year_part.len() > 4 {
         return None;
     }
-    NaiveDate::parse_from_str(s, "%Y-%m-%d").ok().map(Value::Date)
+    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .ok()
+        .map(Value::Date)
 }
 
 /// Format a temporal [`Value`] back to its `@""` lexical form.
@@ -304,10 +308,8 @@ fn parse_duration(s: &str) -> Option<Value> {
     if body.is_empty() {
         return None;
     }
-    let is_day_time = body.contains('T')
-        || body.contains('D')
-        || body.contains('H')
-        || body.contains('S');
+    let is_day_time =
+        body.contains('T') || body.contains('D') || body.contains('H') || body.contains('S');
     if is_day_time {
         let td = parse_day_time_duration(body, neg)?;
         Some(Value::DaysTimeDuration(td))
@@ -814,14 +816,20 @@ mod tests {
             .unwrap();
         let ymd = YearsMonthsDuration { months: 1 };
         let feb = add_months_zoned(jan31_2021, &ymd).expect("Jan 31 + 1M = Feb 28");
-        assert_eq!(feb.naive_local().date(), NaiveDate::from_ymd_opt(2021, 2, 28).unwrap());
+        assert_eq!(
+            feb.naive_local().date(),
+            NaiveDate::from_ymd_opt(2021, 2, 28).unwrap()
+        );
 
         let jan31_2024 = chrono_tz::Australia::Melbourne
             .with_ymd_and_hms(2024, 1, 31, 10, 10, 10)
             .single()
             .unwrap();
         let feb29 = add_months_zoned(jan31_2024, &ymd).expect("Jan 31 2024 + 1M = Feb 29");
-        assert_eq!(feb29.naive_local().date(), NaiveDate::from_ymd_opt(2024, 2, 29).unwrap());
+        assert_eq!(
+            feb29.naive_local().date(),
+            NaiveDate::from_ymd_opt(2024, 2, 29).unwrap()
+        );
     }
 
     #[test]
@@ -848,10 +856,7 @@ mod tests {
             .unwrap();
         // 00:30 EDT + 1 hour = 01:30 (overlap — occurs twice in EDT/EST).
         let overlap = add_days_time_zoned(before_overlap, TimeDelta::hours(1));
-        assert!(
-            overlap.is_some(),
-            "DST overlap → earliest (not None)"
-        );
+        assert!(overlap.is_some(), "DST overlap → earliest (not None)");
     }
 
     proptest::proptest! {

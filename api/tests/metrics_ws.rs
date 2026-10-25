@@ -301,9 +301,8 @@ async fn ws_handshake_completes_with_101() {
 async fn ws_broadcast_delivers_engine_state_frame() {
     let (addr, metrics_tx, _guard_rx, _server) = spawn_server();
     let (_handshake, frame) = handshake_then_broadcast_and_read_frame(addr, metrics_tx).await;
-    let parsed: serde_json::Value = serde_json::from_str(&frame).unwrap_or_else(|e| {
-        panic!("frame is not valid JSON: {e}; frame={frame}")
-    });
+    let parsed: serde_json::Value = serde_json::from_str(&frame)
+        .unwrap_or_else(|e| panic!("frame is not valid JSON: {e}; frame={frame}"));
     assert_eq!(parsed["engine_name"], "test-engine", "frame={frame}");
     assert_eq!(parsed["rules_fired"], 42, "frame={frame}");
     assert_eq!(parsed["facts_inserted"], 7, "frame={frame}");

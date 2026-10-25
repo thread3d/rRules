@@ -262,10 +262,7 @@ pub enum Expression {
     /// Call a registered function by name. Stub for Phase 23 — returns
     /// `Value::Null`; full function dispatch is out of scope (the variant
     /// exists so the AST is complete).
-    Call {
-        name: String,
-        args: Vec<Expression>,
-    },
+    Call { name: String, args: Vec<Expression> },
 }
 
 impl Expression {
@@ -380,9 +377,10 @@ fn numeric_op(
     use crate::data_types::DynamicCast;
     match (left, right) {
         (Value::Integer(l), Value::Integer(r)) => Value::Integer(int_op(*l, *r)),
-        _ if left.as_float().is_some() && right.as_float().is_some() => {
-            Value::Float(float_op(left.as_float().unwrap(), right.as_float().unwrap()))
-        }
+        _ if left.as_float().is_some() && right.as_float().is_some() => Value::Float(float_op(
+            left.as_float().unwrap(),
+            right.as_float().unwrap(),
+        )),
         _ => Value::Null,
     }
 }
@@ -1101,7 +1099,10 @@ mod tests {
                 value: Value::Float(10.5),
                 op: ComparisonOp::Lt,
             };
-            assert!(cond.evaluate(&facts), "10 Lt 10.5 should be true (cross-type)");
+            assert!(
+                cond.evaluate(&facts),
+                "10 Lt 10.5 should be true (cross-type)"
+            );
         }
 
         // ---- Compare: String ----
@@ -1221,7 +1222,10 @@ mod tests {
                 value: Value::Integer(0),
                 op: ComparisonOp::Eq,
             };
-            assert!(!cond.evaluate(&facts), "no matching fact_type should be false");
+            assert!(
+                !cond.evaluate(&facts),
+                "no matching fact_type should be false"
+            );
         }
 
         #[test]

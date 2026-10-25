@@ -25,21 +25,21 @@ impl Actor for DmnMetricsWsSession {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         let mut rx = self.dmn_metrics_tx.subscribe();
-        ctx.run_interval(BROADCAST_POLL_INTERVAL, move |_this: &mut Self, ctx: &mut WebsocketContext<Self>| {
-            while let Ok(snapshot) = rx.try_recv() {
-                let payload = serde_json::to_string(&snapshot).unwrap_or_else(|_| "{}".to_string());
-                ctx.text(payload);
-            }
-        });
+        ctx.run_interval(
+            BROADCAST_POLL_INTERVAL,
+            move |_this: &mut Self, ctx: &mut WebsocketContext<Self>| {
+                while let Ok(snapshot) = rx.try_recv() {
+                    let payload =
+                        serde_json::to_string(&snapshot).unwrap_or_else(|_| "{}".to_string());
+                    ctx.text(payload);
+                }
+            },
+        );
     }
 }
 
 impl StreamHandler<Result<Message, ProtocolError>> for DmnMetricsWsSession {
-    fn handle(
-        &mut self,
-        item: Result<Message, ProtocolError>,
-        ctx: &mut Self::Context,
-    ) {
+    fn handle(&mut self, item: Result<Message, ProtocolError>, ctx: &mut Self::Context) {
         match item {
             Ok(Message::Ping(msg)) => ctx.pong(&msg),
             Ok(Message::Close(reason)) => ctx.close(reason),

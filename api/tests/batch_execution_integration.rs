@@ -166,7 +166,10 @@ async fn batch_execute_runs_two_requests_successfully() {
     for r in results {
         assert_eq!(r["success"], true, "each result successful: {r}");
         assert!(r["response"]["rules_fired"].is_number(), "response present");
-        assert!(r["response"]["execution_id"].is_string(), "execution_id present");
+        assert!(
+            r["response"]["execution_id"].is_string(),
+            "execution_id present"
+        );
     }
 }
 
@@ -201,7 +204,10 @@ async fn batch_execute_respects_max_concurrency_without_deadlock() {
         .to_request();
     let body = json_body(test::call_service(&app, req).await).await;
 
-    assert_eq!(body["succeeded"], 10, "all requests should complete; body: {body}");
+    assert_eq!(
+        body["succeeded"], 10,
+        "all requests should complete; body: {body}"
+    );
     assert_eq!(body["failed"], 0);
     assert_eq!(body["results"].as_array().unwrap().len(), 10);
 }
@@ -223,7 +229,10 @@ async fn batch_execute_static_path_beats_wildcard() {
         body.get("succeeded").is_some(),
         "static /rules/batch-execute must win over /rules/{{id}}; body: {body}"
     );
-    assert_ne!(body["hit"], "wildcard", "wildcard must not shadow static path");
+    assert_ne!(
+        body["hit"], "wildcard",
+        "wildcard must not shadow static path"
+    );
 }
 
 #[actix_web::test]

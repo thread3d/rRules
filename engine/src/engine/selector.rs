@@ -99,7 +99,9 @@ impl EngineSelector {
         let engine_lower = engine_name.to_lowercase();
 
         if !self.available.contains(&engine_lower) {
-            return Err(EngineSelectionError::EngineNotFound(engine_name.to_string()));
+            return Err(EngineSelectionError::EngineNotFound(
+                engine_name.to_string(),
+            ));
         }
 
         // Basic validation for known algorithms
@@ -151,10 +153,7 @@ impl EngineSelector {
         let mut response = HashMap::new();
         response.insert("status".to_string(), "success".to_string());
         response.insert("selected_engine".to_string(), engine_name.to_string());
-        response.insert(
-            "available_engines".to_string(),
-            self.available.join(","),
-        );
+        response.insert("available_engines".to_string(), self.available.join(","));
         response
     }
 }
@@ -181,7 +180,10 @@ mod tests {
     fn test_select_invalid_engine() {
         let mut selector = EngineSelector::new(&["rete"]);
         let result = selector.select_engine("invalid");
-        assert!(matches!(result, Err(EngineSelectionError::EngineNotFound(_))));
+        assert!(matches!(
+            result,
+            Err(EngineSelectionError::EngineNotFound(_))
+        ));
     }
 
     #[test]

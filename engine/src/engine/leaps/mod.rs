@@ -4,11 +4,11 @@
 //! with specialized aggregation nodes for efficient computation of Sum, Count,
 //! Max, Min operations over fact sets.
 
-use std::collections::{HashMap, HashSet};
-use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::metrics::MetricsCollector;
-use crate::fact::Fact;
+use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference};
+use crate::fact::Fact;
+use std::collections::{HashMap, HashSet};
 
 // NOTE: `CoverageTracking` is no longer imported here — the shared direct
 // evaluator (`engine::direct_eval`) owns once-per-rule coverage recording
@@ -176,10 +176,16 @@ impl AggregationResult {
     /// Creates an empty result (no facts).
     pub fn empty(op: AggregationOp) -> Self {
         match op {
-            AggregationOp::Sum | AggregationOp::Max | AggregationOp::Min => {
-                Self { value: 0.0, count: 0, op }
-            }
-            AggregationOp::Count => Self { value: 0.0, count: 0, op },
+            AggregationOp::Sum | AggregationOp::Max | AggregationOp::Min => Self {
+                value: 0.0,
+                count: 0,
+                op,
+            },
+            AggregationOp::Count => Self {
+                value: 0.0,
+                count: 0,
+                op,
+            },
         }
     }
 }
@@ -284,7 +290,10 @@ impl LeapsEngine {
 
         // Propagate to alpha memory (test nodes) - collect node IDs first
         let node_ids: Vec<_> = {
-            self.network.base.test_nodes.values()
+            self.network
+                .base
+                .test_nodes
+                .values()
                 .filter(|n| n.fact_type_id == fact_type)
                 .map(|n| n.id.clone())
                 .collect()
@@ -314,10 +323,16 @@ impl LeapsEngine {
                 None => return,
             };
 
-            test_node.successors.iter()
+            test_node
+                .successors
+                .iter()
                 .filter_map(|s| {
                     self.network.base.join_nodes.get(s).map(|join_node| {
-                        (join_node.id.clone(), join_node.predecessor.clone(), s.0.clone())
+                        (
+                            join_node.id.clone(),
+                            join_node.predecessor.clone(),
+                            s.0.clone(),
+                        )
                     })
                 })
                 .collect()
@@ -366,7 +381,8 @@ impl LeapsEngine {
             self.beta_memory.insert(join_node_id, nagram);
         }
 
-        self.metrics.record_beta_memory_additions(test_facts_from_alpha.len() + existing_nagrams.len());
+        self.metrics
+            .record_beta_memory_additions(test_facts_from_alpha.len() + existing_nagrams.len());
     }
 
     /// Executes aggregation for all nodes.
@@ -400,12 +416,13 @@ impl LeapsEngine {
     pub fn execute_rules(&mut self) -> EngineResult {
         let start = std::time::Instant::now();
 
-        let (fired_set, _evaluated_set, trace) = crate::engine::direct_eval::direct_execute_with_limit(
-            &self.rules,
-            &mut self.working_facts,
-            self.collect_trace,
-            self.max_iterations,
-        );
+        let (fired_set, _evaluated_set, trace) =
+            crate::engine::direct_eval::direct_execute_with_limit(
+                &self.rules,
+                &mut self.working_facts,
+                self.collect_trace,
+                self.max_iterations,
+            );
 
         // Record per-fire metrics for parity with the placeholder loop.
         for _ in &fired_set {
@@ -426,7 +443,11 @@ impl LeapsEngine {
     pub fn get_aggregation(&self, agg_id: &str) -> Option<AggregationResult> {
         let agg_node = self.network.agg_nodes.get(agg_id)?;
         let value = agg_node.current_value?;
-        Some(AggregationResult::new(value, agg_node.source_count(), agg_node.op))
+        Some(AggregationResult::new(
+            value,
+            agg_node.source_count(),
+            agg_node.op,
+        ))
     }
 
     /// Computes an aggregation from facts directly.
@@ -485,9 +506,9 @@ impl ExecutionEngine for LeapsEngine {
         match key {
             // Fixpoint cap for this engine, overriding `RRULES_MAX_CHAIN_ITERATIONS`.
             "max_iterations" => {
-                let limit = value
-                    .parse::<usize>()
-                    .map_err(|_| format!("max_iterations must be a positive integer, got {value:?}"))?;
+                let limit = value.parse::<usize>().map_err(|_| {
+                    format!("max_iterations must be a positive integer, got {value:?}")
+                })?;
                 if limit == 0 {
                     return Err("max_iterations must be at least 1".to_string());
                 }

@@ -49,13 +49,16 @@ impl Actor for MetricsWsSession {
         // Poll the broadcast channel on a short cadence and push every buffered
         // `MetricsSnapshot` as a WS text frame. When the channel is empty or lagged,
         // `try_recv` returns Err and the tick is a no-op.
-        ctx.run_interval(BROADCAST_POLL_INTERVAL, move |_this: &mut Self, ctx: &mut WebsocketContext<Self>| {
-            while let Ok(state) = rx.try_recv() {
-                let payload =
-                    serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
-                ctx.text(payload);
-            }
-        });
+        ctx.run_interval(
+            BROADCAST_POLL_INTERVAL,
+            move |_this: &mut Self, ctx: &mut WebsocketContext<Self>| {
+                while let Ok(state) = rx.try_recv() {
+                    let payload =
+                        serde_json::to_string(&state).unwrap_or_else(|_| "{}".to_string());
+                    ctx.text(payload);
+                }
+            },
+        );
     }
 }
 
@@ -65,11 +68,7 @@ impl Actor for MetricsWsSession {
 /// ignored. Ping is answered with Pong (keep-alive); Close is echoed back so
 /// the client sees a clean close.
 impl StreamHandler<Result<Message, ProtocolError>> for MetricsWsSession {
-    fn handle(
-        &mut self,
-        item: Result<Message, ProtocolError>,
-        ctx: &mut Self::Context,
-    ) {
+    fn handle(&mut self, item: Result<Message, ProtocolError>, ctx: &mut Self::Context) {
         match item {
             Ok(Message::Ping(msg)) => ctx.pong(&msg),
             Ok(Message::Close(reason)) => ctx.close(reason),

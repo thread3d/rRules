@@ -38,8 +38,7 @@ use thiserror::Error;
 /// Carries the [`Definitions`] element plus any namespace-prefix metadata
 /// needed for round-trip (e.g. the prefix map observed by the parser, so the
 /// exporter can re-emit equivalent `xmlns:*` declarations).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DmnModel {
     /// The `<definitions>` element — single root of a DMN document.
     pub definitions: Definitions,
@@ -49,7 +48,6 @@ pub struct DmnModel {
     pub source_namespace: Option<String>,
 }
 
-
 /// The `<definitions>` element — the single root of a DMN document.
 ///
 /// `children` preserves exact document element order across heterogeneous
@@ -57,8 +55,7 @@ pub struct DmnModel {
 /// exporter can re-emit them in the original sequence (Pitfall 11).
 /// `diagrams` carries DMNDI layout through the IR (populated in Plan 29-02;
 /// emitted in Plan 29-03 / Phase 35).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Definitions {
     /// `id` attribute (optional on `<definitions>`).
     pub id: Option<String>,
@@ -83,7 +80,6 @@ pub struct Definitions {
     /// Plan 29-02; emitted by the exporter in Plan 29-03 / Phase 35).
     pub diagrams: Vec<DmnDiagram>,
 }
-
 
 /// Ordered top-level child of [`Definitions`]. Each variant carries the
 /// element so `Vec<DefinitionsChild>` preserves cross-type document order.
@@ -309,8 +305,7 @@ pub struct Association {
 /// Hit-policy *evaluation* is Phase 32; this struct holds only the IR shape.
 /// `hit_policy` defaults to [`HitPolicy::Unique`] when the parser sees no
 /// explicit `hitPolicy` attribute (Phase 29 success criterion 3).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DecisionTable {
     pub id: Option<String>,
     pub name: Option<String>,
@@ -330,7 +325,6 @@ pub struct DecisionTable {
     /// Rules, ordered — preserving document order (Pitfall 11).
     pub rules: Vec<DmnRule>,
 }
-
 
 /// `<literalExpression>` — a decision whose value is one FEEL expression.
 ///

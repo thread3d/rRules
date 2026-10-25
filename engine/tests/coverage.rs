@@ -13,9 +13,9 @@
 //!
 //! Filter: `cargo test -p engine --features engine-rete --test coverage`
 
+use engine::data_types::Value;
 use engine::engine::registry::ExecutionEngine;
 use engine::engine::rete::ReteEngine;
-use engine::data_types::Value;
 use engine::fact::Fact;
 use engine::monitoring::coverage::CoverageTracking;
 use engine::rules::{Action, ComparisonOp, Condition, Expression, Rule, RuleSet};
@@ -83,10 +83,7 @@ fn record_once_per_rule() {
     let state = tracker
         .get_rule_state("r1")
         .expect("r1 should be tracked after firing");
-    assert!(
-        state.fired,
-        "r1 should be marked fired in CoverageTracking"
-    );
+    assert!(state.fired, "r1 should be marked fired in CoverageTracking");
     assert_eq!(
         state.fire_count, 1,
         "Pitfall 6 regression: fire_count should be 1 (once-per-rule), got {}",

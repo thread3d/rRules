@@ -77,7 +77,8 @@ const TWO_DECISIONS_DMN: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 
 /// Build a DecisionEvaluator with the given DMN XML loaded.
 fn build_evaluator(xml: &str) -> Arc<DecisionEvaluator> {
-    let (model, ast_cache) = engine::dmn::parser::parse_dmn_with_cache(xml).expect("parse test DMN");
+    let (model, ast_cache) =
+        engine::dmn::parser::parse_dmn_with_cache(xml).expect("parse test DMN");
     let shared = SharedDmnModel::new(model, ast_cache);
     Arc::new(DecisionEvaluator::new(Arc::new(RwLock::new(shared))))
 }
@@ -85,7 +86,10 @@ fn build_evaluator(xml: &str) -> Arc<DecisionEvaluator> {
 async fn json_body(resp: ServiceResponse<BoxBody>) -> Value {
     let bytes = test::read_body(resp).await;
     serde_json::from_slice(&bytes).unwrap_or_else(|e| {
-        panic!("invalid JSON body: {e}; body={}", String::from_utf8_lossy(&bytes))
+        panic!(
+            "invalid JSON body: {e}; body={}",
+            String::from_utf8_lossy(&bytes)
+        )
     })
 }
 
@@ -96,11 +100,19 @@ async fn json_body(resp: ServiceResponse<BoxBody>) -> Value {
 #[actix_web::test]
 async fn evaluate_returns_outputs() {
     let evaluator = build_evaluator(MINIMAL_DMN_XML);
-    let app = test::init_service(ActixApp::new()
-        .app_data(web::Data::new(evaluator))
-        .route("/decisions/{id}/evaluate", web::post().to(api::v1::decisions::evaluate_decision))
-        .route("/decisions", web::get().to(api::v1::decisions::list_decisions))
-    ).await;
+    let app = test::init_service(
+        ActixApp::new()
+            .app_data(web::Data::new(evaluator))
+            .route(
+                "/decisions/{id}/evaluate",
+                web::post().to(api::v1::decisions::evaluate_decision),
+            )
+            .route(
+                "/decisions",
+                web::get().to(api::v1::decisions::list_decisions),
+            ),
+    )
+    .await;
 
     let req = test::TestRequest::post()
         .uri("/decisions/d1/evaluate")
@@ -118,10 +130,11 @@ async fn evaluate_returns_outputs() {
 #[actix_web::test]
 async fn evaluate_not_found_returns_404() {
     let evaluator = build_evaluator(MINIMAL_DMN_XML);
-    let app = test::init_service(ActixApp::new()
-        .app_data(web::Data::new(evaluator))
-        .route("/decisions/{id}/evaluate", web::post().to(api::v1::decisions::evaluate_decision))
-    ).await;
+    let app = test::init_service(ActixApp::new().app_data(web::Data::new(evaluator)).route(
+        "/decisions/{id}/evaluate",
+        web::post().to(api::v1::decisions::evaluate_decision),
+    ))
+    .await;
 
     let req = test::TestRequest::post()
         .uri("/decisions/nonexistent/evaluate")
@@ -136,15 +149,13 @@ async fn evaluate_not_found_returns_404() {
 async fn list_decisions_returns_array() {
     let evaluator = build_evaluator(MINIMAL_DMN_XML);
     let store = web::Data::new(FileSystemDmnStore::default());
-    let app = test::init_service(ActixApp::new()
-        .app_data(evaluator)
-        .app_data(store)
-        .route("/decisions", web::get().to(api::v1::decisions::list_decisions))
-    ).await;
+    let app = test::init_service(ActixApp::new().app_data(evaluator).app_data(store).route(
+        "/decisions",
+        web::get().to(api::v1::decisions::list_decisions),
+    ))
+    .await;
 
-    let req = test::TestRequest::get()
-        .uri("/decisions")
-        .to_request();
+    let req = test::TestRequest::get().uri("/decisions").to_request();
 
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
@@ -157,12 +168,20 @@ async fn list_decisions_returns_array() {
 async fn create_and_get_decision() {
     let evaluator = build_evaluator(MINIMAL_DMN_XML);
     let store = web::Data::new(FileSystemDmnStore::default());
-    let app = test::init_service(ActixApp::new()
-        .app_data(evaluator)
-        .app_data(store.clone())
-        .route("/decisions", web::post().to(api::v1::decisions::create_decision))
-        .route("/decisions/{id}", web::get().to(api::v1::decisions::get_decision))
-    ).await;
+    let app = test::init_service(
+        ActixApp::new()
+            .app_data(evaluator)
+            .app_data(store.clone())
+            .route(
+                "/decisions",
+                web::post().to(api::v1::decisions::create_decision),
+            )
+            .route(
+                "/decisions/{id}",
+                web::get().to(api::v1::decisions::get_decision),
+            ),
+    )
+    .await;
 
     // Create a new decision.
     let req = test::TestRequest::post()
@@ -191,12 +210,20 @@ async fn create_and_get_decision() {
 async fn hot_reload_swaps_model() {
     let evaluator: Arc<DecisionEvaluator> = build_evaluator(MINIMAL_DMN_XML);
     let store = web::Data::new(FileSystemDmnStore::default());
-    let app = test::init_service(ActixApp::new()
-        .app_data(web::Data::new(evaluator))
-        .app_data(store.clone())
-        .route("/decisions/reload", web::post().to(api::v1::decisions::reload_dmn))
-        .route("/decisions", web::get().to(api::v1::decisions::list_decisions))
-    ).await;
+    let app = test::init_service(
+        ActixApp::new()
+            .app_data(web::Data::new(evaluator))
+            .app_data(store.clone())
+            .route(
+                "/decisions/reload",
+                web::post().to(api::v1::decisions::reload_dmn),
+            )
+            .route(
+                "/decisions",
+                web::get().to(api::v1::decisions::list_decisions),
+            ),
+    )
+    .await;
 
     // Reload with the same content (should succeed, model swapped).
     let req = test::TestRequest::post()
@@ -210,13 +237,15 @@ async fn hot_reload_swaps_model() {
     if !resp.status().is_success() {
         let status = resp.status();
         let body_bytes = test::read_body(resp).await.to_vec();
-        panic!("Reload returned {}: {}", status, String::from_utf8_lossy(&body_bytes));
+        panic!(
+            "Reload returned {}: {}",
+            status,
+            String::from_utf8_lossy(&body_bytes)
+        );
     }
 
     // Verify the model is still accessible after reload.
-    let req = test::TestRequest::get()
-        .uri("/decisions")
-        .to_request();
+    let req = test::TestRequest::get().uri("/decisions").to_request();
 
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
@@ -230,10 +259,11 @@ async fn metrics_increment_on_evaluate() {
     use prometheus::{Encoder, TextEncoder};
 
     let evaluator = build_evaluator(MINIMAL_DMN_XML);
-    let app = test::init_service(ActixApp::new()
-        .app_data(web::Data::new(evaluator))
-        .route("/decisions/{id}/evaluate", web::post().to(api::v1::decisions::evaluate_decision))
-    ).await;
+    let app = test::init_service(ActixApp::new().app_data(web::Data::new(evaluator)).route(
+        "/decisions/{id}/evaluate",
+        web::post().to(api::v1::decisions::evaluate_decision),
+    ))
+    .await;
 
     // Make an evaluate call.
     let req = test::TestRequest::post()
@@ -250,17 +280,25 @@ async fn metrics_increment_on_evaluate() {
     let text = String::from_utf8(buffer).unwrap_or_default();
 
     // At minimum, the evaluations counter should exist.
-    assert!(text.contains("rrules_dmn_evaluations_total"), "metrics output: {text}");
+    assert!(
+        text.contains("rrules_dmn_evaluations_total"),
+        "metrics output: {text}"
+    );
 }
 
 #[actix_web::test]
 async fn dmn_metrics_exposed_at_v1_metrics_dmn() {
     let evaluator = build_evaluator(MINIMAL_DMN_XML);
-    let app = test::init_service(ActixApp::new()
-        .app_data(web::Data::new(evaluator))
-        .route("/decisions/{id}/evaluate", web::post().to(api::v1::decisions::evaluate_decision))
-        .configure(api::v1::dmn_metrics::configure_dmn_metrics)
-    ).await;
+    let app = test::init_service(
+        ActixApp::new()
+            .app_data(web::Data::new(evaluator))
+            .route(
+                "/decisions/{id}/evaluate",
+                web::post().to(api::v1::decisions::evaluate_decision),
+            )
+            .configure(api::v1::dmn_metrics::configure_dmn_metrics),
+    )
+    .await;
 
     // Make an evaluate call first to populate metrics.
     let req = test::TestRequest::post()
@@ -270,13 +308,14 @@ async fn dmn_metrics_exposed_at_v1_metrics_dmn() {
     let _resp = test::call_service(&app, req).await;
 
     // GET /v1/metrics/dmn.
-    let req = test::TestRequest::get()
-        .uri("/metrics/dmn")
-        .to_request();
+    let req = test::TestRequest::get().uri("/metrics/dmn").to_request();
 
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
 
     let body = String::from_utf8(test::read_body(resp).await.to_vec()).unwrap();
-    assert!(body.contains("rrules_dmn_evaluations_total"), "metrics text: {body}");
+    assert!(
+        body.contains("rrules_dmn_evaluations_total"),
+        "metrics text: {body}"
+    );
 }

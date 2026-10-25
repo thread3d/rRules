@@ -21,11 +21,11 @@
 
 use crate::data_types::Value;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::ast::{FeelExpression, BinOpKind, QuantKind, Span};
+use super::ast::{BinOpKind, FeelExpression, QuantKind, Span};
 use super::coercion::{coerce_to_number, coerce_to_string};
 use super::numeric::feel_numeric_eq;
 use super::temporal::parse_at_literal;
@@ -114,12 +114,7 @@ impl Scope {
 fn path_nav(v: Value, name: &str) -> Value {
     match v {
         Value::Object(map) => map.get(name).cloned().unwrap_or(Value::Null),
-        Value::Array(elems) => Value::Array(
-            elems
-                .into_iter()
-                .map(|e| path_nav(e, name))
-                .collect(),
-        ),
+        Value::Array(elems) => Value::Array(elems.into_iter().map(|e| path_nav(e, name)).collect()),
         _ => Value::Null,
     }
 }
@@ -217,7 +212,9 @@ pub(crate) mod cmp {
             // code had the order reversed for (Number, Integer) — a latent
             // bug; this is the corrected version).
             (Value::Number(x), Value::Number(y)) => x.partial_cmp(y),
-            (Value::Number(x), Value::Integer(i)) => x.partial_cmp(&rust_decimal::Decimal::from(*i)),
+            (Value::Number(x), Value::Integer(i)) => {
+                x.partial_cmp(&rust_decimal::Decimal::from(*i))
+            }
             (Value::Integer(i), Value::Number(x)) => rust_decimal::Decimal::from(*i).partial_cmp(x),
             (Value::Integer(x), Value::Integer(y)) => Some(x.cmp(y)),
             (Value::String(x), Value::String(y)) => Some(x.cmp(y)),
@@ -226,7 +223,9 @@ pub(crate) mod cmp {
             (Value::Time(x), Value::Time(y)) => time_cmp(x, y),
             (Value::DateTimeTz(x), Value::DateTimeTz(y)) => datetime_cmp(x, y),
             (Value::DaysTimeDuration(x), Value::DaysTimeDuration(y)) => Some(x.cmp(y)),
-            (Value::YearsMonthsDuration(x), Value::YearsMonthsDuration(y)) => Some(x.months.cmp(&y.months)),
+            (Value::YearsMonthsDuration(x), Value::YearsMonthsDuration(y)) => {
+                Some(x.months.cmp(&y.months))
+            }
             // Type mismatch or unordered types → None.
             _ => None,
         }
@@ -331,9 +330,7 @@ pub(crate) mod cmp {
                 let utc = dt.naive_utc();
                 (utc.date(), utc.time())
             }
-            super::super::temporal::DateTimeValue::Local(ndt) => {
-                (ndt.date(), ndt.time())
-            }
+            super::super::temporal::DateTimeValue::Local(ndt) => (ndt.date(), ndt.time()),
         };
         Some(utc_date == *d && utc_time == midnight)
     }
@@ -423,9 +420,11 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
         // FeelExpression variant forces an evaluator-arm update.
         FeelExpression::If { cond, then, else_ } => evaluate_if(cond, then, else_, scope),
         FeelExpression::For { iters, body } => evaluate_for(iters, body, scope),
-        FeelExpression::Quantified { kind, iters, satisfies } => {
-            evaluate_quantified(kind, iters, satisfies, scope)
-        }
+        FeelExpression::Quantified {
+            kind,
+            iters,
+            satisfies,
+        } => evaluate_quantified(kind, iters, satisfies, scope),
         FeelExpression::Path { target, name } => evaluate_path(target, name, scope),
         FeelExpression::Filter { target, predicate } => evaluate_filter(target, predicate, scope),
         FeelExpression::InstanceOf { expr, ty } => evaluate_instance_of(expr, ty, scope),
@@ -465,7 +464,11 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
                 }
             }
         }
-        FeelExpression::FunctionInvocation { callee, args, named } => {
+        FeelExpression::FunctionInvocation {
+            callee,
+            args,
+            named,
+        } => {
             // DMN-15 boxed function invocation. Evaluate callee and args, then
             // dispatch: built-in registry (31-07), lambda application (31-06).
 
@@ -481,10 +484,11 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
                     // (an `errorResult` case), so they must evaluate to null
                     // rather than silently ignoring the extra arguments.
                     if !crate::dmn::feel::builtins::is_variadic_builtin(name) {
-                        if let Some(params) = crate::dmn::feel::builtins::builtin_param_names(name) {
-                            let supplied = args.len().max(
-                                named.as_ref().map(|entries| entries.len()).unwrap_or(0),
-                            );
+                        if let Some(params) = crate::dmn::feel::builtins::builtin_param_names(name)
+                        {
+                            let supplied = args
+                                .len()
+                                .max(named.as_ref().map(|entries| entries.len()).unwrap_or(0));
                             if supplied > params.len() {
                                 return Value::Null;
                             }
@@ -513,7 +517,10 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
                     if func.body.is_none() {
                         // Built-in function pointer — not yet registered (31-07).
                         // Structure the code so 31-07 can populate a registry.
-                        eprintln!("unregistered built-in function: arity={} param_names={:?}", func.arity, func.param_names);
+                        eprintln!(
+                            "unregistered built-in function: arity={} param_names={:?}",
+                            func.arity, func.param_names
+                        );
                         Value::Null
                     } else if func.external {
                         // Non-external constraint (CONTEXT.md): external functions are rejected at invocation.
@@ -533,7 +540,11 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
                 }
             }
         }
-        FeelExpression::FunctionDefinition { params, body, external } => {
+        FeelExpression::FunctionDefinition {
+            params,
+            body,
+            external,
+        } => {
             // DMN-15 boxed function definition: construct a FeelFunction carrier.
             // The closure body is NOT evaluated at definition time (deferred to
             // invocation in 31-06). `param_names`, `body`, and `captured` are all
@@ -541,7 +552,10 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
             // snapshotted via Arc<Scope> (lexical capture, not dynamic).
             let func = crate::dmn::feel::types::FeelFunction {
                 arity: params.len(),
-                param_types: params.iter().map(|(_, t)| t.clone().unwrap_or(crate::dmn::feel::types::FeelType::Any)).collect(),
+                param_types: params
+                    .iter()
+                    .map(|(_, t)| t.clone().unwrap_or(crate::dmn::feel::types::FeelType::Any))
+                    .collect(),
                 ret_type: Box::new(crate::dmn::feel::types::FeelType::Any),
                 param_names: params.iter().map(|(n, _)| n.clone()).collect(),
                 body: Some(Arc::new(*body.clone())),
@@ -587,7 +601,11 @@ fn lambda_apply(
             .collect()
     } else {
         // Positional arguments — zip with param_names.
-        func.param_names.iter().zip(arg_vals.iter()).map(|(n, v)| (n.clone(), v.clone())).collect()
+        func.param_names
+            .iter()
+            .zip(arg_vals.iter())
+            .map(|(n, v)| (n.clone(), v.clone()))
+            .collect()
     };
 
     // Arity check: if positional args were provided and arity mismatches → Null.
@@ -596,14 +614,21 @@ fn lambda_apply(
     }
 
     // Construct working Scope: start from captured (definition-site), then bind params.
-    let mut working_scope = func.captured.clone().map(|arc| (*arc).clone()).unwrap_or_else(Scope::empty);
+    let mut working_scope = func
+        .captured
+        .clone()
+        .map(|arc| (*arc).clone())
+        .unwrap_or_else(Scope::empty);
 
     for (name, val) in effective_args {
         working_scope.bind(name, val, vec![]); // Params have no deps.
     }
 
     // Evaluate the body against the merged scope.
-    let body = func.body.as_ref().expect("body.is_some() checked at call site");
+    let body = func
+        .body
+        .as_ref()
+        .expect("body.is_some() checked at call site");
     evaluate(body, &working_scope)
 }
 
@@ -662,10 +687,7 @@ fn bind_named_arguments(
 ///
 /// Returns [`Value::Null`] for external functions (rejected at invocation),
 /// for built-in function pointers without a body, and on arity mismatch.
-pub fn apply_function_value(
-    func: &crate::dmn::feel::types::FeelFunction,
-    args: &[Value],
-) -> Value {
+pub fn apply_function_value(func: &crate::dmn::feel::types::FeelFunction, args: &[Value]) -> Value {
     if func.external {
         return Value::Null;
     }
@@ -729,7 +751,11 @@ fn collect_free_vars(expr: &FeelExpression, out: &mut Vec<String>) {
             }
             collect_free_vars(body, out);
         }
-        FeelExpression::Quantified { kind: _, iters, satisfies } => {
+        FeelExpression::Quantified {
+            kind: _,
+            iters,
+            satisfies,
+        } => {
             // Quantified vars are bound locally — only count their sources.
             for (_, src) in iters {
                 collect_free_vars(src, out);
@@ -765,7 +791,11 @@ fn collect_free_vars(expr: &FeelExpression, out: &mut Vec<String>) {
                 collect_free_vars(e, out);
             }
         }
-        FeelExpression::FunctionInvocation { callee, args, named } => {
+        FeelExpression::FunctionInvocation {
+            callee,
+            args,
+            named,
+        } => {
             collect_free_vars(callee, out);
             for a in args {
                 collect_free_vars(a, out);
@@ -776,7 +806,11 @@ fn collect_free_vars(expr: &FeelExpression, out: &mut Vec<String>) {
                 }
             }
         }
-        FeelExpression::FunctionDefinition { params: _, body, external: _ } => {
+        FeelExpression::FunctionDefinition {
+            params: _,
+            body,
+            external: _,
+        } => {
             // Parameter names are bound; only the body's free vars count.
             collect_free_vars(body, out);
         }
@@ -800,17 +834,25 @@ pub fn eval_context_topo(
 ) -> Result<HashMap<String, Value>, ContextCycleError> {
     // 1. Build the dependency graph: for each entry, free-vars of its expr that
     //    are also entry keys → edges (intra-context dependencies only).
-    let entry_keys: std::collections::HashSet<&str> = entries.iter().map(|(k, _)| k.as_str()).collect();
+    let entry_keys: std::collections::HashSet<&str> =
+        entries.iter().map(|(k, _)| k.as_str()).collect();
     let mut deps: HashMap<String, Vec<String>> = HashMap::new();
     for (key, expr) in entries {
         let fv = free_vars(expr);
-        let intra: Vec<String> = fv.into_iter().filter(|v| entry_keys.contains(v.as_str())).collect();
+        let intra: Vec<String> = fv
+            .into_iter()
+            .filter(|v| entry_keys.contains(v.as_str()))
+            .collect();
         deps.insert(key.clone(), intra);
     }
 
     // 2. DFS color-marking cycle detection with full cycle-path tracking.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum Color { White, Gray, Black }
+    enum Color {
+        White,
+        Gray,
+        Black,
+    }
 
     let mut colors: HashMap<String, Color> = HashMap::new();
     for (key, _) in entries {
@@ -871,7 +913,12 @@ pub fn eval_context_topo(
     for (key, _) in entries {
         if colors.get(key) == Some(&Color::White) {
             dfs_visit(
-                key, &deps, &mut colors, &mut topo_order, &mut dfs_path, &mut cycle_entries,
+                key,
+                &deps,
+                &mut colors,
+                &mut topo_order,
+                &mut dfs_path,
+                &mut cycle_entries,
             );
         }
     }
@@ -928,11 +975,7 @@ pub struct ContextCycleError {
 /// `duration("P2D") / 2`); returns `None` when neither operand is a duration, so
 /// the caller falls back to numeric arithmetic. `seconds` is set for a
 /// days-and-time duration and `months` for a years-and-months duration.
-fn duration_binop<F>(
-    left: &Value,
-    right: &Value,
-    scale: F,
-) -> Option<Value>
+fn duration_binop<F>(left: &Value, right: &Value, scale: F) -> Option<Value>
 where
     F: Fn(Option<chrono::TimeDelta>, Option<i64>, f64) -> Option<Value>,
 {
@@ -1007,7 +1050,9 @@ fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope:
         BinOpKind::Mul => duration_binop(&l, &r, |seconds, months, factor| {
             if let Some(duration) = seconds {
                 let scaled = duration.to_std().ok().map(|std| std.mul_f64(factor))?;
-                Some(Value::DaysTimeDuration(chrono::TimeDelta::from_std(scaled).ok()?))
+                Some(Value::DaysTimeDuration(
+                    chrono::TimeDelta::from_std(scaled).ok()?,
+                ))
             } else {
                 let months = months?;
                 let total = (months as f64 * factor).trunc();
@@ -1025,7 +1070,9 @@ fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope:
             }
             if let Some(duration) = seconds {
                 let scaled = duration.to_std().ok().map(|std| std.div_f64(factor))?;
-                Some(Value::DaysTimeDuration(chrono::TimeDelta::from_std(scaled).ok()?))
+                Some(Value::DaysTimeDuration(
+                    chrono::TimeDelta::from_std(scaled).ok()?,
+                ))
             } else {
                 let months = months?;
                 let total = (months as f64 / factor).trunc();
@@ -1037,13 +1084,17 @@ fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope:
             }
         })
         .unwrap_or_else(|| {
-            numeric_binop(l, r, |x, y| {
-                if y.is_zero() {
-                    None
-                } else {
-                    x.checked_div(y)
-                }
-            })
+            numeric_binop(
+                l,
+                r,
+                |x, y| {
+                    if y.is_zero() {
+                        None
+                    } else {
+                        x.checked_div(y)
+                    }
+                },
+            )
         }),
         BinOpKind::Pow => eval_pow(l, r),
         // `in` (DMN-13/DMN-14): positive unary test membership.
@@ -1170,19 +1221,23 @@ fn eval_in(l: Value, r: Value) -> Value {
     };
     let mut ok: Option<bool> = Some(true);
     if let Some(start) = &range.start {
-        let in_lower = cmp::feel_compare(&l, start).map(|o| if range.start_incl {
+        let in_lower = cmp::feel_compare(&l, start).map(|o| {
+            if range.start_incl {
                 o != Ordering::Less
             } else {
                 o == Ordering::Greater
-            });
+            }
+        });
         ok = cmp::and_3vl(ok, in_lower);
     }
     if let Some(end) = &range.end {
-        let in_upper = cmp::feel_compare(&l, end).map(|o| if range.end_incl {
+        let in_upper = cmp::feel_compare(&l, end).map(|o| {
+            if range.end_incl {
                 o != Ordering::Greater
             } else {
                 o == Ordering::Less
-            });
+            }
+        });
         ok = cmp::and_3vl(ok, in_upper);
     }
     opt_bool(ok)
@@ -1257,7 +1312,12 @@ fn range_to_values(range: &FeelRange) -> Option<Vec<Value>> {
 ///   an explicit assumption in 31-RESEARCH.md Open Question A4.
 /// - Any other kind → [`Value::Null`] (a non-bool condition is a type error
 ///   → null, per 3VL semantics).
-fn evaluate_if(cond: &FeelExpression, then: &FeelExpression, else_: &FeelExpression, scope: &Scope) -> Value {
+fn evaluate_if(
+    cond: &FeelExpression,
+    then: &FeelExpression,
+    else_: &FeelExpression,
+    scope: &Scope,
+) -> Value {
     let c = evaluate(cond, scope);
     match c {
         Value::Bool(true) => evaluate(then, scope),
@@ -1299,7 +1359,10 @@ fn evaluate_for(iters: &[(String, FeelExpression)], body: &FeelExpression, scope
     }
 
     // Materialize each source into a Vec<Value>.
-    let materialized: Vec<Vec<Value>> = sources.into_iter().map(|v| iter_source_values(&v)).collect();
+    let materialized: Vec<Vec<Value>> = sources
+        .into_iter()
+        .map(|v| iter_source_values(&v))
+        .collect();
 
     // Empty any source → empty array result (not null — just no iterations).
     if materialized.is_empty() || materialized.iter().any(|v: &Vec<Value>| v.is_empty()) {
@@ -1338,7 +1401,15 @@ fn cartesian_iterate(
     for val in &materialized[idx] {
         let mut new_current = current.to_vec();
         new_current.push(val.clone());
-        cartesian_iterate(idx + 1, materialized, iters, body, parent_scope, &new_current, results);
+        cartesian_iterate(
+            idx + 1,
+            materialized,
+            iters,
+            body,
+            parent_scope,
+            &new_current,
+            results,
+        );
     }
 }
 
@@ -1363,7 +1434,10 @@ fn evaluate_quantified(
         return Value::Null;
     }
 
-    let materialized: Vec<Vec<Value>> = sources.into_iter().map(|v| iter_source_values(&v)).collect();
+    let materialized: Vec<Vec<Value>> = sources
+        .into_iter()
+        .map(|v| iter_source_values(&v))
+        .collect();
 
     // Empty any source → base case.
     if materialized.is_empty() || materialized.iter().any(|v: &Vec<Value>| v.is_empty()) {
@@ -1375,7 +1449,15 @@ fn evaluate_quantified(
 
     // Collect all predicate results via cartesian product.
     let mut pred_results: Vec<Option<bool>> = Vec::new();
-    collect_quant_predicates(0, &materialized, iters, satisfies, scope, &[], &mut pred_results);
+    collect_quant_predicates(
+        0,
+        &materialized,
+        iters,
+        satisfies,
+        scope,
+        &[],
+        &mut pred_results,
+    );
 
     // Fold the predicate results using or_3vl (Some) or and_3vl (Every).
     let fold_fn: fn(Option<bool>, Option<bool>) -> Option<bool> = match kind {
@@ -1416,7 +1498,15 @@ fn collect_quant_predicates(
     for val in &materialized[idx] {
         let mut new_current = current.to_vec();
         new_current.push(val.clone());
-        collect_quant_predicates(idx + 1, materialized, iters, satisfies, parent_scope, &new_current, results);
+        collect_quant_predicates(
+            idx + 1,
+            materialized,
+            iters,
+            satisfies,
+            parent_scope,
+            &new_current,
+            results,
+        );
     }
 }
 
@@ -1464,13 +1554,20 @@ fn evaluate_filter(target: &FeelExpression, predicate: &FeelExpression, scope: &
 /// Per DMN-14: `null instance of Any → true`; `null instance of other types → false`.
 /// The Phase 30 `conforms` function treats Null as conforming to everything,
 /// so we special-case null here to match the DMN-14 requirement.
-fn evaluate_instance_of(expr: &FeelExpression, ty: &super::types::FeelType, scope: &Scope) -> Value {
+fn evaluate_instance_of(
+    expr: &FeelExpression,
+    ty: &super::types::FeelType,
+    scope: &Scope,
+) -> Value {
     let v = evaluate(expr, scope);
     // Special case for null: only conforms to Any per DMN-14 instance of semantics.
     if matches!(v, Value::Null) && !matches!(ty, crate::dmn::feel::types::FeelType::Any) {
         return Value::Bool(false);
     }
-    Value::Bool(crate::dmn::feel::types::conforms(&crate::dmn::feel::types::type_of(&v), ty))
+    Value::Bool(crate::dmn::feel::types::conforms(
+        &crate::dmn::feel::types::type_of(&v),
+        ty,
+    ))
 }
 
 /// `a in <test>` — full unary-test semantics (DMN-13/DMN-14).
@@ -1487,16 +1584,26 @@ fn eval_in_with_ast(l: Value, rhs_expr: &FeelExpression) -> Value {
             let mut ok: Option<bool> = Some(true);
             if let Some(s) = &range.start {
                 let o = match cmp::feel_compare(&l, s) {
-                    Some(o) => o, None => return Value::Null,
+                    Some(o) => o,
+                    None => return Value::Null,
                 };
-                let in_lower = if range.start_incl { o != Ordering::Less } else { o == Ordering::Greater };
+                let in_lower = if range.start_incl {
+                    o != Ordering::Less
+                } else {
+                    o == Ordering::Greater
+                };
                 ok = cmp::and_3vl(ok, Some(in_lower));
             }
             if let Some(e) = &range.end {
                 let o = match cmp::feel_compare(&l, e) {
-                    Some(o) => o, None => return Value::Null,
+                    Some(o) => o,
+                    None => return Value::Null,
                 };
-                let in_upper = if range.end_incl { o != Ordering::Greater } else { o == Ordering::Less };
+                let in_upper = if range.end_incl {
+                    o != Ordering::Greater
+                } else {
+                    o == Ordering::Less
+                };
                 ok = cmp::and_3vl(ok, Some(in_upper));
             }
             opt_bool(ok)
@@ -1628,27 +1735,27 @@ fn datetime_add(l: &Value, r: &Value) -> Option<Value> {
         // Date + DaysTimeDuration -> Date
         (Value::Date(d), Value::DaysTimeDuration(td)) => {
             let ndt = d.and_hms_opt(0, 0, 0)?;
-            ndt.checked_add_signed(*td).map(|r| r.date()).map(Value::Date)
+            ndt.checked_add_signed(*td)
+                .map(|r| r.date())
+                .map(Value::Date)
         }
         // DateTimeTz + DaysTimeDuration -> DateTimeTz
         (Value::DateTimeTz(dt), Value::DaysTimeDuration(td)) => match dt {
             super::temporal::DateTimeValue::Iana(zdt) => {
-                add_days_time_zoned(*zdt, *td)
-                    .map(super::temporal::DateTimeValue::Iana)
+                add_days_time_zoned(*zdt, *td).map(super::temporal::DateTimeValue::Iana)
             }
-            super::temporal::DateTimeValue::Fixed(fdt) => {
-                fdt.checked_add_signed(*td).map(super::temporal::DateTimeValue::Fixed)
-            }
-            super::temporal::DateTimeValue::Local(ndt) => {
-                ndt.checked_add_signed(*td).map(super::temporal::DateTimeValue::Local)
-            }
+            super::temporal::DateTimeValue::Fixed(fdt) => fdt
+                .checked_add_signed(*td)
+                .map(super::temporal::DateTimeValue::Fixed),
+            super::temporal::DateTimeValue::Local(ndt) => ndt
+                .checked_add_signed(*td)
+                .map(super::temporal::DateTimeValue::Local),
         }
         .map(Value::DateTimeTz),
         // DateTimeTz + YearsMonthsDuration -> DateTimeTz
         (Value::DateTimeTz(dt), Value::YearsMonthsDuration(ymd)) => match dt {
             super::temporal::DateTimeValue::Iana(zdt) => {
-                add_months_zoned(*zdt, ymd)
-                    .map(super::temporal::DateTimeValue::Iana)
+                add_months_zoned(*zdt, ymd).map(super::temporal::DateTimeValue::Iana)
             }
             super::temporal::DateTimeValue::Fixed(fdt) => {
                 let naive = fdt.naive_local();
@@ -1659,8 +1766,7 @@ fn datetime_add(l: &Value, r: &Value) -> Option<Value> {
                     .map(super::temporal::DateTimeValue::Fixed)
             }
             super::temporal::DateTimeValue::Local(ndt) => {
-                add_months_to_naive_dt(*ndt, ymd.months)
-                    .map(super::temporal::DateTimeValue::Local)
+                add_months_to_naive_dt(*ndt, ymd.months).map(super::temporal::DateTimeValue::Local)
             }
         }
         .map(Value::DateTimeTz),
@@ -1681,14 +1787,11 @@ fn datetime_add(l: &Value, r: &Value) -> Option<Value> {
             Some(Value::DaysTimeDuration(*a + *b))
         }
         // YearsMonthsDuration + YearsMonthsDuration -> YearsMonthsDuration
-        (
-            Value::YearsMonthsDuration(a),
-            Value::YearsMonthsDuration(b),
-        ) => Some(Value::YearsMonthsDuration(
-            super::temporal::YearsMonthsDuration {
+        (Value::YearsMonthsDuration(a), Value::YearsMonthsDuration(b)) => Some(
+            Value::YearsMonthsDuration(super::temporal::YearsMonthsDuration {
                 months: a.months + b.months,
-            },
-        )),
+            }),
+        ),
         _ => None,
     }
 }
@@ -1705,9 +1808,7 @@ fn datetime_add(l: &Value, r: &Value) -> Option<Value> {
 fn datetime_sub(l: &Value, r: &Value) -> Option<Value> {
     match (l, r) {
         // Date - Date -> DaysTimeDuration
-        (Value::Date(a), Value::Date(b)) => {
-            Some(Value::DaysTimeDuration(*a - *b))
-        }
+        (Value::Date(a), Value::Date(b)) => Some(Value::DaysTimeDuration(*a - *b)),
         // DateTimeTz - DateTimeTz -> DaysTimeDuration (within-form only)
         (Value::DateTimeTz(a), Value::DateTimeTz(b)) => match (a, b) {
             (
@@ -1729,14 +1830,12 @@ fn datetime_sub(l: &Value, r: &Value) -> Option<Value> {
             (super::temporal::TimeValue::Fixed(at), super::temporal::TimeValue::Fixed(bt)) => {
                 Some(Value::DaysTimeDuration(*at - *bt))
             }
-            (
-                super::temporal::TimeValue::Offset(ao),
-                super::temporal::TimeValue::Offset(bo),
-            ) => Some(Value::DaysTimeDuration(*ao - *bo)),
-            (
-                super::temporal::TimeValue::Local(at),
-                super::temporal::TimeValue::Local(bt),
-            ) => Some(Value::DaysTimeDuration(*at - *bt)),
+            (super::temporal::TimeValue::Offset(ao), super::temporal::TimeValue::Offset(bo)) => {
+                Some(Value::DaysTimeDuration(*ao - *bo))
+            }
+            (super::temporal::TimeValue::Local(at), super::temporal::TimeValue::Local(bt)) => {
+                Some(Value::DaysTimeDuration(*at - *bt))
+            }
             _ => None,
         },
         // Date - YearsMonthsDuration -> Date
@@ -1755,14 +1854,11 @@ fn datetime_sub(l: &Value, r: &Value) -> Option<Value> {
             Some(Value::DaysTimeDuration(*a - *b))
         }
         // YearsMonthsDuration - YearsMonthsDuration -> YearsMonthsDuration
-        (
-            Value::YearsMonthsDuration(a),
-            Value::YearsMonthsDuration(b),
-        ) => Some(Value::YearsMonthsDuration(
-            super::temporal::YearsMonthsDuration {
+        (Value::YearsMonthsDuration(a), Value::YearsMonthsDuration(b)) => Some(
+            Value::YearsMonthsDuration(super::temporal::YearsMonthsDuration {
                 months: a.months - b.months,
-            },
-        )),
+            }),
+        ),
         _ => None,
     }
 }
@@ -1821,17 +1917,17 @@ fn opt_endpoint(v: Value) -> Option<Value> {
 // =====================================================================
 
 #[cfg(test)]
+use crate::dmn::feel::parser::parse_expression;
+#[cfg(test)]
 use crate::dmn::feel::temporal::DateTimeValue;
 #[cfg(test)]
 use chrono::NaiveDate;
 #[cfg(test)]
-use rust_decimal::dec;
-#[cfg(test)]
-use crate::dmn::feel::parser::parse_expression;
-#[cfg(test)]
 use proptest::prop_assert_eq;
 #[cfg(test)]
 use proptest::strategy::Strategy;
+#[cfg(test)]
+use rust_decimal::dec;
 
 // ----- MANDATORY DMN-12 conformance cases (the load-bearing tests) -----
 
@@ -1872,7 +1968,6 @@ fn dmn12_null_equals_nonnull_yields_false() {
         Some(false)
     );
 }
-
 
 /// DMN-12: `not(null)` → `null` (negation table: "otherwise" → null).
 #[cfg(test)]
@@ -1995,28 +2090,67 @@ fn truth_tables_not() {
 #[cfg(test)]
 #[test]
 fn truth_tables_equals_same_kind() {
-    assert_eq!(cmp::feel_equals(&Value::Number(dec!(5)), &Value::Number(dec!(5))), Some(true));
-    assert_eq!(cmp::feel_equals(&Value::Number(dec!(5)), &Value::Number(dec!(6))), Some(false));
-    assert_eq!(cmp::feel_equals(&Value::String("a".into()), &Value::String("a".into())), Some(true));
-    assert_eq!(cmp::feel_equals(&Value::String("a".into()), &Value::String("b".into())), Some(false));
-    assert_eq!(cmp::feel_equals(&Value::Bool(true), &Value::Bool(true)), Some(true));
-    assert_eq!(cmp::feel_equals(&Value::Bool(true), &Value::Bool(false)), Some(false));
+    assert_eq!(
+        cmp::feel_equals(&Value::Number(dec!(5)), &Value::Number(dec!(5))),
+        Some(true)
+    );
+    assert_eq!(
+        cmp::feel_equals(&Value::Number(dec!(5)), &Value::Number(dec!(6))),
+        Some(false)
+    );
+    assert_eq!(
+        cmp::feel_equals(&Value::String("a".into()), &Value::String("a".into())),
+        Some(true)
+    );
+    assert_eq!(
+        cmp::feel_equals(&Value::String("a".into()), &Value::String("b".into())),
+        Some(false)
+    );
+    assert_eq!(
+        cmp::feel_equals(&Value::Bool(true), &Value::Bool(true)),
+        Some(true)
+    );
+    assert_eq!(
+        cmp::feel_equals(&Value::Bool(true), &Value::Bool(false)),
+        Some(false)
+    );
     // Type mismatch → None (Pitfall 4).
-    assert_eq!(cmp::feel_equals(&Value::Bool(true), &Value::Number(dec!(1))), None);
+    assert_eq!(
+        cmp::feel_equals(&Value::Bool(true), &Value::Number(dec!(1))),
+        None
+    );
 }
 
 /// `feel_compare` same-kind + null + type-mismatch.
 #[cfg(test)]
 #[test]
 fn truth_tables_compare() {
-    assert_eq!(cmp::feel_compare(&Value::Number(dec!(1)), &Value::Number(dec!(2))), Some(Ordering::Less));
-    assert_eq!(cmp::feel_compare(&Value::Number(dec!(2)), &Value::Number(dec!(1))), Some(Ordering::Greater));
-    assert_eq!(cmp::feel_compare(&Value::Number(dec!(2)), &Value::Number(dec!(2))), Some(Ordering::Equal));
+    assert_eq!(
+        cmp::feel_compare(&Value::Number(dec!(1)), &Value::Number(dec!(2))),
+        Some(Ordering::Less)
+    );
+    assert_eq!(
+        cmp::feel_compare(&Value::Number(dec!(2)), &Value::Number(dec!(1))),
+        Some(Ordering::Greater)
+    );
+    assert_eq!(
+        cmp::feel_compare(&Value::Number(dec!(2)), &Value::Number(dec!(2))),
+        Some(Ordering::Equal)
+    );
     // null operand → None.
-    assert_eq!(cmp::feel_compare(&Value::Null, &Value::Number(dec!(1))), None);
-    assert_eq!(cmp::feel_compare(&Value::Number(dec!(1)), &Value::Null), None);
+    assert_eq!(
+        cmp::feel_compare(&Value::Null, &Value::Number(dec!(1))),
+        None
+    );
+    assert_eq!(
+        cmp::feel_compare(&Value::Number(dec!(1)), &Value::Null),
+        None
+    );
     // type mismatch → None.
-    assert_eq!(cmp::feel_compare(&Value::String("a".into()), &Value::Number(dec!(1))), None);
+    assert_eq!(
+        cmp::feel_compare(&Value::String("a".into()), &Value::Number(dec!(1))),
+        None
+    );
 }
 
 // ----- no_rust_eq lint guard (Pitfall 1 enforcement) -----
@@ -2104,19 +2238,24 @@ fn no_rust_eq() {
             assert!(
                 !(line.contains("use ") && (has_partial_eq || has_partial_ord)),
                 "no_rust_eq: Rust eq/ord trait import outside mod cmp ({}): {}",
-                where_, line
+                where_,
+                line
             );
             // `impl …PartialEq/PartialOrd for …` block.
             assert!(
-                !(line.contains("impl ") && (has_partial_eq || has_partial_ord) && line.contains(" for ")),
+                !(line.contains("impl ")
+                    && (has_partial_eq || has_partial_ord)
+                    && line.contains(" for ")),
                 "no_rust_eq: Rust eq/ord impl block outside mod cmp ({}): {}",
-                where_, line
+                where_,
+                line
             );
             // `.partial_cmp(` method call.
             assert!(
                 !line.contains(".partial_cmp("),
                 "no_rust_eq: `.partial_cmp(` call outside mod cmp ({}): {}",
-                where_, line
+                where_,
+                line
             );
         }
     };
@@ -2169,7 +2308,10 @@ mod control {
     /// Nested if: `if true then (if false then 1 else 2) else 3` → Number(2).
     #[test]
     fn if_nested() {
-        assert_eq!(ev("if true then (if false then 1 else 2) else 3"), Value::Number(dec!(2)));
+        assert_eq!(
+            ev("if true then (if false then 1 else 2) else 3"),
+            Value::Number(dec!(2))
+        );
     }
 
     // ----- for -----
@@ -2177,20 +2319,42 @@ mod control {
     /// `for x in [1,2,3] return x * 2` → Array([2,4,6]).
     #[test]
     fn for_array_iteration() {
-        assert_eq!(ev("for x in [1,2,3] return x * 2"), Value::Array(vec![Value::Number(dec!(2)), Value::Number(dec!(4)), Value::Number(dec!(6))]));
+        assert_eq!(
+            ev("for x in [1,2,3] return x * 2"),
+            Value::Array(vec![
+                Value::Number(dec!(2)),
+                Value::Number(dec!(4)),
+                Value::Number(dec!(6))
+            ])
+        );
     }
 
     /// `for x in 1..3 return x` → Array([Number(1), Number(2), Number(3)]) (range iteration).
     /// Parser emits Number literals for integer values; range iteration preserves that type.
     #[test]
     fn for_range_iteration() {
-        assert_eq!(ev("for x in 1..3 return x"), Value::Array(vec![Value::Number(dec!(1)), Value::Number(dec!(2)), Value::Number(dec!(3))]));
+        assert_eq!(
+            ev("for x in 1..3 return x"),
+            Value::Array(vec![
+                Value::Number(dec!(1)),
+                Value::Number(dec!(2)),
+                Value::Number(dec!(3))
+            ])
+        );
     }
 
     /// Cartesian product: `for x in [1,2], y in [3,4] return x + y` → Array([4,5,5,6]).
     #[test]
     fn for_cartesian_product() {
-        assert_eq!(ev("for x in [1,2], y in [3,4] return x + y"), Value::Array(vec![Value::Number(dec!(4)), Value::Number(dec!(5)), Value::Number(dec!(5)), Value::Number(dec!(6))]));
+        assert_eq!(
+            ev("for x in [1,2], y in [3,4] return x + y"),
+            Value::Array(vec![
+                Value::Number(dec!(4)),
+                Value::Number(dec!(5)),
+                Value::Number(dec!(5)),
+                Value::Number(dec!(6))
+            ])
+        );
     }
 
     /// `for x in null return x` → Null (null source short-circuits).
@@ -2261,7 +2425,14 @@ mod control {
             end_incl: true,
         };
         let vals = range_to_values(&range).unwrap();
-        assert_eq!(vals, vec![Value::Number(dec!(1)), Value::Number(dec!(2)), Value::Number(dec!(3))]);
+        assert_eq!(
+            vals,
+            vec![
+                Value::Number(dec!(1)),
+                Value::Number(dec!(2)),
+                Value::Number(dec!(3))
+            ]
+        );
     }
 
     /// `range_to_values` with empty range (start > end) → None.
@@ -2313,109 +2484,235 @@ mod control_t2 {
     use crate::dmn::feel::ast::FeelExpression;
     use crate::dmn::feel::types::FeelType;
 
-    #[cfg(test)] fn ev(src: &str) -> Value { evaluate(&parse_expression(src), &Scope::empty()) }
+    #[cfg(test)]
+    fn ev(src: &str) -> Value {
+        evaluate(&parse_expression(src), &Scope::empty())
+    }
 
     // ----- Path navigation -----
     /// `{"a": {"b": 1}}.a.b` → Number(1). Built AST manually (no context literal in parser).
     /// NOTE: Context evaluation is stubbed (TODO 31-05), so this test is deferred.
-    #[test] #[ignore = "Context evaluation stubbed until Phase 31-05"]
+    #[test]
+    #[ignore = "Context evaluation stubbed until Phase 31-05"]
     fn path_on_context() {
-        let inner_ctx = FeelExpression::Context(vec![("b".to_string(), FeelExpression::Literal(Value::Number(dec!(1))))]);
+        let inner_ctx = FeelExpression::Context(vec![(
+            "b".to_string(),
+            FeelExpression::Literal(Value::Number(dec!(1))),
+        )]);
         let ctx = FeelExpression::Context(vec![("a".to_string(), inner_ctx)]);
-        let path = FeelExpression::Path { target: Box::new(ctx), name: "b".into() };
+        let path = FeelExpression::Path {
+            target: Box::new(ctx),
+            name: "b".into(),
+        };
         assert_eq!(evaluate(&path, &Scope::empty()), Value::Number(dec!(1)));
     }
 
     /// `[{"x":1}, {"x":2}].x` → Array([1, 2]) (list map semantics).
-    #[test] #[ignore = "Context evaluation stubbed until Phase 31-05"]
+    #[test]
+    #[ignore = "Context evaluation stubbed until Phase 31-05"]
     fn path_on_list_map() {
         let list = FeelExpression::List(vec![
-            FeelExpression::Context(vec![("x".into(), FeelExpression::Literal(Value::Number(dec!(1))))]),
-            FeelExpression::Context(vec![("x".into(), FeelExpression::Literal(Value::Number(dec!(2))))]),
+            FeelExpression::Context(vec![(
+                "x".into(),
+                FeelExpression::Literal(Value::Number(dec!(1))),
+            )]),
+            FeelExpression::Context(vec![(
+                "x".into(),
+                FeelExpression::Literal(Value::Number(dec!(2))),
+            )]),
         ]);
-        let path = FeelExpression::Path { target: Box::new(list), name: "x".into() };
-        assert_eq!(evaluate(&path, &Scope::empty()), Value::Array(vec![Value::Number(dec!(1)), Value::Number(dec!(2))]));
+        let path = FeelExpression::Path {
+            target: Box::new(list),
+            name: "x".into(),
+        };
+        assert_eq!(
+            evaluate(&path, &Scope::empty()),
+            Value::Array(vec![Value::Number(dec!(1)), Value::Number(dec!(2))])
+        );
     }
 
     /// `null.x` → Null.
-    #[test] fn path_on_null() {
-        let path = FeelExpression::Path { target: Box::new(FeelExpression::Literal(Value::Null)), name: "x".into() };
+    #[test]
+    fn path_on_null() {
+        let path = FeelExpression::Path {
+            target: Box::new(FeelExpression::Literal(Value::Null)),
+            name: "x".into(),
+        };
         assert_eq!(evaluate(&path, &Scope::empty()), Value::Null);
     }
 
     // ----- Filter -----
     /// `[1,2,3,4][?item > 2]` → Array([3, 4]).
-    #[test] fn filter_list() {
+    #[test]
+    fn filter_list() {
         let list = FeelExpression::List(vec![
-            FeelExpression::Literal(Value::Number(dec!(1))), FeelExpression::Literal(Value::Number(dec!(2))),
-            FeelExpression::Literal(Value::Number(dec!(3))), FeelExpression::Literal(Value::Number(dec!(4))),
+            FeelExpression::Literal(Value::Number(dec!(1))),
+            FeelExpression::Literal(Value::Number(dec!(2))),
+            FeelExpression::Literal(Value::Number(dec!(3))),
+            FeelExpression::Literal(Value::Number(dec!(4))),
         ]);
-        let pred = FeelExpression::BinOp { op: BinOpKind::Gt, lhs: Box::new(FeelExpression::Name("item".into())), rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(2)))) };
-        let filter = FeelExpression::Filter { target: Box::new(list), predicate: Box::new(pred) };
-        assert_eq!(evaluate(&filter, &Scope::empty()), Value::Array(vec![Value::Number(dec!(3)), Value::Number(dec!(4))]));
+        let pred = FeelExpression::BinOp {
+            op: BinOpKind::Gt,
+            lhs: Box::new(FeelExpression::Name("item".into())),
+            rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(2)))),
+        };
+        let filter = FeelExpression::Filter {
+            target: Box::new(list),
+            predicate: Box::new(pred),
+        };
+        assert_eq!(
+            evaluate(&filter, &Scope::empty()),
+            Value::Array(vec![Value::Number(dec!(3)), Value::Number(dec!(4))])
+        );
     }
 
     /// `null[?true]` → Null.
-    #[test] fn filter_on_null() {
-        let filter = FeelExpression::Filter { target: Box::new(FeelExpression::Literal(Value::Null)), predicate: Box::new(FeelExpression::Literal(Value::Bool(true))) };
+    #[test]
+    fn filter_on_null() {
+        let filter = FeelExpression::Filter {
+            target: Box::new(FeelExpression::Literal(Value::Null)),
+            predicate: Box::new(FeelExpression::Literal(Value::Bool(true))),
+        };
         assert_eq!(evaluate(&filter, &Scope::empty()), Value::Null);
     }
 
     // ----- Instance of -----
-    #[test] fn instance_of_number() {
-        let e = FeelExpression::InstanceOf { expr: Box::new(FeelExpression::Literal(Value::Number(dec!(5)))), ty: FeelType::Number };
+    #[test]
+    fn instance_of_number() {
+        let e = FeelExpression::InstanceOf {
+            expr: Box::new(FeelExpression::Literal(Value::Number(dec!(5)))),
+            ty: FeelType::Number,
+        };
         assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
     }
-    #[test] fn instance_of_string() {
-        let e = FeelExpression::InstanceOf { expr: Box::new(FeelExpression::Literal(Value::Number(dec!(5)))), ty: FeelType::String };
+    #[test]
+    fn instance_of_string() {
+        let e = FeelExpression::InstanceOf {
+            expr: Box::new(FeelExpression::Literal(Value::Number(dec!(5)))),
+            ty: FeelType::String,
+        };
         assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(false));
     }
     /// `null instance of Any` → Bool(true) (Null <: Any).
-    #[test] fn instance_of_null_any() {
-        let e = FeelExpression::InstanceOf { expr: Box::new(FeelExpression::Literal(Value::Null)), ty: FeelType::Any };
+    #[test]
+    fn instance_of_null_any() {
+        let e = FeelExpression::InstanceOf {
+            expr: Box::new(FeelExpression::Literal(Value::Null)),
+            ty: FeelType::Any,
+        };
         assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
     }
     /// `null instance of number` → Bool(false) (only Null <: Any).
-    #[test] fn instance_of_null_not_number() {
-        let e = FeelExpression::InstanceOf { expr: Box::new(FeelExpression::Literal(Value::Null)), ty: FeelType::Number };
+    #[test]
+    fn instance_of_null_not_number() {
+        let e = FeelExpression::InstanceOf {
+            expr: Box::new(FeelExpression::Literal(Value::Null)),
+            ty: FeelType::Number,
+        };
         assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(false));
     }
 
     // ----- In unary-test completion -----
     /// `5 in [1..10]` → Bool(true) (range membership).
-    #[test] fn in_range_membership() { assert_eq!(ev("5 in [1..10]"), Value::Bool(true)); }
+    #[test]
+    fn in_range_membership() {
+        assert_eq!(ev("5 in [1..10]"), Value::Bool(true));
+    }
     /// `0 in [1..10]` → Bool(false).
-    #[test] fn in_range_outside() { assert_eq!(ev("0 in [1..10]"), Value::Bool(false)); }
+    #[test]
+    fn in_range_outside() {
+        assert_eq!(ev("0 in [1..10]"), Value::Bool(false));
+    }
 
     /// Test `eval_in_unary_test` with constructed AST: `? < 10`.
-    #[test] fn in_unary_test_lt() {
-        let test = FeelExpression::BinOp { op: BinOpKind::Lt, lhs: Box::new(FeelExpression::Name("?".into())), rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(10)))) };
-        assert_eq!(eval_in_unary_test(Value::Number(dec!(5)), &test), Some(true));
-        assert_eq!(eval_in_unary_test(Value::Number(dec!(15)), &test), Some(false));
+    #[test]
+    fn in_unary_test_lt() {
+        let test = FeelExpression::BinOp {
+            op: BinOpKind::Lt,
+            lhs: Box::new(FeelExpression::Name("?".into())),
+            rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(10)))),
+        };
+        assert_eq!(
+            eval_in_unary_test(Value::Number(dec!(5)), &test),
+            Some(true)
+        );
+        assert_eq!(
+            eval_in_unary_test(Value::Number(dec!(15)), &test),
+            Some(false)
+        );
     }
 
     /// Test `eval_in` with Or-chain (comma-list unary tests).
-    #[test] fn in_or_chain() {
-        let test = FeelExpression::BinOp { op: BinOpKind::Or,
-            lhs: Box::new(FeelExpression::BinOp { op: BinOpKind::Eq, lhs: Box::new(FeelExpression::Name("?".into())), rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(1)))) }),
-            rhs: Box::new(FeelExpression::BinOp { op: BinOpKind::Eq, lhs: Box::new(FeelExpression::Name("?".into())), rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(3)))) }),
+    #[test]
+    fn in_or_chain() {
+        let test = FeelExpression::BinOp {
+            op: BinOpKind::Or,
+            lhs: Box::new(FeelExpression::BinOp {
+                op: BinOpKind::Eq,
+                lhs: Box::new(FeelExpression::Name("?".into())),
+                rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(1)))),
+            }),
+            rhs: Box::new(FeelExpression::BinOp {
+                op: BinOpKind::Eq,
+                lhs: Box::new(FeelExpression::Name("?".into())),
+                rhs: Box::new(FeelExpression::Literal(Value::Number(dec!(3)))),
+            }),
         };
-        let e = FeelExpression::BinOp { op: BinOpKind::In, lhs: Box::new(FeelExpression::Literal(Value::Number(dec!(1)))), rhs: Box::new(test) };
+        let e = FeelExpression::BinOp {
+            op: BinOpKind::In,
+            lhs: Box::new(FeelExpression::Literal(Value::Number(dec!(1)))),
+            rhs: Box::new(test),
+        };
         assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
     }
 
     /// Empty unary tests (always true).
-    #[test] fn in_always_true() {
-        let e = FeelExpression::BinOp { op: BinOpKind::In, lhs: Box::new(FeelExpression::Literal(Value::Number(dec!(99)))), rhs: Box::new(FeelExpression::Literal(Value::Bool(true))) };
+    #[test]
+    fn in_always_true() {
+        let e = FeelExpression::BinOp {
+            op: BinOpKind::In,
+            lhs: Box::new(FeelExpression::Literal(Value::Number(dec!(99)))),
+            rhs: Box::new(FeelExpression::Literal(Value::Bool(true))),
+        };
         assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
     }
 
     // ----- conforms/type_of integration -----
-    #[test] fn type_of_number() { assert_eq!(crate::dmn::feel::types::type_of(&Value::Number(dec!(5))), FeelType::Number); }
-    #[test] fn type_of_null() { assert_eq!(crate::dmn::feel::types::type_of(&Value::Null), FeelType::Null); }
-    #[test] fn conforms_null_any() { assert!(crate::dmn::feel::types::conforms(&FeelType::Null, &FeelType::Any)); }
-    #[test] fn conforms_number_number() { assert!(crate::dmn::feel::types::conforms(&FeelType::Number, &FeelType::Number)); }
-    #[test] fn conforms_null_not_number() { assert!(!crate::dmn::feel::types::conforms(&FeelType::Null, &FeelType::Number)); }
+    #[test]
+    fn type_of_number() {
+        assert_eq!(
+            crate::dmn::feel::types::type_of(&Value::Number(dec!(5))),
+            FeelType::Number
+        );
+    }
+    #[test]
+    fn type_of_null() {
+        assert_eq!(
+            crate::dmn::feel::types::type_of(&Value::Null),
+            FeelType::Null
+        );
+    }
+    #[test]
+    fn conforms_null_any() {
+        assert!(crate::dmn::feel::types::conforms(
+            &FeelType::Null,
+            &FeelType::Any
+        ));
+    }
+    #[test]
+    fn conforms_number_number() {
+        assert!(crate::dmn::feel::types::conforms(
+            &FeelType::Number,
+            &FeelType::Number
+        ));
+    }
+    #[test]
+    fn conforms_null_not_number() {
+        assert!(!crate::dmn::feel::types::conforms(
+            &FeelType::Null,
+            &FeelType::Number
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -2544,7 +2841,6 @@ fn eval_takes_borrowed_ast_not_str() {
     let e = parse_expression("1");
     let _ = _accepts(&e, &Scope::empty());
 }
-
 
 // =====================================================================
 // Plan 31-03 Task 1: arithmetic + string-concat + numeric-edge tests.
@@ -2886,16 +3182,32 @@ mod boxed {
             FeelExpression::Literal(Value::Integer(2)),
             FeelExpression::Literal(Value::Integer(3)),
         ]);
-        assert_eq!(evaluate(&e, &Scope::empty()), Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]));
+        assert_eq!(
+            evaluate(&e, &Scope::empty()),
+            Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3)
+            ])
+        );
     }
 
     /// Nested boxed expressions: `[{a: 1}]` — outer List containing a Context.
     #[test]
     fn boxed_list_nested_context() {
-        let ctx = FeelExpression::Context(vec![("a".to_string(), FeelExpression::Literal(Value::Integer(1)))]);
+        let ctx = FeelExpression::Context(vec![(
+            "a".to_string(),
+            FeelExpression::Literal(Value::Integer(1)),
+        )]);
         let list = FeelExpression::List(vec![ctx]);
         // Context arm is stubbed -> Value::Null; this test FAILS RED until Task 2 fills it in.
-        assert_eq!(evaluate(&list, &Scope::empty()), Value::Array(vec![Value::Object(HashMap::from([("a".to_string(), Value::Integer(1))]))]));
+        assert_eq!(
+            evaluate(&list, &Scope::empty()),
+            Value::Array(vec![Value::Object(HashMap::from([(
+                "a".to_string(),
+                Value::Integer(1)
+            )]))])
+        );
     }
 
     // ----- Context (no dependencies — simple case) -----
@@ -2907,7 +3219,13 @@ mod boxed {
             ("a".to_string(), FeelExpression::Literal(Value::Integer(1))),
             ("b".to_string(), FeelExpression::Literal(Value::Integer(2))),
         ]);
-        assert_eq!(evaluate(&e, &Scope::empty()), Value::Object(HashMap::from([("a".to_string(), Value::Integer(1)), ("b".to_string(), Value::Integer(2))])));
+        assert_eq!(
+            evaluate(&e, &Scope::empty()),
+            Value::Object(HashMap::from([
+                ("a".to_string(), Value::Integer(1)),
+                ("b".to_string(), Value::Integer(2))
+            ]))
+        );
     }
 
     // ----- Context (with dependencies — topological order) -----
@@ -2917,9 +3235,22 @@ mod boxed {
     fn boxed_context_with_dependency() {
         let e = FeelExpression::Context(vec![
             ("a".to_string(), FeelExpression::Literal(Value::Integer(1))),
-            ("b".to_string(), FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            (
+                "b".to_string(),
+                FeelExpression::BinOp {
+                    op: BinOpKind::Add,
+                    lhs: Box::new(FeelExpression::Name("a".into())),
+                    rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                },
+            ),
         ]);
-        assert_eq!(evaluate(&e, &Scope::empty()), Value::Object(HashMap::from([("a".to_string(), Value::Integer(1)), ("b".to_string(), Value::Number(dec!(2)))])));
+        assert_eq!(
+            evaluate(&e, &Scope::empty()),
+            Value::Object(HashMap::from([
+                ("a".to_string(), Value::Integer(1)),
+                ("b".to_string(), Value::Number(dec!(2)))
+            ]))
+        );
     }
 
     // ----- Relation -----
@@ -2930,14 +3261,29 @@ mod boxed {
         let e = FeelExpression::Relation {
             columns: vec!["x".to_string(), "y".to_string()],
             rows: vec![
-                vec![FeelExpression::Literal(Value::Integer(1)), FeelExpression::Literal(Value::Integer(2))],
-                vec![FeelExpression::Literal(Value::Integer(3)), FeelExpression::Literal(Value::Integer(4))],
+                vec![
+                    FeelExpression::Literal(Value::Integer(1)),
+                    FeelExpression::Literal(Value::Integer(2)),
+                ],
+                vec![
+                    FeelExpression::Literal(Value::Integer(3)),
+                    FeelExpression::Literal(Value::Integer(4)),
+                ],
             ],
         };
-        assert_eq!(evaluate(&e, &Scope::empty()), Value::Array(vec![
-            Value::Object(HashMap::from([("x".to_string(), Value::Integer(1)), ("y".to_string(), Value::Integer(2))])),
-            Value::Object(HashMap::from([("x".to_string(), Value::Integer(3)), ("y".to_string(), Value::Integer(4))])),
-        ]));
+        assert_eq!(
+            evaluate(&e, &Scope::empty()),
+            Value::Array(vec![
+                Value::Object(HashMap::from([
+                    ("x".to_string(), Value::Integer(1)),
+                    ("y".to_string(), Value::Integer(2))
+                ])),
+                Value::Object(HashMap::from([
+                    ("x".to_string(), Value::Integer(3)),
+                    ("y".to_string(), Value::Integer(4))
+                ])),
+            ])
+        );
     }
 
     // ----- FunctionDefinition -----
@@ -2948,7 +3294,11 @@ mod boxed {
         let src = "function(a, b) a + b";
         let result = ev(src);
         // Must be a Function value (not Null — the stub returns Null).
-        assert!(matches!(&result, Value::Function(_)), "expected Value::Function, got {:?}", result);
+        assert!(
+            matches!(&result, Value::Function(_)),
+            "expected Value::Function, got {:?}",
+            result
+        );
     }
 
     /// The closure body is NOT evaluated at definition time.
@@ -2958,7 +3308,11 @@ mod boxed {
         // Since we only construct a carrier, it should succeed and return Value::Function.
         let src = "function(a) undefined_var";
         let result = ev(src);
-        assert!(matches!(&result, Value::Function(_)), "expected Value::Function, got {:?}", result);
+        assert!(
+            matches!(&result, Value::Function(_)),
+            "expected Value::Function, got {:?}",
+            result
+        );
     }
 
     /// `external` flag is stored on the carrier.
@@ -2995,22 +3349,42 @@ mod boxed {
             FeelExpression::Literal(Value::Integer(2)),
             FeelExpression::Literal(Value::Integer(3)),
         ]);
-        let pred = FeelExpression::BinOp { op: BinOpKind::Gt, lhs: Box::new(FeelExpression::Name("item".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) };
-        let filter = FeelExpression::Filter { target: Box::new(list), predicate: Box::new(pred) };
-        assert_eq!(evaluate(&filter, &Scope::empty()), Value::Array(vec![Value::Integer(2), Value::Integer(3)]));
+        let pred = FeelExpression::BinOp {
+            op: BinOpKind::Gt,
+            lhs: Box::new(FeelExpression::Name("item".into())),
+            rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+        };
+        let filter = FeelExpression::Filter {
+            target: Box::new(list),
+            predicate: Box::new(pred),
+        };
+        assert_eq!(
+            evaluate(&filter, &Scope::empty()),
+            Value::Array(vec![Value::Integer(2), Value::Integer(3)])
+        );
     }
 
     /// Boxed for delegates to existing evaluate_for arm.
     #[test]
     fn boxed_for_delegates() {
         let e = FeelExpression::For {
-            iters: vec![("x".to_string(), FeelExpression::List(vec![
-                FeelExpression::Literal(Value::Integer(1)),
-                FeelExpression::Literal(Value::Integer(2)),
-            ]))],
-            body: Box::new(FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("x".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            iters: vec![(
+                "x".to_string(),
+                FeelExpression::List(vec![
+                    FeelExpression::Literal(Value::Integer(1)),
+                    FeelExpression::Literal(Value::Integer(2)),
+                ]),
+            )],
+            body: Box::new(FeelExpression::BinOp {
+                op: BinOpKind::Add,
+                lhs: Box::new(FeelExpression::Name("x".into())),
+                rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+            }),
         };
-        assert_eq!(evaluate(&e, &Scope::empty()), Value::Array(vec![Value::Number(dec!(2)), Value::Number(dec!(3))]));
+        assert_eq!(
+            evaluate(&e, &Scope::empty()),
+            Value::Array(vec![Value::Number(dec!(2)), Value::Number(dec!(3))])
+        );
     }
 
     /// Boxed quantified delegates to existing evaluate_quantified arm.
@@ -3018,11 +3392,18 @@ mod boxed {
     fn boxed_quantified_delegates() {
         let e = FeelExpression::Quantified {
             kind: QuantKind::Some,
-            iters: vec![("x".to_string(), FeelExpression::List(vec![
-                FeelExpression::Literal(Value::Integer(1)),
-                FeelExpression::Literal(Value::Integer(2)),
-            ]))],
-            satisfies: Box::new(FeelExpression::BinOp { op: BinOpKind::Gt, lhs: Box::new(FeelExpression::Name("x".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            iters: vec![(
+                "x".to_string(),
+                FeelExpression::List(vec![
+                    FeelExpression::Literal(Value::Integer(1)),
+                    FeelExpression::Literal(Value::Integer(2)),
+                ]),
+            )],
+            satisfies: Box::new(FeelExpression::BinOp {
+                op: BinOpKind::Gt,
+                lhs: Box::new(FeelExpression::Name("x".into())),
+                rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+            }),
         };
         assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
     }
@@ -3044,10 +3425,19 @@ mod boxed {
     #[test]
     fn boxed_function_invocation_bound_callee_stub() {
         let mut scope = Scope::empty();
-        scope.bind("f".to_string(), Value::Function(FeelFunction {
-            arity: 0, param_types: vec![], ret_type: Box::new(crate::dmn::feel::types::FeelType::Any),
-            param_names: vec![], body: None, captured: None, external: false,
-        }), vec![]);
+        scope.bind(
+            "f".to_string(),
+            Value::Function(FeelFunction {
+                arity: 0,
+                param_types: vec![],
+                ret_type: Box::new(crate::dmn::feel::types::FeelType::Any),
+                param_names: vec![],
+                body: None,
+                captured: None,
+                external: false,
+            }),
+            vec![],
+        );
         let e = FeelExpression::FunctionInvocation {
             callee: Box::new(FeelExpression::Name("f".into())),
             args: vec![],
@@ -3063,14 +3453,24 @@ mod boxed {
     #[test]
     fn boxed_for_returns_contexts_golden() {
         let e = FeelExpression::For {
-            iters: vec![("x".to_string(), FeelExpression::List(vec![
-                FeelExpression::Literal(Value::Integer(1)),
-                FeelExpression::Literal(Value::Integer(2)),
-                FeelExpression::Literal(Value::Integer(3)),
-            ]))],
+            iters: vec![(
+                "x".to_string(),
+                FeelExpression::List(vec![
+                    FeelExpression::Literal(Value::Integer(1)),
+                    FeelExpression::Literal(Value::Integer(2)),
+                    FeelExpression::Literal(Value::Integer(3)),
+                ]),
+            )],
             body: Box::new(FeelExpression::Context(vec![
                 ("value".to_string(), FeelExpression::Name("x".into())),
-                ("doubled".to_string(), FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("x".into())), rhs: Box::new(FeelExpression::Name("x".into())) }),
+                (
+                    "doubled".to_string(),
+                    FeelExpression::BinOp {
+                        op: BinOpKind::Add,
+                        lhs: Box::new(FeelExpression::Name("x".into())),
+                        rhs: Box::new(FeelExpression::Name("x".into())),
+                    },
+                ),
             ])),
         };
         let result = evaluate(&e, &Scope::empty());
@@ -3096,13 +3496,35 @@ mod boxed {
     #[test]
     fn context_topo_2_cycle() {
         let result = eval_ctx(vec![
-            ("a", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("b".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
-            ("b", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            (
+                "a",
+                FeelExpression::BinOp {
+                    op: BinOpKind::Add,
+                    lhs: Box::new(FeelExpression::Name("b".into())),
+                    rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                },
+            ),
+            (
+                "b",
+                FeelExpression::BinOp {
+                    op: BinOpKind::Add,
+                    lhs: Box::new(FeelExpression::Name("a".into())),
+                    rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                },
+            ),
         ]);
         match &result {
             Value::Object(map) => {
-                assert_eq!(map.get("a"), Some(&Value::Null), "cyclic 'a' should be Null");
-                assert_eq!(map.get("b"), Some(&Value::Null), "cyclic 'b' should be Null");
+                assert_eq!(
+                    map.get("a"),
+                    Some(&Value::Null),
+                    "cyclic 'a' should be Null"
+                );
+                assert_eq!(
+                    map.get("b"),
+                    Some(&Value::Null),
+                    "cyclic 'b' should be Null"
+                );
             }
             other => panic!("expected Object, got {:?}", other),
         }
@@ -3112,15 +3534,48 @@ mod boxed {
     #[test]
     fn context_topo_3_cycle() {
         let result = eval_ctx(vec![
-            ("a", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("b".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
-            ("b", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("c".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
-            ("c", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            (
+                "a",
+                FeelExpression::BinOp {
+                    op: BinOpKind::Add,
+                    lhs: Box::new(FeelExpression::Name("b".into())),
+                    rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                },
+            ),
+            (
+                "b",
+                FeelExpression::BinOp {
+                    op: BinOpKind::Add,
+                    lhs: Box::new(FeelExpression::Name("c".into())),
+                    rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                },
+            ),
+            (
+                "c",
+                FeelExpression::BinOp {
+                    op: BinOpKind::Add,
+                    lhs: Box::new(FeelExpression::Name("a".into())),
+                    rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                },
+            ),
         ]);
         match &result {
             Value::Object(map) => {
-                assert_eq!(map.get("a"), Some(&Value::Null), "cyclic 'a' should be Null");
-                assert_eq!(map.get("b"), Some(&Value::Null), "cyclic 'b' should be Null");
-                assert_eq!(map.get("c"), Some(&Value::Null), "cyclic 'c' should be Null");
+                assert_eq!(
+                    map.get("a"),
+                    Some(&Value::Null),
+                    "cyclic 'a' should be Null"
+                );
+                assert_eq!(
+                    map.get("b"),
+                    Some(&Value::Null),
+                    "cyclic 'b' should be Null"
+                );
+                assert_eq!(
+                    map.get("c"),
+                    Some(&Value::Null),
+                    "cyclic 'c' should be Null"
+                );
             }
             other => panic!("expected Object, got {:?}", other),
         }
@@ -3129,12 +3584,21 @@ mod boxed {
     /// Self-reference: `{a: a+1}` — a depends on itself → cycle → Null.
     #[test]
     fn context_topo_self_reference() {
-        let result = eval_ctx(vec![
-            ("a", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
-        ]);
+        let result = eval_ctx(vec![(
+            "a",
+            FeelExpression::BinOp {
+                op: BinOpKind::Add,
+                lhs: Box::new(FeelExpression::Name("a".into())),
+                rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+            },
+        )]);
         match &result {
             Value::Object(map) => {
-                assert_eq!(map.get("a"), Some(&Value::Null), "self-referential 'a' should be Null");
+                assert_eq!(
+                    map.get("a"),
+                    Some(&Value::Null),
+                    "self-referential 'a' should be Null"
+                );
             }
             other => panic!("expected Object, got {:?}", other),
         }
@@ -3144,28 +3608,55 @@ mod boxed {
     #[test]
     fn context_topo_out_of_order_dag() {
         let result = eval_ctx(vec![
-            ("b", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            (
+                "b",
+                FeelExpression::BinOp {
+                    op: BinOpKind::Add,
+                    lhs: Box::new(FeelExpression::Name("a".into())),
+                    rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                },
+            ),
             ("a", FeelExpression::Literal(Value::Integer(1))),
         ]);
-        assert_eq!(result, Value::Object(std::collections::HashMap::from([
-            ("a".to_string(), Value::Integer(1)),
-            ("b".to_string(), Value::Number(rust_decimal::dec!(2))),
-        ])));
+        assert_eq!(
+            result,
+            Value::Object(std::collections::HashMap::from([
+                ("a".to_string(), Value::Integer(1)),
+                ("b".to_string(), Value::Number(rust_decimal::dec!(2))),
+            ]))
+        );
     }
 
     /// DAG with chain: `{a: 1, b: a+1, c: b+1}` → Object({a:1, b:2, c:3}).
     #[test]
     fn context_topo_chain() {
         let result = eval_ctx(vec![
-            ("c", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("b".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
-            ("b", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("a".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            (
+                "c",
+                FeelExpression::BinOp {
+                    op: BinOpKind::Add,
+                    lhs: Box::new(FeelExpression::Name("b".into())),
+                    rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                },
+            ),
+            (
+                "b",
+                FeelExpression::BinOp {
+                    op: BinOpKind::Add,
+                    lhs: Box::new(FeelExpression::Name("a".into())),
+                    rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                },
+            ),
             ("a", FeelExpression::Literal(Value::Integer(1))),
         ]);
-        assert_eq!(result, Value::Object(std::collections::HashMap::from([
-            ("a".to_string(), Value::Integer(1)),
-            ("b".to_string(), Value::Number(rust_decimal::dec!(2))),
-            ("c".to_string(), Value::Number(rust_decimal::dec!(3))),
-        ])));
+        assert_eq!(
+            result,
+            Value::Object(std::collections::HashMap::from([
+                ("a".to_string(), Value::Integer(1)),
+                ("b".to_string(), Value::Number(rust_decimal::dec!(2))),
+                ("c".to_string(), Value::Number(rust_decimal::dec!(3))),
+            ]))
+        );
     }
 
     /// Mixed: some entries cyclic, others not — non-cyclic entries still evaluate.
@@ -3173,14 +3664,40 @@ mod boxed {
     fn context_topo_mixed_cycle_and_dag() {
         let result = eval_ctx(vec![
             ("a", FeelExpression::Literal(Value::Integer(10))),
-            ("b", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("c".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
-            ("c", FeelExpression::BinOp { op: BinOpKind::Add, lhs: Box::new(FeelExpression::Name("b".into())), rhs: Box::new(FeelExpression::Literal(Value::Integer(1))) }),
+            (
+                "b",
+                FeelExpression::BinOp {
+                    op: BinOpKind::Add,
+                    lhs: Box::new(FeelExpression::Name("c".into())),
+                    rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                },
+            ),
+            (
+                "c",
+                FeelExpression::BinOp {
+                    op: BinOpKind::Add,
+                    lhs: Box::new(FeelExpression::Name("b".into())),
+                    rhs: Box::new(FeelExpression::Literal(Value::Integer(1))),
+                },
+            ),
         ]);
         match &result {
             Value::Object(map) => {
-                assert_eq!(map.get("a"), Some(&Value::Integer(10)), "non-cyclic 'a' should evaluate to 10");
-                assert_eq!(map.get("b"), Some(&Value::Null), "cyclic 'b' should be Null");
-                assert_eq!(map.get("c"), Some(&Value::Null), "cyclic 'c' should be Null");
+                assert_eq!(
+                    map.get("a"),
+                    Some(&Value::Integer(10)),
+                    "non-cyclic 'a' should evaluate to 10"
+                );
+                assert_eq!(
+                    map.get("b"),
+                    Some(&Value::Null),
+                    "cyclic 'b' should be Null"
+                );
+                assert_eq!(
+                    map.get("c"),
+                    Some(&Value::Null),
+                    "cyclic 'c' should be Null"
+                );
             }
             other => panic!("expected Object, got {:?}", other),
         }
@@ -3243,7 +3760,7 @@ mod boxed {
 #[cfg(test)]
 mod lambdas {
     use super::*;
-    use crate::dmn::feel::ast::{FeelExpression, BinOpKind};
+    use crate::dmn::feel::ast::{BinOpKind, FeelExpression};
     use crate::dmn::feel::types::FeelType;
     use std::sync::Arc;
 
@@ -3256,7 +3773,11 @@ mod lambdas {
     #[test]
     fn lambda_definition_produces_function_value() {
         let result = ev_lambda("function(a, b) a + b");
-        assert!(matches!(&result, Value::Function(_)), "expected Value::Function, got {:?}", result);
+        assert!(
+            matches!(&result, Value::Function(_)),
+            "expected Value::Function, got {:?}",
+            result
+        );
     }
 
     /// Test: the FunctionDefinition arm populates `captured` with the definition-site scope.
@@ -3266,7 +3787,10 @@ mod lambdas {
         let result = ev_lambda(src);
         match &result {
             Value::Function(f) => {
-                assert!(f.captured.is_some(), "captured scope should be populated at definition time");
+                assert!(
+                    f.captured.is_some(),
+                    "captured scope should be populated at definition time"
+                );
                 // The captured scope is the empty scope (definition-site bindings).
                 let captured = f.captured.as_ref().unwrap();
                 assert_eq!(captured.bindings.len(), 0, "empty scope has no bindings");
@@ -3323,16 +3847,22 @@ mod lambdas {
             param_types: vec![FeelType::Number],
             ret_type: Box::new(FeelType::Any),
             param_names: vec!["x".to_string()],
-            body: Some(Arc::new(crate::dmn::feel::ast::FeelExpression::Literal(Value::Integer(42)))),
+            body: Some(Arc::new(crate::dmn::feel::ast::FeelExpression::Literal(
+                Value::Integer(42),
+            ))),
             captured: Some(Arc::new(Scope {
-                bindings: std::collections::HashMap::from([("y".to_string(), Value::String("hello".into()))]),
+                bindings: std::collections::HashMap::from([(
+                    "y".to_string(),
+                    Value::String("hello".into()),
+                )]),
                 deps: std::collections::HashMap::new(),
             })),
             external: false,
         };
 
         let json = serde_json::to_string(&func).expect("serialize");
-        let deserialized: crate::dmn::feel::types::FeelFunction = serde_json::from_str(&json).expect("deserialize");
+        let deserialized: crate::dmn::feel::types::FeelFunction =
+            serde_json::from_str(&json).expect("deserialize");
 
         assert_eq!(deserialized.arity, func.arity);
         assert_eq!(deserialized.param_names, vec!["x".to_string()]);
@@ -3346,7 +3876,11 @@ mod lambdas {
         // Captured scope should round-trip.
         match (&deserialized.captured, &func.captured) {
             (Some(cap), Some(orig)) => {
-                assert_eq!(cap.bindings.get("y"), orig.bindings.get("y"), "captured bindings should round-trip");
+                assert_eq!(
+                    cap.bindings.get("y"),
+                    orig.bindings.get("y"),
+                    "captured bindings should round-trip"
+                );
             }
             _ => panic!("both captured fields should be Some"),
         }
@@ -3361,7 +3895,10 @@ mod lambdas {
             Value::Function(f) => {
                 assert!(f.external, "external flag should be true");
                 // Even external functions capture the definition-site scope (for future use).
-                assert!(f.captured.is_some(), "captured should still be populated for external functions");
+                assert!(
+                    f.captured.is_some(),
+                    "captured should still be populated for external functions"
+                );
             }
             other => panic!("expected Value::Function, got {:?}", other),
         }
@@ -3395,8 +3932,17 @@ mod lambdas {
                 let f_val = map.get("f").unwrap();
                 if let Value::Function(f) = f_val {
                     // Get the captured x value.
-                    let captured_x = f.captured.as_ref().and_then(|c| c.get("x")).cloned().unwrap_or(Value::Null);
-                    assert_eq!(captured_x, Value::Integer(10), "lexical capture: closure should see definition-site x=10");
+                    let captured_x = f
+                        .captured
+                        .as_ref()
+                        .and_then(|c| c.get("x"))
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    assert_eq!(
+                        captured_x,
+                        Value::Integer(10),
+                        "lexical capture: closure should see definition-site x=10"
+                    );
 
                     // Now invoke this function from a different context where x=99.
                     let invocation = FeelExpression::FunctionInvocation {
@@ -3451,7 +3997,7 @@ mod lambdas {
 #[cfg(test)]
 mod external_rejected {
     use super::*;
-    use crate::dmn::feel::ast::{FeelExpression, BinOpKind};
+    use crate::dmn::feel::ast::{BinOpKind, FeelExpression};
 
     /// Test: external function invocation returns Null + warning logged.
     #[test]
@@ -3470,13 +4016,17 @@ mod external_rejected {
 
         let result = evaluate(&invocation, &Scope::empty());
         // External functions are rejected at invocation time.
-        assert_eq!(result, Value::Null, "external function invocation should return Null");
+        assert_eq!(
+            result,
+            Value::Null,
+            "external function invocation should return Null"
+        );
     }
 
     /// Test: non-external lambda application works (merge captured + params, evaluate body).
     #[test]
     fn lambda_application_merges_scope_and_evaluates() {
-        use crate::dmn::feel::ast::{FeelExpression as FE, BinOpKind as BOK};
+        use crate::dmn::feel::ast::{BinOpKind as BOK, FeelExpression as FE};
 
         // Build a function that adds its parameter to x from the enclosing scope.
         let func_def = FeelExpression::FunctionDefinition {
@@ -3509,7 +4059,11 @@ mod external_rejected {
 
                     // The result should be x + y = 10 + 5 = 15.
                     let eval_result = evaluate(&invocation, &Scope::empty());
-                    assert_eq!(eval_result, Value::Number(rust_decimal::dec!(15)), "lambda application should return 10+5=15");
+                    assert_eq!(
+                        eval_result,
+                        Value::Number(rust_decimal::dec!(15)),
+                        "lambda application should return 10+5=15"
+                    );
                 } else {
                     panic!("expected Function value");
                 }
@@ -3521,7 +4075,7 @@ mod external_rejected {
     /// Test: named args work (merge captured + named params, evaluate body).
     #[test]
     fn lambda_named_args_work() {
-        use crate::dmn::feel::ast::{FeelExpression as FE, BinOpKind as BOK};
+        use crate::dmn::feel::ast::{BinOpKind as BOK, FeelExpression as FE};
 
         let func_def = FeelExpression::FunctionDefinition {
             params: vec![("a".to_string(), None), ("b".to_string(), None)],
@@ -3545,13 +4099,17 @@ mod external_rejected {
 
         let result = evaluate(&invocation, &Scope::empty());
         // a=1 + b=2 = 3.
-        assert_eq!(result, Value::Number(rust_decimal::dec!(3)), "named args: a+b should be 3");
+        assert_eq!(
+            result,
+            Value::Number(rust_decimal::dec!(3)),
+            "named args: a+b should be 3"
+        );
     }
 
     /// Test: lexical capture verified — closure sees definition-site x=10 even when called from scope with x=99.
     #[test]
     fn lambda_lexical_capture_verified_at_invocation() {
-        use crate::dmn::feel::ast::{FeelExpression as FE, BinOpKind as BOK};
+        use crate::dmn::feel::ast::{BinOpKind as BOK, FeelExpression as FE};
 
         // Define function in context where x=10; invoke from a scope where x=99.
         let func_def = FeelExpression::FunctionDefinition {
@@ -3587,7 +4145,11 @@ mod external_rejected {
 
                     // The result should still use captured x=10 (lexical).
                     let eval_result = evaluate(&invocation, &outer_scope);
-                    assert_eq!(eval_result, Value::Number(rust_decimal::dec!(10)), "lexical capture: closure sees definition-site x=10, not call-site x=99");
+                    assert_eq!(
+                        eval_result,
+                        Value::Number(rust_decimal::dec!(10)),
+                        "lexical capture: closure sees definition-site x=10, not call-site x=99"
+                    );
                 } else {
                     panic!("expected Function value");
                 }
@@ -3599,7 +4161,7 @@ mod external_rejected {
     /// Test: arity mismatch returns Null (no lambda application logic yet).
     #[test]
     fn lambda_arity_mismatch_invocation_returns_null() {
-        use crate::dmn::feel::ast::{FeelExpression as FE, BinOpKind as BOK};
+        use crate::dmn::feel::ast::{BinOpKind as BOK, FeelExpression as FE};
 
         let func_def = FeelExpression::FunctionDefinition {
             params: vec![("a".to_string(), None), ("b".to_string(), None)],
@@ -3627,13 +4189,19 @@ mod external_rejected {
     #[test]
     fn lambda_invocation_non_function_callee_returns_null() {
         let invocation = FeelExpression::FunctionInvocation {
-            callee: Box::new(crate::dmn::feel::ast::FeelExpression::Literal(Value::Integer(42))), // Number, not a function!
+            callee: Box::new(crate::dmn::feel::ast::FeelExpression::Literal(
+                Value::Integer(42),
+            )), // Number, not a function!
             args: vec![],
             named: None,
         };
 
         let result = evaluate(&invocation, &Scope::empty());
-        assert_eq!(result, Value::Null, "non-function callee should return Null");
+        assert_eq!(
+            result,
+            Value::Null,
+            "non-function callee should return Null"
+        );
     }
 }
 

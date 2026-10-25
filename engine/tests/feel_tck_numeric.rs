@@ -39,19 +39,58 @@ const TCK_PROVENANCE: &str = "github.com/dmn-tck/tck @ commit 0dbcaf9b (Apache-2
 /// exercise, with the reason. This is the conformance-gap audit trail —
 /// never silently omit a vector.
 const SKIP_LIST: &[(&str, &str)] = &[
-    ("0100-arithmetic: number ** number", "exponentiation (**) is Phase 31 DMN-13"),
-    ("0100-arithmetic: number ** duration", "exponentiation (**) is Phase 31 DMN-13"),
-    ("0100-arithmetic: number OP duration (@\"\")", "duration arithmetic is Plan 03 / Phase 31"),
-    ("0100-arithmetic: number OP date/time (@\"\")", "temporal arithmetic is Plan 03"),
-    ("0100-arithmetic: number OP string (\"..\")", "number↔string is a Phase 31 explicit built-in (Pitfall 6)"),
-    ("0100-arithmetic: number OP list ([..])", "list coercion is Phase 31"),
-    ("0100-arithmetic: number OP context ({..})", "context coercion is Phase 31"),
-    ("0100-arithmetic: number OP null", "null-propagation operators are Phase 31"),
-    ("0100-arithmetic: number OP function", "function values are Phase 31"),
-    ("0100-arithmetic: number OP bool (true/false)", "bool↔number is Phase 31"),
-    ("0100-arithmetic: 100 / 0", "division by zero → null mapping is Phase 31 (Security Domain)"),
-    ("1100-feel-decimal-function: decimal(n, scale)", "decimal() rounding built-in is Phase 31 DMN-17 (Pitfall 2)"),
-    ("1141-1144: round up/down/half-up/half-down", "rounding built-ins are Phase 31 DMN-17 (Pitfall 2)"),
+    (
+        "0100-arithmetic: number ** number",
+        "exponentiation (**) is Phase 31 DMN-13",
+    ),
+    (
+        "0100-arithmetic: number ** duration",
+        "exponentiation (**) is Phase 31 DMN-13",
+    ),
+    (
+        "0100-arithmetic: number OP duration (@\"\")",
+        "duration arithmetic is Plan 03 / Phase 31",
+    ),
+    (
+        "0100-arithmetic: number OP date/time (@\"\")",
+        "temporal arithmetic is Plan 03",
+    ),
+    (
+        "0100-arithmetic: number OP string (\"..\")",
+        "number↔string is a Phase 31 explicit built-in (Pitfall 6)",
+    ),
+    (
+        "0100-arithmetic: number OP list ([..])",
+        "list coercion is Phase 31",
+    ),
+    (
+        "0100-arithmetic: number OP context ({..})",
+        "context coercion is Phase 31",
+    ),
+    (
+        "0100-arithmetic: number OP null",
+        "null-propagation operators are Phase 31",
+    ),
+    (
+        "0100-arithmetic: number OP function",
+        "function values are Phase 31",
+    ),
+    (
+        "0100-arithmetic: number OP bool (true/false)",
+        "bool↔number is Phase 31",
+    ),
+    (
+        "0100-arithmetic: 100 / 0",
+        "division by zero → null mapping is Phase 31 (Security Domain)",
+    ),
+    (
+        "1100-feel-decimal-function: decimal(n, scale)",
+        "decimal() rounding built-in is Phase 31 DMN-17 (Pitfall 2)",
+    ),
+    (
+        "1141-1144: round up/down/half-up/half-down",
+        "rounding built-ins are Phase 31 DMN-17 (Pitfall 2)",
+    ),
 ];
 
 /// Root directory of the vendored TCK subset (relative to `engine/tests/`).
@@ -70,9 +109,8 @@ struct TckCase {
 /// Parse a DMN file into a map of decision name → expression text
 /// (the contents of `<decision><literalExpression><text>…</text>`).
 fn parse_dmn_expressions(path: &Path) -> HashMap<String, String> {
-    let text = fs::read_to_string(path).unwrap_or_else(|e| {
-        panic!("failed to read DMN {}: {e}", path.display())
-    });
+    let text = fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed to read DMN {}: {e}", path.display()));
     let mut reader = NsReader::from_str(&text);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -122,9 +160,8 @@ fn parse_dmn_expressions(path: &Path) -> HashMap<String, String> {
 /// holds a `<value xsi:type="…">TEXT</value>`. Cases with no `<value>` (null
 /// expectations) produce `expected_value = None`.
 fn parse_test_cases(path: &Path) -> Vec<TckCase> {
-    let text = fs::read_to_string(path).unwrap_or_else(|e| {
-        panic!("failed to read test XML {}: {e}", path.display())
-    });
+    let text = fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed to read test XML {}: {e}", path.display()));
     let mut reader = NsReader::from_str(&text);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -285,7 +322,9 @@ fn feel_tck_numeric_vectors() {
         if ty != "xsd:decimal" {
             continue;
         }
-        let Some(expected_str) = &case.expected_value else { continue };
+        let Some(expected_str) = &case.expected_value else {
+            continue;
+        };
         let Ok(expected) = Decimal::from_str(expected_str) else {
             // Oversized/malformed literal → T-30-02-01 mitigation: skip with a
             // visible message rather than panicking.
@@ -369,7 +408,10 @@ fn feel_tck_skip_list_documented() {
     // Every entry has a non-empty reason.
     for (category, reason) in SKIP_LIST {
         assert!(!category.is_empty(), "skip-list category is empty");
-        assert!(!reason.is_empty(), "skip-list reason for {category} is empty");
+        assert!(
+            !reason.is_empty(),
+            "skip-list reason for {category} is empty"
+        );
     }
     // Smoke-check that the skip-list covers the known Phase 31 boundaries.
     // Join both category and reason so substrings in either are visible.
@@ -379,8 +421,20 @@ fn feel_tck_skip_list_documented() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(joined.contains("exponentiation"), "skip-list covers **");
-    assert!(joined.contains("decimal()"), "skip-list covers decimal() built-in");
-    assert!(joined.contains("round up"), "skip-list covers round built-ins");
-    assert!(joined.contains("division by zero"), "skip-list covers div-by-zero");
-    eprintln!("feel_tck_skip_list: {} out-of-scope categories documented", SKIP_LIST.len());
+    assert!(
+        joined.contains("decimal()"),
+        "skip-list covers decimal() built-in"
+    );
+    assert!(
+        joined.contains("round up"),
+        "skip-list covers round built-ins"
+    );
+    assert!(
+        joined.contains("division by zero"),
+        "skip-list covers div-by-zero"
+    );
+    eprintln!(
+        "feel_tck_skip_list: {} out-of-scope categories documented",
+        SKIP_LIST.len()
+    );
 }

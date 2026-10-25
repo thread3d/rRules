@@ -35,5 +35,5 @@ pub mod test_util;
 pub mod tracker;
 
 // Re-exports for convenient access.
-pub use decision_table::{DecisionTableEvaluator, DecisionTableError};
+pub use decision_table::{DecisionTableError, DecisionTableEvaluator};
 pub use evaluator::{DecisionEvalError, DecisionEvaluator, EvaluateRequest, EvaluateResult};

@@ -104,7 +104,9 @@ static INSTANCE: LazyLock<Mutex<TrackerState>> = LazyLock::new(|| {
 /// subsequent monitoring call. Panicking here would turn one failed test into a
 /// process-wide observability outage.
 fn lock_state() -> std::sync::MutexGuard<'static, TrackerState> {
-    INSTANCE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    INSTANCE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl RuleExecutionTracker {
@@ -300,10 +302,7 @@ impl DeadRuleReport {
         // Generate recommendations for each dead rule
         let mut recommendations = HashMap::new();
         for info in &dead_rules {
-            recommendations.insert(
-                info.rule_id.clone(),
-                Self::generate_recommendation(info),
-            );
+            recommendations.insert(info.rule_id.clone(), Self::generate_recommendation(info));
         }
 
         Self {

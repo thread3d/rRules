@@ -4,10 +4,10 @@
 //! - retract_fact returns Ok(true) for valid fact_id
 //! - retract_fact returns Ok(false) for non-existent fact_id
 
-use std::collections::HashMap;
+use engine::data_types::Value;
 use engine::engine::registry::ExecutionEngine;
 use engine::fact::Fact;
-use engine::data_types::Value;
+use std::collections::HashMap;
 
 /// Helper to create a fact with a specific type and payload.
 fn make_fact(fact_type: &str, field_name: &str, value: Value) -> Fact {
@@ -113,7 +113,7 @@ fn test_treat_double_retract_second_returns_false() {
 
 #[test]
 fn test_leaps_retract_multiple_facts() {
-    use engine::engine::leaps::{LeapsEngine, LeapsNetwork, AggregationNode, AggregationOp};
+    use engine::engine::leaps::{AggregationNode, AggregationOp, LeapsEngine, LeapsNetwork};
 
     let mut network = LeapsNetwork::new();
     let agg_node = AggregationNode::new("agg1", AggregationOp::Sum, "amount");

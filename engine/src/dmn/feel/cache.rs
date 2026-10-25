@@ -20,7 +20,9 @@ use std::sync::{Arc, Mutex, Weak};
 use dashmap::DashMap;
 
 use super::ast::FeelExpression;
-use super::parser::{parse_expression_with_cache, parse_simple_unary_tests_with_cache, LexerTokenCache};
+use super::parser::{
+    parse_expression_with_cache, parse_simple_unary_tests_with_cache, LexerTokenCache,
+};
 
 /// Entry-point kind for `get_or_parse`. The same FEEL text can produce a
 /// different AST under the two entry points (Pitfall 8 of 31-RESEARCH.md) —
@@ -254,9 +256,9 @@ impl FeelAstCache {
                     ParseEntry::Expression => {
                         Arc::new(parse_expression_with_cache(src, Some(&self.tokens)))
                     }
-                    ParseEntry::SimpleUnaryTests => Arc::new(
-                        parse_simple_unary_tests_with_cache(src, Some(&self.tokens)),
-                    ),
+                    ParseEntry::SimpleUnaryTests => {
+                        Arc::new(parse_simple_unary_tests_with_cache(src, Some(&self.tokens)))
+                    }
                 };
                 v.insert(parsed.clone());
                 if let Ok(mut ord) = self.order.lock() {
@@ -355,7 +357,10 @@ mod tests {
         let a = cache.get_or_parse("1 + 2", ParseEntry::Expression);
         let b = cache.get_or_parse("1 + 2", ParseEntry::Expression);
 
-        assert!(Arc::as_ptr(&a) == Arc::as_ptr(&b), "same key must yield same Arc");
+        assert!(
+            Arc::as_ptr(&a) == Arc::as_ptr(&b),
+            "same key must yield same Arc"
+        );
         // strong_count should be >= 2 (two clones of the same inner pointer,
         // plus any transient references from DashMap internals during the call).
         assert!(
@@ -374,7 +379,10 @@ mod tests {
     #[test]
     fn get_or_parse_warms_lexer_token_cache() {
         let cache = FeelAstCache::new();
-        assert!(cache.tokens.is_empty(), "token cache empty before first parse");
+        assert!(
+            cache.tokens.is_empty(),
+            "token cache empty before first parse"
+        );
 
         let _ = cache.get_or_parse("1 + 2 * 3", ParseEntry::Expression);
         assert!(
@@ -382,11 +390,18 @@ mod tests {
             "get_or_parse must warm the LexerTokenCache (PERF-05 wiring)"
         );
         let token_entries = cache.tokens.len();
-        assert_eq!(token_entries, 1, "one distinct cell → one token cache entry");
+        assert_eq!(
+            token_entries, 1,
+            "one distinct cell → one token cache entry"
+        );
 
         // A second, distinct cell adds a second token cache entry.
         let _ = cache.get_or_parse("x", ParseEntry::SimpleUnaryTests);
-        assert_eq!(cache.tokens.len(), 2, "second distinct cell → two token entries");
+        assert_eq!(
+            cache.tokens.len(),
+            2,
+            "second distinct cell → two token entries"
+        );
 
         // Re-parsing the first cell must NOT grow the token cache (cache hit).
         let _ = cache.get_or_parse("1 + 2 * 3", ParseEntry::Expression);
@@ -415,7 +430,10 @@ mod tests {
         let _ = cache.get_or_parse("b", ParseEntry::Expression);
         let _ = cache.get_or_parse("c", ParseEntry::Expression);
         let _ = cache.get_or_parse("a", ParseEntry::Expression);
-        assert!(cache.len() <= 2, "cache stays bounded after re-parse of evicted key");
+        assert!(
+            cache.len() <= 2,
+            "cache stays bounded after re-parse of evicted key"
+        );
     }
 
     /// Same text but different entry-point kinds produce DIFFERENT Arcs (Pitfall 8).
@@ -430,8 +448,10 @@ mod tests {
         let expr_ast = cache.get_or_parse("x", ParseEntry::Expression);
         let unary_ast = cache.get_or_parse("x", ParseEntry::SimpleUnaryTests);
 
-        assert!(Arc::as_ptr(&expr_ast) != Arc::as_ptr(&unary_ast),
-            "different entry points must yield different Arcs (Pitfall 8)");
+        assert!(
+            Arc::as_ptr(&expr_ast) != Arc::as_ptr(&unary_ast),
+            "different entry points must yield different Arcs (Pitfall 8)"
+        );
         assert_eq!(cache.len(), 2, "two distinct keys");
     }
 
@@ -448,7 +468,11 @@ mod tests {
         let b = cache.get_or_parse("1 + 2", ParseEntry::Expression);
 
         assert!(Arc::as_ptr(&a) == Arc::as_ptr(&b));
-        assert_eq!(cache.len(), 1, "same content shares a key regardless of CDATA");
+        assert_eq!(
+            cache.len(),
+            1,
+            "same content shares a key regardless of CDATA"
+        );
     }
 
     /// Malformed expression returns an `Err` node — never panics (T-31-09-01
@@ -490,7 +514,11 @@ mod tests {
             let _ = cache.get_or_parse(&format!("{}", i), ParseEntry::Expression);
         }
 
-        assert_eq!(cache.len(), 100, "re-requesting same keys does not grow cache");
+        assert_eq!(
+            cache.len(),
+            100,
+            "re-requesting same keys does not grow cache"
+        );
     }
 
     /// `trim()` normalizes whitespace — `"  x  "` and `"x"` share a key.
@@ -501,7 +529,10 @@ mod tests {
         let a = cache.get_or_parse("  x  ", ParseEntry::Expression);
         let b = cache.get_or_parse("x", ParseEntry::Expression);
 
-        assert!(Arc::as_ptr(&a) == Arc::as_ptr(&b), "trimmed content shares key");
+        assert!(
+            Arc::as_ptr(&a) == Arc::as_ptr(&b),
+            "trimmed content shares key"
+        );
         assert_eq!(cache.len(), 1);
     }
 
@@ -634,7 +665,11 @@ mod tests {
 
         // After clear(), the L1 is empty on this thread → genuine re-parse.
         let _ = cache.get_or_parse("l1_clear_probe", ParseEntry::Expression);
-        assert_eq!(cache.len(), 1, "post-clear repeat is a real miss, not an L1 hit");
+        assert_eq!(
+            cache.len(),
+            1,
+            "post-clear repeat is a real miss, not an L1 hit"
+        );
         clear_l1();
     }
 

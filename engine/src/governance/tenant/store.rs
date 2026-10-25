@@ -10,16 +10,25 @@ use crate::governance::tenant::types::Tenant;
 /// Trait for tenant storage backends.
 pub trait TenantStoreBackend {
     /// Create a new tenant. Returns the created tenant with generated id and timestamp.
-    async fn create_tenant(&mut self, name: &str) -> Result<Tenant, Box<dyn std::error::Error + Send + Sync>>;
+    async fn create_tenant(
+        &mut self,
+        name: &str,
+    ) -> Result<Tenant, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Retrieve a tenant by ID. Returns `None` if not found.
-    async fn get_tenant(&self, id: &str) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>>;
+    async fn get_tenant(
+        &self,
+        id: &str,
+    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>>;
 
     /// List all tenants, ordered by creation time descending.
     async fn list_tenants(&self) -> Result<Vec<Tenant>, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Delete a tenant by ID. Returns `true` if the tenant was found and deleted.
-    async fn delete_tenant(&mut self, id: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+    async fn delete_tenant(
+        &mut self,
+        id: &str,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 /// PostgreSQL-backed tenant store using sqlx.
@@ -41,17 +50,14 @@ impl SqlxTenantStore {
 
 impl Default for SqlxTenantStore {
     fn default() -> Self {
-        Self::new_from_env().unwrap_or_else(|_| Self {
-            pool: None,
-        })
+        Self::new_from_env().unwrap_or_else(|_| Self { pool: None })
     }
 }
 
 impl SqlxTenantStore {
     /// Create a new store from DATABASE_URL environment variable.
     pub fn new_from_env() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let _url = std::env::var("DATABASE_URL")
-            .map_err(|_| "DATABASE_URL not set")?;
+        let _url = std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL not set")?;
 
         // This would be: sqlx::PgPool::connect(&url).await
         Err(Box::new(std::io::Error::new(
@@ -62,14 +68,20 @@ impl SqlxTenantStore {
 }
 
 impl TenantStoreBackend for SqlxTenantStore {
-    async fn create_tenant(&mut self, _name: &str) -> Result<Tenant, Box<dyn std::error::Error + Send + Sync>> {
+    async fn create_tenant(
+        &mut self,
+        _name: &str,
+    ) -> Result<Tenant, Box<dyn std::error::Error + Send + Sync>> {
         Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::NotConnected,
             "SqlxTenantStore requires sqlx with DATABASE_URL and runtime setup",
         )))
     }
 
-    async fn get_tenant(&self, _id: &str) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_tenant(
+        &self,
+        _id: &str,
+    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
         Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::NotConnected,
             "SqlxTenantStore requires sqlx with DATABASE_URL and runtime setup",
@@ -83,7 +95,10 @@ impl TenantStoreBackend for SqlxTenantStore {
         )))
     }
 
-    async fn delete_tenant(&mut self, _id: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    async fn delete_tenant(
+        &mut self,
+        _id: &str,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::NotConnected,
             "SqlxTenantStore requires sqlx with DATABASE_URL and runtime setup",
@@ -121,7 +136,9 @@ impl std::error::Error for TenantStoreError {}
 impl MemoryTenantStore {
     /// Create a new in-memory tenant store.
     pub fn new() -> Self {
-        Self { tenants: Vec::new() }
+        Self {
+            tenants: Vec::new(),
+        }
     }
 
     /// Get all stored tenants (unsorted).
@@ -182,7 +199,8 @@ impl TenantStoreBackend for MemoryTenantStore {
         &mut self,
         name: &str,
     ) -> Result<Tenant, Box<dyn std::error::Error + Send + Sync>> {
-        self.create(name).map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        self.create(name)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
     async fn get_tenant(

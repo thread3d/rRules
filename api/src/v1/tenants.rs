@@ -112,10 +112,7 @@ pub async fn list_tenants(store: web::Data<TenantStore>) -> impl Responder {
         (status = 404, description = "Unknown tenant"),
     ),
 )]
-pub async fn get_tenant(
-    path: web::Path<String>,
-    store: web::Data<TenantStore>,
-) -> impl Responder {
+pub async fn get_tenant(path: web::Path<String>, store: web::Data<TenantStore>) -> impl Responder {
     let id = path.into_inner();
 
     let guard = match store.lock() {
@@ -241,12 +238,11 @@ mod tests {
         let mut store = MemoryTenantStore::new();
         let a = store.create("Alpha").expect("create");
         let b = store.create("Beta").expect("create");
-        let tenants: Vec<TenantResponse> = store
-            .list()
-            .iter()
-            .map(TenantResponse::from)
-            .collect();
-        let list = TenantListResponse { total_count: tenants.len(), tenants };
+        let tenants: Vec<TenantResponse> = store.list().iter().map(TenantResponse::from).collect();
+        let list = TenantListResponse {
+            total_count: tenants.len(),
+            tenants,
+        };
 
         let json = serde_json::to_string(&list).expect("serialize");
         assert!(json.contains(&a.name));

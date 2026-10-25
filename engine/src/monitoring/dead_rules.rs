@@ -45,7 +45,9 @@ impl Default for DeadRuleConfig {
 impl DeadRuleConfig {
     /// Creates a new dead rule config with specified inactivity threshold.
     pub fn new(inactivity_threshold: Duration) -> Self {
-        Self { inactivity_threshold }
+        Self {
+            inactivity_threshold,
+        }
     }
 }
 
@@ -147,7 +149,10 @@ impl HealthRegistry {
         let rule_id_str = rule_id.into();
         let name_str = name.into();
 
-        self.rules.entry(rule_id_str.clone()).or_insert_with(|| RuleHealth::new(rule_id_str, name_str)).record_fire();
+        self.rules
+            .entry(rule_id_str.clone())
+            .or_insert_with(|| RuleHealth::new(rule_id_str, name_str))
+            .record_fire();
     }
 
     /// Gets health data for a specific rule.
@@ -178,10 +183,14 @@ impl HealthRegistry {
     /// Returns a list of potentially dead rules (never fired or very stale).
     pub fn find_dead_rules(&self, min_inactive_duration: chrono::Duration) -> Vec<&RuleHealth> {
         let now = Utc::now();
-        self.rules.values().filter(|h| {
-            h.last_fired_at.is_none()
-                || (now - h.last_fired_at.unwrap() > min_inactive_duration && h.activation_count == 0)
-        }).collect()
+        self.rules
+            .values()
+            .filter(|h| {
+                h.last_fired_at.is_none()
+                    || (now - h.last_fired_at.unwrap() > min_inactive_duration
+                        && h.activation_count == 0)
+            })
+            .collect()
     }
 
     /// Detects dead rules using a sliding window algorithm.
@@ -258,7 +267,9 @@ impl HealthRegistry {
                 } else {
                     // Calculate based on activation distribution
                     // More recent fires = higher confidence
-                    let ratio = 1.0 - (time_since_last_fire.num_seconds() as f64 / total_window_duration.num_seconds() as f64);
+                    let ratio = 1.0
+                        - (time_since_last_fire.num_seconds() as f64
+                            / total_window_duration.num_seconds() as f64);
                     (ratio * 100.0).min(100.0)
                 }
             }
@@ -357,7 +368,10 @@ mod tests {
         assert!(dead_rule_ids.contains(&"rule-dead"));
 
         // Dead rules have 100% confidence in their dead status
-        let dead_health = detected.into_iter().find(|r| r.rule_id == "rule-dead").unwrap();
+        let dead_health = detected
+            .into_iter()
+            .find(|r| r.rule_id == "rule-dead")
+            .unwrap();
         assert_eq!(dead_health.confidence_score, 100.0);
     }
 
@@ -383,7 +397,10 @@ mod tests {
         assert_eq!(detected.len(), 1);
 
         // Non-dead rules have calculated confidence based on window utilization (should be > 0)
-        let active_health = detected.into_iter().find(|r| r.rule_id == "rule-active").unwrap();
+        let active_health = detected
+            .into_iter()
+            .find(|r| r.rule_id == "rule-active")
+            .unwrap();
         assert!(active_health.confidence_score > 0.0);
     }
 
@@ -410,7 +427,10 @@ mod tests {
 
         // Should be returned (not dead since within threshold)
         assert_eq!(detected.len(), 1);
-        let rule_health = detected.into_iter().find(|r| r.rule_id == "rule-6hrs").unwrap();
+        let rule_health = detected
+            .into_iter()
+            .find(|r| r.rule_id == "rule-6hrs")
+            .unwrap();
         // Rule with activation_count=0 gets 0 confidence regardless of time
         assert_eq!(rule_health.confidence_score, 0.0);
 

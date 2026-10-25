@@ -91,10 +91,15 @@ pub async fn create_category(
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Check for duplicate name (case-insensitive)
-    if store_guard.values().any(|c| c.name.to_lowercase() == req.name.to_lowercase()) {
+    if store_guard
+        .values()
+        .any(|c| c.name.to_lowercase() == req.name.to_lowercase())
+    {
         return HttpResponse::Conflict().json(serde_json::json!({
             "error": "Category with this name already exists"
         }));
@@ -102,9 +107,7 @@ pub async fn create_category(
 
     store_guard.insert(id, category);
 
-    HttpResponse::Created().json(CategoryResponse::from(
-        store_guard.get(&id).unwrap(),
-    ))
+    HttpResponse::Created().json(CategoryResponse::from(store_guard.get(&id).unwrap()))
 }
 
 /// List categories (with hierarchy) - GET /v1/categories
@@ -117,8 +120,11 @@ pub async fn create_category(
     ),
 )]
 pub async fn list_categories(store: web::Data<CategoryStore>) -> impl Responder {
-    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let categories: Vec<CategoryResponse> = store_guard.values().map(CategoryResponse::from).collect();
+    let store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let categories: Vec<CategoryResponse> =
+        store_guard.values().map(CategoryResponse::from).collect();
 
     HttpResponse::Ok().json(CategoryListResponse {
         total_count: categories.len(),
@@ -153,7 +159,9 @@ pub async fn get_category(
         }
     };
 
-    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get(&id) {
         Some(category) => HttpResponse::Ok().json(CategoryResponse::from(category)),
@@ -193,7 +201,9 @@ pub async fn update_category(
         }
     };
 
-    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Check for duplicate name before any mutations
     let has_duplicate = store_guard
@@ -250,7 +260,9 @@ pub async fn delete_category(
         }
     };
 
-    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Check if any subcategories reference this as parent
     if store_guard.values().any(|c| c.parent_id == Some(id)) {

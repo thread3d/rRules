@@ -45,7 +45,6 @@ impl ExecutionResult {
 #[allow(dead_code)]
 pub fn execute_forward(_engine: &mut Engine, _session: &Session) -> ExecutionResult {
     // Placeholder implementation - actual Rete integration would go here
-    
 
     // This would:
     // 1. Build or reuse the Rete network from compiled rules
@@ -62,6 +61,6 @@ pub fn execute_forward(_engine: &mut Engine, _session: &Session) -> ExecutionRes
 #[allow(dead_code)]
 pub fn execute_forward_simple(_engine: &mut Engine) -> ExecutionResult {
     // Placeholder implementation - actual Rete integration would go here
-    
+
     ExecutionResult::new()
 }

@@ -28,11 +28,26 @@ pub struct StoredApproval {
 #[derive(Clone, Debug, serde::Serialize, PartialEq, utoipa::ToSchema)]
 pub enum ApprovalState {
     Draft,
-    Submitted { submitted_at: String },
-    InReview { started_at: String, current_tier: i32 },
-    Approved { approved_by: Vec<String>, completed_at: String },
-    Rejected { rejected_by: String, reason: Option<String>, completed_at: String },
-    Escalated { escalated_to_tier: i32, escalated_at: String },
+    Submitted {
+        submitted_at: String,
+    },
+    InReview {
+        started_at: String,
+        current_tier: i32,
+    },
+    Approved {
+        approved_by: Vec<String>,
+        completed_at: String,
+    },
+    Rejected {
+        rejected_by: String,
+        reason: Option<String>,
+        completed_at: String,
+    },
+    Escalated {
+        escalated_to_tier: i32,
+        escalated_at: String,
+    },
 }
 
 /// Request to submit a rule for approval
@@ -116,7 +131,9 @@ pub async fn submit_for_approval(
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
-    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let approval_id = approval.id;
     store_guard.insert(approval_id, approval);
 
@@ -136,18 +153,20 @@ pub async fn submit_for_approval(
         (status = 200, description = "List of pending approvals"),
     ),
 )]
-pub async fn list_pending_approvals(
-    store: web::Data<ApprovalStore>,
-) -> impl Responder {
-    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+pub async fn list_pending_approvals(store: web::Data<ApprovalStore>) -> impl Responder {
+    let store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Filter for non-completed states (Draft, Submitted, InReview)
     let pending: Vec<&StoredApproval> = store_guard
         .values()
-        .filter(|a| !matches!(
-            a.state,
-            ApprovalState::Approved { .. } | ApprovalState::Rejected { .. }
-        ))
+        .filter(|a| {
+            !matches!(
+                a.state,
+                ApprovalState::Approved { .. } | ApprovalState::Rejected { .. }
+            )
+        })
         .collect();
 
     HttpResponse::Ok().json(serde_json::json!({
@@ -191,10 +210,15 @@ pub async fn approve_request(
         }
     };
 
-    let approver_id = req.approver_id.clone().unwrap_or_else(|| "system".to_string());
+    let approver_id = req
+        .approver_id
+        .clone()
+        .unwrap_or_else(|| "system".to_string());
     let reason = req.reason.clone();
 
-    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get_mut(&approval_id) {
         Some(approval) => {
@@ -249,10 +273,15 @@ pub async fn reject_request(
         }
     };
 
-    let approver_id = req.approver_id.clone().unwrap_or_else(|| "system".to_string());
+    let approver_id = req
+        .approver_id
+        .clone()
+        .unwrap_or_else(|| "system".to_string());
     let reason = req.reason.clone();
 
-    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get_mut(&approval_id) {
         Some(approval) => {
@@ -299,7 +328,9 @@ mod tests {
     fn test_state_to_string() {
         assert_eq!(state_to_string(&ApprovalState::Draft), "draft");
         assert_eq!(
-            state_to_string(&ApprovalState::Submitted { submitted_at: "".to_string() }),
+            state_to_string(&ApprovalState::Submitted {
+                submitted_at: "".to_string()
+            }),
             "submitted"
         );
         assert_eq!(

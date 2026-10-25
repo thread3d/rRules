@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use engine::data_types::Value;
 use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest};
-use engine::dmn::model::{DmnModel, DefinitionsChild, Decision};
+use engine::dmn::model::{Decision, DefinitionsChild, DmnModel};
 use engine_state::DmnDocument;
 use engine_state::FileSystemDmnStore;
 // Import the DmnPersistence trait so its methods are in scope for FileSystemDmnStore.
@@ -103,8 +103,12 @@ pub struct ListQuery {
     pub per_page: u32,
 }
 
-fn default_page() -> u32 { 1 }
-fn default_per_page() -> u32 { 20 }
+fn default_page() -> u32 {
+    1
+}
+fn default_per_page() -> u32 {
+    20
+}
 
 // =========================================================================
 // Helper: extract decisions from Definitions children
@@ -154,7 +158,7 @@ pub async fn evaluate_decision(
                 .outputs
                 .keys()
                 .next()
-                .map(|_| "UNIQUE")  // Default label when no table context available
+                .map(|_| "UNIQUE") // Default label when no table context available
                 .unwrap_or("None");
 
             crate::v1::dmn_metrics::METRIC_DECISION_DURATION_SECONDS
@@ -181,7 +185,10 @@ pub async fn evaluate_decision(
             }
             // Map HitPolicyViolation to 400 with DMN_HIT_POLICY_VIOLATION error code.
             engine::dmn::evaluator::DecisionEvalError::TableError(
-                engine::dmn::decision_table::DecisionTableError::HitPolicyViolation { policy, message }
+                engine::dmn::decision_table::DecisionTableError::HitPolicyViolation {
+                    policy,
+                    message,
+                },
             ) => {
                 crate::v1::dmn_metrics::METRIC_HIT_POLICY_VIOLATIONS_TOTAL
                     .with_label_values(&[&decision_id, &policy])
@@ -192,9 +199,8 @@ pub async fn evaluate_decision(
                     "message": message,
                 }))
             }
-            _ => {
-                HttpResponse::InternalServerError().json(serde_json::json!({ "error": format!("{}", e) }))
-            }
+            _ => HttpResponse::InternalServerError()
+                .json(serde_json::json!({ "error": format!("{}", e) })),
         },
     }
 }
@@ -213,10 +219,7 @@ pub async fn list_decisions(
     match store.list().await {
         Ok(summaries) => {
             let total = summaries.len();
-            let paginated: Vec<_> = summaries.into_iter()
-                .skip(offset)
-                .take(per_page)
-                .collect();
+            let paginated: Vec<_> = summaries.into_iter().skip(offset).take(per_page).collect();
 
             HttpResponse::Ok().json(serde_json::json!({
                 "decisions": paginated,
@@ -264,7 +267,10 @@ pub async fn create_decision(
     persistence: web::Data<FileSystemDmnStore>,
     body: web::Json<CreateDecisionRequest>,
 ) -> HttpResponse {
-    let id = body.id.clone().unwrap_or_else(|| Uuid::new_v4().to_string());
+    let id = body
+        .id
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     let now = chrono::Utc::now();
 
     let doc = DmnDocument {
@@ -382,9 +388,11 @@ pub async fn import_dmn(
         Err(engine_state::PersistenceError::NotFound(_)) => {
             // No conflict — proceed.
         }
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({
-            "error": format!("failed to check existing file: {}", e)
-        })),
+        Err(e) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("failed to check existing file: {}", e)
+            }))
+        }
     }
 
     match persistence.save_file(&filename, &body.content).await {

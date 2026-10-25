@@ -120,7 +120,10 @@ fn parse_dmn_with_cache_populates_all_cell_types() {
     let (model, cache) = parser::parse_dmn_with_cache(FIXTURE_DMN).unwrap();
 
     // At least one decision exists in the fixture.
-    assert!(!model.definitions.children.is_empty(), "fixture has definitions");
+    assert!(
+        !model.definitions.children.is_empty(),
+        "fixture has definitions"
+    );
 
     // Cache must not be empty — we have input expressions, unary tests, etc.
     assert!(!cache.is_empty(), "cache populated for FIXTURE_DMN");
@@ -183,9 +186,15 @@ fn cache_len_matches_distinct_pairs() {
     // decoding (`&gt;` → `>` etc.) and content deduplication across rules. We just
     // assert a minimum of 10 distinct keys to confirm wiring is correct — the exact
     // number is verified by inspection below.
-    assert!(cache.len() >= 10, "cache must have at least 10 distinct parsed cells");
+    assert!(
+        cache.len() >= 10,
+        "cache must have at least 10 distinct parsed cells"
+    );
 
-    eprintln!("feel_cache_wiring: cache.len() == {} (distinct parsed cells)", cache.len());
+    eprintln!(
+        "feel_cache_wiring: cache.len() == {} (distinct parsed cells)",
+        cache.len()
+    );
 }
 
 /// The perf property: a 30-cell table x N evaluations performs ~30 parses (at load), not 30×N.
@@ -234,15 +243,21 @@ fn perf_property_30_cells_no_reparsing() {
         total_calls += 1;
     }
 
-    assert_eq!(cache.len(), cache_len_after_load,
+    assert_eq!(
+        cache.len(),
+        cache_len_after_load,
         "cache must not grow during repeated get_or_parse calls (parse-once guarantee); \
          was {}, still {}. Total get_or_parse calls: {}",
-        cache_len_after_load, cache.len(), total_calls);
+        cache_len_after_load,
+        cache.len(),
+        total_calls
+    );
 
     eprintln!(
         "feel_cache_wiring: {} get_or_parse calls on large fixture, cache len unchanged ({}) — \
          parse-once property verified",
-        total_calls, cache.len()
+        total_calls,
+        cache.len()
     );
 }
 

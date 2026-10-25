@@ -83,7 +83,8 @@ impl From<&StoredRule> for RuleResponse {
                 RuleStatus::Active => "active",
                 RuleStatus::Inactive => "inactive",
                 RuleStatus::Archived => "archived",
-            }.to_string(),
+            }
+            .to_string(),
             version: 1,
             created_at: rule.created_at.clone(),
             updated_at: rule.updated_at.clone(),
@@ -106,7 +107,8 @@ impl From<&mut StoredRule> for RuleResponse {
                 RuleStatus::Active => "active",
                 RuleStatus::Inactive => "inactive",
                 RuleStatus::Archived => "archived",
-            }.to_string(),
+            }
+            .to_string(),
             version: 1,
             created_at: rule.created_at.clone(),
             updated_at: rule.updated_at.clone(),
@@ -129,7 +131,8 @@ impl From<&&StoredRule> for RuleResponse {
                 RuleStatus::Active => "active",
                 RuleStatus::Inactive => "inactive",
                 RuleStatus::Archived => "archived",
-            }.to_string(),
+            }
+            .to_string(),
             version: 1,
             created_at: rule.created_at.clone(),
             updated_at: rule.updated_at.clone(),
@@ -342,11 +345,13 @@ pub async fn create_rule(
 
     // Check for duplicate name within same tenant and category
     let has_duplicate = {
-        let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let store_guard = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let cats = req.category.clone().unwrap_or_default();
-        store_guard.values().any(|r| {
-            r.tenant_id == tenant_id && r.rule_name == req.name && r.category == cats
-        })
+        store_guard
+            .values()
+            .any(|r| r.tenant_id == tenant_id && r.rule_name == req.name && r.category == cats)
     };
 
     if has_duplicate {
@@ -361,7 +366,10 @@ pub async fn create_rule(
         tenant_id: tenant_id.clone(),
         rule_name: req.name.clone(),
         description: req.description.clone(),
-        category: req.category.clone().unwrap_or_else(|| "default".to_string()),
+        category: req
+            .category
+            .clone()
+            .unwrap_or_else(|| "default".to_string()),
         tags: req.tags.clone(),
         salience: req.salience,
         dsl_body: req.dsl_body.clone(),
@@ -373,11 +381,19 @@ pub async fn create_rule(
     };
 
     {
-        let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut store_guard = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         store_guard.insert((tenant_id.clone(), rule_id), rule);
     }
 
-    HttpResponse::Created().json(RuleResponse::from(store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&(tenant_id, rule_id)).unwrap()))
+    HttpResponse::Created().json(RuleResponse::from(
+        store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&(tenant_id, rule_id))
+            .unwrap(),
+    ))
 }
 
 /// Get paginated list of rules - GET /v1/rules
@@ -408,10 +424,13 @@ pub async fn get_rules(
     let page = query.page.max(1);
     let page_size = query.page_size.clamp(1, 100); // Max 100 per page
 
-    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Filter rules by tenant and other query parameters
-    let mut rules: Vec<&StoredRule> = store_guard.values()
+    let mut rules: Vec<&StoredRule> = store_guard
+        .values()
         .filter(|r| r.tenant_id == tenant_id)
         .collect();
 
@@ -425,9 +444,11 @@ pub async fn get_rules(
             "active" => RuleStatus::Active,
             "inactive" => RuleStatus::Inactive,
             "archived" => RuleStatus::Archived,
-            _ => return HttpResponse::BadRequest().json(serde_json::json!({
-                "error": "Invalid status filter"
-            })),
+            _ => {
+                return HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": "Invalid status filter"
+                }))
+            }
         };
         rules.retain(|r| r.status == filter_status);
     }
@@ -474,7 +495,8 @@ pub async fn get_rules(
     }
 
     let total_count = rules.len();
-    let total_pages: u32 = total_count.div_ceil(page_size as usize)
+    let total_pages: u32 = total_count
+        .div_ceil(page_size as usize)
         .try_into()
         .unwrap_or(0);
 
@@ -483,7 +505,10 @@ pub async fn get_rules(
     let end_idx = (start_idx + page_size as usize).min(total_count);
 
     let paginated_rules: Vec<RuleResponse> = if start_idx < total_count {
-        rules[start_idx..end_idx].iter().map(RuleResponse::from).collect()
+        rules[start_idx..end_idx]
+            .iter()
+            .map(RuleResponse::from)
+            .collect()
     } else {
         vec![]
     };
@@ -526,7 +551,9 @@ pub async fn get_rule(
         }
     };
 
-    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get(&(tenant_id, id)) {
         Some(rule) => HttpResponse::Ok().json(RuleResponse::from(rule)),
@@ -573,14 +600,18 @@ pub async fn update_rule(
     let key = (tenant_id.clone(), id);
 
     {
-        let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let store_guard = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if let Some(current_rule) = store_guard.get(&key) {
             // Check for duplicate category change before modifying
             if let Some(ref new_category) = new_category_ref {
                 if current_rule.category != *new_category {
                     let has_duplicate = store_guard.values().any(|r| {
-                        r.tenant_id == tenant_id && r.rule_name == current_rule.rule_name && r.category == *new_category
+                        r.tenant_id == tenant_id
+                            && r.rule_name == current_rule.rule_name
+                            && r.category == *new_category
                     });
                     if has_duplicate {
                         return HttpResponse::Conflict().json(serde_json::json!({
@@ -597,7 +628,9 @@ pub async fn update_rule(
     }
 
     // Now we can take mutable access to update
-    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get_mut(&key) {
         Some(rule) => {
@@ -628,9 +661,11 @@ pub async fn update_rule(
                     "active" => RuleStatus::Active,
                     "inactive" => RuleStatus::Inactive,
                     "archived" => RuleStatus::Archived,
-                    _ => return HttpResponse::BadRequest().json(serde_json::json!({
-                        "error": "Invalid status value"
-                    })),
+                    _ => {
+                        return HttpResponse::BadRequest().json(serde_json::json!({
+                            "error": "Invalid status value"
+                        }))
+                    }
                 };
             }
 
@@ -675,7 +710,9 @@ pub async fn delete_rule(
     };
 
     let key = (tenant_id, id);
-    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get_mut(&key) {
         Some(rule) => {
@@ -726,7 +763,9 @@ pub async fn undelete_rule(
     };
 
     let key = (tenant_id, id);
-    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get_mut(&key) {
         Some(rule) if rule.status == RuleStatus::Archived => {
@@ -864,14 +903,16 @@ mod tests {
         assert_eq!(store_guard.len(), 2);
 
         // Simulate tenant-1 query - should only see its own rule
-        let tenant1_rules: Vec<_> = store_guard.values()
+        let tenant1_rules: Vec<_> = store_guard
+            .values()
             .filter(|r| r.tenant_id == "tenant-1")
             .collect();
         assert_eq!(tenant1_rules.len(), 1);
         assert_eq!(tenant1_rules[0].dsl_body, "when true then action1()");
 
         // Simulate tenant-2 query - should only see its own rule
-        let tenant2_rules: Vec<_> = store_guard.values()
+        let tenant2_rules: Vec<_> = store_guard
+            .values()
             .filter(|r| r.tenant_id == "tenant-2")
             .collect();
         assert_eq!(tenant2_rules.len(), 1);
@@ -931,7 +972,9 @@ mod tests {
 
             // Check for duplicate - should find it now
             let has_duplicate = store_guard.values().any(|r| {
-                r.tenant_id == "tenant-1" && r.rule_name == "duplicate-rule" && r.category == "pricing"
+                r.tenant_id == "tenant-1"
+                    && r.rule_name == "duplicate-rule"
+                    && r.category == "pricing"
             });
             assert!(has_duplicate, "Should detect rule after insertion");
 
@@ -941,7 +984,8 @@ mod tests {
 
         // Verify both rules exist (different UUIDs, same tenant and name)
         let store_guard = store.lock().unwrap();
-        let tenant1_rules: Vec<_> = store_guard.values()
+        let tenant1_rules: Vec<_> = store_guard
+            .values()
             .filter(|r| r.tenant_id == "tenant-1")
             .collect();
         assert_eq!(tenant1_rules.len(), 2);

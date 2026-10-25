@@ -130,9 +130,7 @@ pub struct SimulationSummary {
         (status = 400, description = "Invalid request: fact_sets must contain at least one fact group"),
     ),
 )]
-pub async fn run_simulation(
-    request: web::Json<SimulationRunRequest>,
-) -> impl Responder {
+pub async fn run_simulation(request: web::Json<SimulationRunRequest>) -> impl Responder {
     // Validate input early.
     if request.fact_sets.is_empty() {
         return HttpResponse::BadRequest().json(serde_json::json!({
@@ -149,43 +147,61 @@ pub async fn run_simulation(
         name: request.name.clone(),
         base_state: request.base_state.clone(),
         proposed_changes: request.proposed_changes.clone(),
-        fact_sets: request.fact_sets.iter().map(|facts| {
-            facts.iter().map(|f| TestFact {
-                id: f.id.clone(),
-                fields: serde_json::to_value(f).unwrap_or(serde_json::Value::Null),
-            }).collect()
-        }).collect(),
+        fact_sets: request
+            .fact_sets
+            .iter()
+            .map(|facts| {
+                facts
+                    .iter()
+                    .map(|f| TestFact {
+                        id: f.id.clone(),
+                        fields: serde_json::to_value(f).unwrap_or(serde_json::Value::Null),
+                    })
+                    .collect()
+            })
+            .collect(),
     };
 
     // Run the simulation.
     let result = SimulationRunner::run(&base_engine, &sim_request);
 
     // Convert internal types to API response types.
-    let test_cases: Vec<SimulationTestCaseResponse> = result.test_cases.into_iter().map(|tc| {
-        let variants: Vec<SimulationVariantResponse> = tc.variants.into_iter().map(|v| {
-            SimulationVariantResponse {
-                variant_label: v.variant_label,
-                rules_fired: v.rules_fired,
-                execution_time_ms: v.execution_time_ms,
-                output: v.output,
-                success: v.success,
-                error: v.error,
+    let test_cases: Vec<SimulationTestCaseResponse> = result
+        .test_cases
+        .into_iter()
+        .map(|tc| {
+            let variants: Vec<SimulationVariantResponse> = tc
+                .variants
+                .into_iter()
+                .map(|v| SimulationVariantResponse {
+                    variant_label: v.variant_label,
+                    rules_fired: v.rules_fired,
+                    execution_time_ms: v.execution_time_ms,
+                    output: v.output,
+                    success: v.success,
+                    error: v.error,
+                })
+                .collect();
+
+            let differences: Vec<String> = tc
+                .differences
+                .into_iter()
+                .map(|d| format_change_report_string(&d))
+                .collect();
+
+            SimulationTestCaseResponse {
+                fact_set_index: tc.fact_set_index,
+                variants,
+                differences,
             }
-        }).collect();
-
-        let differences: Vec<String> = tc.differences.into_iter().map(|d| {
-            format_change_report_string(&d)
-        }).collect();
-
-        SimulationTestCaseResponse {
-            fact_set_index: tc.fact_set_index,
-            variants,
-            differences,
-        }
-    }).collect();
+        })
+        .collect();
 
     // Calculate summary statistics.
-    let affected_test_cases = test_cases.iter().filter(|tc| !tc.differences.is_empty()).count();
+    let affected_test_cases = test_cases
+        .iter()
+        .filter(|tc| !tc.differences.is_empty())
+        .count();
     let mut rules_affected = std::collections::HashSet::new();
     for tc in &test_cases {
         for diff in &tc.differences {
@@ -213,16 +229,38 @@ pub async fn run_simulation(
 /// Convert a ChangeReport enum variant to a human-readable string.
 fn format_change_report_string(report: &ChangeReport) -> String {
     match report {
-        ChangeReport::RuleFiredBeforeButNotAfter { rule_id, variant_label } => {
-            format!("Rule '{}' fired before but not after change '{}'", rule_id, variant_label)
+        ChangeReport::RuleFiredBeforeButNotAfter {
+            rule_id,
+            variant_label,
+        } => {
+            format!(
+                "Rule '{}' fired before but not after change '{}'",
+                rule_id, variant_label
+            )
         }
-        ChangeReport::RuleFiredAfterButNotBefore { rule_id, variant_label } => {
-            format!("Rule '{}' fires after change '{variant_label}' but not before", rule_id)
+        ChangeReport::RuleFiredAfterButNotBefore {
+            rule_id,
+            variant_label,
+        } => {
+            format!(
+                "Rule '{}' fires after change '{variant_label}' but not before",
+                rule_id
+            )
         }
-        ChangeReport::DifferentResultsForRule { rule_id, variant_label, .. } => {
-            format!("Rule '{}' produces different results with change '{}'", rule_id, variant_label)
+        ChangeReport::DifferentResultsForRule {
+            rule_id,
+            variant_label,
+            ..
+        } => {
+            format!(
+                "Rule '{}' produces different results with change '{}'",
+                rule_id, variant_label
+            )
         }
-        ChangeReport::ChangeApplicationError { variant_label, error } => {
+        ChangeReport::ChangeApplicationError {
+            variant_label,
+            error,
+        } => {
             format!("Change '{}' failed: {}", variant_label, error)
         }
     }

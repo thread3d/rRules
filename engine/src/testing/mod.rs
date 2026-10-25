@@ -7,7 +7,7 @@
 //! - Backward chaining trace capture
 
 use crate::data_types::Value;
-use crate::environment::{EngineBuilder, Engine};
+use crate::environment::{Engine, EngineBuilder};
 use crate::fact::{Fact, WorkingMemory};
 use crate::salience::agenda::Activation;
 use serde_json;
@@ -16,12 +16,14 @@ use serde_json;
 pub use crate::backward_chaining::{InferenceStep, InferenceTrace, StepType};
 
 // Re-export snapshot-related types from their modules
-pub use crate::testing::snapshot::{SnapshotMode, SnapshotError, SnapshotResult, SnapshotManager};
-pub use crate::testing::json::{serialize_deterministic, deserialize_working_memory, roundtrip_snapshot};
+pub use crate::testing::json::{
+    deserialize_working_memory, roundtrip_snapshot, serialize_deterministic,
+};
+pub use crate::testing::snapshot::{SnapshotError, SnapshotManager, SnapshotMode, SnapshotResult};
 
 // Module declarations (must be after re-exports for visibility)
-pub mod snapshot;
 pub mod json;
+pub mod snapshot;
 
 /// Test error type for testing framework
 #[derive(Debug, thiserror::Error)]
@@ -38,8 +40,7 @@ pub type TestResult<T> = Result<T, TestError>;
 // Working memory snapshot types for serialization/testing
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum ValueSnapshot {
     Bool(bool),
     Integer(i64),
@@ -86,52 +87,35 @@ impl ValueSnapshot {
             crate::data_types::Value::Float(f) => ValueSnapshot::Float(*f),
             crate::data_types::Value::String(s) => ValueSnapshot::String(s.clone()),
             crate::data_types::Value::Null => ValueSnapshot::Null,
-            crate::data_types::Value::DateTime(dt) => {
-                ValueSnapshot::DateTime(format!("{:?}", dt))
-            }
+            crate::data_types::Value::DateTime(dt) => ValueSnapshot::DateTime(format!("{:?}", dt)),
             crate::data_types::Value::Array(arr) => {
                 ValueSnapshot::Array(arr.iter().map(ValueSnapshot::from_value).collect())
             }
-            crate::data_types::Value::Object(obj) => {
-                ValueSnapshot::Object(
-                    obj.iter()
-                        .map(|(k, v)| (k.clone(), ValueSnapshot::from_value(v)))
-                        .collect(),
-                )
-            }
+            crate::data_types::Value::Object(obj) => ValueSnapshot::Object(
+                obj.iter()
+                    .map(|(k, v)| (k.clone(), ValueSnapshot::from_value(v)))
+                    .collect(),
+            ),
             // FEEL variants (Phase 30) — no natural ValueSnapshot
             // representation. Map to a readable string marker via Debug so the
             // snapshot carries a human-readable value rather than panicking.
             // The compiler forces these arms (no wildcard — exhaustive match
             // is the safety net, 30-RESEARCH.md Pitfall 1).
-            crate::data_types::Value::Number(d) => {
-                ValueSnapshot::String(format!("{:?}", d))
-            }
-            crate::data_types::Value::Date(d) => {
-                ValueSnapshot::String(format!("{:?}", d))
-            }
-            crate::data_types::Value::Time(t) => {
-                ValueSnapshot::String(format!("{:?}", t))
-            }
-            crate::data_types::Value::DateTimeTz(dt) => {
-                ValueSnapshot::String(format!("{:?}", dt))
-            }
+            crate::data_types::Value::Number(d) => ValueSnapshot::String(format!("{:?}", d)),
+            crate::data_types::Value::Date(d) => ValueSnapshot::String(format!("{:?}", d)),
+            crate::data_types::Value::Time(t) => ValueSnapshot::String(format!("{:?}", t)),
+            crate::data_types::Value::DateTimeTz(dt) => ValueSnapshot::String(format!("{:?}", dt)),
             crate::data_types::Value::DaysTimeDuration(td) => {
                 ValueSnapshot::String(format!("{:?}", td))
             }
             crate::data_types::Value::YearsMonthsDuration(ymd) => {
                 ValueSnapshot::String(format!("{:?}", ymd))
             }
-            crate::data_types::Value::Range(r) => {
-                ValueSnapshot::String(format!("{:?}", r))
-            }
-            crate::data_types::Value::Function(f) => {
-                ValueSnapshot::String(format!("{:?}", f))
-            }
+            crate::data_types::Value::Range(r) => ValueSnapshot::String(format!("{:?}", r)),
+            crate::data_types::Value::Function(f) => ValueSnapshot::String(format!("{:?}", f)),
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkingMemorySnapshot {
@@ -141,7 +125,11 @@ pub struct WorkingMemorySnapshot {
 impl WorkingMemorySnapshot {
     /// Create a snapshot from working memory
     pub fn from_working_memory(memory: &WorkingMemory) -> Self {
-        let facts = memory.get_all_facts().into_iter().map(FactSnapshot::from_fact).collect();
+        let facts = memory
+            .get_all_facts()
+            .into_iter()
+            .map(FactSnapshot::from_fact)
+            .collect();
         WorkingMemorySnapshot { facts }
     }
 
@@ -157,10 +145,22 @@ impl WorkingMemorySnapshot {
         let mut diff = SnapshotDiff::new();
 
         // Create a map of fact_type to payload for easier comparison
-        let self_map: std::collections::HashMap<String, &std::collections::HashMap<String, ValueSnapshot>> =
-            self.facts.iter().map(|f| (f.fact_type.clone(), &f.payload)).collect();
-        let other_map: std::collections::HashMap<String, &std::collections::HashMap<String, ValueSnapshot>> =
-            other.facts.iter().map(|f| (f.fact_type.clone(), &f.payload)).collect();
+        let self_map: std::collections::HashMap<
+            String,
+            &std::collections::HashMap<String, ValueSnapshot>,
+        > = self
+            .facts
+            .iter()
+            .map(|f| (f.fact_type.clone(), &f.payload))
+            .collect();
+        let other_map: std::collections::HashMap<
+            String,
+            &std::collections::HashMap<String, ValueSnapshot>,
+        > = other
+            .facts
+            .iter()
+            .map(|f| (f.fact_type.clone(), &f.payload))
+            .collect();
 
         // Check for added facts
         for fact in &self.facts {
@@ -235,7 +235,9 @@ impl SnapshotDiff {
         for change in &self.changed {
             lines.push(format!(
                 "Changed '{}': {} -> {}",
-                change.fact_type, format_payload(&change.old_payload), format_payload(&change.new_payload)
+                change.fact_type,
+                format_payload(&change.old_payload),
+                format_payload(&change.new_payload)
             ));
         }
         lines.join("\n")
@@ -251,7 +253,8 @@ pub struct SnapshotChange {
 
 // Helper function to format payload for display
 fn format_payload(payload: &std::collections::HashMap<String, ValueSnapshot>) -> String {
-    let entries: Vec<String> = payload.iter()
+    let entries: Vec<String> = payload
+        .iter()
         .map(|(k, v)| format!("{}={}", k, value_snapshot_to_string(v)))
         .collect();
     format!("{{{}}}", entries.join(", "))
@@ -270,7 +273,8 @@ fn value_snapshot_to_string(value: &ValueSnapshot) -> String {
             format!("[{}]", items.join(", "))
         }
         ValueSnapshot::Object(obj) => {
-            let entries: Vec<String> = obj.iter()
+            let entries: Vec<String> = obj
+                .iter()
                 .map(|(k, v)| format!("{}: {}", k, value_snapshot_to_string(v)))
                 .collect();
             format!("{{{}}}", entries.join(", "))
@@ -381,7 +385,11 @@ impl FixtureBuilder {
     /// Add a fact to the fixture with the given name and payload
     ///
     /// The fact will be assigned a unique ID and its type derived from the name.
-    pub fn with_fact(mut self, name: &str, payload: std::collections::HashMap<String, Value>) -> Self {
+    pub fn with_fact(
+        mut self,
+        name: &str,
+        payload: std::collections::HashMap<String, Value>,
+    ) -> Self {
         let fact = Fact::new(name.to_string(), payload);
         self.facts.push(fact);
         self
@@ -456,7 +464,6 @@ impl ForwardChainingTester {
         let session = crate::environment::Session::new(&temp_engine, false, None);
 
         // Execute forward using the actual engine method
-        
 
         crate::forward_chaining::execute_forward(&mut temp_engine, &session)
     }
@@ -555,7 +562,10 @@ impl ForwardChainingTester {
     }
 
     /// Verify that a specific step exists in the trace
-    pub fn assert_trace_contains_step(trace: &InferenceTrace, expected_desc: &str) -> TestResult<()> {
+    pub fn assert_trace_contains_step(
+        trace: &InferenceTrace,
+        expected_desc: &str,
+    ) -> TestResult<()> {
         if !trace.path.iter().any(|s| s.description == expected_desc) {
             return Err(TestError::AssertionFailed(format!(
                 "Trace missing step with description '{}'",
@@ -568,7 +578,9 @@ impl ForwardChainingTester {
     /// Verify the trace represents a successful inference
     pub fn assert_trace_success(trace: &InferenceTrace) -> TestResult<()> {
         if !trace.success {
-            return Err(TestError::AssertionFailed("Trace does not represent success".to_string()));
+            return Err(TestError::AssertionFailed(
+                "Trace does not represent success".to_string(),
+            ));
         }
         Ok(())
     }
@@ -586,13 +598,22 @@ impl ForwardChainingTester {
     }
 
     /// Find a rule application step by rule ID
-    pub fn find_rule_application<'a>(trace: &'a InferenceTrace, rule_id: &str) -> Option<&'a InferenceStep> {
-        trace.path.iter().find(|s| s.rule_id.as_deref() == Some(rule_id))
+    pub fn find_rule_application<'a>(
+        trace: &'a InferenceTrace,
+        rule_id: &str,
+    ) -> Option<&'a InferenceStep> {
+        trace
+            .path
+            .iter()
+            .find(|s| s.rule_id.as_deref() == Some(rule_id))
     }
 
     /// Check if trace contains a fact match step
     pub fn has_fact_match_step(trace: &InferenceTrace) -> bool {
-        trace.path.iter().any(|s| s.step_type == StepType::FactMatch)
+        trace
+            .path
+            .iter()
+            .any(|s| s.step_type == StepType::FactMatch)
     }
 }
 
@@ -639,8 +660,7 @@ impl BackwardChainingTrace {
 ///
 /// When enabled, rules with equal salience are ordered by name
 /// to ensure deterministic test execution.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum DeterministicMode {
     /// Use default conflict resolution (non-deterministic for equal salience)
     #[default]
@@ -648,7 +668,6 @@ pub enum DeterministicMode {
     /// Sort by rule name when salience is equal
     EnabledByName,
 }
-
 
 pub fn deterministic_conflict_strategy(mut activations: Vec<Activation>) -> Vec<Activation> {
     // Sort by (salience DESC, rule_name ASC) for determinism
@@ -730,9 +749,7 @@ mod tests {
         let mut payload = std::collections::HashMap::new();
         payload.insert("score".to_string(), Value::Integer(100));
 
-        let fixture = FixtureBuilder::new()
-            .with_fact("customer", payload)
-            .build();
+        let fixture = FixtureBuilder::new().with_fact("customer", payload).build();
 
         // Just verify we can build working memory with facts
         // The FixtureBuilder now properly accumulates and inserts facts
@@ -748,7 +765,9 @@ mod tests {
     #[test]
     fn test_assert_rule_sequence() {
         let mut tester = ForwardChainingTester::new();
-        tester.activations_mut().extend(vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        tester
+            .activations_mut()
+            .extend(vec!["a".to_string(), "b".to_string(), "c".to_string()]);
 
         assert!(tester.assert_rule_sequence(&["a", "b", "c"]).is_ok());
         assert!(tester.assert_rule_sequence(&["a", "b"]).is_err());
@@ -757,7 +776,9 @@ mod tests {
     #[test]
     fn test_assert_fired_count() {
         let mut tester = ForwardChainingTester::new();
-        tester.activations_mut().extend(vec!["a".to_string(), "b".to_string()]);
+        tester
+            .activations_mut()
+            .extend(vec!["a".to_string(), "b".to_string()]);
 
         assert!(tester.assert_fired_count(2).is_ok());
         assert!(tester.assert_fired_count(3).is_err());
@@ -766,7 +787,13 @@ mod tests {
     #[test]
     fn test_assert_fired_in_order() {
         let mut tester = ForwardChainingTester::new();
-        tester.activations_mut().extend(vec!["a".to_string(), "x".to_string(), "b".to_string(), "y".to_string(), "c".to_string()]);
+        tester.activations_mut().extend(vec![
+            "a".to_string(),
+            "x".to_string(),
+            "b".to_string(),
+            "y".to_string(),
+            "c".to_string(),
+        ]);
 
         // Partial order should pass
         assert!(tester.assert_fired_in_order(&["a", "b", "c"]).is_ok());
@@ -777,7 +804,9 @@ mod tests {
     #[test]
     fn test_assert_rule_not_fired() {
         let mut tester = ForwardChainingTester::new();
-        tester.activations_mut().extend(vec!["a".to_string(), "b".to_string()]);
+        tester
+            .activations_mut()
+            .extend(vec!["a".to_string(), "b".to_string()]);
 
         assert!(tester.assert_rule_not_fired("c").is_ok());
         assert!(tester.assert_rule_not_fired("a").is_err());

@@ -6,7 +6,7 @@
 //! - Per-decision evaluation counts for the dashboard panel
 
 use std::collections::HashMap;
-use std::sync::{Mutex, LazyLock};
+use std::sync::{LazyLock, Mutex};
 
 /// Tracks which DMN decisions have been evaluated and how many times.
 /// Separate singleton from `RuleExecutionTracker` to avoid source tag contamination.
@@ -33,16 +33,18 @@ impl DmnDecisionTracker {
 
     /// Record that a decision was evaluated. Called after each evaluate() call.
     pub fn record_evaluation(&mut self, decision_id: &str) {
-        *self.evaluation_counts.entry(decision_id.to_string()).or_insert(0) += 1;
-        self.last_evaluated.insert(
-            decision_id.to_string(),
-            chrono_now(),
-        );
+        *self
+            .evaluation_counts
+            .entry(decision_id.to_string())
+            .or_insert(0) += 1;
+        self.last_evaluated
+            .insert(decision_id.to_string(), chrono_now());
     }
 
     /// Returns all decisions that have never been evaluated (dead decisions).
     pub fn find_dead_decisions(&self, known_ids: &[String]) -> Vec<String> {
-        known_ids.iter()
+        known_ids
+            .iter()
             .filter(|id| !self.evaluation_counts.contains_key(id.as_str()))
             .cloned()
             .collect()
@@ -56,7 +58,11 @@ impl DmnDecisionTracker {
     /// Returns coverage info for a single decision.
     pub fn coverage_for(&self, decision_id: &str) -> Option<(u64, String)> {
         self.evaluation_counts.get(decision_id).map(|count| {
-            let last = self.last_evaluated.get(decision_id).cloned().unwrap_or_default();
+            let last = self
+                .last_evaluated
+                .get(decision_id)
+                .cloned()
+                .unwrap_or_default();
             (*count, last)
         })
     }

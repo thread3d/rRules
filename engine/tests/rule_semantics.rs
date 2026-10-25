@@ -145,7 +145,12 @@ fn eng_004_conditions_compare_all_numeric_carriers() {
         ("ratio", Value::Integer(1), ComparisonOp::Lt, true),
         ("ratio", Value::Integer(0), ComparisonOp::Gt, true),
         ("missing", Value::Integer(1), ComparisonOp::Eq, false),
-        ("age", Value::String("30".to_string()), ComparisonOp::Eq, false),
+        (
+            "age",
+            Value::String("30".to_string()),
+            ComparisonOp::Eq,
+            false,
+        ),
     ];
 
     for (field, value, op, expected) in cases {
@@ -177,10 +182,7 @@ fn eng_003_retraction_is_idempotent_in_every_engine() {
         assert!(engine.retract_fact(&id).unwrap(), "{kind}: first retract");
         assert!(!engine.retract_fact(&id).unwrap(), "{kind}: second retract");
         assert!(
-            !engine
-                .get_facts()
-                .iter()
-                .any(|f| f.id.to_string() == id),
+            !engine.get_facts().iter().any(|f| f.id.to_string() == id),
             "{kind}: working memory must drop the fact"
         );
     }
@@ -269,7 +271,10 @@ fn eng_001_fixpoint_cap_is_configurable() {
 
     assert_eq!(capped_result.rules_fired, 1, "one pass fires r1 only");
     assert_eq!(capped_score, Some(Value::Integer(0)));
-    assert_eq!(unbounded_result.rules_fired, 2, "two passes fire both rules");
+    assert_eq!(
+        unbounded_result.rules_fired, 2,
+        "two passes fire both rules"
+    );
     assert_eq!(unbounded_score, Some(Value::Integer(9)));
 }
 

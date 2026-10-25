@@ -17,7 +17,7 @@
 // Requirements covered by this suite: API-001
 
 use actix_web::middleware::from_fn;
-use actix_web::{test, web, App, HttpRequest, HttpResponse, HttpMessage, Responder};
+use actix_web::{test, web, App, HttpMessage, HttpRequest, HttpResponse, Responder};
 use api::auth::{self, init_store, Claims};
 use api::middleware::auth::requires_auth;
 use serde_json::Value;
@@ -57,8 +57,14 @@ fn configure_protected_app(cfg: &mut web::ServiceConfig) {
             .route("/whoami", web::get().to(whoami)),
     );
     // Root-level public routes (outside the /v1 scope → never wrapped).
-    cfg.route("/metrics", web::get().to(|| async { HttpResponse::Ok().body("metrics") }));
-    cfg.route("/health", web::get().to(|| async { HttpResponse::Ok().body("health") }));
+    cfg.route(
+        "/metrics",
+        web::get().to(|| async { HttpResponse::Ok().body("metrics") }),
+    );
+    cfg.route(
+        "/health",
+        web::get().to(|| async { HttpResponse::Ok().body("health") }),
+    );
 }
 
 fn valid_token(sub: &str, role: &str) -> String {
@@ -110,8 +116,7 @@ fn alg_none_token(sub: &str, role: &str) -> String {
 /// base64url encode (no padding) — self-contained so the test stays
 /// dependency-free.
 fn b64url_encode(input: &[u8]) -> String {
-    const CHARS: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::new();
     for chunk in input.chunks(3) {
         let b0 = chunk[0];
@@ -185,7 +190,11 @@ async fn protected_route_with_wrong_secret_token_returns_401() {
         .insert_header(("Authorization", format!("Bearer {token}")))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status().as_u16(), 401, "wrong-secret token must be 401");
+    assert_eq!(
+        resp.status().as_u16(),
+        401,
+        "wrong-secret token must be 401"
+    );
 }
 
 #[actix_web::test]
@@ -223,7 +232,11 @@ async fn public_allowlist_routes_return_200_without_token() {
         .set_json(serde_json::json!({"username": "admin", "password": "admin"}))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status().as_u16(), 200, "login must be public (allowlist)");
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "login must be public (allowlist)"
+    );
 
     // /metrics — root-level, outside the wrapped /v1 scope.
     let req = test::TestRequest::get().uri("/metrics").to_request();
@@ -245,7 +258,9 @@ async fn refresh_requires_a_valid_token() {
             .configure(configure_protected_app),
     )
     .await;
-    let req = test::TestRequest::post().uri("/v1/auth/refresh").to_request();
+    let req = test::TestRequest::post()
+        .uri("/v1/auth/refresh")
+        .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status().as_u16(), 401, "refresh must require a token");
 }

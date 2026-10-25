@@ -127,7 +127,10 @@ fn string_functions_propagate_null() {
 fn list_functions_follow_spec() {
     assert_ev("count([1, 2, 3])", int(3));
     assert_ev("append([1, 2], 3)", arr(vec![num(1), num(2), num(3)]));
-    assert_ev("concatenate([1], [2, 3])", arr(vec![num(1), num(2), num(3)]));
+    assert_ev(
+        "concatenate([1], [2, 3])",
+        arr(vec![num(1), num(2), num(3)]),
+    );
     assert_ev("union([1, 2], [2, 3])", arr(vec![num(1), num(2), num(3)]));
     assert_ev("sublist([1, 2, 3, 4], 2, 2)", arr(vec![num(2), num(3)]));
     assert_ev(

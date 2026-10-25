@@ -8,4 +8,6 @@ pub mod types;
 pub use types::{CreateTenantRequest, Tenant, TenantListResponse, TenantResponse};
 
 pub mod store;
-pub use store::{MemoryTenantStore, SqlxTenantStore, TenantStore, TenantStoreBackend, TenantStoreError};
+pub use store::{
+    MemoryTenantStore, SqlxTenantStore, TenantStore, TenantStoreBackend, TenantStoreError,
+};

@@ -242,7 +242,8 @@ mod tests {
             // DateTime
             #[allow(deprecated)]
             {
-                let _v_datetime = Value::DateTime(chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
+                let _v_datetime =
+                    Value::DateTime(chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
             }
 
             // Object
@@ -391,15 +392,19 @@ mod tests {
             type_class: TypeClass::Scalar,
         }));
 
-        assert!(Value::Object(std::collections::HashMap::new()).is_compatible_with(&TypeInfo {
-            name: "object".to_string(),
-            type_class: TypeClass::Object,
-        }));
+        assert!(
+            Value::Object(std::collections::HashMap::new()).is_compatible_with(&TypeInfo {
+                name: "object".to_string(),
+                type_class: TypeClass::Object,
+            })
+        );
 
-        assert!(!Value::String("test".to_string()).is_compatible_with(&TypeInfo {
-            name: "bool".to_string(),
-            type_class: TypeClass::Scalar,
-        }));
+        assert!(
+            !Value::String("test".to_string()).is_compatible_with(&TypeInfo {
+                name: "bool".to_string(),
+                type_class: TypeClass::Scalar,
+            })
+        );
     }
 
     #[test]

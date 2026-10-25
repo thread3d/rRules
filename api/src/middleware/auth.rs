@@ -19,7 +19,7 @@
 use actix_web::body::{BoxBody, MessageBody};
 use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::middleware::Next;
-use actix_web::{Error, HttpResponse, HttpMessage};
+use actix_web::{Error, HttpMessage, HttpResponse};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 
 use crate::auth::{secret_key, Claims};
@@ -74,10 +74,8 @@ fn bearer_token(req: &ServiceRequest) -> Option<String> {
 /// Build a 401 response carrying a JSON `{message}` body, consuming the
 /// request. Used for all auth-failure short-circuits.
 fn unauthorized(req: ServiceRequest, msg: &'static str) -> ServiceResponse<BoxBody> {
-    req.into_response(
-        HttpResponse::Unauthorized().json(serde_json::json!({ "message": msg })),
-    )
-    .map_into_boxed_body()
+    req.into_response(HttpResponse::Unauthorized().json(serde_json::json!({ "message": msg })))
+        .map_into_boxed_body()
 }
 
 /// JWT validation middleware. Wrap with

@@ -105,9 +105,6 @@ mod tests {
     /// returns `None` (ternary logic; Phase 31 consumes this `Option`).
     #[test]
     fn test_feel_numeric_eq_null() {
-        assert_eq!(
-            feel_numeric_eq(&Value::Null, &Value::Number(dec!(5))),
-            None
-        );
+        assert_eq!(feel_numeric_eq(&Value::Null, &Value::Number(dec!(5))), None);
     }
 }

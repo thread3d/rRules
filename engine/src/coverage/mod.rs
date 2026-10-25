@@ -42,13 +42,16 @@ impl CoverageTracker {
     pub fn record_evaluation(&mut self, rule_id: &str) {
         let now = chrono::Utc::now().to_rfc3339();
 
-        self.rules.entry(rule_id.to_string()).or_insert(RuleCoverage {
-            rule_id: rule_id.to_string(),
-            evaluated: false,
-            fired: false,
-            evaluated_at: None,
-            fired_at: None,
-        }).evaluated = true;
+        self.rules
+            .entry(rule_id.to_string())
+            .or_insert(RuleCoverage {
+                rule_id: rule_id.to_string(),
+                evaluated: false,
+                fired: false,
+                evaluated_at: None,
+                fired_at: None,
+            })
+            .evaluated = true;
         if let Some(coverage) = self.rules.get_mut(rule_id) {
             coverage.evaluated_at = Some(now);
         }
@@ -64,13 +67,16 @@ impl CoverageTracker {
             coverage.fired_at = Some(now);
         } else {
             // First time seeing this rule - record it as fired
-            self.rules.insert(rule_id.to_string(), RuleCoverage {
-                rule_id: rule_id.to_string(),
-                evaluated: true,
-                fired: true,
-                evaluated_at: Some(now),
-                fired_at: None,
-            });
+            self.rules.insert(
+                rule_id.to_string(),
+                RuleCoverage {
+                    rule_id: rule_id.to_string(),
+                    evaluated: true,
+                    fired: true,
+                    evaluated_at: Some(now),
+                    fired_at: None,
+                },
+            );
         }
         self.total_evaluations += 1; // Fire implies evaluation
         self.total_fires += 1;
@@ -80,13 +86,16 @@ impl CoverageTracker {
     pub fn record_skipped(&mut self, rule_id: &str) {
         let now = chrono::Utc::now().to_rfc3339();
 
-        self.rules.entry(rule_id.to_string()).or_insert(RuleCoverage {
-            rule_id: rule_id.to_string(),
-            evaluated: false,
-            fired: false,
-            evaluated_at: None,
-            fired_at: None,
-        }).evaluated = true;
+        self.rules
+            .entry(rule_id.to_string())
+            .or_insert(RuleCoverage {
+                rule_id: rule_id.to_string(),
+                evaluated: false,
+                fired: false,
+                evaluated_at: None,
+                fired_at: None,
+            })
+            .evaluated = true;
         if let Some(coverage) = self.rules.get_mut(rule_id) {
             coverage.evaluated_at = Some(now);
         }
@@ -200,14 +209,18 @@ pub struct CoverageEntry {
 impl CoverageTracker {
     /// Generates a coverage report.
     pub fn generate_report(&self) -> CoverageReport {
-        let rules: Vec<CoverageEntry> = self.rules.values().map(|r| CoverageEntry {
-            rule_id: r.rule_id.clone(),
-            evaluated: r.evaluated,
-            fired: r.fired,
-            evaluation_count: if r.evaluated { Some(1) } else { None },
-            fire_count: if r.fired { Some(1) } else { None },
-            coverage_percent: if r.evaluated { 100.0 } else { 0.0 },
-        }).collect();
+        let rules: Vec<CoverageEntry> = self
+            .rules
+            .values()
+            .map(|r| CoverageEntry {
+                rule_id: r.rule_id.clone(),
+                evaluated: r.evaluated,
+                fired: r.fired,
+                evaluation_count: if r.evaluated { Some(1) } else { None },
+                fire_count: if r.fired { Some(1) } else { None },
+                coverage_percent: if r.evaluated { 100.0 } else { 0.0 },
+            })
+            .collect();
 
         let total_rules = self.rules.len();
         let evaluated_rules = rules.iter().filter(|r| r.evaluated).count();

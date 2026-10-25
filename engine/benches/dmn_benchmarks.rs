@@ -10,16 +10,16 @@
 //! under `api/dmn/`. Both are loaded once per benchmark run via the helpers below.
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, SamplingMode};
-use std::collections::HashMap;
-use std::sync::Arc;
 use engine::data_types::Value;
 use engine::dmn::decision_table::DecisionTableEvaluator;
 use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest, SharedDmnModel};
 use engine::dmn::feel::ast::FeelExpression;
-use engine::dmn::feel::cache::{clear_l1, FeelAstCache};
 use engine::dmn::feel::cache::ParseEntry;
+use engine::dmn::feel::cache::{clear_l1, FeelAstCache};
 use engine::dmn::feel::eval::Scope;
 use engine::dmn::model::{BuiltinAggregator, DecisionTable, HitPolicy, InputClause, OutputClause};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Corpus helpers — load .dmn files from the test fixtures tree.
@@ -30,14 +30,18 @@ use engine::dmn::model::{BuiltinAggregator, DecisionTable, HitPolicy, InputClaus
 /// `engine/`) to reach the repo root, then descend into `engine/tests/fixtures/tck/`.
 fn tck_root() -> std::path::PathBuf {
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let parent1 = manifest.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let parent1 = manifest
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
     parent1.join("engine/tests/fixtures/tck")
 }
 
 /// Locate the import-test corpus under `api/dmn/`.
 fn import_corpus_root() -> std::path::PathBuf {
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let parent1 = manifest.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let parent1 = manifest
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
     parent1.join("api/dmn")
 }
 
@@ -87,7 +91,10 @@ fn load_corpus() -> Vec<(String, Vec<u8>)> {
 
 fn bench_parser(c: &mut criterion::Criterion) {
     let corpus = load_corpus();
-    assert!(!corpus.is_empty(), "no DMN corpus found — is the test-fixture tree present?");
+    assert!(
+        !corpus.is_empty(),
+        "no DMN corpus found — is the test-fixture tree present?"
+    );
 
     // Warm the parser up once so we don't benchmark cold-start of quick-xml.
     for (_, bytes) in &corpus {
@@ -120,9 +127,10 @@ fn bench_parser(c: &mut criterion::Criterion) {
             || corpus_ref.clone(),
             |data: Vec<&[u8]>| -> () {
                 for data in &data {
-                    let _ = engine::dmn::parser::parse_dmn_with_cache(std::str::from_utf8(data)
-                        .expect("utf-8"))
-                        .expect("parse with cache");
+                    let _ = engine::dmn::parser::parse_dmn_with_cache(
+                        std::str::from_utf8(data).expect("utf-8"),
+                    )
+                    .expect("parse with cache");
                 }
             },
             criterion::BatchSize::SmallInput,
@@ -168,27 +176,23 @@ fn bench_feel_evaluator(c: &mut criterion::Criterion) {
 
     // Build a scope with representative bindings for each expression to evaluate.
     let mut scope = Scope::empty();
+    scope.bindings.insert("x".into(), Value::Integer(42));
+    scope.bindings.insert("y".into(), Value::Integer(7));
+    scope.bindings.insert("a".into(), Value::Integer(3));
+    scope
+        .bindings
+        .insert("b".into(), Value::String("hello".into()));
     scope.bindings.insert(
-        "x".into(), Value::Integer(42),
-    );
-    scope.bindings.insert(
-        "y".into(), Value::Integer(7),
-    );
-    scope.bindings.insert(
-        "a".into(), Value::Integer(3),
-    );
-    scope.bindings.insert(
-        "b".into(), Value::String("hello".into()),
-    );
-    scope.bindings.insert(
-        "names".into(), Value::Array(vec![
+        "names".into(),
+        Value::Array(vec![
             Value::String("Alice".into()),
             Value::String("Bob".into()),
             Value::String("Carol".into()),
         ]),
     );
     scope.bindings.insert(
-        "numbers".into(), Value::Array(vec![
+        "numbers".into(),
+        Value::Array(vec![
             Value::Integer(1),
             Value::Integer(5),
             Value::Integer(10),
@@ -212,10 +216,9 @@ fn bench_feel_evaluator(c: &mut criterion::Criterion) {
     for (size, label) in [(10usize, "small"), (50, "medium"), (200, "large")] {
         let mut big_scope = Scope::empty();
         for i in 0..size {
-            big_scope.bindings.insert(
-                format!("v{}", i),
-                Value::Integer(i as i64),
-            );
+            big_scope
+                .bindings
+                .insert(format!("v{}", i), Value::Integer(i as i64));
         }
         group.bench_with_input(BenchmarkId::new("scope_size", label), &size, |b, _| {
             b.iter(|| engine::dmn::feel::eval::evaluate(&asts[0], &big_scope))
@@ -256,9 +259,7 @@ fn build_synthetic_table(n_rules: usize, n_inputs: usize) -> DecisionTable {
     for r in 0..n_rules {
         let input_entries: Vec<engine::dmn::model::RuleEntry> = (0..n_inputs)
             .map(|i| engine::dmn::model::RuleEntry {
-                text: engine::dmn::model::TextContent::plain(
-                    format!("> {}", i * 10),
-                ),
+                text: engine::dmn::model::TextContent::plain(format!("> {}", i * 10)),
             })
             .collect();
         rules.push(engine::dmn::model::DmnRule {
@@ -313,8 +314,7 @@ fn bench_decision_table(c: &mut criterion::Criterion) {
             |b, _| {
                 b.iter(|| {
                     let scope = Scope::empty();
-                    DecisionTableEvaluator::evaluate(&t, &scope, &cache)
-                        .expect("eval");
+                    DecisionTableEvaluator::evaluate(&t, &scope, &cache).expect("eval");
                 })
             },
         );
@@ -327,8 +327,7 @@ fn bench_decision_table(c: &mut criterion::Criterion) {
         group.bench_with_input(BenchmarkId::new("rules", label), &n_rules, |b, _| {
             b.iter(|| {
                 let scope = Scope::empty();
-                DecisionTableEvaluator::evaluate(&table, &scope, &cache)
-                    .expect("eval");
+                DecisionTableEvaluator::evaluate(&table, &scope, &cache).expect("eval");
             })
         });
     }
@@ -339,8 +338,7 @@ fn bench_decision_table(c: &mut criterion::Criterion) {
         group.bench_with_input(BenchmarkId::new("inputs", label), &n_inputs, |b, _| {
             b.iter(|| {
                 let scope = Scope::empty();
-                DecisionTableEvaluator::evaluate(&table, &scope, &cache)
-                    .expect("eval");
+                DecisionTableEvaluator::evaluate(&table, &scope, &cache).expect("eval");
             })
         });
     }
@@ -365,8 +363,7 @@ fn bench_drd_resolution(c: &mut criterion::Criterion) {
     }
 
     let xml = std::fs::read_to_string(&multi_path).expect("read multi-output fixture");
-    let (model, cache) = engine::dmn::parser::parse_dmn_with_cache(&xml)
-        .expect("parse with cache");
+    let (model, cache) = engine::dmn::parser::parse_dmn_with_cache(&xml).expect("parse with cache");
 
     // Collect decision IDs from the model.
     let decisions: Vec<String> = model
@@ -382,7 +379,10 @@ fn bench_drd_resolution(c: &mut criterion::Criterion) {
         })
         .collect();
 
-    assert!(!decisions.is_empty(), "no decisions in multi-output fixture");
+    assert!(
+        !decisions.is_empty(),
+        "no decisions in multi-output fixture"
+    );
 
     // Build a shared snapshot and evaluator — these are reusable across iterations.
     let shared = Arc::new(std::sync::RwLock::new(SharedDmnModel::new(model, cache)));
@@ -396,8 +396,7 @@ fn bench_drd_resolution(c: &mut criterion::Criterion) {
                     inputs: HashMap::new(),
                     trace: false,
                 };
-                evaluator.evaluate(did, request)
-                    .expect("evaluate");
+                evaluator.evaluate(did, request).expect("evaluate");
             })
         });
     }
@@ -452,13 +451,12 @@ fn bench_feel_cache_concurrency(c: &mut criterion::Criterion) {
     group.sample_size(10);
 
     const CALLS_PER_THREAD: usize = 500;
-    const SMALL_WS: usize = 64;   // << L1 cap (1024) → fully L1-served
+    const SMALL_WS: usize = 64; // << L1 cap (1024) → fully L1-served
     const LARGE_WS: usize = 4096; // > L1 cap → L1 thrashes, shared map dominates
 
     for (n_threads, label) in [(16usize, "16t"), (32usize, "32t")] {
         // ---- Variant A: thread-local L1 hot path (lock-free hits) ----
-        let small_ws: Vec<String> =
-            (0..SMALL_WS).map(|i| format!("{} + {}", i, i)).collect();
+        let small_ws: Vec<String> = (0..SMALL_WS).map(|i| format!("{} + {}", i, i)).collect();
         group.bench_function(BenchmarkId::new("thread_local", label), |b| {
             b.iter_batched(
                 || {
@@ -494,8 +492,9 @@ fn bench_feel_cache_concurrency(c: &mut criterion::Criterion) {
         });
 
         // ---- Variant B: DashMap-contended (L1 thrashing → shared lock) ----
-        let large_ws: Vec<String> =
-            (0..LARGE_WS).map(|i| format!("{} * {}", i, i + 1)).collect();
+        let large_ws: Vec<String> = (0..LARGE_WS)
+            .map(|i| format!("{} * {}", i, i + 1))
+            .collect();
         group.bench_function(BenchmarkId::new("dashmap_contended", label), |b| {
             b.iter_batched(
                 || {

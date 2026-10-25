@@ -340,7 +340,8 @@ mod tests {
         for i in 0..3 {
             let mut payload = HashMap::new();
             payload.insert("key".to_string(), Value::Integer(i as i64));
-            wm.insert_fact(Fact::new("type1".to_string(), payload)).unwrap();
+            wm.insert_fact(Fact::new("type1".to_string(), payload))
+                .unwrap();
         }
 
         let all_facts = wm.get_all_facts();
@@ -365,7 +366,8 @@ mod tests {
         for _ in 0..5 {
             let mut payload = HashMap::new();
             payload.insert("key".to_string(), Value::Integer(1));
-            wm.insert_fact(Fact::new("same_type".to_string(), payload)).unwrap();
+            wm.insert_fact(Fact::new("same_type".to_string(), payload))
+                .unwrap();
         }
 
         let facts = wm.get_facts_by_type("same_type");

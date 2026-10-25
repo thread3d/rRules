@@ -4,11 +4,11 @@
 //! that uses LRU caching for join node partial matches to reduce redundant computations.
 
 #![allow(dead_code)]
-use std::collections::{HashMap, HashSet};
-use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::metrics::MetricsCollector;
-use crate::fact::Fact;
+use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference, Nagram};
+use crate::fact::Fact;
+use std::collections::{HashMap, HashSet};
 
 // NOTE: `CoverageTracking` is no longer imported here — the shared direct
 // evaluator (`engine::direct_eval`) owns once-per-rule coverage recording
@@ -18,7 +18,6 @@ use crate::engine::rete::{AlphaMemory, BetaMemory, FactId, MemoryReference, Nagr
 
 /// Cache entry with a generation timestamp for LRU ordering.
 #[allow(dead_code)]
-
 #[derive(Debug, Clone)]
 struct CacheEntry {
     nagram: Nagram,
@@ -78,7 +77,7 @@ impl LRUCache {
     }
 
     /// Gets the key of an arbitrary entry for eviction (not truly LRU due to HashMap ordering)
-#[allow(dead_code)]
+    #[allow(dead_code)]
     fn get_oldest_entry(&self) -> Option<String> {
         // Since we're using HashMap which has non-deterministic iteration order,
         // just return the first key
@@ -245,7 +244,10 @@ impl TreatEngine {
 
         // Collect test nodes that need propagation first (before mutable borrow)
         let node_ids: Vec<_> = {
-            self.network.base.test_nodes.values()
+            self.network
+                .base
+                .test_nodes
+                .values()
                 .filter(|n| n.fact_type_id == fact_type)
                 .map(|n| n.id.clone())
                 .collect()
@@ -269,7 +271,9 @@ impl TreatEngine {
                 None => return,
             };
 
-            test_node.successors.iter()
+            test_node
+                .successors
+                .iter()
                 .map(|s| (s.clone(), format!("join_{}", s.0)))
                 .collect()
         };
@@ -297,7 +301,11 @@ impl TreatEngine {
     }
 
     /// Propagates from join node with caching support.
-    fn join_propagation_with_cache(&mut self, join_node_id: &crate::engine::rete::NodeId, _fact_id: &str) {
+    fn join_propagation_with_cache(
+        &mut self,
+        join_node_id: &crate::engine::rete::NodeId,
+        _fact_id: &str,
+    ) {
         // Get join_node data after all borrows are done
         let join_node = match self.network.base.join_nodes.get(join_node_id) {
             Some(n) => n,
@@ -356,7 +364,8 @@ impl TreatEngine {
 
         // Cache the first partial match if node is cacheable
         // This allows reuse when the same join node is evaluated with different facts
-        let new_nagrams_count = existing_nagrams.len() * facts_from_alpha.len() + facts_from_alpha.len();
+        let new_nagrams_count =
+            existing_nagrams.len() * facts_from_alpha.len() + facts_from_alpha.len();
         if self.network.is_cached(&join_node.id.0) && new_nagrams_count > 0 {
             // Cache a representative nagram - we use the first one created
             if !existing_nagrams.is_empty() && !facts_from_alpha.is_empty() {
@@ -394,12 +403,13 @@ impl TreatEngine {
     pub fn execute_rules(&mut self) -> EngineResult {
         let start = std::time::Instant::now();
 
-        let (fired_set, _evaluated_set, trace) = crate::engine::direct_eval::direct_execute_with_limit(
-            &self.rules,
-            &mut self.working_facts,
-            self.collect_trace,
-            self.max_iterations,
-        );
+        let (fired_set, _evaluated_set, trace) =
+            crate::engine::direct_eval::direct_execute_with_limit(
+                &self.rules,
+                &mut self.working_facts,
+                self.collect_trace,
+                self.max_iterations,
+            );
 
         // Record per-fire metrics for parity with the placeholder loop.
         for _ in &fired_set {
@@ -452,9 +462,9 @@ impl ExecutionEngine for TreatEngine {
         match key {
             // Fixpoint cap for this engine, overriding `RRULES_MAX_CHAIN_ITERATIONS`.
             "max_iterations" => {
-                let limit = value
-                    .parse::<usize>()
-                    .map_err(|_| format!("max_iterations must be a positive integer, got {value:?}"))?;
+                let limit = value.parse::<usize>().map_err(|_| {
+                    format!("max_iterations must be a positive integer, got {value:?}")
+                })?;
                 if limit == 0 {
                     return Err("max_iterations must be at least 1".to_string());
                 }
@@ -588,10 +598,8 @@ mod tests {
         // Insert some facts to trigger cache operations
         for i in 0..3 {
             let mut fact = Fact::new("test", HashMap::new());
-            fact.payload.insert(
-                "value".to_string(),
-                crate::data_types::Value::Integer(i),
-            );
+            fact.payload
+                .insert("value".to_string(), crate::data_types::Value::Integer(i));
             engine.assert_fact(fact);
         }
 

@@ -39,11 +39,11 @@ use std::fs;
 use std::path::Path;
 use std::str::FromStr;
 
-use rust_decimal::Decimal;
 use engine::data_types::Value;
 use engine::dmn::feel::eval::{evaluate, Scope};
 use engine::dmn::feel::numeric::feel_numeric_eq;
 use engine::dmn::feel::parser::parse_expression;
+use rust_decimal::Decimal;
 
 /// Root directory of the vendored TCK subset (relative to `engine/tests/`).
 const TCK_ROOT: &str = "tests/fixtures/tck/feel";
@@ -63,12 +63,12 @@ struct TckFeelCase {
 
 #[derive(Debug, Clone)]
 enum ExpectedType {
-    Number(String),       // decimal string representation
+    Number(String), // decimal string representation
     Boolean(bool),
     String(String),
     Null,
-    Array(usize),         // expected length
-    Object(Vec<String>),  // expected keys (order not guaranteed)
+    Array(usize),        // expected length
+    Object(Vec<String>), // expected keys (order not guaranteed)
 }
 
 // =====================================================================
@@ -95,17 +95,19 @@ pub fn load_tck_subset() -> Vec<TckFeelCase> {
         }
     }
 
-    eprintln!("TCK FEEL scaffold: loaded {} test cases from {}", cases.len(), TCK_ROOT);
+    eprintln!(
+        "TCK FEEL scaffold: loaded {} test cases from {}",
+        cases.len(),
+        TCK_ROOT
+    );
     cases
 }
 
 fn load_tck_from_file(path: &Path) -> Vec<TckFeelCase> {
-    let text = fs::read_to_string(path).unwrap_or_else(|e| {
-        panic!("failed to read TCK file {}: {e}", path.display())
-    });
-    let value: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|e| {
-        panic!("JSON parse error in {}: {e}", path.display())
-    });
+    let text = fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed to read TCK file {}: {e}", path.display()));
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("JSON parse error in {}: {e}", path.display()));
 
     let cases_array = value.get("cases").expect("expected 'cases' array");
     let mut out = Vec::new();
@@ -118,15 +120,9 @@ fn load_tck_from_file(path: &Path) -> Vec<TckFeelCase> {
 
             let expected_type: ExpectedType = if let Some(v) = case_val.get("expected_value") {
                 match case_val["expected_type"].as_str() {
-                    Some("number") => {
-                        ExpectedType::Number(v.as_str().unwrap_or("").to_string())
-                    }
-                    Some("boolean") => {
-                        ExpectedType::Boolean(v.as_bool().unwrap_or(false))
-                    }
-                    Some("string") => {
-                        ExpectedType::String(v.as_str().unwrap_or("").to_string())
-                    }
+                    Some("number") => ExpectedType::Number(v.as_str().unwrap_or("").to_string()),
+                    Some("boolean") => ExpectedType::Boolean(v.as_bool().unwrap_or(false)),
+                    Some("string") => ExpectedType::String(v.as_str().unwrap_or("").to_string()),
                     Some("null") => ExpectedType::Null,
                     _ => continue,
                 }
@@ -166,7 +162,11 @@ fn feel_tck_subset_runs_green() {
     let cases = load_tck_subset();
 
     // Must have at least 5 cases to be a meaningful scaffold.
-    assert!(cases.len() >= 5, "TCK subset must have at least 5 test cases, got {}", cases.len());
+    assert!(
+        cases.len() >= 5,
+        "TCK subset must have at least 5 test cases, got {}",
+        cases.len()
+    );
 
     let mut passed = 0usize;
     let mut failed: Vec<String> = Vec::new();
@@ -202,85 +202,73 @@ fn run_one_case(case: &TckFeelCase) -> Result<(), String> {
     let result = evaluate(&ast, &Scope::empty());
 
     match &case.expected_type {
-        ExpectedType::Number(expected_str) => {
-            match &result {
-                Value::Number(actual) => {
-                    let expected_dec = Decimal::from_str(expected_str)
-                        .map_err(|e| format!("expected value parse error: {e}"))?;
-                    if feel_numeric_eq(&Value::Number(actual.clone()), &Value::Number(expected_dec))
-                        == Some(true)
-                    {
-                        Ok(())
-                    } else {
-                        Err(format!(
-                            "number mismatch: expr {:?} = {} but expected {}",
-                            case.expression, actual, expected_str
-                        ))
-                    }
+        ExpectedType::Number(expected_str) => match &result {
+            Value::Number(actual) => {
+                let expected_dec = Decimal::from_str(expected_str)
+                    .map_err(|e| format!("expected value parse error: {e}"))?;
+                if feel_numeric_eq(&Value::Number(actual.clone()), &Value::Number(expected_dec))
+                    == Some(true)
+                {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "number mismatch: expr {:?} = {} but expected {}",
+                        case.expression, actual, expected_str
+                    ))
                 }
-                _ => Err(format!(
-                    "expected Number, got {:?} for expression {:?}",
-                    result, case.expression
-                )),
             }
-        }
-        ExpectedType::Boolean(expected) => {
-            match &result {
-                Value::Bool(actual) if actual == expected => Ok(()),
-                _ => Err(format!(
-                    "expected boolean {}, got {:?} for expression {:?}",
-                    expected, result, case.expression
-                )),
-            }
-        }
-        ExpectedType::String(expected) => {
-            match &result {
-                Value::String(actual) if actual == expected => Ok(()),
-                _ => Err(format!(
-                    "expected string {:?}, got {:?} for expression {:?}",
-                    expected, result, case.expression
-                )),
-            }
-        }
-        ExpectedType::Null => {
-            match &result {
-                Value::Null => Ok(()),
-                _ => Err(format!(
-                    "expected null, got {:?} for expression {:?}",
-                    result, case.expression
-                )),
-            }
-        }
-        ExpectedType::Array(expected_len) => {
-            match &result {
-                Value::Array(arr) if arr.len() == *expected_len => Ok(()),
-                _ => Err(format!(
-                    "expected array of length {}, got {:?} for expression {:?}",
-                    expected_len, result, case.expression
-                )),
-            }
-        }
-        ExpectedType::Object(expected_keys) => {
-            match &result {
-                Value::Object(map) => {
-                    let actual_keys: Vec<String> = map.keys().cloned().collect();
-                    if actual_keys.len() == expected_keys.len()
-                        && expected_keys.iter().all(|k| map.contains_key(k.as_str()))
-                    {
-                        Ok(())
-                    } else {
-                        Err(format!(
-                            "expected object with keys {:?}, got {:?}",
-                            expected_keys, actual_keys
-                        ))
-                    }
+            _ => Err(format!(
+                "expected Number, got {:?} for expression {:?}",
+                result, case.expression
+            )),
+        },
+        ExpectedType::Boolean(expected) => match &result {
+            Value::Bool(actual) if actual == expected => Ok(()),
+            _ => Err(format!(
+                "expected boolean {}, got {:?} for expression {:?}",
+                expected, result, case.expression
+            )),
+        },
+        ExpectedType::String(expected) => match &result {
+            Value::String(actual) if actual == expected => Ok(()),
+            _ => Err(format!(
+                "expected string {:?}, got {:?} for expression {:?}",
+                expected, result, case.expression
+            )),
+        },
+        ExpectedType::Null => match &result {
+            Value::Null => Ok(()),
+            _ => Err(format!(
+                "expected null, got {:?} for expression {:?}",
+                result, case.expression
+            )),
+        },
+        ExpectedType::Array(expected_len) => match &result {
+            Value::Array(arr) if arr.len() == *expected_len => Ok(()),
+            _ => Err(format!(
+                "expected array of length {}, got {:?} for expression {:?}",
+                expected_len, result, case.expression
+            )),
+        },
+        ExpectedType::Object(expected_keys) => match &result {
+            Value::Object(map) => {
+                let actual_keys: Vec<String> = map.keys().cloned().collect();
+                if actual_keys.len() == expected_keys.len()
+                    && expected_keys.iter().all(|k| map.contains_key(k.as_str()))
+                {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "expected object with keys {:?}, got {:?}",
+                        expected_keys, actual_keys
+                    ))
                 }
-                _ => Err(format!(
-                    "expected object, got {:?} for expression {:?}",
-                    result, case.expression
-                )),
             }
-        }
+            _ => Err(format!(
+                "expected object, got {:?} for expression {:?}",
+                result, case.expression
+            )),
+        },
     }
 }
 

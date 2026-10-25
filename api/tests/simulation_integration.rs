@@ -31,8 +31,10 @@ async fn json_body(resp: ServiceResponse<BoxBody>) -> Value {
 
 #[actix_web::test]
 async fn simulation_run_valid_returns_results() {
-    let app = test::init_service(App::new().service(web::scope("/v1").configure(configure_v1_simulation)))
-        .await;
+    let app = test::init_service(
+        App::new().service(web::scope("/v1").configure(configure_v1_simulation)),
+    )
+    .await;
 
     let req = test::TestRequest::post()
         .uri("/v1/simulation")
@@ -56,21 +58,29 @@ async fn simulation_run_valid_returns_results() {
 
 #[actix_web::test]
 async fn simulation_run_empty_fact_sets_rejected_400() {
-    let app = test::init_service(App::new().service(web::scope("/v1").configure(configure_v1_simulation)))
-        .await;
+    let app = test::init_service(
+        App::new().service(web::scope("/v1").configure(configure_v1_simulation)),
+    )
+    .await;
 
     let req = test::TestRequest::post()
         .uri("/v1/simulation")
         .set_json(json!({ "name": "bad", "fact_sets": [] }))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status().as_u16(), 400, "empty fact_sets must be rejected");
+    assert_eq!(
+        resp.status().as_u16(),
+        400,
+        "empty fact_sets must be rejected"
+    );
 }
 
 #[actix_web::test]
 async fn simulation_run_with_one_proposed_change_has_two_variants() {
-    let app = test::init_service(App::new().service(web::scope("/v1").configure(configure_v1_simulation)))
-        .await;
+    let app = test::init_service(
+        App::new().service(web::scope("/v1").configure(configure_v1_simulation)),
+    )
+    .await;
 
     let req = test::TestRequest::post()
         .uri("/v1/simulation")

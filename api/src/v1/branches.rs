@@ -173,9 +173,11 @@ pub async fn create_branch(
             // Refresh branch list to get the newly created branch.
             let branches = match guard.list_branches() {
                 Ok(b) => b,
-                Err(_) => return HttpResponse::InternalServerError().json(serde_json::json!({
-                    "error": "Failed to refresh branch list"
-                })),
+                Err(_) => {
+                    return HttpResponse::InternalServerError().json(serde_json::json!({
+                        "error": "Failed to refresh branch list"
+                    }))
+                }
             };
             let new_branch = branches.iter().find(|b| b.name == name).cloned();
 
@@ -224,9 +226,11 @@ async fn create_branch_from_commit(
         Ok(()) => {
             let branches = match guard.list_branches() {
                 Ok(b) => b,
-                Err(_) => return HttpResponse::InternalServerError().json(serde_json::json!({
-                    "error": "Failed to refresh branch list"
-                })),
+                Err(_) => {
+                    return HttpResponse::InternalServerError().json(serde_json::json!({
+                        "error": "Failed to refresh branch list"
+                    }))
+                }
             };
             let new_branch = branches.iter().find(|b| b.name == name).cloned();
             match new_branch {
@@ -263,10 +267,12 @@ async fn create_branch_from_commit(
 pub async fn list_branches(vcs: web::Data<VcsState>) -> impl Responder {
     let vcr = match vcs.lock().await.list_branches() {
         Ok(b) => b,
-        Err(_) => return HttpResponse::InternalServerError().json(serde_json::json!({
-            "error": "Failed to list branches",
-            "status_code": 500,
-        })),
+        Err(_) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to list branches",
+                "status_code": 500,
+            }))
+        }
     };
 
     let default_branch = vcr.iter().find(|b| b.is_default).map(|b| b.name.clone());
@@ -294,18 +300,17 @@ pub async fn list_branches(vcs: web::Data<VcsState>) -> impl Responder {
         ("name" = String, Path, description = "Branch name"),
     ),
 )]
-pub async fn get_branch(
-    path: web::Path<String>,
-    vcs: web::Data<VcsState>,
-) -> impl Responder {
+pub async fn get_branch(path: web::Path<String>, vcs: web::Data<VcsState>) -> impl Responder {
     let name = path.into_inner();
 
     let branches = match vcs.lock().await.list_branches() {
         Ok(b) => b,
-        Err(_) => return HttpResponse::InternalServerError().json(serde_json::json!({
-            "error": "Failed to list branches",
-            "status_code": 500,
-        })),
+        Err(_) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to list branches",
+                "status_code": 500,
+            }))
+        }
     };
 
     match branches.iter().find(|b| b.name == name) {
@@ -332,10 +337,7 @@ pub async fn get_branch(
         ("name" = String, Path, description = "Branch name"),
     ),
 )]
-pub async fn delete_branch(
-    path: web::Path<String>,
-    vcs: web::Data<VcsState>,
-) -> impl Responder {
+pub async fn delete_branch(path: web::Path<String>, vcs: web::Data<VcsState>) -> impl Responder {
     let name = path.into_inner();
 
     match vcs.lock().await.delete_branch(&name) {
@@ -371,10 +373,7 @@ pub async fn delete_branch(
         ("name" = String, Path, description = "Source branch name to merge"),
     ),
 )]
-pub async fn merge_branch(
-    path: web::Path<String>,
-    vcs: web::Data<VcsState>,
-) -> impl Responder {
+pub async fn merge_branch(path: web::Path<String>, vcs: web::Data<VcsState>) -> impl Responder {
     let source_name = path.into_inner();
 
     // Switch to main before merging (typical workflow).
@@ -503,7 +502,10 @@ mod tests {
     fn test_sanitize_branch_name_accepts_valid() {
         assert_eq!(sanitize_branch_name("feature/x").unwrap(), "feature/x");
         assert_eq!(sanitize_branch_name("branch-a").unwrap(), "branch-a");
-        assert_eq!(sanitize_branch_name("branch_with_underscores").unwrap(), "branch_with_underscores");
+        assert_eq!(
+            sanitize_branch_name("branch_with_underscores").unwrap(),
+            "branch_with_underscores"
+        );
         assert_eq!(sanitize_branch_name("v1.2.3").unwrap(), "v1.2.3");
     }
 
@@ -512,9 +514,20 @@ mod tests {
         // T-22-04: traversal (`..`), ref injection (`refs/`, `HEAD`), backslash,
         // whitespace, empty. A lone `/` is NOT rejected — git uses it for
         // namespaced branches like `feature/login`.
-        for bad in ["../escape", "refs/heads/evil", "..", "has space",
-                    "", "   ", "trailing ", " leading", "HEAD",
-                    "a\\b", "refs/foo", "feature/../x"] {
+        for bad in [
+            "../escape",
+            "refs/heads/evil",
+            "..",
+            "has space",
+            "",
+            "   ",
+            "trailing ",
+            " leading",
+            "HEAD",
+            "a\\b",
+            "refs/foo",
+            "feature/../x",
+        ] {
             assert!(
                 sanitize_branch_name(bad).is_err(),
                 "expected {:?} to be rejected, but was accepted",
@@ -544,9 +557,15 @@ mod tests {
     #[test]
     fn test_vcs_state_type_alias() {
         // Verify the type alias compiles and is Send + Sync.
-        let _f: fn() -> VcsState = || Mutex::new(
-            VersionControlRepo::open_or_init("/tmp/test-vcs-state", VcsConfig::new("/tmp/test")).unwrap(),
-        );
+        let _f: fn() -> VcsState = || {
+            Mutex::new(
+                VersionControlRepo::open_or_init(
+                    "/tmp/test-vcs-state",
+                    VcsConfig::new("/tmp/test"),
+                )
+                .unwrap(),
+            )
+        };
     }
 
     #[test]

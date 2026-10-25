@@ -111,8 +111,7 @@ impl Agenda {
 }
 
 /// Conflict resolution strategies for ordering rule firings when salience is equal.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ConflictStrategy {
     /// Higher salience fires first (default)
     #[default]
@@ -126,7 +125,6 @@ pub enum ConflictStrategy {
     /// Alphabetical rule name
     Lexicographic,
 }
-
 
 /// Conflict resolver that applies different ordering strategies.
 #[derive(Debug, Clone)]

@@ -31,9 +31,9 @@
 //! (`types` ⇄ `eval` ⇄ `ast`) is broken with `Arc`/`Box` exactly as
 //! `FeelRange` already uses `Box<FeelRange>` to break the `Value` cycle.
 
+use super::types::FeelType;
 use crate::data_types::Value;
 use serde::{Deserialize, Serialize};
-use super::types::FeelType;
 
 /// A source span — byte offset + length + 1-based line/column.
 ///
@@ -61,7 +61,12 @@ pub struct Span {
 impl Span {
     /// Construct a zero-length span at `start` (an insertion-point marker).
     pub fn zero(start: usize, line: u32, col: u32) -> Self {
-        Self { start, len: 0, line, col }
+        Self {
+            start,
+            len: 0,
+            line,
+            col,
+        }
     }
 }
 
@@ -334,12 +339,18 @@ mod tests {
             else_: Box::new(FeelExpression::Literal(Value::Number(dec!(2)))),
         };
         let _for = FeelExpression::For {
-            iters: vec![("x".to_string(), FeelExpression::Literal(Value::Number(dec!(1))))],
+            iters: vec![(
+                "x".to_string(),
+                FeelExpression::Literal(Value::Number(dec!(1))),
+            )],
             body: Box::new(FeelExpression::Name("x".to_string())),
         };
         let _some = FeelExpression::Quantified {
             kind: QuantKind::Some,
-            iters: vec![("x".to_string(), FeelExpression::Literal(Value::Number(dec!(1))))],
+            iters: vec![(
+                "x".to_string(),
+                FeelExpression::Literal(Value::Number(dec!(1))),
+            )],
             satisfies: Box::new(FeelExpression::Literal(Value::Bool(true))),
         };
         let _path = FeelExpression::Path {
@@ -359,7 +370,10 @@ mod tests {
             columns: vec!["x".to_string()],
             rows: vec![vec![FeelExpression::Literal(Value::Number(dec!(1)))]],
         };
-        let _ctx = FeelExpression::Context(vec![("a".to_string(), FeelExpression::Literal(Value::Number(dec!(1))))]);
+        let _ctx = FeelExpression::Context(vec![(
+            "a".to_string(),
+            FeelExpression::Literal(Value::Number(dec!(1))),
+        )]);
         let _inv = FeelExpression::FunctionInvocation {
             callee: Box::new(FeelExpression::Name("f".to_string())),
             args: vec![FeelExpression::Literal(Value::Number(dec!(1)))],
@@ -377,7 +391,12 @@ mod tests {
     /// and for the Phase 34 editor's per-cell span comparison.
     #[test]
     fn span_is_copy_eq() {
-        let s = Span { start: 3, len: 2, line: 1, col: 4 };
+        let s = Span {
+            start: 3,
+            len: 2,
+            line: 1,
+            col: 4,
+        };
         let copy = s;
         assert_eq!(s, copy);
     }

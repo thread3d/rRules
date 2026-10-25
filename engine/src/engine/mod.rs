@@ -31,12 +31,12 @@
 pub mod rete;
 
 // TREAT and LEAPS require engine-rete for shared types
-#[cfg(any(feature = "engine-treat", feature = "engine-leaps"))]
-pub mod treat;
 #[cfg(feature = "engine-leaps")]
 pub mod leaps;
 #[cfg(feature = "engine-phreak")]
 pub mod phreak;
+#[cfg(any(feature = "engine-treat", feature = "engine-leaps"))]
+pub mod treat;
 
 pub mod direct_eval;
 pub mod metrics;

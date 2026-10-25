@@ -49,8 +49,7 @@ fn decode_payload(token: &str) -> Value {
 /// base64url decode (no padding) — self-contained so the tests stay
 /// dependency-free.
 fn base64url_decode(input: &str) -> Result<Vec<u8>, &'static str> {
-    const CHARS: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let bytes: Vec<u8> = input.bytes().collect();
     let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
     let val = |b: u8| CHARS.iter().position(|&c| c == b).map(|i| i as u8);

@@ -52,10 +52,7 @@ pub struct SimulationRunner;
 
 impl SimulationRunner {
     /// Run a complete simulation: compare base execution against modified variants.
-    pub fn run(
-        base_engine: &Engine,
-        request: &SimulationRequest,
-    ) -> SimulationResult {
+    pub fn run(base_engine: &Engine, request: &SimulationRequest) -> SimulationResult {
         let start_time = std::time::Instant::now();
 
         // Validate input early so we fail fast before doing any work.
@@ -111,7 +108,11 @@ impl SimulationRunner {
 
             // Run each variant with proposed changes.
             for plan in &variant_plans {
-                match SimulationRunner::execute_variant_with_change(base_engine, fact_set, &plan.change) {
+                match SimulationRunner::execute_variant_with_change(
+                    base_engine,
+                    fact_set,
+                    &plan.change,
+                ) {
                     Ok(result) => {
                         variants.push(result);
                     }
@@ -175,10 +176,11 @@ impl SimulationRunner {
         // Load facts into working memory.
         let _working_memory = WorkingMemory::new();
         for test_fact in fact_set {
-            let fields: serde_json::Map<String, serde_json::Value> = match serde_json::from_value(test_fact.fields.clone()) {
-                Ok(m) => m,
-                Err(_) => serde_json::Map::new(), // Treat invalid JSON as empty.
-            };
+            let fields: serde_json::Map<String, serde_json::Value> =
+                match serde_json::from_value(test_fact.fields.clone()) {
+                    Ok(m) => m,
+                    Err(_) => serde_json::Map::new(), // Treat invalid JSON as empty.
+                };
 
             let mut payload = std::collections::HashMap::with_capacity(fields.len());
             for (key, value) in fields {
@@ -218,10 +220,11 @@ impl SimulationRunner {
         // Load facts into working memory.
         let _working_memory = WorkingMemory::new();
         for test_fact in fact_set {
-            let fields: serde_json::Map<String, serde_json::Value> = match serde_json::from_value(test_fact.fields.clone()) {
-                Ok(m) => m,
-                Err(_) => serde_json::Map::new(),
-            };
+            let fields: serde_json::Map<String, serde_json::Value> =
+                match serde_json::from_value(test_fact.fields.clone()) {
+                    Ok(m) => m,
+                    Err(_) => serde_json::Map::new(),
+                };
 
             let mut payload = std::collections::HashMap::with_capacity(fields.len());
             for (key, value) in fields {
@@ -308,7 +311,11 @@ fn format_change_label(index: usize, change: &RuleChange) -> String {
         RuleChange::RemoveCondition { rule_id, field } => {
             format!("remove-field(rule={},field={})", rule_id, field)
         }
-        RuleChange::ModifyAction { rule_id, action_index, .. } => {
+        RuleChange::ModifyAction {
+            rule_id,
+            action_index,
+            ..
+        } => {
             format!("modify-action(rule={},index={})", rule_id, action_index)
         }
         RuleChange::RemoveRule { rule_id } => {
@@ -358,18 +365,36 @@ mod tests {
 
     #[test]
     fn test_format_change_label() {
-        assert_eq!(format_change_label(0, &RuleChange::AddCondition {
-            rule_id: "r1".to_string(),
-            condition: serde_json::json!({"True": null}),
-        }), "add-condition(rule=r1)");
+        assert_eq!(
+            format_change_label(
+                0,
+                &RuleChange::AddCondition {
+                    rule_id: "r1".to_string(),
+                    condition: serde_json::json!({"True": null}),
+                }
+            ),
+            "add-condition(rule=r1)"
+        );
 
-        assert_eq!(format_change_label(1, &RuleChange::RemoveRule {
-            rule_id: "r2".to_string(),
-        }), "remove-rule(rule=r2)");
+        assert_eq!(
+            format_change_label(
+                1,
+                &RuleChange::RemoveRule {
+                    rule_id: "r2".to_string(),
+                }
+            ),
+            "remove-rule(rule=r2)"
+        );
 
-        assert_eq!(format_change_label(2, &RuleChange::DisableRule {
-            rule_id: "r3".to_string(),
-        }), "disable-rule(rule=r3)");
+        assert_eq!(
+            format_change_label(
+                2,
+                &RuleChange::DisableRule {
+                    rule_id: "r3".to_string(),
+                }
+            ),
+            "disable-rule(rule=r3)"
+        );
     }
 
     #[test]

@@ -3,11 +3,11 @@
 //! PHREAK is an extension of the Rete algorithm that provides incremental
 //! truth maintenance through justifications and dependency tracking.
 
-use std::collections::{HashMap, HashSet};
-use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::metrics::MetricsCollector;
-use crate::fact::Fact;
+use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::rete::NodeId;
+use crate::fact::Fact;
+use std::collections::{HashMap, HashSet};
 
 // NOTE: `CoverageTracking` is no longer imported here — the shared direct
 // evaluator (`engine::direct_eval`) owns once-per-rule coverage recording
@@ -35,11 +35,17 @@ impl AlphaMemory {
     }
 
     pub fn insert(&mut self, fact_type_id: &str, fact_id: String) {
-        self.entries.entry(fact_type_id.to_string()).or_default().insert(fact_id);
+        self.entries
+            .entry(fact_type_id.to_string())
+            .or_default()
+            .insert(fact_id);
     }
 
     pub fn get_facts(&self, fact_type_id: &str) -> Vec<String> {
-        self.entries.get(fact_type_id).map(|s| s.iter().cloned().collect()).unwrap_or_default()
+        self.entries
+            .get(fact_type_id)
+            .map(|s| s.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Removes one fact from its fact type, pruning the bucket when it empties.
@@ -71,11 +77,17 @@ impl BetaMemory {
     }
 
     pub fn insert(&mut self, join_node_id: impl Into<String>, nagram: Nagram) {
-        self.entries.entry(join_node_id.into()).or_default().push(nagram);
+        self.entries
+            .entry(join_node_id.into())
+            .or_default()
+            .push(nagram);
     }
 
     pub fn get_nagrams(&self, join_node_id: impl Into<String>) -> Vec<Nagram> {
-        self.entries.get(&join_node_id.into()).cloned().unwrap_or_default()
+        self.entries
+            .get(&join_node_id.into())
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Drops every partial match that references `fact_id`, pruning empty
@@ -208,8 +220,10 @@ impl DependencyGraph {
                 .or_default()
                 .push(justification.id.clone());
         }
-        self.dependents
-            .insert(justification.id.clone(), justification.premises.iter().cloned().collect());
+        self.dependents.insert(
+            justification.id.clone(),
+            justification.premises.iter().cloned().collect(),
+        );
     }
 
     /// Removes a fact and its associated dependencies.
@@ -508,7 +522,10 @@ impl PhreakEngine {
 
         // Collect test nodes that need propagation first (before mutable borrow)
         let node_ids: Vec<_> = {
-            self.network.base.test_nodes.values()
+            self.network
+                .base
+                .test_nodes
+                .values()
                 .filter(|n| n.fact_type_id == fact_type)
                 .map(|n| n.id.clone())
                 .collect()
@@ -534,7 +551,9 @@ impl PhreakEngine {
                 None => return,
             };
 
-            test_node.successors.iter()
+            test_node
+                .successors
+                .iter()
                 .filter_map(|s| self.network.base.join_nodes.get(s))
                 .cloned()
                 .collect()
@@ -591,7 +610,8 @@ impl PhreakEngine {
             self.beta_memory.insert(&join_node.id.0, nagram);
         }
 
-        self.metrics.record_beta_memory_additions(test_facts_from_alpha.len() + existing_nagrams.len());
+        self.metrics
+            .record_beta_memory_additions(test_facts_from_alpha.len() + existing_nagrams.len());
     }
 
     /// Executes the rules loaded via `load_ruleset` against `working_facts`
@@ -614,12 +634,13 @@ impl PhreakEngine {
     pub fn execute_rules(&mut self) -> EngineResult {
         let start = std::time::Instant::now();
 
-        let (fired_set, _evaluated_set, trace) = crate::engine::direct_eval::direct_execute_with_limit(
-            &self.rules,
-            &mut self.working_facts,
-            self.collect_trace,
-            self.max_iterations,
-        );
+        let (fired_set, _evaluated_set, trace) =
+            crate::engine::direct_eval::direct_execute_with_limit(
+                &self.rules,
+                &mut self.working_facts,
+                self.collect_trace,
+                self.max_iterations,
+            );
 
         // Record per-fire metrics for parity with the placeholder loop.
         for _ in &fired_set {
@@ -705,9 +726,9 @@ impl ExecutionEngine for PhreakEngine {
         match key {
             // Fixpoint cap for this engine, overriding `RRULES_MAX_CHAIN_ITERATIONS`.
             "max_iterations" => {
-                let limit = value
-                    .parse::<usize>()
-                    .map_err(|_| format!("max_iterations must be a positive integer, got {value:?}"))?;
+                let limit = value.parse::<usize>().map_err(|_| {
+                    format!("max_iterations must be a positive integer, got {value:?}")
+                })?;
                 if limit == 0 {
                     return Err("max_iterations must be at least 1".to_string());
                 }
@@ -844,10 +865,8 @@ mod tests {
         // Add some facts
         for i in 0..3 {
             let mut fact = Fact::new("test", HashMap::new());
-            fact.payload.insert(
-                "value".to_string(),
-                crate::data_types::Value::Integer(i),
-            );
+            fact.payload
+                .insert("value".to_string(), crate::data_types::Value::Integer(i));
             engine.assert_fact(fact);
         }
 

@@ -97,7 +97,9 @@ static INSTANCE: LazyLock<Mutex<TrackingState>> = LazyLock::new(|| {
 /// subsequent monitoring call. Panicking here would turn one failed test into a
 /// process-wide observability outage.
 fn lock_state() -> std::sync::MutexGuard<'static, TrackingState> {
-    INSTANCE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    INSTANCE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Singleton for tracking coverage across multiple engine runs.
@@ -138,7 +140,11 @@ impl CoverageTracking {
     pub fn get_all_states(&self) -> Vec<(String, RuleCoverageState)> {
         let state = lock_state();
         // Collect as owned data since we can't return references from inside the lock
-        state.rules.iter().map(|(id, s)| (id.clone(), s.clone())).collect()
+        state
+            .rules
+            .iter()
+            .map(|(id, s)| (id.clone(), s.clone()))
+            .collect()
     }
 
     /// Gets a summary of coverage across all tracked rules.
@@ -178,16 +184,20 @@ impl CoverageTracking {
     pub fn to_json(&self) -> String {
         let state = lock_state();
 
-        let rules_data: Vec<_> = state.rules.iter().map(|(id, rule)| {
-            serde_json::json!({
-                "rule_id": id,
-                "evaluated": rule.evaluated,
-                "fired": rule.fired,
-                "evaluation_count": rule.evaluation_count,
-                "fire_count": rule.fire_count,
-                "skipped_reason": rule.skipped_reason
+        let rules_data: Vec<_> = state
+            .rules
+            .iter()
+            .map(|(id, rule)| {
+                serde_json::json!({
+                    "rule_id": id,
+                    "evaluated": rule.evaluated,
+                    "fired": rule.fired,
+                    "evaluation_count": rule.evaluation_count,
+                    "fire_count": rule.fire_count,
+                    "skipped_reason": rule.skipped_reason
+                })
             })
-        }).collect();
+            .collect();
 
         let summary = CoverageSummary {
             total_rules: state.rules.len(),
@@ -204,7 +214,8 @@ impl CoverageTracking {
         serde_json::json!({
             "rules": rules_data,
             "summary": summary
-        }).to_string()
+        })
+        .to_string()
     }
 
     /// Exports coverage data as CSV row.
@@ -212,7 +223,11 @@ impl CoverageTracking {
         format!(
             "{},{},{}",
             rule_id,
-            if evaluated { "evaluated" } else { "not_evaluated" },
+            if evaluated {
+                "evaluated"
+            } else {
+                "not_evaluated"
+            },
             if fired { "fired" } else { "not_fired" }
         )
     }
@@ -271,7 +286,10 @@ mod tests {
     #[test]
     fn test_with_skipped_reason() {
         let report = CoverageReport::new("rule-1").with_skipped_reason("condition not matched");
-        assert_eq!(report.skipped_reason, Some("condition not matched".to_string()));
+        assert_eq!(
+            report.skipped_reason,
+            Some("condition not matched".to_string())
+        );
     }
 
     #[test]
@@ -330,7 +348,10 @@ mod tests {
         CoverageTracking::record_rule_skipped("rule-1", "condition not matched");
 
         let state = tracker.get_rule_state("rule-1").unwrap();
-        assert_eq!(state.skipped_reason, Some("condition not matched".to_string()));
+        assert_eq!(
+            state.skipped_reason,
+            Some("condition not matched".to_string())
+        );
     }
 
     #[test]

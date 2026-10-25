@@ -55,10 +55,7 @@ pub fn find_user(store: &UserStore, identifier: &str) -> Option<UserRecord> {
     if let Some(u) = users.get(identifier) {
         return Some(u.clone());
     }
-    users
-        .values()
-        .find(|u| u.email == identifier)
-        .cloned()
+    users.values().find(|u| u.email == identifier).cloned()
 }
 
 /// Permissions per role, mirroring the frontend `Permission` union
@@ -68,21 +65,43 @@ pub fn find_user(store: &UserStore, identifier: &str) -> Option<UserRecord> {
 fn permissions_for(role: &str) -> Vec<String> {
     match role {
         "admin" => vec![
-            "rule:read", "rule:create", "rule:update", "rule:delete",
-            "approval:read", "approval:create", "approval:approve", "approval:reject",
-            "metrics:read", "settings:read", "settings:update",
+            "rule:read",
+            "rule:create",
+            "rule:update",
+            "rule:delete",
+            "approval:read",
+            "approval:create",
+            "approval:approve",
+            "approval:reject",
+            "metrics:read",
+            "settings:read",
+            "settings:update",
         ],
         "reviewer" => vec![
-            "rule:read", "rule:create", "rule:update",
-            "approval:read", "approval:approve", "approval:reject",
-            "metrics:read", "settings:read",
+            "rule:read",
+            "rule:create",
+            "rule:update",
+            "approval:read",
+            "approval:approve",
+            "approval:reject",
+            "metrics:read",
+            "settings:read",
         ],
         "author" => vec![
-            "rule:read", "rule:create", "rule:update",
-            "approval:read", "metrics:read", "settings:read",
+            "rule:read",
+            "rule:create",
+            "rule:update",
+            "approval:read",
+            "metrics:read",
+            "settings:read",
         ],
         // viewer (and any unknown role): read-only baseline.
-        _ => vec!["rule:read", "approval:read", "metrics:read", "settings:read"],
+        _ => vec![
+            "rule:read",
+            "approval:read",
+            "metrics:read",
+            "settings:read",
+        ],
     }
     .into_iter()
     .map(String::from)

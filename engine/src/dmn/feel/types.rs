@@ -258,7 +258,16 @@ pub fn conforms(a: &FeelType, b: &FeelType) -> bool {
         // function (T1..Tn)->U <: (S1..Sm)->V iff n=m, Si <: Ti (contravariant
         // args), and U <: V (covariant return). Here `a` is the source
         // (params=Ti, ret=U), `b` is the target (params=Si, ret=V).
-        (FeelType::Function { params: ap, ret: ar }, FeelType::Function { params: bp, ret: br }) => {
+        (
+            FeelType::Function {
+                params: ap,
+                ret: ar,
+            },
+            FeelType::Function {
+                params: bp,
+                ret: br,
+            },
+        ) => {
             ap.len() == bp.len()
                 && bp.iter().zip(ap).all(|(s, t)| conforms(s, t))
                 && conforms(ar, br)
@@ -418,7 +427,10 @@ pub fn resolve_type_ref(s: &str) -> Option<FeelType> {
     let s = s.trim();
     let inner = s.strip_prefix("feel:")?;
     // Recursive nested forms first (list<...> / context<...>), then flat names.
-    if let Some(rest) = inner.strip_prefix("list<").and_then(|r| r.strip_suffix('>')) {
+    if let Some(rest) = inner
+        .strip_prefix("list<")
+        .and_then(|r| r.strip_suffix('>'))
+    {
         let inner_t = resolve_type_ref(rest)?;
         return Some(FeelType::List(Box::new(inner_t)));
     }
@@ -589,7 +601,10 @@ mod tests {
         let list_any = FeelType::List(Box::new(FeelType::Any));
         let list_str = FeelType::List(Box::new(FeelType::String));
         assert!(conforms(&list_num, &list_any), "List<Number> <: List<Any>");
-        assert!(!conforms(&list_num, &list_str), "List<Number> !<: List<String>");
+        assert!(
+            !conforms(&list_num, &list_str),
+            "List<Number> !<: List<String>"
+        );
     }
 
     #[test]
@@ -714,7 +729,11 @@ mod tests {
         // to a Number targeting Number (conforms); targeting String yields None.
         let singleton_num = Value::Array(vec![Value::Number(dec!(1))]);
         assert_eq!(
-            implicit_convert(singleton_num.clone(), &FeelType::String, ConvertCtx::Invocation),
+            implicit_convert(
+                singleton_num.clone(),
+                &FeelType::String,
+                ConvertCtx::Invocation
+            ),
             None,
             "singleton List<Number>→String must NOT convert in Invocation context"
         );
@@ -786,13 +805,12 @@ mod tests {
         assert_eq!(type_of(&Value::Integer(5)), FeelType::Number);
         assert_eq!(type_of(&Value::Float(5.0)), FeelType::Number);
         assert_eq!(type_of(&Value::Bool(true)), FeelType::Boolean);
-        assert_eq!(
-            type_of(&Value::String("x".to_string())),
-            FeelType::String
-        );
+        assert_eq!(type_of(&Value::String("x".to_string())), FeelType::String);
         assert_eq!(type_of(&Value::Null), FeelType::Null);
         assert_eq!(
-            type_of(&Value::Date(chrono::NaiveDate::from_ymd_opt(2021, 1, 1).unwrap())),
+            type_of(&Value::Date(
+                chrono::NaiveDate::from_ymd_opt(2021, 1, 1).unwrap()
+            )),
             FeelType::Date
         );
         assert_eq!(
@@ -844,9 +862,7 @@ mod tests {
                 params: vec![FeelType::Number],
                 ret: Box::new(FeelType::Any),
             });
-            base.push(FeelType::Context(vec![
-                ("k".to_string(), FeelType::Number),
-            ]));
+            base.push(FeelType::Context(vec![("k".to_string(), FeelType::Number)]));
         }
         base
     }

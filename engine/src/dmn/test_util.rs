@@ -504,7 +504,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         let vector_dir = tmp.join("0001-input-data-string");
         let _ = std::fs::create_dir_all(&vector_dir);
-        std::fs::write(vector_dir.join("0001-input-data-string.dmn"), "<definitions/>").ok();
+        std::fs::write(
+            vector_dir.join("0001-input-data-string.dmn"),
+            "<definitions/>",
+        )
+        .ok();
         std::fs::write(
             vector_dir.join("0001-input-data-string-test-01.xml"),
             "<testCases/>",
@@ -517,7 +521,11 @@ mod tests {
             .to_str()
             .unwrap()
             .ends_with("0001-input-data-string.dmn"));
-        assert!(vectors[0].test_xml_path.to_str().unwrap().contains("-test-"));
+        assert!(vectors[0]
+            .test_xml_path
+            .to_str()
+            .unwrap()
+            .contains("-test-"));
         assert_eq!(vectors[0].dir_name, "0001-input-data-string");
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -526,7 +534,9 @@ mod tests {
     fn discover_vectors_nested_dirs() {
         let tmp = std::env::temp_dir().join("tck_test_nested");
         let _ = std::fs::remove_dir_all(&tmp);
-        let leaf = tmp.join("compliance-level-2").join("0001-input-data-string");
+        let leaf = tmp
+            .join("compliance-level-2")
+            .join("0001-input-data-string");
         let _ = std::fs::create_dir_all(&leaf);
         std::fs::write(leaf.join("0001-input-data-string.dmn"), "<definitions/>").ok();
         std::fs::write(

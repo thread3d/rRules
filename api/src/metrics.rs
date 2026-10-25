@@ -1,13 +1,15 @@
 //! Metrics collection and reporting for the rRules API server
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use actix_web::{web, HttpResponse, Responder};
-use prometheus::{Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder};
+use prometheus::{
+    Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder,
+};
 use serde::Serialize;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-use engine::monitoring::detection::RuleExecutionTracker;
 use engine::monitoring::coverage::CoverageTracking;
+use engine::monitoring::detection::RuleExecutionTracker;
 
 use crate::v1::sessions::SessionManager;
 
@@ -30,7 +32,9 @@ pub struct MetricsSnapshot {
 pub type MetricsTx = Arc<tokio::sync::broadcast::Sender<MetricsSnapshot>>;
 
 /// Create a new metrics broadcast sender
-pub fn create_metrics_channel(capacity: usize) -> (MetricsTx, tokio::sync::broadcast::Receiver<MetricsSnapshot>) {
+pub fn create_metrics_channel(
+    capacity: usize,
+) -> (MetricsTx, tokio::sync::broadcast::Receiver<MetricsSnapshot>) {
     let (tx, rx) = tokio::sync::broadcast::channel(capacity);
     (Arc::new(tx), rx)
 }
@@ -171,9 +175,13 @@ impl Default for ExecutionCounters {
     }
 }
 
-
 /// HTML template for metrics page
-fn metrics_html(engine_name: &str, rules_fired: u64, memory_bytes: u64, active_sessions: usize) -> String {
+fn metrics_html(
+    engine_name: &str,
+    rules_fired: u64,
+    memory_bytes: u64,
+    active_sessions: usize,
+) -> String {
     let memory_mb = format!("{:.2}", memory_bytes as f64 / 1_048_576.0);
     let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S");
 
@@ -325,7 +333,11 @@ pub async fn metrics_endpoint(
     // `metrics_json_active_sessions_live` regression test proves that path.
     session_manager: Option<web::Data<Arc<SessionManager>>>,
 ) -> impl Responder {
-    let accept = req.headers().get("Accept").and_then(|h| h.to_str().ok()).unwrap_or("");
+    let accept = req
+        .headers()
+        .get("Accept")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
 
     match accept {
         _ if accept.contains("text/html") || accept.contains("*/*") => {
@@ -372,9 +384,9 @@ pub async fn metrics_endpoint(
             let metric_families = counters.registry.gather();
             let mut buffer = Vec::new();
             let encoder = TextEncoder::new();
-            encoder
-                .encode(&metric_families, &mut buffer)
-                .expect("prometheus TextEncoder encode is infallible for valid gathered metric families");
+            encoder.encode(&metric_families, &mut buffer).expect(
+                "prometheus TextEncoder encode is infallible for valid gathered metric families",
+            );
             let text = String::from_utf8(buffer).unwrap_or_default();
             HttpResponse::Ok()
                 .content_type("text/plain; version=0.0.4")
@@ -435,10 +447,7 @@ pub async fn coverage_endpoint() -> impl Responder {
 /// `/v1` scope by [`configure_metrics_dashboards`], where they resolve to
 /// `/v1/metrics/dead-rules` and `/v1/metrics/coverage` (MON-03/MON-04).
 pub fn configure_metrics(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::scope("/metrics")
-            .route("", web::get().to(metrics_endpoint)),
-    );
+    cfg.service(web::scope("/metrics").route("", web::get().to(metrics_endpoint)));
 }
 
 /// Initialize the dashboard metric routes for the `/v1` scope (MON-03/MON-04).

@@ -97,12 +97,8 @@ fn tck_precision_audit() {
         for o in &offenders {
             eprintln!("  - {}", o);
         }
-        eprintln!(
-            "\nDocumented fallback path (30-RESEARCH.md Standard Stack / Pitfall 2):"
-        );
-        eprintln!(
-            "  Add `bigdecimal` 0.4.10 localized to the Phase 31 rounding built-ins"
-        );
+        eprintln!("\nDocumented fallback path (30-RESEARCH.md Standard Stack / Pitfall 2):");
+        eprintln!("  Add `bigdecimal` 0.4.10 localized to the Phase 31 rounding built-ins");
         eprintln!("  (round up/down/half-up/half-down, floor, ceiling, decimal).");
         eprintln!("  `Value::Number` backing type stays `rust_decimal::Decimal` — the swap");
         eprintln!("  is localized because the numeric *value* (e.g. 5.5) is equal under FEEL");
@@ -126,7 +122,9 @@ fn tck_precision_audit() {
 /// numeric literals: the test-case XML holds `xsd:decimal`/`xsd:double`
 /// expected values, and the `.dmn` files hold FEEL `<text>` expressions.
 fn collect_xml_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let p = entry.path();
         if p.is_dir() {
@@ -228,7 +226,10 @@ fn iter_numeric_literals(s: &str) -> Vec<Literal> {
             i += 1;
         }
         // Optional fractional part.
-        if i < bytes.len() && bytes[i] == b'.' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()
+        if i < bytes.len()
+            && bytes[i] == b'.'
+            && i + 1 < bytes.len()
+            && bytes[i + 1].is_ascii_digit()
         {
             i += 1; // consume '.'
             while i < bytes.len() && bytes[i].is_ascii_digit() {
@@ -306,7 +307,11 @@ fn significant_digits(lit: &str) -> usize {
         let e_signed: i64 = e.parse::<i64>().unwrap_or(0);
         if e_signed > 0 {
             let int_part = mant.split('.').next().unwrap_or("");
-            let int_digits = int_part.trim_start_matches('0').chars().filter(|c| c.is_ascii_digit()).count();
+            let int_digits = int_part
+                .trim_start_matches('0')
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .count();
             let effective_int = (int_digits as i64) + e_signed;
             if effective_int > SIG_DIGIT_THRESHOLD as i64 {
                 return effective_int as usize;
@@ -348,7 +353,10 @@ mod tests {
     #[test]
     fn iter_literals_finds_numbers() {
         let s = r#"<expectedValue type="xsd:decimal">5.5</expectedValue><text>1 + 2</text>"#;
-        let lits: Vec<String> = iter_numeric_literals(s).into_iter().map(|l| l.text).collect();
+        let lits: Vec<String> = iter_numeric_literals(s)
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
         assert!(lits.contains(&"5.5".to_string()));
         assert!(lits.contains(&"1".to_string()));
         assert!(lits.contains(&"2".to_string()));
@@ -359,7 +367,10 @@ mod tests {
         // TCK test-case IDs carry hex hash suffixes (e.g. `001_af177e63fc`).
         // The `177e63` inside is NOT a scientific-notation number.
         let s = r#"<testCase id="001_af177e63fc"><resultNode name="feel-decimal-function_010_4b46e59c8b">"#;
-        let lits: Vec<String> = iter_numeric_literals(s).into_iter().map(|l| l.text).collect();
+        let lits: Vec<String> = iter_numeric_literals(s)
+            .into_iter()
+            .map(|l| l.text)
+            .collect();
         // `001` is bounded by `"` and `_` — extracted (harmless: 3 sig digits).
         assert!(lits.contains(&"001".to_string()));
         // `177e63` / `46e59` are embedded in alphanumeric IDs — must NOT appear.

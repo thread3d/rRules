@@ -130,7 +130,10 @@ fn test_cdata_description_preserved() {
         DefinitionsChild::Decision(d) => d,
         other => panic!("expected first child to be Decision, got {:?}", other),
     };
-    let desc = dec.description.as_ref().expect("decision has a description");
+    let desc = dec
+        .description
+        .as_ref()
+        .expect("decision has a description");
     assert!(desc.is_cdata, "decision description must be CDATA-flagged");
     assert!(
         desc.content.contains("age >= 18"),
@@ -216,7 +219,12 @@ fn test_element_order_preserved() {
         .collect();
     assert_eq!(
         seq,
-        ["ItemDefinition", "Decision", "TextAnnotation", "Association"],
+        [
+            "ItemDefinition",
+            "Decision",
+            "TextAnnotation",
+            "Association"
+        ],
         "element order must be preserved (Pitfall 11)"
     );
 }

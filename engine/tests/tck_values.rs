@@ -53,8 +53,13 @@ pub struct TckCase {
 
 /// One tag in the flat token stream.
 enum Tag {
-    Open { name: String, attrs: Vec<(String, String)> },
-    Close { name: String },
+    Open {
+        name: String,
+        attrs: Vec<(String, String)>,
+    },
+    Close {
+        name: String,
+    },
     Text(String),
 }
 
@@ -383,7 +388,9 @@ pub fn to_value(node: &TckNode) -> Value {
 
 fn scalar_to_value(xsi_type: Option<&str>, text: &str) -> Value {
     let text = text.trim();
-    let short = xsi_type.map(|t| t.rsplit(':').next().unwrap_or(t)).unwrap_or("");
+    let short = xsi_type
+        .map(|t| t.rsplit(':').next().unwrap_or(t))
+        .unwrap_or("");
 
     match short {
         "string" => Value::String(text.to_string()),
@@ -392,10 +399,12 @@ fn scalar_to_value(xsi_type: Option<&str>, text: &str) -> Value {
             "false" => Value::Bool(false),
             _ => Value::Null,
         },
-        "decimal" | "double" | "float" | "integer" | "int" | "long" => match Decimal::from_str(text) {
-            Ok(d) => Value::Number(d),
-            Err(_) => Value::String(text.to_string()),
-        },
+        "decimal" | "double" | "float" | "integer" | "int" | "long" => {
+            match Decimal::from_str(text) {
+                Ok(d) => Value::Number(d),
+                Err(_) => Value::String(text.to_string()),
+            }
+        }
         "date" => match chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d") {
             Ok(d) => Value::Date(d),
             Err(_) => Value::String(text.to_string()),
@@ -550,24 +559,20 @@ mod tests {
 
     #[test]
     fn deep_equal_compares_structure() {
-        let a = to_value(&TckNode::List(vec![
-            TckNode::Scalar {
-                xsi_type: Some("xsd:decimal".into()),
-                text: "1.0".into(),
-            },
-        ]));
+        let a = to_value(&TckNode::List(vec![TckNode::Scalar {
+            xsi_type: Some("xsd:decimal".into()),
+            text: "1.0".into(),
+        }]));
         let b = to_value(&TckNode::List(vec![TckNode::Scalar {
             xsi_type: Some("xsd:decimal".into()),
             text: "1".into(),
         }]));
         assert!(deep_equal(&a, &b), "1.0 and 1 compare equal by value");
 
-        let c = to_value(&TckNode::List(vec![
-            TckNode::Scalar {
-                xsi_type: Some("xsd:decimal".into()),
-                text: "2".into(),
-            },
-        ]));
+        let c = to_value(&TckNode::List(vec![TckNode::Scalar {
+            xsi_type: Some("xsd:decimal".into()),
+            text: "2".into(),
+        }]));
         assert!(!deep_equal(&a, &c), "different element values must differ");
     }
 
@@ -590,10 +595,7 @@ mod tests {
                 match &items[0] {
                     Value::Object(map) => {
                         assert_eq!(map.get("key"), Some(&Value::String("a".into())));
-                        assert_eq!(
-                            map.get("value"),
-                            Some(&Value::Number(Decimal::from(1)))
-                        );
+                        assert_eq!(map.get("value"), Some(&Value::Number(Decimal::from(1))));
                     }
                     other => panic!("expected context item, got {other:?}"),
                 }

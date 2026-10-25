@@ -98,8 +98,7 @@ pub fn parse_dmn_bytes(input: &[u8]) -> Result<DmnModel, DmnParseError> {
 
 /// Parse a DMN document from a file path.
 pub fn parse_dmn_file(path: &str) -> Result<DmnModel, DmnParseError> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| DmnParseError::Io(e.to_string()))?;
+    let content = std::fs::read_to_string(path).map_err(|e| DmnParseError::Io(e.to_string()))?;
     parse_dmn(&content)
 }
 
@@ -273,15 +272,17 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Event::Eof) => break,
                 // Ignore stray text/comments outside the root.
-                Ok(Event::End(_)) | Ok(Event::Text(_)) | Ok(Event::CData(_)) |
-                Ok(Event::Empty(_)) | Ok(Event::Comment(_)) => {}
+                Ok(Event::End(_))
+                | Ok(Event::Text(_))
+                | Ok(Event::CData(_))
+                | Ok(Event::Empty(_))
+                | Ok(Event::Comment(_)) => {}
                 Ok(_) => {}
                 Err(e) => return Err(DmnParseError::XmlError(e.to_string())),
             }
         }
-        let definitions = definitions.ok_or_else(|| {
-            DmnParseError::MissingElement("definitions root element".into())
-        })?;
+        let definitions = definitions
+            .ok_or_else(|| DmnParseError::MissingElement("definitions root element".into()))?;
         Ok(DmnModel {
             definitions,
             source_namespace: source_ns,
@@ -348,7 +349,8 @@ impl<'a> Parser<'a> {
                         "businessKnowledgeModel" => {
                             let attrs = collect_attrs(&e)?;
                             let b = self.parse_bkm(attrs)?;
-                            defs.children.push(DefinitionsChild::BusinessKnowledgeModel(b));
+                            defs.children
+                                .push(DefinitionsChild::BusinessKnowledgeModel(b));
                         }
                         "decisionService" => {
                             let attrs = collect_attrs(&e)?;
@@ -1108,14 +1110,15 @@ impl<'a> Parser<'a> {
                             rule.description = Some(self.read_text_content(&ln)?);
                         }
                         "inputEntry" => {
-                            rule.input_entries.push(self.parse_rule_entry("inputEntry")?);
+                            rule.input_entries
+                                .push(self.parse_rule_entry("inputEntry")?);
                         }
                         "outputEntry" => {
-                            rule.output_entries.push(self.parse_rule_entry("outputEntry")?);
+                            rule.output_entries
+                                .push(self.parse_rule_entry("outputEntry")?);
                         }
                         "annotationEntry" => {
-                            rule
-                                .annotation_entries
+                            rule.annotation_entries
                                 .push(self.parse_rule_entry("annotationEntry")?);
                         }
                         _ => self.skip_element(&ln)?,
@@ -1714,10 +1717,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_dmn_shape(&mut self, attrs: Attrs) -> Result<DmnShape, DmnParseError> {
-        let element_id = attrs
-            .get("dmnElementRef")
-            .cloned()
-            .unwrap_or_default();
+        let element_id = attrs.get("dmnElementRef").cloned().unwrap_or_default();
         let mut bounds = None;
         let mut labels = Vec::new();
         loop {
@@ -1814,11 +1814,20 @@ impl<'a> Parser<'a> {
         Ok(edge)
     }
 
-    fn parse_dc_bounds(&mut self, attrs: Attrs) -> Result<crate::dmn::model::DcBounds, DmnParseError> {
+    fn parse_dc_bounds(
+        &mut self,
+        attrs: Attrs,
+    ) -> Result<crate::dmn::model::DcBounds, DmnParseError> {
         let x = attrs.get("x").and_then(|v| v.parse().ok()).unwrap_or(0.0);
         let y = attrs.get("y").and_then(|v| v.parse().ok()).unwrap_or(0.0);
-        let width = attrs.get("width").and_then(|v| v.parse().ok()).unwrap_or(0.0);
-        let height = attrs.get("height").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        let width = attrs
+            .get("width")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0);
+        let height = attrs
+            .get("height")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0);
         self.skip_element("Bounds")?;
         Ok(crate::dmn::model::DcBounds {
             x,
@@ -1828,7 +1837,10 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_dc_point(&mut self, attrs: Attrs) -> Result<crate::dmn::model::DcPoint, DmnParseError> {
+    fn parse_dc_point(
+        &mut self,
+        attrs: Attrs,
+    ) -> Result<crate::dmn::model::DcPoint, DmnParseError> {
         let x = attrs.get("x").and_then(|v| v.parse().ok()).unwrap_or(0.0);
         let y = attrs.get("y").and_then(|v| v.parse().ok()).unwrap_or(0.0);
         self.skip_element("waypoint")?;
@@ -1980,10 +1992,7 @@ impl<'a> Parser<'a> {
     /// text/CDATA or as a `<text>` child (the standard DMN enumeration form
     /// for `itemComponent`). If a `<text>` child is present, its content (and
     /// CDATA flag) is used; otherwise raw `Text`/`CData` events are accumulated.
-    fn read_text_or_text_child(
-        &mut self,
-        end_local: &str,
-    ) -> Result<TextContent, DmnParseError> {
+    fn read_text_or_text_child(&mut self, end_local: &str) -> Result<TextContent, DmnParseError> {
         let mut content = String::new();
         let mut is_cdata = false;
         let mut saw_text_child = false;
@@ -2133,8 +2142,7 @@ impl<'a> Parser<'a> {
                     let ln = local_name_str(s.name());
                     return Err(DmnParseError::UnexpectedElement(format!(
                         "unexpected child <{}> inside text content of <{}>",
-                        ln,
-                        end_local
+                        ln, end_local
                     )));
                 }
                 Ok(Event::DocType(_)) => {
@@ -2156,10 +2164,7 @@ impl<'a> Parser<'a> {
                 Err(e) => return Err(DmnParseError::XmlError(e.to_string())),
             }
         }
-        Ok(TextContent {
-            content,
-            is_cdata,
-        })
+        Ok(TextContent { content, is_cdata })
     }
 
     /// Read text/CDATA content and return just the string (CDATA flag discarded).
@@ -2327,7 +2332,11 @@ mod tests {
   <decision id="_dec"><description>&xxe;</description></decision>
 </definitions>"#;
         let res = parse_dmn(xxe);
-        assert!(matches!(res, Err(DmnParseError::XxeRejected(_))), "got {:?}", res);
+        assert!(
+            matches!(res, Err(DmnParseError::XxeRejected(_))),
+            "got {:?}",
+            res
+        );
     }
 
     /// PERF-07 regression guard: a decision table with attributes, a
@@ -2373,7 +2382,10 @@ mod tests {
         assert_eq!(table.id.as_deref(), Some("_dt"));
         assert_eq!(table.hit_policy, HitPolicy::Unique);
         assert_eq!(table.input_clauses.len(), 1);
-        assert_eq!(table.input_clauses[0].label.as_deref(), Some("Applicant age"));
+        assert_eq!(
+            table.input_clauses[0].label.as_deref(),
+            Some("Applicant age")
+        );
         assert_eq!(table.input_clauses[0].input_expression, "applicant.age");
         assert_eq!(table.output_clauses.len(), 1);
         assert_eq!(table.output_clauses[0].name.as_deref(), Some("result"));

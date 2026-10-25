@@ -318,7 +318,9 @@ impl EngineState {
         }
 
         {
-            let mut rule_files = self.rule_files.write()
+            let mut rule_files = self
+                .rule_files
+                .write()
                 .map_err(|e| format!("Failed to acquire lock: {}", e))?;
             *rule_files = files_updated;
         }
@@ -354,13 +356,17 @@ impl EngineState {
         }
 
         {
-            let mut files = self.rule_files.write()
+            let mut files = self
+                .rule_files
+                .write()
                 .map_err(|e| format!("Failed to acquire write lock: {}", e))?;
             *files = rule_files;
         }
 
         {
-            let _engine = self.engine.write()
+            let _engine = self
+                .engine
+                .write()
                 .map_err(|e| format!("Failed to acquire engine lock: {}", e))?;
         }
 
@@ -788,11 +794,8 @@ pub async fn execute_single(
     }
 
     // 8. Compute rules_not_fired = shared ruleset rule ids - fired_rule_ids.
-    let fired_set: std::collections::HashSet<String> = engine_result
-        .fired_rule_ids
-        .iter()
-        .cloned()
-        .collect();
+    let fired_set: std::collections::HashSet<String> =
+        engine_result.fired_rule_ids.iter().cloned().collect();
     let rules_not_fired: Vec<String> = all_rule_ids
         .iter()
         .filter(|id| !fired_set.contains(*id))
@@ -1109,7 +1112,17 @@ pub async fn execute_rules(
     metrics_tx: web::Data<MetricsTx>,
     session_manager: web::Data<Arc<SessionManager>>,
 ) -> impl Responder {
-    match execute_single(req.into_inner(), registry, selector, ruleset, counters, metrics_tx, session_manager).await {
+    match execute_single(
+        req.into_inner(),
+        registry,
+        selector,
+        ruleset,
+        counters,
+        metrics_tx,
+        session_manager,
+    )
+    .await
+    {
         Ok(resp) => HttpResponse::Ok().json(resp),
         Err((code, msg)) => HttpResponse::build(code).json(serde_json::json!({ "error": msg })),
     }
@@ -1217,9 +1230,17 @@ pub async fn batch_execute_rules(
             // `HttpResponse` body. The Err-mask placeholder (hardcoded
             // zero-fired `ExecuteResponse`) is GONE — an `execute_single` Err
             // is now a per-item FAILURE, not a masked success (SC-2).
-            execute_single(request, registry, selector, ruleset, counters, metrics_tx, session_manager)
-                .await
-                .map_err(|(_code, msg)| msg)
+            execute_single(
+                request,
+                registry,
+                selector,
+                ruleset,
+                counters,
+                metrics_tx,
+                session_manager,
+            )
+            .await
+            .map_err(|(_code, msg)| msg)
         });
     }
 
@@ -1407,10 +1428,7 @@ pub async fn reload_rules(
         ("job_id" = String, Path, description = "Reload job ID"),
     ),
 )]
-pub async fn get_job_status(
-    path: web::Path<String>,
-    store: web::Data<JobStore>,
-) -> impl Responder {
+pub async fn get_job_status(path: web::Path<String>, store: web::Data<JobStore>) -> impl Responder {
     let job_id = path.into_inner();
 
     let jobs = store.read().unwrap();
@@ -1485,9 +1503,9 @@ fn engine_value_to_json(value: engine::Value) -> serde_json::Value {
         engine::Value::Float(f) => serde_json::json!(f),
         engine::Value::String(s) => serde_json::Value::String(s),
         engine::Value::DateTime(dt) => serde_json::Value::String(dt.to_string()),
-        engine::Value::Array(arr) => serde_json::Value::Array(
-            arr.into_iter().map(engine_value_to_json).collect(),
-        ),
+        engine::Value::Array(arr) => {
+            serde_json::Value::Array(arr.into_iter().map(engine_value_to_json).collect())
+        }
         engine::Value::Object(map) => {
             let obj: serde_json::Map<String, serde_json::Value> = map
                 .into_iter()

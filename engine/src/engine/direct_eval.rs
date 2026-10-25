@@ -85,13 +85,14 @@ pub fn direct_execute_with_limit(
     max_iterations: Option<usize>,
 ) -> (HashSet<String>, HashSet<String>, Option<TraceData>) {
     // D-07: fixpoint cap — explicit setting, then env var, then default 1000.
-    let max_iter = max_iterations.unwrap_or_else(|| {
-        std::env::var("RRULES_MAX_CHAIN_ITERATIONS")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(1000)
-    })
-    .max(1);
+    let max_iter = max_iterations
+        .unwrap_or_else(|| {
+            std::env::var("RRULES_MAX_CHAIN_ITERATIONS")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(1000)
+        })
+        .max(1);
 
     let mut fired_set: HashSet<String> = HashSet::new();
     let mut evaluated_set: HashSet<String> = HashSet::new();
@@ -101,7 +102,11 @@ pub fn direct_execute_with_limit(
     // (cheap `Instant::now()`); events are pushed in firing order inside
     // the loop. When `collect_trace` is false, no `TraceEvent` is ever
     // pushed and no `chrono` call is made (SC-3 latency neutrality).
-    let trace_start = if collect_trace { Some(Instant::now()) } else { None };
+    let trace_start = if collect_trace {
+        Some(Instant::now())
+    } else {
+        None
+    };
     let mut trace_events: Vec<TraceEvent> = Vec::new();
     let mut facts_matched: usize = 0;
 
@@ -189,8 +194,7 @@ pub fn direct_execute_with_limit(
     // id→name lookup is built once before the loops (Pitfall 4 —
     // evaluated_set/fired_set are HashSet<String> of ids only; Rule.id
     // and Rule.name are pub at rules.rs:18,20).
-    let id_to_name: HashMap<&String, &String> =
-        rules.iter().map(|r| (&r.id, &r.name)).collect();
+    let id_to_name: HashMap<&String, &String> = rules.iter().map(|r| (&r.id, &r.name)).collect();
     for id in &evaluated_set {
         CoverageTracking::record_rule_eval(id);
         RuleExecutionTracker::record_evaluation(id, id_to_name[id]);

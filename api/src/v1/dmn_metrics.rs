@@ -12,16 +12,20 @@ use prometheus::{Encoder, Registry, TextEncoder};
 use serde::Serialize;
 
 // Re-export Phase 35 extended metrics from engine (avoids duplicate registration).
-pub use engine::dmn::evaluator::{METRIC_OUTPUT_EVALUATIONS_TOTAL, METRIC_DRD_CHAIN_DEPTH};
+pub use engine::dmn::evaluator::{METRIC_DRD_CHAIN_DEPTH, METRIC_OUTPUT_EVALUATIONS_TOTAL};
 
 /// Original Phase 33 metrics (defined here since they're API-scoped).
 use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, Opts};
 
 pub static METRIC_EVALUATIONS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
     IntCounterVec::new(
-        Opts::new("rrules_dmn_evaluations_total", "Total number of decision evaluations"),
+        Opts::new(
+            "rrules_dmn_evaluations_total",
+            "Total number of decision evaluations",
+        ),
         &["decision_id"],
-    ).expect("metrics to be valid")
+    )
+    .expect("metrics to be valid")
 });
 
 pub static METRIC_DECISION_DURATION_SECONDS: LazyLock<HistogramVec> = LazyLock::new(|| {
@@ -31,14 +35,19 @@ pub static METRIC_DECISION_DURATION_SECONDS: LazyLock<HistogramVec> = LazyLock::
             "Distribution of decision evaluation duration in seconds",
         ),
         &["decision_id", "hit_policy"],
-    ).expect("metrics to be valid")
+    )
+    .expect("metrics to be valid")
 });
 
 pub static METRIC_HIT_POLICY_VIOLATIONS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
     IntCounterVec::new(
-        Opts::new("rrules_dmn_hit_policy_violations_total", "Total number of hit policy violations during decision evaluation"),
+        Opts::new(
+            "rrules_dmn_hit_policy_violations_total",
+            "Total number of hit policy violations during decision evaluation",
+        ),
         &["decision_id", "hit_policy"],
-    ).expect("metrics to be valid")
+    )
+    .expect("metrics to be valid")
 });
 
 // =========================================================================
@@ -80,7 +89,12 @@ pub struct DmnMetricsSnapshot {
 pub type DmnMetricsTx = Arc<tokio::sync::broadcast::Sender<DmnMetricsSnapshot>>;
 
 /// Create a new DMN metrics broadcast sender + receiver pair (capacity 16).
-pub fn create_dmn_metrics_channel(capacity: usize) -> (DmnMetricsTx, tokio::sync::broadcast::Receiver<DmnMetricsSnapshot>) {
+pub fn create_dmn_metrics_channel(
+    capacity: usize,
+) -> (
+    DmnMetricsTx,
+    tokio::sync::broadcast::Receiver<DmnMetricsSnapshot>,
+) {
     let (tx, rx) = tokio::sync::broadcast::channel(capacity);
     (Arc::new(tx), rx)
 }
@@ -131,5 +145,8 @@ pub async fn dmn_metrics_endpoint() -> impl Responder {
 
 /// Configure DMN metrics routes inside the `/v1` scope (Plan 33-01 Task 3).
 pub fn configure_dmn_metrics(cfg: &mut actix_web::web::ServiceConfig) {
-    cfg.route("/metrics/dmn", actix_web::web::get().to(dmn_metrics_endpoint));
+    cfg.route(
+        "/metrics/dmn",
+        actix_web::web::get().to(dmn_metrics_endpoint),
+    );
 }

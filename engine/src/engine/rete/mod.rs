@@ -5,11 +5,10 @@
 //! - Beta memory for join node partial matches
 //! - Network propagation for efficient pattern matching
 
-use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::metrics::MetricsCollector;
+use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::fact::Fact;
 use std::collections::{HashMap, HashSet};
-
 
 /// A unique identifier for a fact in working memory.
 pub type FactId = String;
@@ -97,7 +96,10 @@ impl BetaMemory {
     }
 
     pub fn insert(&mut self, join_node_id: &NodeId, nagram: Nagram) {
-        self.entries.entry(join_node_id.clone()).or_default().push(nagram);
+        self.entries
+            .entry(join_node_id.clone())
+            .or_default()
+            .push(nagram);
     }
 
     pub fn get_nagrams(&self, join_node_id: &NodeId) -> Vec<Nagram> {
@@ -116,9 +118,7 @@ impl BetaMemory {
     /// `size()` stays meaningful.
     pub fn remove_fact(&mut self, fact_id: &str) {
         for nagrams in self.entries.values_mut() {
-            nagrams.retain(|nagram| {
-                nagram.iter().all(|reference| reference.fact_id != fact_id)
-            });
+            nagrams.retain(|nagram| nagram.iter().all(|reference| reference.fact_id != fact_id));
         }
         self.entries.retain(|_, nagrams| !nagrams.is_empty());
     }
@@ -159,7 +159,7 @@ impl TestNode {
 #[derive(Debug, Clone)]
 pub struct JoinNode {
     pub id: NodeId,
-    pub predecessor: NodeId, // Left input from alpha memory
+    pub predecessor: NodeId,    // Left input from alpha memory
     pub condition_node: NodeId, // Right input for join condition
 }
 
@@ -282,7 +282,10 @@ impl ReteEngine {
         self.working_facts.insert(fact_id.clone(), fact);
 
         // Collect test nodes that need propagation first (before mutable borrow)
-        let node_ids_to_propagate: Vec<_> = self.network.test_nodes.values()
+        let node_ids_to_propagate: Vec<_> = self
+            .network
+            .test_nodes
+            .values()
             .filter(|n| n.fact_type_id == fact_type)
             .map(|n| n.id.clone())
             .collect();
@@ -304,7 +307,9 @@ impl ReteEngine {
                 Some(n) => n,
                 None => return,
             };
-            test_node.successors.iter()
+            test_node
+                .successors
+                .iter()
                 .filter_map(|s| self.network.join_nodes.get(s).cloned())
                 .collect()
         };
@@ -317,16 +322,15 @@ impl ReteEngine {
     /// Propagates from join node to action nodes.
     fn join_propagation(&mut self, join_node: &JoinNode, _fact_id: &str) {
         // Get partial matches from left input (alpha memory)
-        let test_node = self
-            .network
-            .test_nodes
-            .get(&join_node.predecessor);
+        let test_node = self.network.test_nodes.get(&join_node.predecessor);
 
         if test_node.is_none() {
             return;
         }
 
-        let facts_from_alpha = self.alpha_memory.get_facts(&test_node.unwrap().fact_type_id);
+        let facts_from_alpha = self
+            .alpha_memory
+            .get_facts(&test_node.unwrap().fact_type_id);
         let existing_nagrams = self.beta_memory.get_nagrams(&join_node.id);
         let alpha_count = facts_from_alpha.len();
 
@@ -357,7 +361,8 @@ impl ReteEngine {
             self.beta_memory.insert(&join_node.id, nagram);
         }
 
-        self.metrics.record_beta_memory_additions(alpha_count + existing_nagrams.len());
+        self.metrics
+            .record_beta_memory_additions(alpha_count + existing_nagrams.len());
     }
 
     /// Executes the rules loaded via `load_ruleset` against `working_facts`
@@ -435,9 +440,9 @@ impl ExecutionEngine for ReteEngine {
         match key {
             // Fixpoint cap for this engine, overriding `RRULES_MAX_CHAIN_ITERATIONS`.
             "max_iterations" => {
-                let limit = value
-                    .parse::<usize>()
-                    .map_err(|_| format!("max_iterations must be a positive integer, got {value:?}"))?;
+                let limit = value.parse::<usize>().map_err(|_| {
+                    format!("max_iterations must be a positive integer, got {value:?}")
+                })?;
                 if limit == 0 {
                     return Err("max_iterations must be at least 1".to_string());
                 }
@@ -608,7 +613,9 @@ mod tests {
     #[test]
     fn retracting_a_fact_removes_it_from_working_memory_and_alpha_memory() {
         let mut engine = ReteEngine::new();
-        engine.network.add_test_node(TestNode::new("test-item", "item"));
+        engine
+            .network
+            .add_test_node(TestNode::new("test-item", "item"));
 
         let fact = Fact::new("item", HashMap::new());
         let fact_id = fact.id.to_string();
@@ -616,7 +623,10 @@ mod tests {
         assert_eq!(engine.get_facts().len(), 1);
 
         assert!(engine.retract_fact(&fact_id).unwrap());
-        assert!(engine.get_facts().is_empty(), "working memory must drop the fact");
+        assert!(
+            engine.get_facts().is_empty(),
+            "working memory must drop the fact"
+        );
         assert!(
             !engine.beta_memory.contains_fact(&fact_id),
             "beta memory must not keep partial matches for a retracted fact"
@@ -636,7 +646,10 @@ mod tests {
 
         // Insert a fact
         let mut fact = Fact::new("person", HashMap::new());
-        fact.payload.insert("name".to_string(), crate::data_types::Value::String("Alice".to_string()));
+        fact.payload.insert(
+            "name".to_string(),
+            crate::data_types::Value::String("Alice".to_string()),
+        );
         engine.assert_fact(fact);
 
         // Check that alpha memory was updated
@@ -650,10 +663,8 @@ mod tests {
         // Insert some facts
         for i in 0..3 {
             let mut fact = Fact::new("test", HashMap::new());
-            fact.payload.insert(
-                "value".to_string(),
-                crate::data_types::Value::Integer(i),
-            );
+            fact.payload
+                .insert("value".to_string(), crate::data_types::Value::Integer(i));
             engine.assert_fact(fact);
         }
 
@@ -675,7 +686,11 @@ mod tests {
 
         let mut engine = ReteEngine::new();
         let result = engine.load_ruleset(&ruleset);
-        assert!(result.is_ok(), "load_ruleset should return Ok, got {:?}", result);
+        assert!(
+            result.is_ok(),
+            "load_ruleset should return Ok, got {:?}",
+            result
+        );
     }
 
     /// `get_facts` on a fresh engine returns an empty Vec.
@@ -692,10 +707,7 @@ mod tests {
     fn get_facts_returns_fact_after_assert_fact() {
         let mut engine = ReteEngine::new();
         let mut payload = HashMap::new();
-        payload.insert(
-            "score".to_string(),
-            crate::data_types::Value::Integer(0),
-        );
+        payload.insert("score".to_string(), crate::data_types::Value::Integer(0));
         let fact = Fact::new("scorecard", payload);
         engine.assert_fact(fact.clone());
 

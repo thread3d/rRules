@@ -144,7 +144,7 @@ mod tests {
         collector.record_rule_fired();
         collector.record_rule_fired();
         collector.set_execution_time_ms(1000.0); // 1 second
-        // 2 rules fired in 1 second = 2.0 rules/second
+                                                 // 2 rules fired in 1 second = 2.0 rules/second
         assert_eq!(collector.firing_rate(), 2.0);
     }
 

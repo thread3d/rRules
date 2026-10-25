@@ -14,7 +14,7 @@ use crate::data_types::Value;
 use crate::dmn::decision_table::DecisionTableEvaluator;
 use crate::dmn::feel::cache::{FeelAstCache, ParseEntry};
 use crate::dmn::feel::eval::Scope;
-use crate::dmn::model::{DmnModel, DefinitionsChild, Decision};
+use crate::dmn::model::{Decision, DefinitionsChild, DmnModel};
 
 use self::trace::InferenceTrace;
 
@@ -28,9 +28,13 @@ use std::sync::LazyLock;
 /// Per-output evaluation counter: total output clause evaluations per decision.
 pub static METRIC_OUTPUT_EVALUATIONS_TOTAL: LazyLock<IntCounterVec> = LazyLock::new(|| {
     IntCounterVec::new(
-        Opts::new("rrules_dmn_output_evaluations_total", "Total number of output clause evaluations during decision service invocation"),
+        Opts::new(
+            "rrules_dmn_output_evaluations_total",
+            "Total number of output clause evaluations during decision service invocation",
+        ),
         &["decision_id", "output_name"],
-    ).expect("metrics to be valid")
+    )
+    .expect("metrics to be valid")
 });
 
 /// DRD chain depth histogram: distribution of decisions resolved per evaluation.
@@ -170,8 +174,15 @@ fn resolve_drd_order(
 
     // DFS with gray/black coloring.
     #[derive(Clone, Copy, PartialEq)]
-    enum Color { White, Gray, Black }
-    let mut colors: HashMap<String, Color> = decision_map.iter().map(|(id, _)| (id.to_string(), Color::White)).collect();
+    enum Color {
+        White,
+        Gray,
+        Black,
+    }
+    let mut colors: HashMap<String, Color> = decision_map
+        .iter()
+        .map(|(id, _)| (id.to_string(), Color::White))
+        .collect();
     let mut order = Vec::new();
 
     fn dfs<'a>(
@@ -181,7 +192,12 @@ fn resolve_drd_order(
         order: &mut Vec<String>,
     ) -> Result<(), DecisionEvalError> {
         match colors.get(node).copied() {
-            Some(Color::Gray) => return Err(DecisionEvalError::DrdCycle(collect_cycle(node, decision_map))),
+            Some(Color::Gray) => {
+                return Err(DecisionEvalError::DrdCycle(collect_cycle(
+                    node,
+                    decision_map,
+                )))
+            }
             Some(Color::Black) => return Ok(()),
             _ => {}
         }
@@ -212,9 +228,13 @@ fn resolve_drd_order(
     // Filter to only decisions reachable from target_id.
     let mut result = Vec::new();
     fn collect_reachable(
-        id: &str, decision_map: &[(&str, &Decision)], reachable: &mut HashSet<String>
+        id: &str,
+        decision_map: &[(&str, &Decision)],
+        reachable: &mut HashSet<String>,
     ) {
-        if reachable.contains(id) { return; }
+        if reachable.contains(id) {
+            return;
+        }
         reachable.insert(id.to_string());
         if let Some((_, d)) = decision_map.iter().find(|(id2, _)| id2 == &id) {
             for dep in &d.required_decisions {
@@ -227,7 +247,9 @@ fn resolve_drd_order(
 
     // Return topological order filtered to reachable set.
     for id in order {
-        if reachable.contains(&id) { result.push(id); }
+        if reachable.contains(&id) {
+            result.push(id);
+        }
     }
 
     Ok(result)
@@ -235,7 +257,10 @@ fn resolve_drd_order(
 
 /// Helper: extract all decisions from the model for DRD resolution.
 fn extract_decisions_for_drd(model: &DmnModel) -> Vec<(&str, &Decision)> {
-    model.definitions.children.iter()
+    model
+        .definitions
+        .children
+        .iter()
         .filter_map(|child| match child {
             DefinitionsChild::Decision(d) => Some((d.id.as_str(), d)),
             _ => None,
@@ -262,8 +287,12 @@ fn collect_cycle(start: &str, decision_map: &[(&str, &Decision)]) -> Vec<String>
         if let Some((_, d)) = decision_map.iter().find(|(id, _)| id == &current) {
             if !d.required_decisions.is_empty() {
                 current = &d.required_decisions[0];
-            } else { break; }
-        } else { break; }
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
     }
     cycle
 }
@@ -283,10 +312,7 @@ fn collect_cycle(start: &str, decision_map: &[(&str, &Decision)]) -> Vec<String>
 /// (deps before dependents), so a single forward pass assigns levels. The
 /// reachable set is closed under dependencies, so every dependency of a
 /// reachable decision is already assigned a level when we reach it.
-fn resolve_drd_levels(
-    shared: &SharedDmnModel,
-    drd_order: &[String],
-) -> Vec<Vec<String>> {
+fn resolve_drd_levels(shared: &SharedDmnModel, drd_order: &[String]) -> Vec<Vec<String>> {
     let dmap: HashMap<&str, &Decision> = extract_decisions_for_drd(&shared.model)
         .into_iter()
         .collect();
@@ -552,13 +578,19 @@ impl DecisionEvaluator {
                 if work.len() > 1 {
                     work.par_iter()
                         .map(|(id, decision, scope)| {
-                            (id.clone(), evaluate_single_decision(&guard, decision, scope))
+                            (
+                                id.clone(),
+                                evaluate_single_decision(&guard, decision, scope),
+                            )
                         })
                         .collect()
                 } else {
                     work.iter()
                         .map(|(id, decision, scope)| {
-                            (id.clone(), evaluate_single_decision(&guard, decision, scope))
+                            (
+                                id.clone(),
+                                evaluate_single_decision(&guard, decision, scope),
+                            )
                         })
                         .collect()
                 };
@@ -715,9 +747,14 @@ mod drd_cache_tests {
             annotations: vec![],
         };
         let mut defs = Definitions::default();
-        defs.children.push(DefinitionsChild::Decision(mk("d1", vec![])));
-        defs.children.push(DefinitionsChild::Decision(mk("d2", vec!["d1".into()])));
-        DmnModel { definitions: defs, source_namespace: None }
+        defs.children
+            .push(DefinitionsChild::Decision(mk("d1", vec![])));
+        defs.children
+            .push(DefinitionsChild::Decision(mk("d2", vec!["d1".into()])));
+        DmnModel {
+            definitions: defs,
+            source_namespace: None,
+        }
     }
 
     /// PERF-08: the DRD topological order is memoized — a second
@@ -733,14 +770,20 @@ mod drd_cache_tests {
         assert_eq!(shared.drd_order_cache_len(), 1, "one cached order for d2");
 
         // Second call must return the SAME order from the cache (no new entry).
-        let order2 = shared.resolve_drd_order_cached("d2").expect("resolve d2 again");
+        let order2 = shared
+            .resolve_drd_order_cached("d2")
+            .expect("resolve d2 again");
         assert_eq!(order2, order1, "cached order identical to first");
         assert_eq!(shared.drd_order_cache_len(), 1, "cache not grown on hit");
 
         // Resolving d1 caches a second, distinct order.
         let order_d1 = shared.resolve_drd_order_cached("d1").expect("resolve d1");
         assert_eq!(order_d1, vec!["d1".to_string()]);
-        assert_eq!(shared.drd_order_cache_len(), 2, "d1 adds a second cache entry");
+        assert_eq!(
+            shared.drd_order_cache_len(),
+            2,
+            "d1 adds a second cache entry"
+        );
     }
 
     /// PERF-08: `bump_generation` (reload) invalidates the DRD order cache so
@@ -753,7 +796,11 @@ mod drd_cache_tests {
         assert_eq!(shared.drd_order_cache_len(), 1);
 
         shared.bump_generation();
-        assert_eq!(shared.drd_order_cache_len(), 0, "reload clears the DRD cache");
+        assert_eq!(
+            shared.drd_order_cache_len(),
+            0,
+            "reload clears the DRD cache"
+        );
         assert_eq!(shared.generation(), 2);
     }
 }
@@ -761,12 +808,12 @@ mod drd_cache_tests {
 #[cfg(test)]
 mod parallel_eval_tests {
     use super::*;
+    use crate::data_types::Value;
     use crate::dmn::feel::cache::{FeelAstCache, ParseEntry};
     use crate::dmn::model::{
         Decision, DecisionTable, Definitions, DefinitionsChild, DmnModel, DmnRule, HitPolicy,
         InformationItem, InputClause, OutputClause, RuleEntry, TextContent,
     };
-    use crate::data_types::Value;
     use rust_decimal::Decimal;
     use std::sync::{Arc, RwLock};
 
@@ -842,18 +889,42 @@ mod parallel_eval_tests {
     /// For x = 5: a = 6, b = 12, c = 106, result = 118.
     fn diamond_model() -> DmnModel {
         let mut defs = Definitions::default();
-        defs.children.push(DefinitionsChild::Decision(table_decision(
-            "d1", "a", vec![], "x", "a", "x + 1",
-        )));
-        defs.children.push(DefinitionsChild::Decision(table_decision(
-            "d2a", "b", vec!["d1".into()], "a", "b", "a * 2",
-        )));
-        defs.children.push(DefinitionsChild::Decision(table_decision(
-            "d2b", "c", vec!["d1".into()], "a", "c", "a + 100",
-        )));
-        defs.children.push(DefinitionsChild::Decision(table_decision(
-            "d3", "result", vec!["d2a".into(), "d2b".into()], "b", "result", "b + c",
-        )));
+        defs.children
+            .push(DefinitionsChild::Decision(table_decision(
+                "d1",
+                "a",
+                vec![],
+                "x",
+                "a",
+                "x + 1",
+            )));
+        defs.children
+            .push(DefinitionsChild::Decision(table_decision(
+                "d2a",
+                "b",
+                vec!["d1".into()],
+                "a",
+                "b",
+                "a * 2",
+            )));
+        defs.children
+            .push(DefinitionsChild::Decision(table_decision(
+                "d2b",
+                "c",
+                vec!["d1".into()],
+                "a",
+                "c",
+                "a + 100",
+            )));
+        defs.children
+            .push(DefinitionsChild::Decision(table_decision(
+                "d3",
+                "result",
+                vec!["d2a".into(), "d2b".into()],
+                "b",
+                "result",
+                "b + c",
+            )));
         DmnModel {
             definitions: defs,
             source_namespace: None,
@@ -883,10 +954,7 @@ mod parallel_eval_tests {
     #[test]
     fn diamond_parallel_eval_produces_correct_result() {
         let model = diamond_model();
-        let shared = Arc::new(RwLock::new(SharedDmnModel::new(
-            model,
-            FeelAstCache::new(),
-        )));
+        let shared = Arc::new(RwLock::new(SharedDmnModel::new(model, FeelAstCache::new())));
         let evaluator = DecisionEvaluator::new(shared);
 
         let mut inputs = HashMap::new();
@@ -916,26 +984,41 @@ mod parallel_eval_tests {
     #[test]
     fn chain_eval_sequential_levels() {
         let mut defs = Definitions::default();
-        defs.children.push(DefinitionsChild::Decision(table_decision(
-            "d1", "a", vec![], "x", "a", "x + 1",
-        )));
-        defs.children.push(DefinitionsChild::Decision(table_decision(
-            "d2", "b", vec!["d1".into()], "a", "b", "a + 10",
-        )));
+        defs.children
+            .push(DefinitionsChild::Decision(table_decision(
+                "d1",
+                "a",
+                vec![],
+                "x",
+                "a",
+                "x + 1",
+            )));
+        defs.children
+            .push(DefinitionsChild::Decision(table_decision(
+                "d2",
+                "b",
+                vec!["d1".into()],
+                "a",
+                "b",
+                "a + 10",
+            )));
         let model = DmnModel {
             definitions: defs,
             source_namespace: None,
         };
-        let shared = Arc::new(RwLock::new(SharedDmnModel::new(
-            model,
-            FeelAstCache::new(),
-        )));
+        let shared = Arc::new(RwLock::new(SharedDmnModel::new(model, FeelAstCache::new())));
         let evaluator = DecisionEvaluator::new(shared);
 
         let mut inputs = HashMap::new();
         inputs.insert("x".to_string(), Value::Number(Decimal::from(5)));
         let result = evaluator
-            .evaluate("d2", EvaluateRequest { inputs, trace: false })
+            .evaluate(
+                "d2",
+                EvaluateRequest {
+                    inputs,
+                    trace: false,
+                },
+            )
             .expect("evaluate d2");
 
         // a = x + 1 = 6; b = a + 10 = 16.

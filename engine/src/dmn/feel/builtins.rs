@@ -24,10 +24,10 @@
 
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::{OnceLock, Mutex};
+use std::sync::{Mutex, OnceLock};
 
-use chrono::Datelike;
 use crate::data_types::Value;
+use chrono::Datelike;
 use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
 
@@ -128,9 +128,7 @@ fn built_in_time(args: &[Value]) -> Value {
     }
     match &args[0] {
         Value::Null => Value::Null,
-        Value::String(s) => {
-            crate::dmn::feel::temporal::parse_at_literal(s).unwrap_or(Value::Null)
-        }
+        Value::String(s) => crate::dmn::feel::temporal::parse_at_literal(s).unwrap_or(Value::Null),
         _ => Value::Null,
     }
 }
@@ -142,9 +140,7 @@ fn built_in_date_and_time(args: &[Value]) -> Value {
     }
     match &args[0] {
         Value::Null => Value::Null,
-        Value::String(s) => {
-            crate::dmn::feel::temporal::parse_at_literal(s).unwrap_or(Value::Null)
-        }
+        Value::String(s) => crate::dmn::feel::temporal::parse_at_literal(s).unwrap_or(Value::Null),
         _ => Value::Null,
     }
 }
@@ -156,9 +152,7 @@ fn built_in_duration(args: &[Value]) -> Value {
     }
     match &args[0] {
         Value::Null => Value::Null,
-        Value::String(s) => {
-            crate::dmn::feel::temporal::parse_at_literal(s).unwrap_or(Value::Null)
-        }
+        Value::String(s) => crate::dmn::feel::temporal::parse_at_literal(s).unwrap_or(Value::Null),
         _ => Value::Null,
     }
 }
@@ -252,7 +246,8 @@ fn built_in_years_and_months_duration(args: &[Value]) -> Value {
                 .strip_prefix('P')
                 .unwrap_or("");
             // If body contains T, D, H, or S → it's a days-time duration, not YMD.
-            if body.contains('T') || body.contains('D') || body.contains('H') || body.contains('S') {
+            if body.contains('T') || body.contains('D') || body.contains('H') || body.contains('S')
+            {
                 return Value::Null;
             }
             crate::dmn::feel::temporal::parse_at_literal(trimmed).unwrap_or(Value::Null)
@@ -298,8 +293,9 @@ fn built_in_decimal(args: &[Value]) -> Value {
     // wrong place instead of failing.
     let max_scale = rust_decimal::Decimal::MAX_SCALE;
     let scale: u32 = match &args[1] {
-        Value::Integer(n) => u32::try_from((*n).clamp(0, i64::from(max_scale)))
-            .unwrap_or(max_scale),
+        Value::Integer(n) => {
+            u32::try_from((*n).clamp(0, i64::from(max_scale))).unwrap_or(max_scale)
+        }
         Value::Number(d) => {
             let truncated = d.trunc().abs();
             u32::try_from(truncated)
@@ -355,9 +351,9 @@ fn round_with(args: &[Value], strategy: rust_decimal::RoundingStrategy) -> Value
     };
     match args.first() {
         Some(Value::Number(d)) => Value::Number(d.round_dp_with_strategy(scale, strategy)),
-        Some(Value::Integer(i)) => Value::Number(
-            Decimal::from(*i).round_dp_with_strategy(scale, strategy),
-        ),
+        Some(Value::Integer(i)) => {
+            Value::Number(Decimal::from(*i).round_dp_with_strategy(scale, strategy))
+        }
         _ => Value::Null,
     }
 }
@@ -633,7 +629,11 @@ fn built_in_replace(args: &[Value]) -> Value {
         Value::String(s) => s.clone(),
         _ => return Value::Null,
     };
-    if args.is_empty() || matches!(args[0], Value::Null) || matches!(args[1], Value::Null) || matches!(args[2], Value::Null) {
+    if args.is_empty()
+        || matches!(args[0], Value::Null)
+        || matches!(args[1], Value::Null)
+        || matches!(args[2], Value::Null)
+    {
         return Value::Null;
     }
     let re = match get_or_compile(pattern_str) {
@@ -738,10 +738,13 @@ fn built_in_string_join(args: &[Value]) -> Value {
         return Value::Null;
     }
     // Filter to strings only (non-strings are ignored per DMN spec).
-    let parts: Vec<String> = list.iter().filter_map(|v| match v {
-        Value::String(s) => Some(s.clone()),
-        _ => None,
-    }).collect();
+    let parts: Vec<String> = list
+        .iter()
+        .filter_map(|v| match v {
+            Value::String(s) => Some(s.clone()),
+            _ => None,
+        })
+        .collect();
     Value::String(parts.join(&delim))
 }
 
@@ -781,25 +784,32 @@ fn built_in_list_replace(args: &[Value]) -> Value {
         Value::String(s) => s.clone(),
         _ => return Value::Null,
     };
-    if args.is_empty() || matches!(args[0], Value::Null) || matches!(args[1], Value::Null) || matches!(args[2], Value::Null) {
+    if args.is_empty()
+        || matches!(args[0], Value::Null)
+        || matches!(args[1], Value::Null)
+        || matches!(args[2], Value::Null)
+    {
         return Value::Null;
     }
     let re = match get_or_compile(&pattern_str) {
         Some(r) => r,
         None => return Value::Array(vec![]),
     };
-    let result: Vec<Value> = list.iter().map(|v| {
-        if let Value::String(s) = v {
-            if re.is_match(s) {
-                let r = re.replace_all(s, replacement.as_str());
-                Value::String(r.into_owned())
+    let result: Vec<Value> = list
+        .iter()
+        .map(|v| {
+            if let Value::String(s) = v {
+                if re.is_match(s) {
+                    let r = re.replace_all(s, replacement.as_str());
+                    Value::String(r.into_owned())
+                } else {
+                    v.clone()
+                }
             } else {
                 v.clone()
             }
-        } else {
-            v.clone()
-        }
-    }).collect();
+        })
+        .collect();
     Value::Array(result)
 }
 
@@ -932,8 +942,14 @@ fn built_in_mean(args: &[Value]) -> Value {
     let mut count: u64 = 0;
     for v in &elems {
         match v {
-            Value::Number(d) => { total += d; count += 1; }
-            Value::Integer(i) => { total += rust_decimal::Decimal::from(*i); count += 1; }
+            Value::Number(d) => {
+                total += d;
+                count += 1;
+            }
+            Value::Integer(i) => {
+                total += rust_decimal::Decimal::from(*i);
+                count += 1;
+            }
             _ => {} // skip non-numeric
         }
     }
@@ -1116,7 +1132,11 @@ fn built_in_insert_before(args: &[Value]) -> Value {
         Value::Number(d) => d.to_i64().unwrap_or(0) as usize,
         _ => return Value::Null,
     };
-    if args.is_empty() || matches!(args[0], Value::Null) || matches!(args[1], Value::Null) || matches!(args[2], Value::Null) {
+    if args.is_empty()
+        || matches!(args[0], Value::Null)
+        || matches!(args[1], Value::Null)
+        || matches!(args[2], Value::Null)
+    {
         return Value::Null;
     }
     let pos = if pos == 0 { 1 } else { pos }; // FEEL 1-based
@@ -1181,7 +1201,9 @@ fn built_in_index_of(args: &[Value]) -> Value {
     if args.is_empty() || matches!(args[0], Value::Null) || matches!(args[1], Value::Null) {
         return Value::Null;
     }
-    let positions: Vec<Value> = list.iter().enumerate()
+    let positions: Vec<Value> = list
+        .iter()
+        .enumerate()
         .filter(|(_, v)| crate::dmn::feel::eval::cmp::feel_equals(v, &val) == Some(true))
         .map(|(i, _)| Value::Integer((i + 1) as i64)) // FEEL 1-based positions
         .collect();
@@ -1415,7 +1437,8 @@ fn built_in_mode(args: &[Value]) -> Value {
         return Value::Array(vec![]);
     }
     let max_count = counts.iter().map(|(_, c)| *c).max().unwrap_or(0);
-    let modes: Vec<Value> = counts.into_iter()
+    let modes: Vec<Value> = counts
+        .into_iter()
         .filter(|(_, c)| *c == max_count)
         .map(|(v, _)| v)
         .collect();
@@ -1452,12 +1475,10 @@ fn built_in_sort(args: &[Value]) -> Value {
     match args.get(1) {
         Some(Value::Function(cmp)) => {
             sortable.sort_by(|a, b| {
-                
-                match crate::dmn::feel::eval::apply_function_value(
-                    cmp,
-                    &[a.clone(), b.clone()],
-                ) {
-                    Value::Number(n) => n.partial_cmp(&Decimal::ZERO).unwrap_or(std::cmp::Ordering::Equal),
+                match crate::dmn::feel::eval::apply_function_value(cmp, &[a.clone(), b.clone()]) {
+                    Value::Number(n) => n
+                        .partial_cmp(&Decimal::ZERO)
+                        .unwrap_or(std::cmp::Ordering::Equal),
                     Value::Integer(i) => i.cmp(&0),
                     // Boolean comparator: `true` means "a comes before b".
                     Value::Bool(true) => std::cmp::Ordering::Less,
@@ -1472,7 +1493,9 @@ fn built_in_sort(args: &[Value]) -> Value {
             sortable.sort_by(|a, b| {
                 use std::cmp::Ordering;
                 match (a, b) {
-                    (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+                    (Value::Number(x), Value::Number(y)) => {
+                        x.partial_cmp(y).unwrap_or(Ordering::Equal)
+                    }
                     (Value::Integer(x), Value::Integer(y)) => x.cmp(y),
                     (Value::String(x), Value::String(y)) => x.cmp(y),
                     (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
@@ -1556,10 +1579,7 @@ fn iso_week_num(d: chrono::NaiveDate) -> u32 {
     // ISO-8601 week number (1–53), i.e. the week of the calendar year that
     // Thursday falls in. `%V` gives exactly that; `iso_week().week()` would too,
     // but formatting keeps this helper free of extra trait imports.
-    d.format("%V")
-        .to_string()
-        .parse::<u32>()
-        .unwrap_or(1)
+    d.format("%V").to_string().parse::<u32>().unwrap_or(1)
 }
 
 /// `day of year(<date>)` — day number within the year (1–366).
@@ -1619,7 +1639,7 @@ pub fn built_in_not(args: &[Value]) -> Value {
     let opt = match args.first() {
         Some(Value::Null) => return Value::Null, // short-circuit null arg
         Some(Value::Bool(b)) => Some(*b),
-        _ => return Value::Null,                  // wrong type → null
+        _ => return Value::Null, // wrong type → null
     };
     match crate::dmn::feel::eval::cmp::not_3vl(opt) {
         Some(b) => Value::Bool(b),
@@ -1984,8 +2004,8 @@ pub fn built_in_finishes(args: &[Value]) -> Value {
         None => return Value::Null,
     };
     // r1.end == r2.end AND r1.start <= r2.start (r2 is a suffix of r1).
-    let end_eq = crate::dmn::feel::eval::cmp::feel_compare(e1, e2)
-        == Some(std::cmp::Ordering::Equal);
+    let end_eq =
+        crate::dmn::feel::eval::cmp::feel_compare(e1, e2) == Some(std::cmp::Ordering::Equal);
     let start_le = cmp(s1, s2) != std::cmp::Ordering::Greater;
     Value::Bool(end_eq && start_le)
 }
@@ -2010,8 +2030,8 @@ pub fn built_in_finished_by(args: &[Value]) -> Value {
         None => return Value::Null,
     };
     // Share start AND they overlap (one contains part of the other).
-    let start_eq = crate::dmn::feel::eval::cmp::feel_compare(s1, s2)
-        == Some(std::cmp::Ordering::Equal);
+    let start_eq =
+        crate::dmn::feel::eval::cmp::feel_compare(s1, s2) == Some(std::cmp::Ordering::Equal);
     if !start_eq {
         return Value::Bool(false);
     }
@@ -2024,7 +2044,8 @@ pub fn built_in_finished_by(args: &[Value]) -> Value {
         Some(v) => v,
         None => return Value::Null,
     };
-    let overlap = cmp(s1, e2) != std::cmp::Ordering::Greater && cmp(s2, e1) != std::cmp::Ordering::Greater;
+    let overlap =
+        cmp(s1, e2) != std::cmp::Ordering::Greater && cmp(s2, e1) != std::cmp::Ordering::Greater;
     Value::Bool(overlap)
 }
 
@@ -2061,14 +2082,18 @@ pub fn built_in_includes(args: &[Value]) -> Value {
             None => return Value::Null,
         };
         // Apply inclusivity: if start is exclusive and value == start → false.
-        let start_ok = if outer.start_incl { ge } else {
+        let start_ok = if outer.start_incl {
+            ge
+        } else {
             match crate::dmn::feel::eval::cmp::feel_compare(s, inner) {
                 Some(std::cmp::Ordering::Equal) => false,
                 _ => ge,
             }
         };
         // Apply inclusivity: if end is exclusive and value == end → false.
-        let end_ok = if outer.end_incl { le } else {
+        let end_ok = if outer.end_incl {
+            le
+        } else {
             match crate::dmn::feel::eval::cmp::feel_compare(inner, e) {
                 Some(std::cmp::Ordering::Equal) => false,
                 _ => le,
@@ -2143,8 +2168,8 @@ pub fn built_in_starts(args: &[Value]) -> Value {
         None => return Value::Null,
     };
     // r1.start == r2.start AND r1.end <= r2.end.
-    let start_eq = crate::dmn::feel::eval::cmp::feel_compare(s1, s2)
-        == Some(std::cmp::Ordering::Equal);
+    let start_eq =
+        crate::dmn::feel::eval::cmp::feel_compare(s1, s2) == Some(std::cmp::Ordering::Equal);
     let end_le = cmp(e1, e2) != std::cmp::Ordering::Greater;
     Value::Bool(start_eq && end_le)
 }
@@ -2186,10 +2211,8 @@ pub fn built_in_coincides(args: &[Value]) -> Value {
         None => return Value::Null,
     };
     // Both start and end must be equal.
-    let s_eq = crate::dmn::feel::eval::cmp::feel_compare(s1, s2)
-        == Some(std::cmp::Ordering::Equal);
-    let e_eq = crate::dmn::feel::eval::cmp::feel_compare(e1, e2)
-        == Some(std::cmp::Ordering::Equal);
+    let s_eq = crate::dmn::feel::eval::cmp::feel_compare(s1, s2) == Some(std::cmp::Ordering::Equal);
+    let e_eq = crate::dmn::feel::eval::cmp::feel_compare(e1, e2) == Some(std::cmp::Ordering::Equal);
     Value::Bool(s_eq && e_eq)
 }
 
@@ -2228,8 +2251,8 @@ pub fn built_in_is(args: &[Value]) -> Value {
     // Delegate to feel_equals (three-valued), then coerce None → false.
     let result = crate::dmn::feel::eval::cmp::feel_equals(a, b);
     match result {
-        Some(b) => Value::Bool(b),     // definite answer
-        None => Value::Bool(false),     // Pitfall 6: NEVER null — coerce to false
+        Some(b) => Value::Bool(b),  // definite answer
+        None => Value::Bool(false), // Pitfall 6: NEVER null — coerce to false
     }
 }
 
@@ -2358,7 +2381,10 @@ pub fn builtin_registry() -> HashMap<&'static str, BuiltinFn> {
     reg!("duration", built_in_duration);
     reg!("number", built_in_number);
     reg!("string", built_in_string);
-    reg!("years and months duration", built_in_years_and_months_duration);
+    reg!(
+        "years and months duration",
+        built_in_years_and_months_duration
+    );
 
     // Numeric family (12).
     reg!("decimal", built_in_decimal);
@@ -2472,7 +2498,10 @@ mod conversion {
     #[test]
     fn date_valid_string() {
         let result = built_in_date(&[Value::String("2021-01-31".into())]);
-        assert_eq!(result, Value::Date(NaiveDate::from_ymd_opt(2021, 1, 31).unwrap()));
+        assert_eq!(
+            result,
+            Value::Date(NaiveDate::from_ymd_opt(2021, 1, 31).unwrap())
+        );
     }
 
     /// `date(null)` → Null.
@@ -2510,9 +2539,7 @@ mod conversion {
     /// `date and time("2021-01-01T10:00:00+00:00")` → DateTimeTz.
     #[test]
     fn date_and_time_valid() {
-        let result = built_in_date_and_time(&[Value::String(
-            "2021-01-01T10:00:00+00:00".into(),
-        )]);
+        let result = built_in_date_and_time(&[Value::String("2021-01-01T10:00:00+00:00".into())]);
         match result {
             Value::DateTimeTz(DateTimeValue::Fixed(_)) => {}
             other => panic!("expected DateTimeTz(Fixed), got {:?}", other),
@@ -2611,7 +2638,10 @@ mod conversion {
     /// `years and months duration(null)` → Null.
     #[test]
     fn years_months_duration_null() {
-        assert_eq!(built_in_years_and_months_duration(&[Value::Null]), Value::Null);
+        assert_eq!(
+            built_in_years_and_months_duration(&[Value::Null]),
+            Value::Null
+        );
     }
 
     /// Registry contains all conversion names.
@@ -2619,8 +2649,13 @@ mod conversion {
     fn registry_contains_conversion_names() {
         let reg = builtin_registry();
         for name in &[
-            "date", "time", "date and time", "duration", "number",
-            "string", "years and months duration",
+            "date",
+            "time",
+            "date and time",
+            "duration",
+            "number",
+            "string",
+            "years and months duration",
         ] {
             assert!(reg.contains_key(*name), "missing conversion: {}", name);
         }
@@ -2635,7 +2670,10 @@ mod numeric {
     /// `abs(-5)` → Number(5).
     #[test]
     fn abs_negative() {
-        assert_eq!(built_in_abs(&[Value::Number(dec!(-5))]), Value::Number(dec!(5)));
+        assert_eq!(
+            built_in_abs(&[Value::Number(dec!(-5))]),
+            Value::Number(dec!(5))
+        );
     }
 
     /// `abs(null)` → Null.
@@ -2647,19 +2685,28 @@ mod numeric {
     /// `modulo(10, 3)` → Number(1).
     #[test]
     fn modulo_normal() {
-        assert_eq!(built_in_modulo(&[Value::Number(dec!(10)), Value::Number(dec!(3))]), Value::Number(dec!(1)));
+        assert_eq!(
+            built_in_modulo(&[Value::Number(dec!(10)), Value::Number(dec!(3))]),
+            Value::Number(dec!(1))
+        );
     }
 
     /// `modulo(10, 0)` → Null (div-by-zero).
     #[test]
     fn modulo_div_by_zero() {
-        assert_eq!(built_in_modulo(&[Value::Number(dec!(10)), Value::Number(dec!(0))]), Value::Null);
+        assert_eq!(
+            built_in_modulo(&[Value::Number(dec!(10)), Value::Number(dec!(0))]),
+            Value::Null
+        );
     }
 
     /// `modulo(null, 3)` → Null.
     #[test]
     fn modulo_null_arg() {
-        assert_eq!(built_in_modulo(&[Value::Null, Value::Number(dec!(3))]), Value::Null);
+        assert_eq!(
+            built_in_modulo(&[Value::Null, Value::Number(dec!(3))]),
+            Value::Null
+        );
     }
 
     /// `sqrt(4)` → Number(2).
@@ -2685,42 +2732,60 @@ mod numeric {
     #[test]
     fn floor_positive() {
         let three_7 = rust_decimal::Decimal::from(37) / rust_decimal::Decimal::from(10);
-        assert_eq!(built_in_floor(&[Value::Number(three_7)]), Value::Number(dec!(3)));
+        assert_eq!(
+            built_in_floor(&[Value::Number(three_7)]),
+            Value::Number(dec!(3))
+        );
     }
 
     /// `ceiling(3.2)` → Number(4).
     #[test]
     fn ceiling_positive() {
         let three_2 = rust_decimal::Decimal::from(32) / rust_decimal::Decimal::from(10);
-        assert_eq!(built_in_ceiling(&[Value::Number(three_2)]), Value::Number(dec!(4)));
+        assert_eq!(
+            built_in_ceiling(&[Value::Number(three_2)]),
+            Value::Number(dec!(4))
+        );
     }
 
     /// `round up(3.2)` → Number(4) (away from zero).
     #[test]
     fn round_up_positive() {
         let three_2 = rust_decimal::Decimal::from(32) / rust_decimal::Decimal::from(10);
-        assert_eq!(built_in_round_up(&[Value::Number(three_2)]), Value::Number(dec!(4)));
+        assert_eq!(
+            built_in_round_up(&[Value::Number(three_2)]),
+            Value::Number(dec!(4))
+        );
     }
 
     /// `round down(3.7)` → Number(3) (toward zero).
     #[test]
     fn round_down_positive() {
         let three_7 = rust_decimal::Decimal::from(37) / rust_decimal::Decimal::from(10);
-        assert_eq!(built_in_round_down(&[Value::Number(three_7)]), Value::Number(dec!(3)));
+        assert_eq!(
+            built_in_round_down(&[Value::Number(three_7)]),
+            Value::Number(dec!(3))
+        );
     }
 
     /// `round half up(2.5)` → Number(3) (ties away from zero).
     #[test]
     fn round_half_up_positive() {
         let two_5 = rust_decimal::Decimal::from(25) / rust_decimal::Decimal::from(10);
-        assert_eq!(built_in_round_half_up(&[Value::Number(two_5)]), Value::Number(dec!(3)));
+        assert_eq!(
+            built_in_round_half_up(&[Value::Number(two_5)]),
+            Value::Number(dec!(3))
+        );
     }
 
     /// `round half down(2.5)` → Number(2) (ties toward zero).
     #[test]
     fn round_half_down_positive() {
         let two_5 = rust_decimal::Decimal::from(25) / rust_decimal::Decimal::from(10);
-        assert_eq!(built_in_round_half_down(&[Value::Number(two_5)]), Value::Number(dec!(2)));
+        assert_eq!(
+            built_in_round_half_down(&[Value::Number(two_5)]),
+            Value::Number(dec!(2))
+        );
     }
 
     /// `odd(3)` → Bool(true).
@@ -2756,12 +2821,16 @@ mod numeric {
     /// `decimal(3.14159, 2)` → Number(3.14).
     #[test]
     fn decimal_rounding() {
-        let three_point_one_four_one_five_nine = rust_decimal::Decimal::from_str("3.14159").unwrap();
+        let three_point_one_four_one_five_nine =
+            rust_decimal::Decimal::from_str("3.14159").unwrap();
         let result = built_in_decimal(&[
             Value::Number(three_point_one_four_one_five_nine),
             Value::Integer(2),
         ]);
-        assert_eq!(result, Value::Number(rust_decimal::Decimal::from_str("3.14").unwrap()));
+        assert_eq!(
+            result,
+            Value::Number(rust_decimal::Decimal::from_str("3.14").unwrap())
+        );
     }
 
     /// `log(e)` approx Number(1).
@@ -2774,7 +2843,11 @@ mod numeric {
             Value::Number(d) => {
                 let one = rust_decimal::Decimal::ONE;
                 let threshold = rust_decimal::Decimal::from_str("0.001").unwrap();
-                assert!((d - one).abs() < threshold, "ln(e) should approximate to 1, got {}", d);
+                assert!(
+                    (d - one).abs() < threshold,
+                    "ln(e) should approximate to 1, got {}",
+                    d
+                );
             }
             other => panic!("expected Number, got {:?}", other),
         }
@@ -2789,7 +2862,11 @@ mod numeric {
                 // e ≈ 2.71828...
                 let two_point_7 = rust_decimal::Decimal::from_str("2.7").unwrap();
                 let threshold = rust_decimal::Decimal::from_str("0.1").unwrap();
-                assert!((d - two_point_7).abs() < threshold, "exp(1) should approximate to e, got {}", d);
+                assert!(
+                    (d - two_point_7).abs() < threshold,
+                    "exp(1) should approximate to e, got {}",
+                    d
+                );
             }
             other => panic!("expected Number, got {:?}", other),
         }
@@ -2799,14 +2876,20 @@ mod numeric {
     #[test]
     fn floor_negative() {
         let neg_three_2 = rust_decimal::Decimal::from_str("-3.2").unwrap();
-        assert_eq!(built_in_floor(&[Value::Number(neg_three_2)]), Value::Number(dec!(-4)));
+        assert_eq!(
+            built_in_floor(&[Value::Number(neg_three_2)]),
+            Value::Number(dec!(-4))
+        );
     }
 
     /// `ceiling(-3.7)` → Number(-3).
     #[test]
     fn ceiling_negative() {
         let neg_three_7 = rust_decimal::Decimal::from_str("-3.7").unwrap();
-        assert_eq!(built_in_ceiling(&[Value::Number(neg_three_7)]), Value::Number(dec!(-3)));
+        assert_eq!(
+            built_in_ceiling(&[Value::Number(neg_three_7)]),
+            Value::Number(dec!(-3))
+        );
     }
 
     /// Registry contains all numeric names.
@@ -2814,9 +2897,20 @@ mod numeric {
     fn registry_contains_numeric_names() {
         let reg = builtin_registry();
         for name in &[
-            "decimal", "floor", "ceiling", "round up", "round down",
-            "round half up", "round half down", "abs", "modulo", "sqrt",
-            "log", "exp", "odd", "even",
+            "decimal",
+            "floor",
+            "ceiling",
+            "round up",
+            "round down",
+            "round half up",
+            "round half down",
+            "abs",
+            "modulo",
+            "sqrt",
+            "log",
+            "exp",
+            "odd",
+            "even",
         ] {
             assert!(reg.contains_key(*name), "missing numeric: {}", name);
         }
@@ -2836,7 +2930,10 @@ mod numeric {
                 continue;
             }
             // Detect entering the target function.
-            if !in_target_fn && trimmed.starts_with("fn no_") && trimmed.ends_with("_in_builtins() {") {
+            if !in_target_fn
+                && trimmed.starts_with("fn no_")
+                && trimmed.ends_with("_in_builtins() {")
+            {
                 in_target_fn = true;
                 depth = 1;
                 continue;
@@ -2868,7 +2965,7 @@ mod numeric {
 #[cfg(test)]
 mod registry_dispatch {
     use super::*;
-    use crate::dmn::feel::ast::{FeelExpression, BinOpKind};
+    use crate::dmn::feel::ast::{BinOpKind, FeelExpression};
 
     /// Helper: parse + evaluate with empty scope.
     fn ev(src: &str) -> Value {
@@ -2890,7 +2987,11 @@ mod registry_dispatch {
     #[test]
     fn registry_has_minimum_entries() {
         let reg = builtin_registry();
-        assert!(reg.len() >= 20, "registry should have at least 20 entries, got {}", reg.len());
+        assert!(
+            reg.len() >= 20,
+            "registry should have at least 20 entries, got {}",
+            reg.len()
+        );
     }
 
     /// `abs(-5)` via FunctionInvocation dispatch → Number(5).
@@ -2986,7 +3087,9 @@ mod proptests {
             let neg = built_in_abs(&[Value::Number(dec_val.clone())]);
             let pos = built_in_abs(&[Value::Number(-dec_val)]);
             match (&neg, &pos) {
-                (Value::Number(a), Value::Number(b)) => assert_eq!(a, b, "abs(x) == abs(-x) for {}", d),
+                (Value::Number(a), Value::Number(b)) => {
+                    assert_eq!(a, b, "abs(x) == abs(-x) for {}", d)
+                }
                 _ => panic!("expected Number results"),
             }
         }
@@ -2998,7 +3101,8 @@ mod proptests {
         for d in -100i64..100 {
             let whole = rust_decimal::Decimal::from(d);
             for frac in 0u32..10 {
-                let fract = rust_decimal::Decimal::from(frac as i64) / rust_decimal::Decimal::from(10i64);
+                let fract =
+                    rust_decimal::Decimal::from(frac as i64) / rust_decimal::Decimal::from(10i64);
                 let val = whole + fract;
 
                 let floored = built_in_floor(&[Value::Number(val.clone())]);
@@ -3024,7 +3128,11 @@ mod proptests {
             let e = built_in_even(&[v.clone()]);
             match (o, e) {
                 (Value::Bool(ob), Value::Bool(eb)) => {
-                    assert_eq!(ob, !eb, "odd and even must be complementary for integer {}", i);
+                    assert_eq!(
+                        ob, !eb,
+                        "odd and even must be complementary for integer {}",
+                        i
+                    );
                 }
                 _ => panic!("expected Bool results"),
             }
@@ -3049,11 +3157,16 @@ mod proptests {
     fn prop_sqrt_square_is_abs() {
         for x in 1i64..100 {
             let dec_x = rust_decimal::Decimal::from(x);
-            let squared = built_in_mul(vec![Value::Number(dec_x.clone()), Value::Number(dec_x.clone())]);
+            let squared = built_in_mul(vec![
+                Value::Number(dec_x.clone()),
+                Value::Number(dec_x.clone()),
+            ]);
             // sqrt(squared) should equal abs(x).
             let result = built_in_sqrt(&[squared]);
             match (result, dec_x.abs()) {
-                (Value::Number(r), expected) => assert_eq!(r, expected, "sqrt(x*x) == |x| for {}", x),
+                (Value::Number(r), expected) => {
+                    assert_eq!(r, expected, "sqrt(x*x) == |x| for {}", x)
+                }
                 _ => panic!("expected Number"),
             }
         }
@@ -3081,7 +3194,11 @@ mod string {
     #[test]
     fn substring_with_length() {
         assert_eq!(
-            built_in_substring(&[Value::String("hello".into()), Value::Integer(2), Value::Integer(2)]),
+            built_in_substring(&[
+                Value::String("hello".into()),
+                Value::Integer(2),
+                Value::Integer(2)
+            ]),
             Value::String("el".into())
         );
     }
@@ -3089,13 +3206,19 @@ mod string {
     /// `substring(null, 1)` → Null.
     #[test]
     fn substring_null_arg() {
-        assert_eq!(built_in_substring(&[Value::Null, Value::Integer(1)]), Value::Null);
+        assert_eq!(
+            built_in_substring(&[Value::Null, Value::Integer(1)]),
+            Value::Null
+        );
     }
 
     /// `string length("hello")` → 5.
     #[test]
     fn string_length_basic() {
-        assert_eq!(built_in_string_length(&[Value::String("hello".into())]), Value::Integer(5));
+        assert_eq!(
+            built_in_string_length(&[Value::String("hello".into())]),
+            Value::Integer(5)
+        );
     }
 
     /// `string length(null)` → Null.
@@ -3107,20 +3230,29 @@ mod string {
     /// `upper case("abc")` → "ABC".
     #[test]
     fn upper_case_basic() {
-        assert_eq!(built_in_upper_case(&[Value::String("abc".into())]), Value::String("ABC".into()));
+        assert_eq!(
+            built_in_upper_case(&[Value::String("abc".into())]),
+            Value::String("ABC".into())
+        );
     }
 
     /// `lower case("ABC")` → "abc".
     #[test]
     fn lower_case_basic() {
-        assert_eq!(built_in_lower_case(&[Value::String("ABC".into())]), Value::String("abc".into()));
+        assert_eq!(
+            built_in_lower_case(&[Value::String("ABC".into())]),
+            Value::String("abc".into())
+        );
     }
 
     /// `substring before("hello world", "o")` → "hell".
     #[test]
     fn substring_before_basic() {
         assert_eq!(
-            built_in_substring_before(&[Value::String("hello world".into()), Value::String("o".into())]),
+            built_in_substring_before(&[
+                Value::String("hello world".into()),
+                Value::String("o".into())
+            ]),
             Value::String("hell".into())
         );
     }
@@ -3129,7 +3261,10 @@ mod string {
     #[test]
     fn substring_after_basic() {
         assert_eq!(
-            built_in_substring_after(&[Value::String("hello world".into()), Value::String("o".into())]),
+            built_in_substring_after(&[
+                Value::String("hello world".into()),
+                Value::String("o".into())
+            ]),
             Value::String(" world".into())
         );
     }
@@ -3187,7 +3322,10 @@ mod string {
     #[test]
     fn matches_true() {
         assert_eq!(
-            built_in_matches(&[Value::String("hello".into()), Value::String("^h.*o$".into())]),
+            built_in_matches(&[
+                Value::String("hello".into()),
+                Value::String("^h.*o$".into())
+            ]),
             Value::Bool(true)
         );
     }
@@ -3204,10 +3342,7 @@ mod string {
     /// `split("a,b,c", ",")` → Array(["a","b","c"]).
     #[test]
     fn split_basic() {
-        let result = built_in_split(&[
-            Value::String("a,b,c".into()),
-            Value::String(",".into()),
-        ]);
+        let result = built_in_split(&[Value::String("a,b,c".into()), Value::String(",".into())]);
         match result {
             Value::Array(elems) => assert_eq!(elems.len(), 3),
             other => panic!("expected Array, got {:?}", other),
@@ -3219,7 +3354,11 @@ mod string {
     fn string_join_basic() {
         assert_eq!(
             built_in_string_join(&[
-                Value::Array(vec![Value::String("a".into()), Value::String("b".into()), Value::String("c".into())]),
+                Value::Array(vec![
+                    Value::String("a".into()),
+                    Value::String("b".into()),
+                    Value::String("c".into())
+                ]),
                 Value::String("-".into()),
             ]),
             Value::String("a-b-c".into())
@@ -3231,9 +3370,19 @@ mod string {
     fn registry_contains_string_names() {
         let reg = builtin_registry();
         for name in &[
-            "substring", "string length", "upper case", "lower case",
-            "substring before", "substring after", "replace", "contains",
-            "starts with", "ends with", "matches", "split", "string join",
+            "substring",
+            "string length",
+            "upper case",
+            "lower case",
+            "substring before",
+            "substring after",
+            "replace",
+            "contains",
+            "starts with",
+            "ends with",
+            "matches",
+            "split",
+            "string join",
         ] {
             assert!(reg.contains_key(*name), "missing string function: {}", name);
         }
@@ -3250,7 +3399,11 @@ mod string {
             Value::Number(rust_decimal::Decimal::from(1)),
         ])]);
         match &result {
-            Value::Array(elems) => assert_eq!(elems.len(), 2, "distinct values should deduplicate equal elements"),
+            Value::Array(elems) => assert_eq!(
+                elems.len(),
+                2,
+                "distinct values should deduplicate equal elements"
+            ),
             other => panic!("expected Array, got {:?}", other),
         }
     }
@@ -3270,7 +3423,11 @@ mod list {
     fn list_contains_true() {
         assert_eq!(
             built_in_list_contains(&[
-                Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]),
+                Value::Array(vec![
+                    Value::Integer(1),
+                    Value::Integer(2),
+                    Value::Integer(3)
+                ]),
                 Value::Integer(2),
             ]),
             Value::Bool(true)
@@ -3282,7 +3439,11 @@ mod list {
     fn list_contains_false() {
         assert_eq!(
             built_in_list_contains(&[
-                Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]),
+                Value::Array(vec![
+                    Value::Integer(1),
+                    Value::Integer(2),
+                    Value::Integer(3)
+                ]),
                 Value::Integer(4),
             ]),
             Value::Bool(false)
@@ -3293,7 +3454,11 @@ mod list {
     #[test]
     fn count_basic() {
         assert_eq!(
-            built_in_count(&[Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)])]),
+            built_in_count(&[Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3)
+            ])]),
             Value::Integer(3)
         );
     }
@@ -3311,7 +3476,11 @@ mod list {
     #[test]
     fn sum_basic() {
         assert_eq!(
-            built_in_sum(&[Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)])]),
+            built_in_sum(&[Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3)
+            ])]),
             Value::Number(Decimal::from(6))
         );
     }
@@ -3326,7 +3495,11 @@ mod list {
     #[test]
     fn product_basic() {
         assert_eq!(
-            built_in_product(&[Value::Array(vec![Value::Integer(2), Value::Integer(3), Value::Integer(4)])]),
+            built_in_product(&[Value::Array(vec![
+                Value::Integer(2),
+                Value::Integer(3),
+                Value::Integer(4)
+            ])]),
             Value::Number(Decimal::from(24))
         );
     }
@@ -3335,7 +3508,11 @@ mod list {
     #[test]
     fn min_basic() {
         assert_eq!(
-            built_in_min(&[Value::Array(vec![Value::Integer(3), Value::Integer(1), Value::Integer(2)])]),
+            built_in_min(&[Value::Array(vec![
+                Value::Integer(3),
+                Value::Integer(1),
+                Value::Integer(2)
+            ])]),
             Value::Integer(1)
         );
     }
@@ -3344,7 +3521,11 @@ mod list {
     #[test]
     fn max_basic() {
         assert_eq!(
-            built_in_max(&[Value::Array(vec![Value::Integer(3), Value::Integer(1), Value::Integer(2)])]),
+            built_in_max(&[Value::Array(vec![
+                Value::Integer(3),
+                Value::Integer(1),
+                Value::Integer(2)
+            ])]),
             Value::Integer(3)
         );
     }
@@ -3358,7 +3539,11 @@ mod list {
     /// `mean([1,2,3])` → 2.
     #[test]
     fn mean_basic() {
-        let result = built_in_mean(&[Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)])]);
+        let result = built_in_mean(&[Value::Array(vec![
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(3),
+        ])]);
         match result {
             Value::Number(d) => assert_eq!(d, Decimal::from(2)),
             other => panic!("expected Number, got {:?}", other),
@@ -3408,7 +3593,12 @@ mod list {
     #[test]
     fn sublist_from_position() {
         let result = built_in_sublist(&[
-            Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3), Value::Integer(4)]),
+            Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3),
+                Value::Integer(4),
+            ]),
             Value::Integer(2),
         ]);
         match &result {
@@ -3421,7 +3611,12 @@ mod list {
     #[test]
     fn sublist_with_length() {
         let result = built_in_sublist(&[
-            Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3), Value::Integer(4)]),
+            Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3),
+                Value::Integer(4),
+            ]),
             Value::Integer(2),
             Value::Integer(2),
         ]);
@@ -3475,7 +3670,11 @@ mod list {
     #[test]
     fn remove_basic() {
         let result = built_in_remove(&[
-            Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]),
+            Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3),
+            ]),
             Value::Integer(2),
         ]);
         match &result {
@@ -3487,7 +3686,11 @@ mod list {
     /// `reverse([1,2,3])` → [3,2,1].
     #[test]
     fn reverse_basic() {
-        let result = built_in_reverse(&[Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)])]);
+        let result = built_in_reverse(&[Value::Array(vec![
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(3),
+        ])]);
         match &result {
             Value::Array(elems) => assert_eq!(elems.len(), 3),
             other => panic!("expected Array, got {:?}", other),
@@ -3498,7 +3701,12 @@ mod list {
     #[test]
     fn index_of_basic() {
         let result = built_in_index_of(&[
-            Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3), Value::Integer(2)]),
+            Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3),
+                Value::Integer(2),
+            ]),
             Value::Integer(2),
         ]);
         match &result {
@@ -3524,7 +3732,10 @@ mod list {
     #[test]
     fn distinct_values_basic() {
         let result = built_in_distinct_values(&[Value::Array(vec![
-            Value::Integer(1), Value::Integer(2), Value::Integer(2), Value::Integer(3),
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(2),
+            Value::Integer(3),
         ])]);
         match &result {
             Value::Array(elems) => assert_eq!(elems.len(), 3),
@@ -3549,7 +3760,10 @@ mod list {
     #[test]
     fn median_even_count() {
         let result = built_in_median(&[Value::Array(vec![
-            Value::Integer(1), Value::Integer(2), Value::Integer(3), Value::Integer(4),
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(3),
+            Value::Integer(4),
         ])]);
         match &result {
             Value::Number(d) => assert_eq!(*d, Decimal::from_str("2.5").unwrap()),
@@ -3561,7 +3775,9 @@ mod list {
     #[test]
     fn median_odd_count() {
         let result = built_in_median(&[Value::Array(vec![
-            Value::Integer(1), Value::Integer(2), Value::Integer(3),
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(3),
         ])]);
         match &result {
             Value::Number(d) => assert_eq!(*d, Decimal::from(2)),
@@ -3573,7 +3789,9 @@ mod list {
     #[test]
     fn mode_basic() {
         let result = built_in_mode(&[Value::Array(vec![
-            Value::Integer(1), Value::Integer(1), Value::Integer(2),
+            Value::Integer(1),
+            Value::Integer(1),
+            Value::Integer(2),
         ])]);
         match &result {
             Value::Integer(1) => {} // single mode returns the value directly
@@ -3585,7 +3803,10 @@ mod list {
     #[test]
     fn stddev_basic() {
         let result = built_in_stddev(&[Value::Array(vec![
-            Value::Integer(1), Value::Integer(2), Value::Integer(3), Value::Integer(4),
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(3),
+            Value::Integer(4),
         ])]);
         // Should return a Number (population stddev of [1,2,3,4] ≈ 1.118).
         match &result {
@@ -3598,7 +3819,9 @@ mod list {
     #[test]
     fn sort_basic() {
         let result = built_in_sort(&[Value::Array(vec![
-            Value::Integer(3), Value::Integer(1), Value::Integer(2),
+            Value::Integer(3),
+            Value::Integer(1),
+            Value::Integer(2),
         ])]);
         match &result {
             Value::Array(elems) => assert_eq!(elems.len(), 3),
@@ -3611,10 +3834,30 @@ mod list {
     fn registry_contains_list_names() {
         let reg = builtin_registry();
         for name in &[
-            "list contains", "list replace", "count", "min", "max", "sum", "mean",
-            "all", "any", "sublist", "append", "concatenate", "insert before",
-            "remove", "reverse", "index of", "union", "distinct values", "flatten",
-            "product", "median", "stddev", "mode", "sort",
+            "list contains",
+            "list replace",
+            "count",
+            "min",
+            "max",
+            "sum",
+            "mean",
+            "all",
+            "any",
+            "sublist",
+            "append",
+            "concatenate",
+            "insert before",
+            "remove",
+            "reverse",
+            "index of",
+            "union",
+            "distinct values",
+            "flatten",
+            "product",
+            "median",
+            "stddev",
+            "mode",
+            "sort",
         ] {
             assert!(reg.contains_key(*name), "missing list function: {}", name);
         }
@@ -3624,7 +3867,11 @@ mod list {
     #[test]
     fn registry_has_minimum_entries() {
         let reg = builtin_registry();
-        assert!(reg.len() >= 45, "registry should have at least 45 entries, got {}", reg.len());
+        assert!(
+            reg.len() >= 45,
+            "registry should have at least 45 entries, got {}",
+            reg.len()
+        );
     }
 
     /// `distinct values` uses feel_equals: [1, "a", 1] → [Number(1), String("a")] (2 elements).
@@ -3639,7 +3886,11 @@ mod list {
             Value::Array(elems) => {
                 // Number(1) and String("a") are different kinds → feel_equals returns None.
                 // So they should NOT be deduplicated together, but Number(1) duplicates should be.
-                assert_eq!(elems.len(), 2, "distinct values with type mismatch: [1, \"a\", 1] → [1, \"a\"]");
+                assert_eq!(
+                    elems.len(),
+                    2,
+                    "distinct values with type mismatch: [1, \"a\", 1] → [1, \"a\"]"
+                );
             }
             other => panic!("expected Array, got {:?}", other),
         }
@@ -3668,7 +3919,10 @@ mod list {
     /// `count([null])` == Number(1) (spec exception).
     #[test]
     fn count_null_element_count() {
-        assert_eq!(built_in_count(&[Value::Array(vec![Value::Null])]), Value::Integer(1));
+        assert_eq!(
+            built_in_count(&[Value::Array(vec![Value::Null])]),
+            Value::Integer(1)
+        );
     }
 
     /// `sum([])` == Null (A5 documented).
@@ -3681,12 +3935,18 @@ mod list {
     #[test]
     fn concatenate_is_associative() {
         let a = built_in_concatenate(&[
-            built_in_concatenate(&[Value::Array(vec![Value::Integer(1)]), Value::Array(vec![Value::Integer(2)])]),
+            built_in_concatenate(&[
+                Value::Array(vec![Value::Integer(1)]),
+                Value::Array(vec![Value::Integer(2)]),
+            ]),
             Value::Array(vec![Value::Integer(3)]),
         ]);
         let b = built_in_concatenate(&[
             Value::Array(vec![Value::Integer(1)]),
-            built_in_concatenate(&[Value::Array(vec![Value::Integer(2)]), Value::Array(vec![Value::Integer(3)])]),
+            built_in_concatenate(&[
+                Value::Array(vec![Value::Integer(2)]),
+                Value::Array(vec![Value::Integer(3)]),
+            ]),
         ]);
         assert_eq!(a, b, "concatenate should be associative");
     }
@@ -3694,7 +3954,11 @@ mod list {
     /// reverse(reverse(x)) == x.
     #[test]
     fn reverse_reverse_is_identity() {
-        let original = Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]);
+        let original = Value::Array(vec![
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(3),
+        ]);
         let result = built_in_reverse(&[built_in_reverse(&[original.clone()])]);
         assert_eq!(result, original, "reverse(reverse(x)) should equal x");
     }
@@ -3711,7 +3975,11 @@ mod list {
         ])]);
         match &result {
             Value::Array(elems) => {
-                assert_eq!(elems.len(), 2, "distinct values should use feel_equals: [1, \"a\", 1] → 2 elements");
+                assert_eq!(
+                    elems.len(),
+                    2,
+                    "distinct values should use feel_equals: [1, \"a\", 1] → 2 elements"
+                );
             }
             other => panic!("expected Array, got {:?}", other),
         }
@@ -3813,8 +4081,12 @@ mod datetime {
     fn registry_contains_datetime_names() {
         let reg = builtin_registry();
         for name in &[
-            "now", "today", "day of year", "day of week",
-            "month of year", "week of year",
+            "now",
+            "today",
+            "day of year",
+            "day of week",
+            "month of year",
+            "week of year",
         ] {
             assert!(reg.contains_key(*name), "missing date-time: {}", name);
         }
@@ -3850,7 +4122,10 @@ mod boolean {
     /// `not(5)` → Null (non-boolean arg → null).
     #[test]
     fn not_non_bool() {
-        assert_eq!(built_in_not(&[Value::Number(rust_decimal::Decimal::from(5))]), Value::Null);
+        assert_eq!(
+            built_in_not(&[Value::Number(rust_decimal::Decimal::from(5))]),
+            Value::Null
+        );
     }
 
     /// Registry contains "not".
@@ -3882,9 +4157,7 @@ mod context {
     /// `context([{a:1}])` constructs a context with one entry.
     #[test]
     fn context_with_entries() {
-        let result = built_in_context(&[Value::Array(vec![
-            Value::String("\"a\": 1".into()),
-        ])]);
+        let result = built_in_context(&[Value::Array(vec![Value::String("\"a\": 1".into())])]);
         match &result {
             Value::Object(m) => assert_eq!(m.len(), 1, "expected one entry"),
             other => panic!("expected Object, got {:?}", other),
@@ -3895,7 +4168,12 @@ mod context {
     #[test]
     fn context_put_adds_key() {
         let ctx = Value::Object(
-            [(String::from("a"), Value::Number(rust_decimal::Decimal::from(1)))].into_iter().collect(),
+            [(
+                String::from("a"),
+                Value::Number(rust_decimal::Decimal::from(1)),
+            )]
+            .into_iter()
+            .collect(),
         );
         let result = built_in_context_put(&[ctx, Value::String("b".into()), Value::Integer(2)]);
         match &result {
@@ -3910,15 +4188,26 @@ mod context {
     /// `context put(null, ...)` → Null.
     #[test]
     fn context_put_null() {
-        let result = built_in_context_put(&[Value::Null, Value::String("b".into()), Value::Integer(2)]);
+        let result =
+            built_in_context_put(&[Value::Null, Value::String("b".into()), Value::Integer(2)]);
         assert_eq!(result, Value::Null);
     }
 
     /// `context merge({a:1}, {b:2})` merges two contexts.
     #[test]
     fn context_merge() {
-        let m1 = [(String::from("a"), Value::Number(rust_decimal::Decimal::from(1)))].into_iter().collect();
-        let m2 = [(String::from("b"), Value::Number(rust_decimal::Decimal::from(2)))].into_iter().collect();
+        let m1 = [(
+            String::from("a"),
+            Value::Number(rust_decimal::Decimal::from(1)),
+        )]
+        .into_iter()
+        .collect();
+        let m2 = [(
+            String::from("b"),
+            Value::Number(rust_decimal::Decimal::from(2)),
+        )]
+        .into_iter()
+        .collect();
         let result = built_in_context_merge(&[Value::Object(m1), Value::Object(m2)]);
         match &result {
             Value::Object(m) => assert_eq!(m.len(), 2, "expected two entries"),
@@ -3929,12 +4218,20 @@ mod context {
     /// `context merge` later keys override earlier ones.
     #[test]
     fn context_merge_override() {
-        let m1 = [(String::from("a"), Value::Integer(1))].into_iter().collect();
-        let m2 = [(String::from("a"), Value::Integer(99))].into_iter().collect();
+        let m1 = [(String::from("a"), Value::Integer(1))]
+            .into_iter()
+            .collect();
+        let m2 = [(String::from("a"), Value::Integer(99))]
+            .into_iter()
+            .collect();
         let result = built_in_context_merge(&[Value::Object(m1), Value::Object(m2)]);
         match &result {
             Value::Object(m) => {
-                assert_eq!(m.get("a"), Some(&Value::Integer(99)), "later key should override");
+                assert_eq!(
+                    m.get("a"),
+                    Some(&Value::Integer(99)),
+                    "later key should override"
+                );
             }
             other => panic!("expected Object, got {:?}", other),
         }
@@ -3956,7 +4253,9 @@ mod context {
     /// `get value({a:1}, "x")` → Null (key absent).
     #[test]
     fn get_value_absent_key() {
-        let m = [(String::from("a"), Value::Integer(1))].into_iter().collect();
+        let m = [(String::from("a"), Value::Integer(1))]
+            .into_iter()
+            .collect();
         let result = built_in_get_value(&[Value::Object(m), Value::String("x".into())]);
         assert_eq!(result, Value::Null);
     }
@@ -3964,7 +4263,12 @@ mod context {
     /// `get entries({a:1})` returns a list of string entries.
     #[test]
     fn get_entries() {
-        let m = [(String::from("a"), Value::Number(rust_decimal::Decimal::from(1)))].into_iter().collect();
+        let m = [(
+            String::from("a"),
+            Value::Number(rust_decimal::Decimal::from(1)),
+        )]
+        .into_iter()
+        .collect();
         let result = built_in_get_entries(&[Value::Object(m)]);
         match &result {
             Value::Array(elems) => assert_eq!(elems.len(), 1, "expected one entry"),
@@ -3983,7 +4287,13 @@ mod context {
     #[test]
     fn registry_contains_context_names() {
         let reg = builtin_registry();
-        for name in &["context", "context put", "context merge", "get value", "get entries"] {
+        for name in &[
+            "context",
+            "context put",
+            "context merge",
+            "get value",
+            "get entries",
+        ] {
             assert!(reg.contains_key(*name), "missing context: {}", name);
         }
     }
@@ -4006,14 +4316,20 @@ mod is_never_null {
     /// `is("a", 1)` == Bool(false) — NEVER null (Pitfall 6).
     #[test]
     fn is_type_mismatch() {
-        assert_eq!(built_in_is(&[Value::String("a".into()), Value::Integer(1)]), Value::Bool(false));
+        assert_eq!(
+            built_in_is(&[Value::String("a".into()), Value::Integer(1)]),
+            Value::Bool(false)
+        );
     }
 
     /// `is(1, 1)` == Bool(true).
     #[test]
     fn is_equal_numbers() {
         assert_eq!(
-            built_in_is(&[Value::Number(rust_decimal::Decimal::from(1)), Value::Number(rust_decimal::Decimal::from(1))]),
+            built_in_is(&[
+                Value::Number(rust_decimal::Decimal::from(1)),
+                Value::Number(rust_decimal::Decimal::from(1))
+            ]),
             Value::Bool(true)
         );
     }
@@ -4036,20 +4352,29 @@ mod is_never_null {
     /// `is(true, false)` == Bool(false).
     #[test]
     fn is_unequal_bools() {
-        assert_eq!(built_in_is(&[Value::Bool(true), Value::Bool(false)]), Value::Bool(false));
+        assert_eq!(
+            built_in_is(&[Value::Bool(true), Value::Bool(false)]),
+            Value::Bool(false)
+        );
     }
 
     /// `is(null, "x")` == Bool(false) (one null → false).
     #[test]
     fn is_one_null() {
-        assert_eq!(built_in_is(&[Value::Null, Value::String("x".into())]), Value::Bool(false));
+        assert_eq!(
+            built_in_is(&[Value::Null, Value::String("x".into())]),
+            Value::Bool(false)
+        );
     }
 
     /// `is(1, "1")` == Bool(false) (different kinds → false).
     #[test]
     fn is_number_vs_string() {
         assert_eq!(
-            built_in_is(&[Value::Number(rust_decimal::Decimal::from(1)), Value::String("1".into())]),
+            built_in_is(&[
+                Value::Number(rust_decimal::Decimal::from(1)),
+                Value::String("1".into())
+            ]),
             Value::Bool(false)
         );
     }
@@ -4145,13 +4470,19 @@ mod range {
     /// `overlaps before([1..5], [3..8])` == Bool(true) (r2 overlaps r1).
     #[test]
     fn overlaps_before_true() {
-        assert_eq!(built_in_overlaps_before(&[r(1, 5), r(3, 8)]), Value::Bool(true));
+        assert_eq!(
+            built_in_overlaps_before(&[r(1, 5), r(3, 8)]),
+            Value::Bool(true)
+        );
     }
 
     /// `overlaps after([3..8], [1..5])` == Bool(true).
     #[test]
     fn overlaps_after_true() {
-        assert_eq!(built_in_overlaps_after(&[r(3, 8), r(1, 5)]), Value::Bool(true));
+        assert_eq!(
+            built_in_overlaps_after(&[r(3, 8), r(1, 5)]),
+            Value::Bool(true)
+        );
     }
 
     /// `finishes([1..5], [3..5])` == Bool(true) (shares end).
@@ -4175,13 +4506,19 @@ mod range {
     /// `includes([1..10], 5)` == Bool(true).
     #[test]
     fn includes_scalar_true() {
-        assert_eq!(built_in_includes(&[r(1, 10), Value::Number(rust_decimal::Decimal::from(5))]), Value::Bool(true));
+        assert_eq!(
+            built_in_includes(&[r(1, 10), Value::Number(rust_decimal::Decimal::from(5))]),
+            Value::Bool(true)
+        );
     }
 
     /// `includes([1..10], 0)` == Bool(false) (outside).
     #[test]
     fn includes_scalar_false() {
-        assert_eq!(built_in_includes(&[r(1, 10), Value::Number(rust_decimal::Decimal::from(0))]), Value::Bool(false));
+        assert_eq!(
+            built_in_includes(&[r(1, 10), Value::Number(rust_decimal::Decimal::from(0))]),
+            Value::Bool(false)
+        );
     }
 
     /// `includes([1..10], [3..7])` == Bool(true) (sub-range).
@@ -4199,7 +4536,10 @@ mod range {
     /// `during(5, [1..10])` == Bool(true) (scalar during range).
     #[test]
     fn during_scalar_true() {
-        assert_eq!(built_in_during(&[Value::Number(rust_decimal::Decimal::from(5)), r(1, 10)]), Value::Bool(true));
+        assert_eq!(
+            built_in_during(&[Value::Number(rust_decimal::Decimal::from(5)), r(1, 10)]),
+            Value::Bool(true)
+        );
     }
 
     /// `during([3..7], [1..10])` == Bool(true) (sub-range during).
@@ -4245,9 +4585,21 @@ mod range {
         assert_eq!(built_in_before(&[null_range.clone(), r(1, 5)]), Value::Null);
         assert_eq!(built_in_after(&[r(1, 5), null_range.clone()]), Value::Null);
         assert_eq!(built_in_meets(&[null_range.clone(), r(1, 5)]), Value::Null);
-        assert_eq!(built_in_overlaps(&[null_range.clone(), r(1, 5)]), Value::Null);
-        assert_eq!(built_in_includes(&[null_range.clone(), Value::Number(rust_decimal::Decimal::from(5))]), Value::Null);
-        assert_eq!(built_in_coincides(&[null_range.clone(), r(1, 5)]), Value::Null);
+        assert_eq!(
+            built_in_overlaps(&[null_range.clone(), r(1, 5)]),
+            Value::Null
+        );
+        assert_eq!(
+            built_in_includes(&[
+                null_range.clone(),
+                Value::Number(rust_decimal::Decimal::from(5))
+            ]),
+            Value::Null
+        );
+        assert_eq!(
+            built_in_coincides(&[null_range.clone(), r(1, 5)]),
+            Value::Null
+        );
     }
 
     /// Allen symmetry: before(r1,r2) == after(r2,r1).
@@ -4255,7 +4607,10 @@ mod range {
     fn allen_before_after_symmetry() {
         let r1 = r(1, 5);
         let r2 = r(6, 10);
-        assert_eq!(built_in_before(&[r1.clone(), r2.clone()]), built_in_after(&[r2, r1]));
+        assert_eq!(
+            built_in_before(&[r1.clone(), r2.clone()]),
+            built_in_after(&[r2, r1])
+        );
     }
 
     /// Allen symmetry: meets(r1,r2) == met_by(r2,r1).
@@ -4263,7 +4618,10 @@ mod range {
     fn allen_meets_met_by_symmetry() {
         let r1 = r(1, 5);
         let r2 = r(6, 10);
-        assert_eq!(built_in_meets(&[r1.clone(), r2.clone()]), built_in_met_by(&[r2, r1]));
+        assert_eq!(
+            built_in_meets(&[r1.clone(), r2.clone()]),
+            built_in_met_by(&[r2, r1])
+        );
     }
 
     /// Allen symmetry: starts(r1,r2) == started_by(r2,r1).
@@ -4271,7 +4629,10 @@ mod range {
     fn allen_starts_started_by_symmetry() {
         let r1 = r(1, 5);
         let r2 = r(1, 10);
-        assert_eq!(built_in_starts(&[r1.clone(), r2.clone()]), built_in_started_by(&[r2, r1]));
+        assert_eq!(
+            built_in_starts(&[r1.clone(), r2.clone()]),
+            built_in_started_by(&[r2, r1])
+        );
     }
 
     /// Allen symmetry: finishes(r1,r2) == finished_by(r2,r1).
@@ -4279,15 +4640,20 @@ mod range {
     fn allen_finishes_finished_by_symmetry() {
         let r1 = r(3, 5);
         let r2 = r(1, 5);
-        assert_eq!(built_in_finishes(&[r1.clone(), r2.clone()]), built_in_finished_by(&[r2, r1]));
+        assert_eq!(
+            built_in_finishes(&[r1.clone(), r2.clone()]),
+            built_in_finished_by(&[r2, r1])
+        );
     }
 
     /// Allen symmetry: includes(r, x) == during(x, r).
     #[test]
     fn allen_includes_during_symmetry() {
         let range = r(1, 10);
-        assert_eq!(built_in_includes(&[range.clone(), Value::Number(rust_decimal::Decimal::from(5))]),
-                   built_in_during(&[Value::Number(rust_decimal::Decimal::from(5)), range]));
+        assert_eq!(
+            built_in_includes(&[range.clone(), Value::Number(rust_decimal::Decimal::from(5))]),
+            built_in_during(&[Value::Number(rust_decimal::Decimal::from(5)), range])
+        );
     }
 
     /// Registry contains all range names.
@@ -4295,9 +4661,20 @@ mod range {
     fn registry_contains_range_names() {
         let reg = builtin_registry();
         for name in &[
-            "before", "after", "meets", "met by", "overlaps",
-            "overlaps before", "overlaps after", "finishes", "finished by",
-            "includes", "during", "starts", "started by", "coincides",
+            "before",
+            "after",
+            "meets",
+            "met by",
+            "overlaps",
+            "overlaps before",
+            "overlaps after",
+            "finishes",
+            "finished by",
+            "includes",
+            "during",
+            "starts",
+            "started by",
+            "coincides",
         ] {
             assert!(reg.contains_key(*name), "missing range: {}", name);
         }
@@ -4308,9 +4685,20 @@ mod range {
     fn registry_range_count() {
         let reg = builtin_registry();
         let range_names = &[
-            "before", "after", "meets", "met by", "overlaps",
-            "overlaps before", "overlaps after", "finishes", "finished by",
-            "includes", "during", "starts", "started by", "coincides",
+            "before",
+            "after",
+            "meets",
+            "met by",
+            "overlaps",
+            "overlaps before",
+            "overlaps after",
+            "finishes",
+            "finished by",
+            "includes",
+            "during",
+            "starts",
+            "started by",
+            "coincides",
         ];
         let count = range_names.iter().filter(|n| reg.contains_key(**n)).count();
         assert_eq!(count, 14, "expected 14 range built-ins, got {}", count);

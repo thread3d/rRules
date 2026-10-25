@@ -101,14 +101,16 @@ impl From<&StoredAuditEvent> for AuditEvent {
                 AuditAction::Reject => "reject",
                 AuditAction::Execute => "execute",
                 AuditAction::Export => "export",
-            }.to_string(),
+            }
+            .to_string(),
             resource_type: match event.resource_type {
                 ResourceType::Rule => "rule",
                 ResourceType::Category => "category",
                 ResourceType::Tag => "tag",
                 ResourceType::User => "user",
                 ResourceType::Approval => "approval",
-            }.to_string(),
+            }
+            .to_string(),
             resource_id: event.resource_id.clone(),
             resource_name: event.resource_name.clone(),
             details: event.details.clone(),
@@ -149,7 +151,9 @@ pub async fn query_audit_events(
     let page = query.page.unwrap_or(1).max(1);
     let page_size = query.page_size.unwrap_or(50).clamp(1, 100);
 
-    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Filter events based on query parameters
     let mut events: Vec<&StoredAuditEvent> = store_guard.values().collect();
@@ -161,9 +165,11 @@ pub async fn query_audit_events(
             "tag" => ResourceType::Tag,
             "user" => ResourceType::User,
             "approval" => ResourceType::Approval,
-            _ => return HttpResponse::BadRequest().json(serde_json::json!({
-                "error": "Invalid resource_type filter"
-            })),
+            _ => {
+                return HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": "Invalid resource_type filter"
+                }))
+            }
         };
         events.retain(|e| e.resource_type == filter_type);
     }
@@ -178,9 +184,11 @@ pub async fn query_audit_events(
             "reject" => AuditAction::Reject,
             "execute" => AuditAction::Execute,
             "export" => AuditAction::Export,
-            _ => return HttpResponse::BadRequest().json(serde_json::json!({
-                "error": "Invalid action filter"
-            })),
+            _ => {
+                return HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": "Invalid action filter"
+                }))
+            }
         };
         events.retain(|e| e.action == filter_action);
     }
@@ -193,7 +201,8 @@ pub async fn query_audit_events(
     events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
     let total_count = events.len();
-    let total_pages = total_count.div_ceil(page_size as usize)
+    let total_pages = total_count
+        .div_ceil(page_size as usize)
         .try_into()
         .unwrap_or(0);
 
@@ -202,7 +211,10 @@ pub async fn query_audit_events(
     let end_idx = (start_idx + page_size as usize).min(total_count);
 
     let paginated_events: Vec<AuditEvent> = if start_idx < total_count {
-        events[start_idx..end_idx].iter().map(|e| AuditEvent::from(*e)).collect()
+        events[start_idx..end_idx]
+            .iter()
+            .map(|e| AuditEvent::from(*e))
+            .collect()
     } else {
         vec![]
     };
@@ -230,7 +242,9 @@ pub async fn get_audit_event(
         }
     };
 
-    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get(&id) {
         Some(event) => HttpResponse::Ok().json(AuditEvent::from(event)),
@@ -250,10 +264,13 @@ pub async fn get_audit_event(
     ),
 )]
 pub async fn export_audit_log(store: web::Data<AuditStore>) -> impl Responder {
-    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Build CSV content
-    let mut csv = "id,timestamp,user_id,action,resource_type,resource_id,resource_name,details\n".to_string();
+    let mut csv =
+        "id,timestamp,user_id,action,resource_type,resource_id,resource_name,details\n".to_string();
 
     for event in store_guard.values() {
         let details_json = serde_json::to_string(&event.details).unwrap_or_default();
@@ -282,14 +299,20 @@ pub async fn export_audit_log(store: web::Data<AuditStore>) -> impl Responder {
                 ResourceType::Approval => "approval",
             },
             event.resource_id,
-            event.resource_name.clone().unwrap_or_else(|| "".to_string()),
+            event
+                .resource_name
+                .clone()
+                .unwrap_or_else(|| "".to_string()),
             details_escaped
         ));
     }
 
     HttpResponse::Ok()
         .content_type("text/csv")
-        .insert_header(("Content-Disposition", "attachment; filename=\"audit_log.csv\""))
+        .insert_header((
+            "Content-Disposition",
+            "attachment; filename=\"audit_log.csv\"",
+        ))
         .body(csv)
 }
 
@@ -306,7 +329,9 @@ pub fn record_audit_event(
     ip_address: Option<String>,
     user_agent: Option<String>,
 ) {
-    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut store_guard = store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let event_id = Uuid::new_v4();
 
     let event = StoredAuditEvent {

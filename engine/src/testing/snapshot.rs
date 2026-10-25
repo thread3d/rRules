@@ -10,8 +10,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// Snapshot mode for controlling baseline behavior
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum SnapshotMode {
     /// Compare against baselines (default)
     #[default]
@@ -21,7 +20,6 @@ pub enum SnapshotMode {
     /// Don't compare or save
     Skip,
 }
-
 
 /// Error type for snapshot operations
 #[derive(Debug, thiserror::Error)]
@@ -103,24 +101,29 @@ impl SnapshotManager {
 
     /// Get the path to a snapshot file for the given test name
     fn snapshot_path(&self, test_name: impl AsRef<str>) -> PathBuf {
-        self.base_dir.join(format!("{}.snapshot.json", test_name.as_ref()))
+        self.base_dir
+            .join(format!("{}.snapshot.json", test_name.as_ref()))
     }
 
     /// Ensure the base directory exists, creating it if necessary
     fn ensure_base_dir_exists(&self) -> SnapshotResult<()> {
-        fs::create_dir_all(&self.base_dir)
-            .map_err(|e| SnapshotError::WriteError(format!(
+        fs::create_dir_all(&self.base_dir).map_err(|e| {
+            SnapshotError::WriteError(format!(
                 "Failed to create directory '{}': {}",
                 self.base_dir.display(),
                 e
-            )))?;
+            ))
+        })?;
         Ok(())
     }
 
     /// Load a baseline snapshot from disk
     ///
     /// Returns the snapshot if it exists, or an error if not found.
-    pub fn load_baseline(&self, test_name: impl AsRef<str>) -> SnapshotResult<WorkingMemorySnapshot> {
+    pub fn load_baseline(
+        &self,
+        test_name: impl AsRef<str>,
+    ) -> SnapshotResult<WorkingMemorySnapshot> {
         let path = self.snapshot_path(test_name);
 
         if !path.exists() {
@@ -130,12 +133,9 @@ impl SnapshotManager {
             )));
         }
 
-        let json = fs::read_to_string(&path)
-            .map_err(|e| SnapshotError::ReadError(format!(
-                "Failed to read '{}': {}",
-                path.display(),
-                e
-            )))?;
+        let json = fs::read_to_string(&path).map_err(|e| {
+            SnapshotError::ReadError(format!("Failed to read '{}': {}", path.display(), e))
+        })?;
 
         match WorkingMemorySnapshot::from_json(&json) {
             Ok(snapshot) => Ok(snapshot),
@@ -154,18 +154,13 @@ impl SnapshotManager {
         self.ensure_base_dir_exists()?;
 
         let path = self.snapshot_path(test_name);
-        let json = serde_json::to_string_pretty(snapshot)
-            .map_err(|e| SnapshotError::WriteError(format!(
-                "Failed to serialize snapshot: {}",
-                e
-            )))?;
+        let json = serde_json::to_string_pretty(snapshot).map_err(|e| {
+            SnapshotError::WriteError(format!("Failed to serialize snapshot: {}", e))
+        })?;
 
-        fs::write(&path, &json)
-            .map_err(|e| SnapshotError::WriteError(format!(
-                "Failed to write '{}': {}",
-                path.display(),
-                e
-            )))?;
+        fs::write(&path, &json).map_err(|e| {
+            SnapshotError::WriteError(format!("Failed to write '{}': {}", path.display(), e))
+        })?;
 
         Ok(())
     }
@@ -246,12 +241,9 @@ impl SnapshotManager {
             return Ok(false);
         }
 
-        fs::remove_file(&path)
-            .map_err(|e| SnapshotError::WriteError(format!(
-                "Failed to delete '{}': {}",
-                path.display(),
-                e
-            )))?;
+        fs::remove_file(&path).map_err(|e| {
+            SnapshotError::WriteError(format!("Failed to delete '{}': {}", path.display(), e))
+        })?;
 
         Ok(true)
     }
@@ -294,28 +286,33 @@ mod tests {
 
         // Create a test snapshot
         let mut payload = HashMap::new();
-        payload.insert("name".to_string(), ValueSnapshot::String("test".to_string()));
+        payload.insert(
+            "name".to_string(),
+            ValueSnapshot::String("test".to_string()),
+        );
         payload.insert("value".to_string(), ValueSnapshot::Integer(42));
 
         let snapshot = WorkingMemorySnapshot {
-            facts: vec![
-                crate::testing::FactSnapshot {
-                    id: "fact1".to_string(),
-                    fact_type: "item".to_string(),
-                    payload,
-                }
-            ],
+            facts: vec![crate::testing::FactSnapshot {
+                id: "fact1".to_string(),
+                fact_type: "item".to_string(),
+                payload,
+            }],
         };
 
         // Save baseline
-        manager.save_baseline("test_save_load", &snapshot).expect("Failed to save");
+        manager
+            .save_baseline("test_save_load", &snapshot)
+            .expect("Failed to save");
 
         // Verify file exists
         let snapshot_path = temp_dir.path().join("test_save_load.snapshot.json");
         assert!(snapshot_path.exists());
 
         // Load and verify
-        let loaded = manager.load_baseline("test_save_load").expect("Failed to load");
+        let loaded = manager
+            .load_baseline("test_save_load")
+            .expect("Failed to load");
 
         assert_eq!(loaded.facts.len(), 1);
         assert_eq!(loaded.facts[0].fact_type, "item");
@@ -327,9 +324,10 @@ mod tests {
         let manager = SnapshotManager::new(temp_dir.path());
 
         // Create and save a baseline
-        let baseline_payload = HashMap::from([
-            ("name".to_string(), ValueSnapshot::String("original".to_string())),
-        ]);
+        let baseline_payload = HashMap::from([(
+            "name".to_string(),
+            ValueSnapshot::String("original".to_string()),
+        )]);
 
         let snapshot = WorkingMemorySnapshot {
             facts: vec![crate::testing::FactSnapshot {
@@ -346,18 +344,21 @@ mod tests {
         // Same content should match
         let same_snapshot = WorkingMemorySnapshot {
             facts: vec![crate::testing::FactSnapshot {
-                id: "fact2".to_string(),  // Different ID but same content
+                id: "fact2".to_string(), // Different ID but same content
                 fact_type: "item".to_string(),
                 payload: baseline_payload.clone(),
             }],
         };
 
-        assert!(manager.assert_matches_baseline("test_compare", &same_snapshot).is_ok());
+        assert!(manager
+            .assert_matches_baseline("test_compare", &same_snapshot)
+            .is_ok());
 
         // Different content should fail in Read mode
-        let different_payload = HashMap::from([
-            ("name".to_string(), ValueSnapshot::String("different".to_string())),
-        ]);
+        let different_payload = HashMap::from([(
+            "name".to_string(),
+            ValueSnapshot::String("different".to_string()),
+        )]);
 
         let different_snapshot = WorkingMemorySnapshot {
             facts: vec![crate::testing::FactSnapshot {
@@ -367,7 +368,9 @@ mod tests {
             }],
         };
 
-        assert!(manager.assert_matches_baseline("test_compare", &different_snapshot).is_err());
+        assert!(manager
+            .assert_matches_baseline("test_compare", &different_snapshot)
+            .is_err());
     }
 
     #[test]
@@ -376,9 +379,10 @@ mod tests {
         let manager = SnapshotManager::new_with_mode(temp_dir.path(), SnapshotMode::Update);
 
         // Create and save initial baseline
-        let initial_payload = HashMap::from([
-            ("name".to_string(), ValueSnapshot::String("initial".to_string())),
-        ]);
+        let initial_payload = HashMap::from([(
+            "name".to_string(),
+            ValueSnapshot::String("initial".to_string()),
+        )]);
 
         let initial_snapshot = WorkingMemorySnapshot {
             facts: vec![crate::testing::FactSnapshot {
@@ -393,9 +397,10 @@ mod tests {
             .expect("Failed to save");
 
         // Update with different content
-        let updated_payload = HashMap::from([
-            ("name".to_string(), ValueSnapshot::String("updated".to_string())),
-        ]);
+        let updated_payload = HashMap::from([(
+            "name".to_string(),
+            ValueSnapshot::String("updated".to_string()),
+        )]);
 
         let updated_snapshot = WorkingMemorySnapshot {
             facts: vec![crate::testing::FactSnapshot {
@@ -411,7 +416,9 @@ mod tests {
             .is_ok());
 
         // Verify baseline was updated by loading it back
-        let loaded = manager.load_baseline("test_update").expect("Failed to load");
+        let loaded = manager
+            .load_baseline("test_update")
+            .expect("Failed to load");
 
         assert_eq!(
             loaded.facts[0].payload.get("name"),
@@ -429,13 +436,16 @@ mod tests {
             facts: vec![crate::testing::FactSnapshot {
                 id: "fact1".to_string(),
                 fact_type: "item".to_string(),
-                payload: HashMap::from([
-                    ("name".to_string(), ValueSnapshot::String("test".to_string())),
-                ]),
+                payload: HashMap::from([(
+                    "name".to_string(),
+                    ValueSnapshot::String("test".to_string()),
+                )]),
             }],
         };
 
-        assert!(manager.assert_matches_baseline("nonexistent", &snapshot).is_ok());
+        assert!(manager
+            .assert_matches_baseline("nonexistent", &snapshot)
+            .is_ok());
     }
 
     #[test]
@@ -455,7 +465,9 @@ mod tests {
             }],
         };
 
-        manager.save_baseline("test_exists", &snapshot).expect("Failed to save");
+        manager
+            .save_baseline("test_exists", &snapshot)
+            .expect("Failed to save");
 
         assert!(manager.has_baseline("test_exists"));
     }
@@ -474,13 +486,17 @@ mod tests {
             }],
         };
 
-        manager.save_baseline("test_delete", &snapshot).expect("Failed to save");
+        manager
+            .save_baseline("test_delete", &snapshot)
+            .expect("Failed to save");
 
         // Verify it exists
         assert!(manager.has_baseline("test_delete"));
 
         // Delete it
-        let deleted = manager.delete_baseline("test_delete").expect("Delete failed");
+        let deleted = manager
+            .delete_baseline("test_delete")
+            .expect("Delete failed");
         assert!(deleted);
 
         // Verify it's gone

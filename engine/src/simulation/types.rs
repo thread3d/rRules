@@ -49,10 +49,7 @@ pub enum RuleChange {
     /// Remove the named field from a rule's pattern-based condition. The exact
     /// semantics depend on how the engine evaluates conditions; this is a
     /// best-effort structural modification of the AST.
-    RemoveCondition {
-        rule_id: String,
-        field: String,
-    },
+    RemoveCondition { rule_id: String, field: String },
 
     /// Replace an action at a given index with a new one (JSON-encoded).
     ModifyAction {

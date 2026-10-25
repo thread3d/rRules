@@ -77,14 +77,15 @@ fn sort_json_keys(value: Value) -> Value {
             keys.sort();
 
             for key in keys {
-                sorted_map.insert(key.clone(), sort_json_keys(map.get(&key).cloned().unwrap_or(Value::Null)));
+                sorted_map.insert(
+                    key.clone(),
+                    sort_json_keys(map.get(&key).cloned().unwrap_or(Value::Null)),
+                );
             }
 
             Value::Object(sorted_map)
         }
-        Value::Array(arr) => {
-            Value::Array(arr.into_iter().map(sort_json_keys).collect())
-        }
+        Value::Array(arr) => Value::Array(arr.into_iter().map(sort_json_keys).collect()),
         _ => value,
     }
 }
@@ -119,7 +120,9 @@ pub fn json_semantic_equal(a: &str, b: &str) -> bool {
 ///
 /// # Returns
 /// Ok(WorkingMemorySnapshot) if the roundtrip succeeds, error otherwise
-pub fn roundtrip_snapshot(snapshot: &WorkingMemorySnapshot) -> Result<WorkingMemorySnapshot, serde_json::Error> {
+pub fn roundtrip_snapshot(
+    snapshot: &WorkingMemorySnapshot,
+) -> Result<WorkingMemorySnapshot, serde_json::Error> {
     let json = serialize_deterministic(snapshot);
     deserialize_working_memory(&json)
 }
@@ -135,13 +138,22 @@ mod tests {
         // key ordering if not sorted
 
         let mut payload1 = HashMap::new();
-        payload1.insert("zebra".to_string(), ValueSnapshot::String("last".to_string()));
+        payload1.insert(
+            "zebra".to_string(),
+            ValueSnapshot::String("last".to_string()),
+        );
         payload1.insert("alpha".to_string(), ValueSnapshot::Integer(1));
         payload1.insert("middle".to_string(), ValueSnapshot::Bool(true));
 
         let mut payload2 = HashMap::new();
-        payload2.insert("yak".to_string(), ValueSnapshot::Float(std::f64::consts::PI));
-        payload2.insert("aardvark".to_string(), ValueSnapshot::String("first".to_string()));
+        payload2.insert(
+            "yak".to_string(),
+            ValueSnapshot::Float(std::f64::consts::PI),
+        );
+        payload2.insert(
+            "aardvark".to_string(),
+            ValueSnapshot::String("first".to_string()),
+        );
 
         let snapshot = WorkingMemorySnapshot {
             facts: vec![
@@ -178,7 +190,10 @@ mod tests {
     #[test]
     fn test_roundtrip_serialization() {
         let mut payload = HashMap::new();
-        payload.insert("name".to_string(), ValueSnapshot::String("test".to_string()));
+        payload.insert(
+            "name".to_string(),
+            ValueSnapshot::String("test".to_string()),
+        );
         payload.insert("value".to_string(), ValueSnapshot::Integer(42));
         payload.insert("enabled".to_string(), ValueSnapshot::Bool(true));
 
@@ -217,7 +232,10 @@ mod tests {
     #[test]
     fn test_serialize_fact_deterministic() {
         let mut payload = HashMap::new();
-        payload.insert("z_field".to_string(), ValueSnapshot::String("last".to_string()));
+        payload.insert(
+            "z_field".to_string(),
+            ValueSnapshot::String("last".to_string()),
+        );
         payload.insert("a_field".to_string(), ValueSnapshot::Integer(1));
 
         let fact = FactSnapshot {
@@ -232,7 +250,10 @@ mod tests {
         let a_pos = json.find("\"a_field\"").unwrap();
         let z_pos = json.find("\"z_field\"").unwrap();
 
-        assert!(a_pos < z_pos, "Keys should be sorted: a_field before z_field");
+        assert!(
+            a_pos < z_pos,
+            "Keys should be sorted: a_field before z_field"
+        );
     }
 
     #[test]
@@ -259,17 +280,13 @@ mod tests {
             facts: vec![FactSnapshot {
                 id: "id1".to_string(),
                 fact_type: "array_test".to_string(),
-                payload: HashMap::from([
-                    (
-                        "nested".to_string(),
-                        ValueSnapshot::Array(vec![
-                            ValueSnapshot::Object(HashMap::from([
-                                ("z".to_string(), ValueSnapshot::Integer(1)),
-                                ("a".to_string(), ValueSnapshot::String("test".to_string())),
-                            ])),
-                        ]),
-                    ),
-                ]),
+                payload: HashMap::from([(
+                    "nested".to_string(),
+                    ValueSnapshot::Array(vec![ValueSnapshot::Object(HashMap::from([
+                        ("z".to_string(), ValueSnapshot::Integer(1)),
+                        ("a".to_string(), ValueSnapshot::String("test".to_string())),
+                    ]))]),
+                )]),
             }],
         };
 
@@ -287,13 +304,11 @@ mod tests {
         payload.insert("enabled".to_string(), ValueSnapshot::Bool(true));
 
         let snapshot = WorkingMemorySnapshot {
-            facts: vec![
-                FactSnapshot {
-                    id: "f1".to_string(),
-                    fact_type: "config".to_string(),
-                    payload,
-                },
-            ],
+            facts: vec![FactSnapshot {
+                id: "f1".to_string(),
+                fact_type: "config".to_string(),
+                payload,
+            }],
         };
 
         // Multiple roundtrips should produce identical results
@@ -302,7 +317,10 @@ mod tests {
         for _ in 0..5 {
             let roundtripped = roundtrip_snapshot(&snapshot).expect("Roundtrip failed");
             let curr_json = serialize_deterministic(&roundtripped);
-            assert_eq!(prev_json, curr_json, "Multiple roundtrips should be consistent");
+            assert_eq!(
+                prev_json, curr_json,
+                "Multiple roundtrips should be consistent"
+            );
             prev_json = curr_json;
         }
     }

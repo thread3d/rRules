@@ -101,8 +101,7 @@ pub struct FileSystemDmnStore {
 impl FileSystemDmnStore {
     /// Create a new FileSystemDmnStore from the `DMN_STORAGE_PATH` env var (fallback `"./dmn"`).
     pub fn new() -> Self {
-        let path = std::env::var("DMN_STORAGE_PATH")
-            .unwrap_or_else(|_| "./dmn".to_string());
+        let path = std::env::var("DMN_STORAGE_PATH").unwrap_or_else(|_| "./dmn".to_string());
         Self {
             storage_path: PathBuf::from(path),
         }
@@ -122,10 +121,16 @@ impl FileSystemDmnStore {
     }
 
     /// Read and parse a `.meta.json` sidecar file, returning the stored timestamps.
-    async fn read_meta(&self, id: &str) -> Result<(DateTime<Utc>, DateTime<Utc>), PersistenceError> {
+    async fn read_meta(
+        &self,
+        id: &str,
+    ) -> Result<(DateTime<Utc>, DateTime<Utc>), PersistenceError> {
         let meta_path = self.meta_path(id);
         if !meta_path.exists() {
-            return Err(PersistenceError::NotFound(format!("metadata for decision {}", id)));
+            return Err(PersistenceError::NotFound(format!(
+                "metadata for decision {}",
+                id
+            )));
         }
         let content = fs::read_to_string(&meta_path).await?;
         #[derive(serde::Deserialize)]
@@ -133,8 +138,9 @@ impl FileSystemDmnStore {
             created_at: String,
             updated_at: String,
         }
-        let meta: MetaFile = serde_json::from_str(&content)
-            .map_err(|e| PersistenceError::ParseError(format!("invalid metadata JSON for {}: {}", id, e)))?;
+        let meta: MetaFile = serde_json::from_str(&content).map_err(|e| {
+            PersistenceError::ParseError(format!("invalid metadata JSON for {}: {}", id, e))
+        })?;
         let parsed_created = DateTime::parse_from_rfc3339(&meta.created_at)
             .map_err(|e| PersistenceError::ParseError(format!("invalid created_at: {}", e)))?;
         let created = chrono::TimeZone::from_utc_datetime(&Utc, &parsed_created.naive_utc());
@@ -145,7 +151,12 @@ impl FileSystemDmnStore {
     }
 
     /// Write a `.meta.json` sidecar file for a decision.
-    async fn write_meta(&self, id: &str, created: DateTime<Utc>, updated: DateTime<Utc>) -> Result<(), PersistenceError> {
+    async fn write_meta(
+        &self,
+        id: &str,
+        created: DateTime<Utc>,
+        updated: DateTime<Utc>,
+    ) -> Result<(), PersistenceError> {
         self.ensure_dir().await?;
         let meta = serde_json::json!({
             "created_at": created.to_rfc3339(),
@@ -207,7 +218,10 @@ impl DmnPersistence for FileSystemDmnStore {
     async fn get(&self, id: &str) -> Result<DmnDocument, PersistenceError> {
         let dmn_path = self.dmn_path(id);
         if !dmn_path.exists() {
-            return Err(PersistenceError::NotFound(format!("decision file for {}", id)));
+            return Err(PersistenceError::NotFound(format!(
+                "decision file for {}",
+                id
+            )));
         }
 
         let content = fs::read(&dmn_path).await?;
@@ -234,7 +248,9 @@ impl DmnPersistence for FileSystemDmnStore {
             id: id.to_string(),
             name,
             content,
-            metadata: meta_content.and_then(|c| serde_json::from_str(&c).ok()).unwrap_or(JsonValue::Null),
+            metadata: meta_content
+                .and_then(|c| serde_json::from_str(&c).ok())
+                .unwrap_or(JsonValue::Null),
             created_at,
             updated_at,
         })
@@ -247,7 +263,8 @@ impl DmnPersistence for FileSystemDmnStore {
         let dmn_path = self.dmn_path(&doc.id);
         if dmn_path.exists() {
             return Err(PersistenceError::Conflict(format!(
-                "decision '{}' already exists", doc.id
+                "decision '{}' already exists",
+                doc.id
             )));
         }
 
@@ -268,7 +285,10 @@ impl DmnPersistence for FileSystemDmnStore {
     async fn update(&self, id: &str, doc: DmnDocument) -> Result<DmnDocument, PersistenceError> {
         let dmn_path = self.dmn_path(id);
         if !dmn_path.exists() {
-            return Err(PersistenceError::NotFound(format!("decision file for {}", id)));
+            return Err(PersistenceError::NotFound(format!(
+                "decision file for {}",
+                id
+            )));
         }
 
         fs::write(&dmn_path, &doc.content).await?;
@@ -295,7 +315,10 @@ impl DmnPersistence for FileSystemDmnStore {
         let meta_path = self.meta_path(id);
 
         if !dmn_path.exists() && !meta_path.exists() {
-            return Err(PersistenceError::NotFound(format!("decision '{}' not found", id)));
+            return Err(PersistenceError::NotFound(format!(
+                "decision '{}' not found",
+                id
+            )));
         }
 
         fs::remove_file(&dmn_path).await.ok(); // Ignore if already gone.
@@ -314,7 +337,10 @@ impl DmnPersistence for FileSystemDmnStore {
     async fn load_file(&self, filename: &str) -> Result<Vec<u8>, PersistenceError> {
         let path = self.storage_path.join(filename);
         if !path.exists() {
-            return Err(PersistenceError::NotFound(format!("file '{}' not found", filename)));
+            return Err(PersistenceError::NotFound(format!(
+                "file '{}' not found",
+                filename
+            )));
         }
         Ok(fs::read(&path).await?)
     }
@@ -452,7 +478,9 @@ mod tests {
         let doc = DmnDocument {
             id: "test-1".to_string(),
             name: "Test Decision".to_string(),
-            content: b"<?xml version=\"1.0\"?><definitions id=\"test-1\" name=\"Test\"></definitions>".to_vec(),
+            content:
+                b"<?xml version=\"1.0\"?><definitions id=\"test-1\" name=\"Test\"></definitions>"
+                    .to_vec(),
             metadata: serde_json::json!({"key": "value"}),
             created_at: Utc::now(),
             updated_at: Utc::now(),

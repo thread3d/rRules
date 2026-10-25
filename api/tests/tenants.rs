@@ -174,7 +174,10 @@ async fn rules_are_isolated_per_tenant() {
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
         let body = body_json(resp).await;
-        assert_eq!(body["total_count"], 1, "tenant {tenant} sees exactly one rule");
+        assert_eq!(
+            body["total_count"], 1,
+            "tenant {tenant} sees exactly one rule"
+        );
         let names: Vec<&str> = body["rules"]
             .as_array()
             .expect("rules array")
@@ -182,6 +185,9 @@ async fn rules_are_isolated_per_tenant() {
             .filter_map(|r| r["name"].as_str())
             .collect();
         assert!(names.contains(&expected), "tenant {tenant} sees {expected}");
-        assert!(!names.contains(&unexpected), "tenant {tenant} must not see {unexpected}");
+        assert!(
+            !names.contains(&unexpected),
+            "tenant {tenant} must not see {unexpected}"
+        );
     }
 }

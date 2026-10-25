@@ -205,7 +205,11 @@ mod tests {
         let types: Vec<_> = events.iter().map(|e| e.event_type()).collect();
         let unique_types: std::collections::HashSet<_> = types.iter().collect();
 
-        assert_eq!(types.len(), unique_types.len(), "Event type names must be unique");
+        assert_eq!(
+            types.len(),
+            unique_types.len(),
+            "Event type names must be unique"
+        );
     }
 
     #[test]

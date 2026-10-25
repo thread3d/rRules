@@ -34,8 +34,8 @@ use std::fs;
 use std::path::Path;
 
 use chrono::Months;
-use chrono::TimeZone;
 use chrono::TimeDelta;
+use chrono::TimeZone;
 
 /// OMG DMN TCK provenance — cited per 30-03-02 acceptance criteria.
 const TCK_PROVENANCE: &str = "github.com/dmn-tck/tck @ commit 0dbcaf9b (Apache-2.0)";
@@ -96,9 +96,8 @@ struct TckCase {
 
 /// Parse a DMN file into a map of decision name → expression text.
 fn parse_dmn_expressions(path: &Path) -> HashMap<String, String> {
-    let text = fs::read_to_string(path).unwrap_or_else(|e| {
-        panic!("failed to read DMN {}: {e}", path.display())
-    });
+    let text = fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed to read DMN {}: {e}", path.display()));
     let mut reader = NsReader::from_str(&text);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -144,9 +143,8 @@ fn parse_dmn_expressions(path: &Path) -> HashMap<String, String> {
 
 /// Parse a TCK test-case XML file into a list of [`TckCase`]s.
 fn parse_test_cases(path: &Path) -> Vec<TckCase> {
-    let text = fs::read_to_string(path).unwrap_or_else(|e| {
-        panic!("failed to read test XML {}: {e}", path.display())
-    });
+    let text = fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed to read test XML {}: {e}", path.display()));
     let mut reader = NsReader::from_str(&text);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -356,7 +354,9 @@ fn feel_tck_melbourne_iana_round_trip() {
         formatted, "2021-02-01T10:10:10@Australia/Melbourne",
         "exact TCK expected value"
     );
-    eprintln!("feel_tck_melbourne_iana_round_trip: Pitfall 3 closed — @Australia/Melbourne preserved");
+    eprintln!(
+        "feel_tck_melbourne_iana_round_trip: Pitfall 3 closed — @Australia/Melbourne preserved"
+    );
 }
 
 /// Run the vendored 0100-arithmetic TCK temporal+duration vectors that are
@@ -385,7 +385,9 @@ fn feel_tck_temporal_vectors() {
         if ty != "xsd:dateTime" && ty != "xsd:string" {
             continue;
         }
-        let Some(expected_str) = &case.expected_value else { continue };
+        let Some(expected_str) = &case.expected_value else {
+            continue;
+        };
         // Skip negative-prefix temporal cases (negative-year IANA — Pitfall 4
         // documented limitation; recorded in SKIP_LIST).
         if expected_str.starts_with('-') && expected_str.contains('@') {
@@ -449,15 +451,24 @@ fn feel_tck_temporal_skip_list_documented() {
     );
     for (category, reason) in SKIP_LIST {
         assert!(!category.is_empty(), "skip-list category is empty");
-        assert!(!reason.is_empty(), "skip-list reason for {category} is empty");
+        assert!(
+            !reason.is_empty(),
+            "skip-list reason for {category} is empty"
+        );
     }
     let joined: String = SKIP_LIST
         .iter()
         .map(|(c, r)| format!("{c}: {r}"))
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(joined.contains("subtraction"), "skip-list covers subtraction");
-    assert!(joined.contains("scaling"), "skip-list covers duration scaling");
+    assert!(
+        joined.contains("subtraction"),
+        "skip-list covers subtraction"
+    );
+    assert!(
+        joined.contains("scaling"),
+        "skip-list covers duration scaling"
+    );
     assert!(
         joined.contains("string()"),
         "skip-list covers string() built-in"

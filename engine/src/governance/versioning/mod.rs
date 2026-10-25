@@ -156,11 +156,8 @@ impl VersionControlRepo {
                 let mut cfg = repo.config()?;
                 cfg.set_str("user.name", &config.commit_author_name)
                     .map_err(|e| VcsError::CommitFailed(format!("config set: {}", e)))?;
-                cfg.set_str(
-                    "user.email",
-                    &config.commit_author_email,
-                )
-                .map_err(|e| VcsError::CommitFailed(format!("config set: {}", e)))?;
+                cfg.set_str("user.email", &config.commit_author_email)
+                    .map_err(|e| VcsError::CommitFailed(format!("config set: {}", e)))?;
 
                 let mut vcr = Self { repo, config };
                 vcr.ensure_default_branch()?;
@@ -190,17 +187,25 @@ impl VersionControlRepo {
 
         // An empty commit has no parent (root commit).
         let tree = self.repo.find_tree(tree_id)?;
-        let commit_oid = self.repo
-            .commit(Some("HEAD"), &sig, &sig, "Initial empty repository", &tree, &[])?;
+        let commit_oid = self.repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "Initial empty repository",
+            &tree,
+            &[],
+        )?;
 
         // Create the default branch reference pointing to this commit.
         let branch_ref_name = format!("refs/heads/{}", self.config.default_branch);
-        self.repo.reference(&branch_ref_name, commit_oid, true, "create initial branch")?;
+        self.repo
+            .reference(&branch_ref_name, commit_oid, true, "create initial branch")?;
 
         // Update HEAD to point to the new branch (symbolic ref).
         let head_oid = self.repo.refname_to_id("HEAD").unwrap_or(commit_oid);
         if head_oid != commit_oid {
-            self.repo.reference("HEAD", commit_oid, true, "set HEAD to default branch")?;
+            self.repo
+                .reference("HEAD", commit_oid, true, "set HEAD to default branch")?;
         }
 
         Ok(())
@@ -216,7 +221,11 @@ impl VersionControlRepo {
     }
 
     /// Create a new feature branch from the default branch (or specified source).
-    pub fn create_branch(&mut self, branch_name: &str, source: Option<&str>) -> Result<(), VcsError> {
+    pub fn create_branch(
+        &mut self,
+        branch_name: &str,
+        source: Option<&str>,
+    ) -> Result<(), VcsError> {
         if branch_name == "HEAD" || branch_name.starts_with("refs/") {
             return Err(VcsError::InvalidBranchName(branch_name.to_string()));
         }
@@ -230,7 +239,10 @@ impl VersionControlRepo {
 
         match self.repo.branch(branch_name, &commit, false) {
             Ok(_) => Ok(()),
-            Err(e) if e.class() == git2::ErrorClass::Reference && e.code() == git2::ErrorCode::Exists => {
+            Err(e)
+                if e.class() == git2::ErrorClass::Reference
+                    && e.code() == git2::ErrorCode::Exists =>
+            {
                 Err(VcsError::BranchCreationFailed(format!(
                     "Branch '{}' already exists",
                     branch_name
@@ -244,7 +256,8 @@ impl VersionControlRepo {
     pub fn list_branches(&self) -> Result<Vec<Branch>, VcsError> {
         let head_ref = self.repo.head()?;
         // Get just the branch name (not full ref like "refs/heads/main")
-        let default_head_name: Option<String> = head_ref.name()
+        let default_head_name: Option<String> = head_ref
+            .name()
             .ok()
             .and_then(|full_name| full_name.strip_prefix("refs/heads/"))
             .map(String::from);
@@ -262,7 +275,8 @@ impl VersionControlRepo {
                 name: name.clone(),
                 is_default: default_head_name.as_ref() == Some(&name),
                 created_at: Utc::now(),
-                last_commit_sha: head_commit.as_ref()
+                last_commit_sha: head_commit
+                    .as_ref()
                     .map(|commit: &git2::Commit<'_>| commit.id().to_string())
                     .unwrap_or_default(),
                 last_commit_message: head_commit
@@ -296,10 +310,8 @@ impl VersionControlRepo {
         // Checkout the tree associated with this commit.
         let mut opts = git2::build::CheckoutBuilder::new();
         opts.force().safe();
-        self.repo.checkout_tree(
-            commit.as_object(),
-            Some(&mut opts),
-        )?;
+        self.repo
+            .checkout_tree(commit.as_object(), Some(&mut opts))?;
 
         Ok(())
     }
@@ -355,9 +367,7 @@ impl VersionControlRepo {
         let annotated_source = self.repo.reference_to_annotated_commit(&src_ref)?;
 
         // Analyze merge to detect conflicts before attempting.
-        let (analysis, _preference) = self
-            .repo
-            .merge_analysis(&[&annotated_source])?;
+        let (analysis, _preference) = self.repo.merge_analysis(&[&annotated_source])?;
 
         if analysis.is_up_to_date() {
             // Already up to date — no merge needed.
@@ -371,7 +381,8 @@ impl VersionControlRepo {
         if analysis.is_fast_forward() {
             // Fast-forward merge — just move the branch pointer.
             let ref_name = format!("refs/heads/{}", &target);
-            self.repo.reference(&ref_name, source_commit.id(), true, "merge: fast-forward")?;
+            self.repo
+                .reference(&ref_name, source_commit.id(), true, "merge: fast-forward")?;
 
             return Ok(MergeResult {
                 success: true,
@@ -385,16 +396,26 @@ impl VersionControlRepo {
         let source_tree = source_commit.tree()?;
 
         let opts = git2::MergeOptions::new();
-        match self.repo.merge_trees(&base_tree, &target_commit.tree()?, &source_tree, Some(&opts)) {
+        match self.repo.merge_trees(
+            &base_tree,
+            &target_commit.tree()?,
+            &source_tree,
+            Some(&opts),
+        ) {
             Ok(mut index_result) => {
                 if index_result.has_conflicts() {
                     let conflicts: Vec<Conflict> = index_result
                         .conflicts()?
                         .filter_map(|result| result.ok())
                         .map(|c| Conflict {
-                            path: c.our.map(|o| String::from_utf8_lossy(&o.path).into_owned()).unwrap_or_else(|| "unknown".to_string()),
+                            path: c
+                                .our
+                                .map(|o| String::from_utf8_lossy(&o.path).into_owned())
+                                .unwrap_or_else(|| "unknown".to_string()),
                             old_version: None,
-                            base_version: c.ancestor.map(|a| String::from_utf8_lossy(&a.path).into_owned()),
+                            base_version: c
+                                .ancestor
+                                .map(|a| String::from_utf8_lossy(&a.path).into_owned()),
                             new_version: None,
                         })
                         .collect();
@@ -430,11 +451,7 @@ impl VersionControlRepo {
     }
 
     /// Get the commit history (git log) for a branch.
-    pub fn get_log(
-        &self,
-        branch: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<LogEntry>, VcsError> {
+    pub fn get_log(&self, branch: Option<&str>, limit: usize) -> Result<Vec<LogEntry>, VcsError> {
         let ref_name = if let Some(b) = branch {
             format!("refs/heads/{}", b)
         } else {
@@ -451,7 +468,10 @@ impl VersionControlRepo {
             .take(limit)
             .filter_map(|oid_result| {
                 oid_result.ok().and_then(|oid| {
-                    self.repo.find_commit(oid).ok().map(|c| LogEntry::from_commit(&c))
+                    self.repo
+                        .find_commit(oid)
+                        .ok()
+                        .map(|c| LogEntry::from_commit(&c))
                 })
             })
             .collect();
@@ -607,7 +627,11 @@ fn collect_changes(
         }
         _ => {
             if old != new {
-                let path = if prefix.is_empty() { "value".to_string() } else { prefix.to_string() };
+                let path = if prefix.is_empty() {
+                    "value".to_string()
+                } else {
+                    prefix.to_string()
+                };
                 out.push(Change::Modified {
                     field: path,
                     old_value: old.clone(),
@@ -735,7 +759,13 @@ mod tests {
 
         // Verify both branches exist.
         let branches = vcr.list_branches().unwrap();
-        assert!(branches.iter().any(|b| b.name == "main"), "Should have main branch");
-        assert!(branches.iter().any(|b| b.name == "ff-branch"), "Should have ff-branch");
+        assert!(
+            branches.iter().any(|b| b.name == "main"),
+            "Should have main branch"
+        );
+        assert!(
+            branches.iter().any(|b| b.name == "ff-branch"),
+            "Should have ff-branch"
+        );
     }
 }

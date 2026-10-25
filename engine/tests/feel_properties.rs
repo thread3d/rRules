@@ -5,10 +5,10 @@
 //! - Operator associativity and commutativity
 //! - Scope resolution with dependency chains
 
-use proptest::prelude::*;
-use engine::dmn::feel::parser::{parse_expression, parse_simple_unary_tests};
-use engine::dmn::feel::eval::{evaluate, Scope};
 use engine::data_types::Value;
+use engine::dmn::feel::eval::{evaluate, Scope};
+use engine::dmn::feel::parser::{parse_expression, parse_simple_unary_tests};
+use proptest::prelude::*;
 
 // PropTest strategy for generating random FEEL-like expressions
 fn feel_expr_strategy() -> impl Strategy<Value = String> {
@@ -144,7 +144,7 @@ fn test_scope_resolution_with_dependencies() {
 
     let mut scope = Scope::empty();
     let person_ctx = engine::data_types::Value::Object(
-        [("name".to_string(), Value::String("Alice".to_string()))].into()
+        [("name".to_string(), Value::String("Alice".to_string()))].into(),
     );
     scope.bindings.insert("person".into(), person_ctx);
 
@@ -187,11 +187,9 @@ fn test_context_lookup() {
 
     let mut scope = Scope::empty();
     let inner = engine::data_types::Value::Object(
-        [("b".to_string(), Value::String("value".to_string()))].into()
+        [("b".to_string(), Value::String("value".to_string()))].into(),
     );
-    let outer = engine::data_types::Value::Object(
-        [("a".to_string(), inner)].into()
-    );
+    let outer = engine::data_types::Value::Object([("a".to_string(), inner)].into());
     scope.bindings.insert("a".into(), outer);
 
     // Path navigation may not be fully implemented - skip this test for now
