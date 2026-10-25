@@ -6,7 +6,7 @@
 | [`user-guide.md`](user-guide.md) | How to write rules, aimed at a rule author rather than a developer. |
 | [`../specs/`](../specs/README.md) | **The specification.** Normative requirements with stable ids, plus implementation-derived subsystem specs that CodeWitness executes against. |
 | [`../specs/requirements.md`](../specs/requirements.md) | The 35 requirements CodeWitness verifies, in the form it parses. |
-| [`../TCK-COVERAGE-GAPS.md`](../TCK-COVERAGE-GAPS.md) | Measured DMN TCK conformance: pass/fail/skip counts per layer and every remaining gap. |
+| [`../TCK-COVERAGE-GAPS.md`](../TCK-COVERAGE-GAPS.md) | Measured DMN TCK conformance: the baseline the test suite enforces, a digest of failure causes, and a generated ledger of every failing layer (`make tck-ledger`). |
 | [`../CHANGELOG.md`](../CHANGELOG.md) | Released behaviour, newest first. |
 | [`archive/`](archive/) | Historical audits, kept for provenance. Superseded — do not treat as current. |
 

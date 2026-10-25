@@ -34,8 +34,9 @@ independent verification; the measured state below is the only state worth quoti
   requirements — **28 VERIFIED, 0 FAILED, 7 UNVERIFIED** for `engine`; the 7 are the HTTP API
   requirements, covered from `api` where their integration suites pass.
 - **DMN conformance:** **143 layer results pass, 31 fail, 0 skip** across 51 vectors
-  (`TCK-COVERAGE-GAPS.md` lists every remaining failure by class). The sweep gates on that baseline,
-  so a regression fails the build.
+  (`TCK-COVERAGE-GAPS.md` holds both a digest and a generated per-layer ledger of them). The sweep
+  gates on that baseline, and `tck_baseline_matches_documentation` fails if the document and the gate
+  disagree — so a regression fails the build and a stale document fails it too.
 - **Build:** `cargo test --workspace` green, `cargo clippy --workspace -- -D warnings` clean,
   `cargo fmt --all -- --check` clean.
 
@@ -48,6 +49,7 @@ recorded as wrong wherever it appeared outside the historical archives.
 ```bash
 make ci          # build, test, clippy -D warnings, fmt --check, frontend build + tests
 make tck         # DMN TCK sweep, baseline-gated, per-layer report
+make tck-ledger  # regenerate the failure ledger inside TCK-COVERAGE-GAPS.md
 make verify      # CodeWitness against specs/requirements.md (engine + api)
 ```
 

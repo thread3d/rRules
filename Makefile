@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck verify docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger verify docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -45,6 +45,11 @@ frontend-build:
 # baseline (143 pass / 31 fail / 0 skip); fails on any regression.
 tck:
 	cargo test -p engine --test tck_sweep -- --nocapture
+
+# Regenerate the failure ledger inside TCK-COVERAGE-GAPS.md from a real sweep.
+# Run after closing a gap (and bump the baseline constants) or after accepting one.
+tck-ledger:
+	./scripts/update-tck-ledger.sh
 
 # Verify the specification with CodeWitness (requires the `codewitness` CLI).
 # Reports land under engine/.codewitness/runs/ and api/.codewitness/runs/.
@@ -117,6 +122,7 @@ help:
 	@echo "  fmt             - Format code with rustfmt"
 	@echo "  fmt-check       - Fail if any file is not rustfmt-clean"
 	@echo "  tck             - Run the DMN TCK sweep (baseline-gated)"
+	@echo "  tck-ledger      - Regenerate the failure ledger in TCK-COVERAGE-GAPS.md"
 	@echo "  verify          - Verify specs/requirements.md with CodeWitness"
 	@echo "  docker-build    - Build Docker image using existing Dockerfile"
 	@echo "  bench           - Run DMN subsystem benchmarks (Criterion)"

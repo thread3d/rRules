@@ -99,6 +99,21 @@ struct DmndiLoss {
 }
 
 // =========================================================================
+// Documented conformance baseline
+// =========================================================================
+
+/// Layer results that pass at the documented conformance baseline.
+///
+/// `TCK-COVERAGE-GAPS.md` states the same numbers, and
+/// `tck_baseline_matches_documentation` fails the suite when the two disagree —
+/// so the gate and the document cannot drift apart silently. Closing a gap means
+/// raising both, deliberately.
+const TCK_BASELINE_PASSED: usize = 143;
+
+/// Layer results that fail at the documented conformance baseline.
+const TCK_BASELINE_FAILED: usize = 31;
+
+// =========================================================================
 // Known divergences
 // =========================================================================
 
@@ -163,13 +178,16 @@ fn tck_sweep() {
     if std::env::var("TCK_WRITE_REPORT").is_ok() {
         write_results_report(&results, &phase_dir, &elapsed);
     }
+    if let Some(path) = std::env::var_os("TCK_LEDGER_OUT") {
+        write_ledger(&results, Path::new(&path));
+    }
 
     // The documented conformance baseline (see TCK-COVERAGE-GAPS.md). The suite
     // is green at the baseline and fails on any regression: one more failing
     // layer, or one fewer passing layer than the recorded gap set. Closing a gap
     // means raising these numbers, deliberately.
-    const BASELINE_PASSED: usize = 143;
-    const BASELINE_FAILED: usize = 31;
+    const BASELINE_PASSED: usize = TCK_BASELINE_PASSED;
+    const BASELINE_FAILED: usize = TCK_BASELINE_FAILED;
 
     if results.passed < BASELINE_PASSED || results.failed > BASELINE_FAILED {
         eprintln!(
@@ -183,6 +201,39 @@ fn tck_sweep() {
         "Baseline met: {}/{} layer results ({} known failures documented in TCK-COVERAGE-GAPS.md).",
         results.passed, results.failed, BASELINE_FAILED
     );
+}
+
+/// Write every failing layer as a Markdown table, for `make tck-ledger`.
+///
+/// `TCK_LEDGER_OUT` selects the destination; the target splices the block into
+/// `TCK-COVERAGE-GAPS.md` between its generated-section markers, so the ledger in
+/// the repository is produced by the harness rather than typed by hand.
+fn write_ledger(results: &SweepResults, path: &Path) {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "| # | Vector | Layer | Observed |\n|---|--------|-------|----------|\n"
+    ));
+    for (index, (vector, layer, reason)) in results.failures.iter().enumerate() {
+        let observed = reason.replace('|', "\\|").replace('\n', " ");
+        out.push_str(&format!(
+            "| {} | `{}` | {} | {} |\n",
+            index + 1,
+            vector,
+            layer,
+            observed
+        ));
+    }
+    if results.failures.is_empty() {
+        out.push_str("| — | — | — | No failing layer. |\n");
+    }
+    match std::fs::write(path, out) {
+        Ok(()) => println!(
+            "Ledger written to {} ({} failing layer results).",
+            path.display(),
+            results.failures.len()
+        ),
+        Err(error) => eprintln!("could not write the ledger to {}: {error}", path.display()),
+    }
 }
 
 fn execute_all_layers(vectors: &[test_util::TckVector]) -> SweepResults {
@@ -205,22 +256,22 @@ fn execute_all_layers(vectors: &[test_util::TckVector]) -> SweepResults {
 
         // Layer 1: Parser-only (parse + export + re-parse structural compare).
         let r = execute_parser_layer(vector);
-        record_pass_fail(&mut results, vector, &r.status);
+        record_pass_fail(&mut results, vector, &r.status, "parser");
 
         // Layer 2: Evaluator. Every outcome is recorded — an earlier version
         // only recorded passes here, which made a failing evaluator layer
         // invisible in the summary and in the exit code.
         let eval_result = execute_evaluator_layer(vector);
-        record_pass_fail(&mut results, vector, &eval_result.status);
+        record_pass_fail(&mut results, vector, &eval_result.status, "evaluator");
 
         // Layer 3: Round-trip structural comparison (IR equality primary).
         let rt_result = execute_round_trip_layer(vector);
-        record_pass_fail(&mut results, vector, &rt_result.status);
+        record_pass_fail(&mut results, vector, &rt_result.status, "round-trip");
 
         // Layer 4: DMNDI round-trip.
         let dmndi_result = execute_dmndi_layer(vector, &mut results);
         if !matches!(dmndi_result.status, TestStatus::Skip(_)) {
-            record_pass_fail(&mut results, vector, &dmndi_result.status);
+            record_pass_fail(&mut results, vector, &dmndi_result.status, "dmndi");
         }
     }
 
@@ -231,6 +282,7 @@ fn record_pass_fail(
     results: &mut SweepResults,
     vector: &test_util::TckVector,
     status: &TestStatus,
+    layer: &str,
 ) {
     match status {
         TestStatus::Pass => results.passed += 1,
@@ -238,7 +290,7 @@ fn record_pass_fail(
             results.failed += 1;
             results
                 .failures
-                .push((vector.dir_name.clone(), String::new(), reason.clone()));
+                .push((vector.dir_name.clone(), layer.to_string(), reason.clone()));
         }
         TestStatus::Skip(_) => results.skipped += 1,
     }
@@ -936,4 +988,57 @@ fn write_results_report(results: &SweepResults, phase_dir: &Path, elapsed: &std:
     }
 
     writeln!(f, "## Layer Breakdown\nEach vector is tested through up to 4 layers:\n| Layer | Description |\n|-------|-------------|\n| Parser Only | Parse DMN -> Export XML -> Re-parse -> IR structural compare |\n| Evaluator | Parse DMN + evaluate with test inputs vs expected values |\n| Round-Trip | Full IR round-trip (parse->export->re-parse) IR equality |\n| DMNDI Round-Trip | Diagram/layout preservation through parse->export->re-parse |\n").unwrap();
+}
+
+/// The document and the gate must state the same baseline.
+///
+/// `TCK-COVERAGE-GAPS.md` claims a pass/fail count and `tck_sweep` gates on
+/// constants of the same value. Without this check the two drift silently — the
+/// document says one thing, CI enforces another, and nobody notices until a gap
+/// is "closed" in prose only.
+#[test]
+fn tck_baseline_matches_documentation() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("engine/ has a parent (the repository root)")
+        .join("TCK-COVERAGE-GAPS.md");
+    let document = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+
+    // Expect a line of the form:
+    //   **Layer results: 143 passed, 31 failed, 0 skipped across 51 vectors.**
+    let summary = document
+        .lines()
+        .find(|line| line.contains("Layer results:"))
+        .unwrap_or_else(|| panic!("{} has no 'Layer results:' summary line", path.display()));
+
+    let numbers: Vec<usize> = summary
+        .split_whitespace()
+        .filter_map(|word| {
+            word.trim_matches(|c: char| !c.is_ascii_digit())
+                .parse()
+                .ok()
+        })
+        .collect();
+    assert!(
+        numbers.len() >= 2,
+        "could not read pass/fail counts from {summary:?}"
+    );
+
+    assert_eq!(
+        (numbers[0], numbers[1]),
+        (TCK_BASELINE_PASSED, TCK_BASELINE_FAILED),
+        "TCK-COVERAGE-GAPS.md says {}/{} (passed/failed) but the sweep gates on {}/{}: \
+         update the document and the constants together",
+        numbers[0],
+        numbers[1],
+        TCK_BASELINE_PASSED,
+        TCK_BASELINE_FAILED
+    );
+
+    // The generated ledger must be present and mention the same number of rows.
+    assert!(
+        document.contains("BEGIN GENERATED LEDGER"),
+        "TCK-COVERAGE-GAPS.md is missing the generated-ledger markers; run `make tck-ledger`"
+    );
 }

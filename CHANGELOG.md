@@ -12,6 +12,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`make tck-ledger`** — the conformance record now carries a generated ledger of every failing
+  layer (vector, layer, observed-versus-expected) alongside the hand-written digest of causes. The
+  block between the `BEGIN/END GENERATED LEDGER` markers in `TCK-COVERAGE-GAPS.md` is owned by
+  `scripts/update-tck-ledger.sh`, which runs the sweep and splices the result in, so the list cannot
+  rot into a stale summary.
+- **`tck_baseline_matches_documentation`** — a test that reads the pass/fail counts from
+  `TCK-COVERAGE-GAPS.md` and compares them with the constants the sweep gates on. The document and
+  the gate can no longer drift apart: changing one without the other fails the suite with both
+  numbers in the message. Verified by deliberately breaking the document (150/20) and watching it
+  fail.
+
 ### Fixed
 - **GitHub Actions workflows restored and repaired.** The four workflows had been removed because
   none of them could run as written; they are back, fixed:
