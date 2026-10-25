@@ -1,0 +1,59 @@
+# CodeWitness configuration for the rRules HTTP API crate.
+#
+# Run from the repository root:
+#
+#   codewitness verify api --requirements specs/requirements.md --config api/codewitness.yaml
+#
+# The API is verified from its own integration-test suite rather than from
+# generated scenarios: the handlers need an actix-web test server, an
+# authenticator and a shared state stack, which a single generated Rust test
+# cannot construct. The suites below cite their requirement ids in their
+# headers, which is how CodeWitness maps a test class to a requirement.
+#
+# Requirements whose evidence lives in the engine crate (the FEEL/DMN/engine
+# semantics) are verified by `engine/codewitness.yaml`.
+
+project:
+  name: rrules-api
+
+language:
+  adapter: rust
+
+verification:
+  timeout: 10m
+  max_duration: 15m
+  max_test_generation_iterations: 1
+  max_generated_tests: 0
+  max_mutation_time: 5m
+
+tests:
+  enabled: true
+
+mutation:
+  enabled: true
+  tool: rust-text
+
+property_testing:
+  enabled: false
+  max_scenarios: 0
+
+static_analysis:
+  enabled: true
+  analyzers: [heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: false
+
+scenarios: []

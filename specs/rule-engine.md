@@ -1,0 +1,508 @@
+# Rule engine
+
+The `engine` crate exposes **one** boxed-trait execution surface (`ExecutionEngine`,
+`engine/src/engine/registry.rs:64-117`), **four** registered algorithm names
+(`EngineType::{Rete, Treat, Leaps, Phreak}`, `engine/src/engine/registry.rs:10-19`) and
+**one** shared evaluate-and-apply routine (`direct_eval::direct_execute`,
+`engine/src/engine/direct_eval.rs:67-179`) that three of the four engines delegate to.
+Only `ReteEngine` inlines its own copy of that routine
+(`engine/src/engine/rete/mod.rs:374-492`); TREAT, LEAPS and PHREAK call the shared helper
+(`engine/src/engine/treat/mod.rs:388-410`, `engine/src/engine/leaps/mod.rs:394-416`,
+`engine/src/engine/phreak/mod.rs:578-600`). All four ship network structures (alpha/beta
+memory, join nodes, caches, aggregation nodes, truth maintenance) that fact insertion
+populates but rule execution never consults. The four names therefore select a metrics
+identity plus a set of bookkeeping structures, not four matching strategies.
+
+Module gating (`engine/src/engine/mod.rs:30-44`): `rete` behind `engine-rete`, `treat`
+behind `any(engine-treat, engine-leaps)`, `leaps` behind `engine-leaps`, `phreak` behind
+`engine-phreak`; `direct_eval`, `metrics`, `registry`, `selector` are always compiled.
+
+## Execution semantics
+
+The evaluator is a **direct interpreter**: every pass re-evaluates every loaded rule's
+`Condition` against the whole working-memory set
+(`engine/src/engine/direct_eval.rs:100-133`; Rete twin at
+`engine/src/engine/rete/mod.rs:406-441`).
+
+1. **Resolve the fixpoint cap** from `RRULES_MAX_CHAIN_ITERATIONS`, unparseable/absent ⇒
+   `1000`, read per `execute()` call (`engine/src/engine/direct_eval.rs:73-76`,
+   `engine/src/engine/rete/mod.rs:378-381`). The API only logs a warning for a bad value
+   (`api/src/main.rs:76-81`).
+2. **Loop `for _pass in 0..max_iter`** (`engine/src/engine/direct_eval.rs:96`); `max_iter
+   == 0` means nothing is evaluated and `rules_fired == 0`.
+3. **Rule order** is `Vec` order, i.e. the order `load_ruleset` cloned
+   (`engine/src/engine/rete/mod.rs:630-633`). No salience/timestamp/name sort anywhere.
+4. **Skip already-fired rules** by id (`engine/src/engine/direct_eval.rs:102-104`).
+5. **Evaluate** against `working_facts.values()`; the id enters `evaluated_set` *before*
+   evaluation, so "evaluated" means "condition was computed"
+   (`engine/src/engine/direct_eval.rs:106-108`).
+6. **Fired test**: `rule.condition.evaluate(&facts)` (`engine/src/rules.rs:168-212`).
+   `Pattern` with no fact of that type is `false` (`engine/src/rules.rs:196-211`), so only
+   `Condition::True` (`:170`) fires on empty working memory.
+7. **Trace, if enabled**: push `TraceEvent{event_type:"rule_fired", timestamp: now}` and add
+   `facts.len()` to `facts_matched` (`engine/src/engine/direct_eval.rs:115-122`) — the sum of
+   working-memory size per firing, not a match count.
+8. **Apply actions**: clone `rule.actions`, then `apply_action` against live working memory
+   (`engine/src/engine/direct_eval.rs:126-129`).
+9. **Mark fired**, set `newly_fired_this_pass`; Rete additionally calls
+   `metrics.record_rule_fired()` here (`engine/src/engine/rete/mod.rs:437-439`). "Fired"
+   means the condition returned `true` — even when no action changed anything (an
+   `UpdateFact` with an absent target is a silent return,
+   `engine/src/engine/direct_eval.rs:211-214`).
+10. **Intra-pass visibility**: writes are immediate, so a later rule in the same pass sees
+    them; there is no activation snapshot and no agenda
+    (`engine/src/engine/direct_eval.rs:100-133`).
+11. **Terminate the pass** when nothing newly fired (`engine/src/engine/direct_eval.rs:134-136`);
+    with step 4 this bounds productive passes at `|rules|`, the env cap being the outer net.
+12. **Record coverage once per rule, after the loop**: `CoverageTracking::record_rule_eval`
+    / `record_rule_fire` plus `RuleExecutionTracker::record_evaluation` / `record_fire`
+    (`engine/src/engine/direct_eval.rs:150-159`; duplicated for Rete at
+    `engine/src/engine/rete/mod.rs:457-466`).
+13. **Assemble** `EngineResult::success(fired_set.len())`, set
+    `fired_rule_ids` from HashSet iteration and attach `trace`
+    (`engine/src/engine/treat/mod.rs:404-409`, `engine/src/engine/rete/mod.rs:488-491`).
+
+### `EngineResult`
+
+| Field | Source | Notes |
+|---|---|---|
+| `success` | always `true` (`engine/src/engine/registry.rs:183-191`) | `EngineResult::failure` (`:194-202`) is unreachable from `execute()`; no evaluator error is surfaced. |
+| `rules_fired` | `fired_set.len()` | distinct rules fired this call, `≤ |rules|`. |
+| `message` | `"Executed {n} rules"` (`engine/src/engine/registry.rs:187`) | |
+| `fired_rule_ids` | HashSet iteration | explicitly unordered (`engine/src/engine/registry.rs:165-172`). |
+| `trace` | `Some` only if `collect_trace && !events.is_empty()` (`engine/src/engine/direct_eval.rs:165-176`) | `events` *is* in firing order (`engine/src/engine/registry.rs:141-146`); duration covers the loop only (`:86`, `166-168`). |
+
+`set_collect_trace` (`engine/src/engine/registry.rs:91-98`) defaults to `false` in all four
+engines (`engine/src/engine/rete/mod.rs:243`, `treat/mod.rs:197`, `leaps/mod.rs:240`,
+`phreak/mod.rs:446`); when false no `Vec`, `String` or `chrono` call happens
+(`engine/src/engine/direct_eval.rs:86-88`, `165`).
+
+### `rules_not_fired`
+
+Computed in the API, not the engine: loaded rule ids minus
+`EngineResult.fired_rule_ids` (`api/src/v1/execution.rs:790-800`). The stateless path takes
+ids from the filtered load (`api/src/v1/execution.rs:654-681`), so `rule_filter`-excluded
+rules never appear; the sessionful path takes ids from the unfiltered shared ruleset
+(`api/src/v1/execution.rs:1037-1054`). Operationally it is: evaluated rules whose
+condition never returned true, plus rules never evaluated because the pass cap ran out.
+
+### Action semantics
+
+`apply_action` exists twice with identical bodies
+(`engine/src/engine/direct_eval.rs:193-247`, `engine/src/engine/rete/mod.rs:507-562`):
+
+| Action | Behaviour |
+|---|---|
+| `UpdateFact { id, fields }` | Target = exact `fact.id` key, else first fact whose `fact_type_id == id`; none ⇒ silent return (`engine/src/engine/direct_eval.rs:203-214`). Field expressions evaluate against a **clone** of working memory taken at action start (`:196-199`) and are written into the payload (`:219-222`). |
+| `InsertFact` | `Fact::new` ⇒ new UUID (`engine/src/fact.rs:27-34`); inserted into `working_facts` only — no alpha/beta memory, no metric (`engine/src/engine/direct_eval.rs:224-227`). |
+| `RetractFact` | Removes by exact key, else first `fact_type_id` match; no memory cleanup, no metric (`engine/src/engine/direct_eval.rs:228-240`). |
+| `CallFunction`, `LogMessage` | No-ops (`engine/src/engine/direct_eval.rs:241-246`). |
+
+## Engine registry
+
+| Trait member | Default | Overridden by |
+|---|---|---|
+| `execute` | required (`registry.rs:66`) | all four → own `execute_rules` (`rete/mod.rs:571-573`, `treat/mod.rs:420-422`, `leaps/mod.rs:450-452`, `phreak/mod.rs:641-643`) |
+| `insert_fact` | required (`:69`) | all four → `assert_fact` |
+| `retract_fact -> Result<bool,String>` | required (`:72`) | Rete/TREAT/LEAPS real; PHREAK stub (`engine/src/engine/phreak/mod.rs:650-653`) |
+| `run -> usize` | required (`:75`) | all four: `execute_rules().rules_fired` |
+| `get_metrics`, `engine_type`, `reset` | required (`:78`, `:81`, `:84`) | all four; `reset` also drops loaded rules (`engine/src/engine/rete/mod.rs:607-615`) |
+| `set_config` | `Ok(())` no-op (`:87-89`) | nobody |
+| `set_collect_trace` | no-op (`:98`) | all four store a flag |
+| `load_ruleset` | `Err("load_ruleset not supported by this engine")` (`:106-108`) | all four clone `ruleset.rules` (`engine/src/engine/rete/mod.rs:630-633` and siblings) |
+| `get_facts` | empty `Vec` (`:114-116`) | all four clone `working_facts` |
+
+`ExecutionEngine: Send + Sync + Debug` (`engine/src/engine/registry.rs:64`) but no engine is
+`Clone`; the API builds a fresh engine per request (`api/src/v1/execution.rs:618-640`) and per
+session (`api/src/v1/sessions.rs:221-231`).
+
+**Naming.** `EngineType::name()` gives the lowercase name (`registry.rs:23-30`);
+`all_variants()` lists all four unconditionally (`:33-40`). `create_engine_by_name`
+lowercases and maps `"rete"|"treat"|"leaps"|"phreak"`; **anything else returns `None`**
+(`:276-285`), and `create_engine` returns `None` for an unregistered factory (`:269-273`).
+`available_engines()` is HashMap-ordered (`:288-293`); the API sorts it for `/v1/engines`
+(`api/src/v1/execution.rs:1142-1151`). `EngineSelector` keeps `current = "rete"`
+(`engine/src/engine/selector.rs:67-74`), `with_defaults()` advertises all four names
+**regardless of features** (`:77-79`), `select_engine` checks that list then a hardcoded
+match (`:98-116`), and `from_yaml`/`from_json` always return `Err` (`:127-144`).
+
+| Env var | Read at | Default | Effect |
+|---|---|---|---|
+| `RRULES_DEFAULT_ENGINE` | per request (`api/src/v1/execution.rs:598-602`), per session create (`api/src/v1/sessions.rs:196-208`), startup (`api/src/main.rs:61-63`) | `"rete"` (session path) / `selector.current_engine()` (stateless) | Engine used when the request omits `engine`. |
+| `RRULES_MAX_CHAIN_ITERATIONS` | per `execute()` (`engine/src/engine/direct_eval.rs:73`, `rete/mod.rs:378`) | `1000` | Fixpoint pass cap. |
+| `RRULES_SESSION_*`, `RRULES_MAX_SESSIONS` | `api/src/v1/sessions.rs:451-465` | — | Session lifecycle only. |
+
+**Unknown engine name**: `available_engines()` membership is checked first and failure
+returns `400 "unknown engine: {name}"` (`api/src/v1/execution.rs:606-613`,
+`api/src/v1/sessions.rs:210-216`); a registered-but-uncreatable engine is `500`
+(`api/src/v1/execution.rs:626-631`); `None` from `create_engine_by_name` maps to the same
+400 (`:632-637`). Sessions pin the engine at creation and reject a conflicting `engine` on
+resume with 400 (`api/src/v1/sessions.rs:171-190`). Startup *warns and falls back* to `rete`
+for an invalid `RRULES_DEFAULT_ENGINE` (`api/src/main.rs:63-69`), but per-request resolution
+re-reads the raw env value (`api/src/v1/execution.rs:600-602`), so a bad value still fails
+every engine-omitting request with 400.
+
+| Feature | Gates | Declared |
+|---|---|---|
+| `engine-rete` | `pub mod rete` (`engine/src/engine/mod.rs:30-31`), `ReteEngine`/`ReteEngineFactory` re-export (`registry.rs:308-309`), `metrics` re-export (`mod.rs:47-48`) | `engine/Cargo.toml:64` |
+| `engine-treat` | registration of `TreatEngineFactory` (`registry.rs:250-253`) | `engine/Cargo.toml:66` (`= ["engine-rete"]`) |
+| `engine-leaps` | `pub mod leaps` (`mod.rs:36-37`); alone it *also* compiles `treat` via `any(engine-treat, engine-leaps)` (`mod.rs:34-35`) | `engine/Cargo.toml:67` (`= ["engine-rete"]`) |
+| `engine-phreak` | `pub mod phreak` (`mod.rs:38-39`) | `engine/Cargo.toml:68` (`= ["engine-rete"]`) |
+| `history` | `pub mod history` — a verbatim copy of `coverage/mod.rs` (`engine/src/coverage/mod.rs:316-317`) | `engine/Cargo.toml:69` |
+
+The crate default is exactly those four engine features
+(`engine/Cargo.toml:58-63`: `default = ["engine-rete","engine-treat","engine-leaps","engine-phreak"]`)
+and the API pins the same four (`api/Cargo.toml:17`). Behaviour that **requires all four**:
+
+* `register_default_engines` registering four factories with `available_engines()` returning
+  `["rete","treat","leaps","phreak"]` (`registry.rs:245-266`, contract documented `:239-244`).
+* `test_register_default_engines_advertises_all_four`, itself gated on all four
+  (`registry.rs:351-380`).
+* `POST /v1/execute` (stateless and sessionful) accepting `engine: treat|leaps|phreak`,
+  because validation is `available_engines().contains(...)`
+  (`api/src/v1/execution.rs:606-613`).
+* `GET /v1/engines` listing four names, and per-engine Prometheus labels
+  (`api/src/v1/execution.rs:1120-1151`, `:732-741`).
+
+With `--no-default-features` no factory registers and every name resolves to `None`
+(`registry.rs:262-266`) while `EngineSelector` still advertises four
+(`engine/src/engine/selector.rs:77-79`).
+
+## Algorithm implementations
+
+Shared by all four: `HashMap<String, Fact>` working memory keyed by `fact.id.to_string()`,
+the cloned rules vector, `SimpleMetricsCollector`, and the semantics above.
+
+### Rete (`engine/src/engine/rete/mod.rs`)
+
+| Structure | Lines | Reality |
+|---|---|---|
+| `AlphaMemory` | `47-86` | Real insert/remove/get/size; `remove` used by retraction (`:587`). |
+| `BetaMemory` | `88-141` | Real; `remove_fact` drops every nagram mentioning the id and prunes empty buckets (`:120-127`). |
+| `MemoryReference`/`Nagram`/`NodeId` | `22-38` | `generation` is always written `0` (`:342`, `:351`). |
+| `TestNode`, `JoinNode`, `ActionNode` | `144-193` | Node records only: `JoinNode` is built with `NodeId("placeholder")` predecessors (`:173-174`) and no join condition is ever evaluated; `ActionNode`s are stored (`:219-221`) but nothing propagates into them. |
+| `assert_fact` | `274-294` | Stores the fact, inserts into alpha memory **only if a matching test node exists** (`:282-291`). |
+| `join_propagation` | `315-358` | Appends `alpha × existing-nagram` products and singletons with no dedup and no predicate (`:337-355`); nagram count grows quadratically. |
+| `execute_rules` | `374-492` | The inlined evaluator; doc comment states it bypasses the network (`:360-373`). |
+| metrics | `293`, `357`, `439`, `596-601` | `alpha_memory_size`/`beta_memory_size` are overwritten from live memory at read time (`:598-599`). |
+
+There is no token propagation, no join predicate, no agenda, no negative/aggregate node: the
+network is a data-collection harness and matching happens in `Condition::evaluate`.
+
+### TREAT (`engine/src/engine/treat/mod.rs`)
+
+Reuses `AlphaMemory`/`BetaMemory`/`NodeId` from `crate::engine::rete` (`:11`).
+
+| Structure | Lines | Reality |
+|---|---|---|
+| `LRUCache` / `CacheStats` | `31-139` | `HashMap<String, Nagram>` + `max_size`/`current_size`; eviction sorts keys and drops the lexicographically first (`:66-73`) — not LRU; `stats()` hardcodes `hit_count: 0, miss_count: 0` (`:110-117`) so `hit_rate()` is always `0.0`; `CacheEntry` (`:22-27`) and `get_oldest_entry` (`:82-86`) are dead. |
+| `TreatNetwork` | `142-170` | `base: ReteNetwork` + cache + `cached_nodes`; `add_cached_join_node` has no production caller. |
+| `propagate_to_successors` | `258-291` | Cache key is per node (`format!("join_{}", successor)`, `:267`), so a hit short-circuits propagation for a *different* fact (`:275-279`); exactly one `record_cache_miss` per test node after the loop (`:289-290`). |
+| `join_propagation_with_cache` | `294-374` | Hit ⇒ clone cached nagram + append each alpha fact (`:311-324`); miss ⇒ cache one representative nagram (`:351-371`). |
+| `execute_rules` | `388-410` | Delegates to `direct_execute`, then re-adds `record_rule_fired()` per fired rule (`:398-400`); the engine also keeps a second hit/miss counter pair (`:191-192`, `:452-453`) beside the metrics collector. |
+| `TreatEngineFactory::with_cache_size` | `507-510` | Ignores its argument (`let _ = max_cache_size;`). |
+
+### LEAPS (`engine/src/engine/leaps/mod.rs`)
+
+| Structure | Lines | Reality |
+|---|---|---|
+| `AggregationOp` (`Sum`/`Count`/`Max`/`Min`) | `21-91` | Real `compute` over `&[f64]` (`:44-55`) and `compute_from_facts` over `Integer`/`Float` fields (`:58-84`); empty ⇒ `None`. |
+| `AggregationNode` | `95-158` | Tracks `source_facts` + `current_value`; `recalculate()` **always returns `None`** (`:133-137`), so `current_value` never becomes `Some` (`:294-296`). |
+| `LeapsNetwork` + `assert_fact` | `188-222`, `271-300` | `base: ReteNetwork` + `agg_nodes` + `aggregated_join_nodes`; insertion feeds the fact id to **every** aggregation node regardless of type/field (`:293-297`). |
+| `join_propagation_with_predecessor` | `330-364` | Looks alpha facts up by `predecessor_id.0` as if it were a fact type (`:338`), whereas Rete uses the predecessor test node's `fact_type_id` (`rete/mod.rs:326`). |
+| `execute_aggregations` | `367-380` | No-op: computes into a local `_value` and discards it (`:375-378`). |
+| `compute_aggregation` | `426-440` | Real, but scans `working_facts` by `fact_type_id`, independent of the network. |
+| metrics pollution | `322-324` | `record_rule_fired()` on join traversal when the join is marked aggregated. |
+| `execute_rules` | `394-416` | Delegates to `direct_execute`, then `record_rule_fired()` per fired rule (`:404-406`). |
+
+### PHREAK (`engine/src/engine/phreak/mod.rs`)
+
+Redefines its own `AlphaMemory` (`:25-48`), `BetaMemory` (`:51-74`), `FactId`, `Nagram`,
+`MemoryReference` (`:18-22`, `:117-122`) instead of importing Rete's; its `AlphaMemory` has no
+`remove` and its `BetaMemory` no `remove_fact`, so PHREAK bookkeeping is not interchangeable.
+
+| Structure | Lines | Reality |
+|---|---|---|
+| `Justification`, `DependencyGraph`, `TruthMaintenance` | `124-327` | Real records and edges; `DependencyGraph::remove_justification` (`:215-224`) retains `producers` keys by premise rather than conclusion, so conclusion-keyed entries are not cleaned. |
+| `ExecutionTrace`/`RuleFire` | `363-425` | Real recorder, populated only by network traversal (`:508`), never by `execute_rules`. |
+| `assert_fact` | `464-490` | Stores, propagates, and `tms.support_fact` (`:487`). |
+| `execute_rules` | `578-600` | Delegates to `direct_execute`; **never touches the TMS** (documented `:574-577`). |
+| justifications | — | None created outside tests, so `justification_count() == 0` (asserted `:793`). |
+| `retract_fact` | `650-653` | `Ok(false)` unconditionally; `retract_fact_with_maintenance` (`:617-626`) is the same stub. |
+
+## Fact lifecycle
+
+**Insert.** `insert_fact` → `assert_fact`: working-memory insert, alpha insert if a matching
+test node exists, join/beta propagation, `record_fact_inserted`
+(`rete/mod.rs:274-294`, `treat/mod.rs:232-255`, `leaps/mod.rs:271-300`,
+`phreak/mod.rs:464-490`). `Action::InsertFact` inside the evaluator bypasses all of that — it
+mutates `working_facts` only with a fresh UUID (`direct_eval.rs:224-227`, `fact.rs:27-34`).
+Because ids are UUID v4 (`engine/src/fact.rs:16`, `:29`), two `Fact::new` calls never collide;
+only caller-supplied `Fact::with_id` (`:37-40`) can, and then insert silently overwrites.
+
+**Retract.**
+
+| Engine | Removes | Returns | Source |
+|---|---|---|---|
+| Rete | working memory by id, alpha entry for the fact's `fact_type_id`, every beta nagram referencing the id (empty buckets pruned) | `Ok(true)`; `Ok(false)` for unknown id | `rete/mod.rs:580-590`, `:120-127` |
+| TREAT | Rete's three + `cache.clear()` (a cached nagram may mention the fact) | `Ok(true)`/`Ok(false)` | `treat/mod.rs:429-442` |
+| LEAPS | Rete's three + `reset()` on **every** aggregation node (source set and cached value cleared) | `Ok(true)`/`Ok(false)` | `leaps/mod.rs:459-475`, `:144-147` |
+| PHREAK | nothing | always `Ok(false)` | `phreak/mod.rs:650-653` |
+
+Idempotency (Rete/TREAT/LEAPS): retracting an absent id returns `Ok(false)` and mutates
+nothing, so a second retract is a no-op
+(test: `engine/src/engine/rete/mod.rs:750-768`). No engine calls
+`record_fact_retracted` (`engine/src/engine/metrics.rs:77`, `engine/src/metrics/mod.rs:57`), so
+`facts_retracted` stays `0` after successful retracts. Retraction does not touch the
+coverage/tracker singletons; `fired_set` is per-call, so a later `execute()` re-evaluates all
+rules against the reduced working memory.
+
+## Conflict resolution and salience
+
+* `Rule.salience: i32` exists (`engine/src/rules.rs:22`, builder `:77-80`) and is **never read
+  by any evaluator** — no `salience` reference exists under `engine/src/engine/**`. Firing
+  order is `Vec` order only.
+* `Agenda` (`engine/src/salience/agenda.rs:45-111`) implements salience-desc/timestamp-asc
+  insert (`:57-68`), front-pop (`:71-78`), `remove_activation` for no-loop (`:96-100`) and
+  `all_activations` (`:103-105`); `Activation` clones the whole `Rule` (`:12-21`).
+* `ConflictStrategy = Salience | DepthFirst | BreadthFirst | Recency | Lexicographic`
+  (`agenda.rs:113-128`) is applied by `ConflictResolver::sort`/`sort_in_place`
+  (`:144-200`). Depth/breadth order by `fact_matches.len()`; `Recency` is newest-first;
+  `Lexicographic` sorts on `rule.name`.
+* The enum and resolver are **duplicated verbatim** in `engine/src/salience/agenda.rs:113-207`
+  and `engine/src/salience/conflict_resolution.rs:9-116`; `salience/mod.rs:11-12` re-exports
+  the latter pair while `engine/src/tests/mod.rs:14-15` imports both.
+* Nothing in the execution path constructs an `Agenda` or `ConflictResolver`: callers are tests
+  (`engine/src/tests/mod.rs:282-400`, `engine/src/salience/**` tests) and the test-only
+  `deterministic_conflict_strategy` (`engine/src/testing/mod.rs:653-661`). `no_loop` and
+  `lock_on_active` (`engine/src/rules.rs:24-26`) are stored and never consulted.
+
+Net: conflict resolution is a tested standalone utility; the live evaluator has no agenda, so
+salience has no runtime effect.
+
+## Chaining modes
+
+`ChainingMode = Automatic | ForwardOnly | BackwardOnly`
+(`engine/src/chaining/mode_selector.rs:124-131`). `EngineBuilder::chaining_mode`
+(`engine/src/environment.rs:34-37`, default `Automatic` `:27`) stores it and
+`Engine::get_chaining_mode` returns it (`:107-109`); no execution path reads it.
+
+* **Forward**: `execute_forward(&mut Engine, &Session)` ignores both arguments and returns a
+  default `ExecutionResult` — the body is comments only
+  (`engine/src/forward_chaining.rs:45-57`); `execute_forward_simple` is identical (`:62-67`).
+  Its `ExecutionResult` has `rules_fired`/`facts_added`/`facts_retracted`/`errors` (`:9-18`).
+  A **second, incompatible** `ExecutionResult` lives on `Engine`
+  (`engine/src/environment.rs:211-232`, private fields), returned by
+  `Engine::execute_forward` as `new(true, "Forward chaining not yet implemented")`
+  (`:132-138`).
+* **Backward**: `execute_backward(&Engine, &Session, goal)` always returns
+  `InferenceTrace::new(false)` with exactly `Query{goal}` and
+  `Backtrack{"No rules match the query"}` (`engine/src/backward_chaining.rs:80-93`). The
+  surrounding types are real — `InferenceTrace{success, path, fact_matches}` with
+  `with_step`/`explain` (`:9-49`), `InferenceStep`/`StepType`
+  (`Query|RuleApplication|SubGoal|FactMatch|Backtrack`, `:51-75`), `TraceExplorer` with
+  `max_depth = 10` (`:96-160`). `Engine::execute_backward` returns yet another
+  `InferenceTrace` (`engine/src/environment.rs:140-146`, `:235-246`, a single `path: String`).
+* **Mode selector**: `analyze_rule_structure` returns `GoalDriven` **iff** the condition tree
+  contains a `Pattern` whose `fact_type` starts with `"query_"`, else `DataDriven`
+  (`engine/src/chaining/mode_selector.rs:42-67`); `InferencePattern::Mixed` is never produced
+  (`:46-49`) though `select` handles it (`:92-95`). `select` short-circuits to
+  `BackwardOnly` when the target starts with `"query_"` or contains `'?'` (`:76-82`), else
+  all-`DataDriven` ⇒ `ForwardOnly`, all-`GoalDriven` ⇒ `BackwardOnly`, mixed **or empty rule
+  list** ⇒ `Automatic` (`:99-103`). No engine consults it.
+
+Four different "trace" mechanisms: evaluator rule-firing trace
+(`TraceEvent`/`TraceData`, `engine/src/engine/registry.rs:128-154`, mapped to the API
+`InferenceTrace` at `api/src/v1/execution.rs:812-838`); `InferenceTraceCollector`
+(`engine/src/chaining/mode_selector.rs:134-197`), a manual recorder no executor calls
+(re-exported at `engine/src/lib.rs:54`); PHREAK's `ExecutionTrace`
+(`engine/src/engine/phreak/mod.rs:363-425`, populated by propagation only); and
+`BackwardChainingTrace` whose two recorders are empty stubs
+(`engine/src/testing/mod.rs:599-636`).
+
+## Observability
+
+**Two coverage implementations, one singleton.** `monitoring::coverage::CoverageTracking` is a
+process-wide `static INSTANCE: LazyLock<Mutex<TrackingState>>`
+(`engine/src/monitoring/coverage.rs:86-90`) with associated-function recording
+(`record_rule_eval`/`record_rule_fire`/`record_rule_skipped`, `:97-118`), owned-clone reads
+(`:121-131`), `coverage_percent = fired / total_tracked` (`:152-157`), plus JSON (`:167-197`)
+and CSV (`:200-226`) exports. `coverage::CoverageTracker` is a separate `&mut self` type
+(`engine/src/coverage/mod.rs:26-234`) whose `record_fire` on an unseen id sets
+`evaluated_at: Some(now)` but **`fired_at: None`** (`:67-73`), whose `coverage_percent`
+returns `100.0` when nothing is tracked (`:109-120`), and whose report hardcodes
+`evaluation_count`/`fire_count` to `Some(1)` (`:203-210`). `engine/src/coverage/history/mod.rs`
+is a byte-identical copy of `coverage/mod.rs` (`diff` differs only by the `pub mod history`
+stanza), compiled under `history`. The engine records only into the singleton, from the two
+evaluator sites (`direct_eval.rs:152-158`, `rete/mod.rs:459-465`); `CoverageTracker` and
+`history` have no production callers.
+
+**Execution tracker / dead rules — a second singleton.** `RuleExecutionTracker` is a unit
+struct over a third `LazyLock<Mutex<TrackerState>>`
+(`engine/src/monitoring/detection.rs:70-97`); `record_evaluation`/`record_fire` insert-or-update
+`DeadRuleInfo` and bump global counters (`:117-147`), with `record_fire` stamping
+`last_fired_at` internally via `chrono::Utc::now().to_rfc3339()` (`:138`). `new()` is
+`#[deprecated]` and stateless (`:109-114`). `find_dead_rules()` = tracked rules with
+`fire_count == 0` (`:175-183`); `find_truly_inactive_rules()` = both counts zero (`:190-198`,
+which cannot report a rule never recorded); `activation_rate()` = `total_fires/total_evaluations`
+(`:219-225`); `reset()` keeps entries (`:230-237`); `clear()` wipes all and is the documented
+test-isolation primitive (`:239-249`). `DeadRuleReport::generate()` reads that singleton and
+attaches a recommendation per dead rule (`:279-319`). Separately,
+`monitoring::dead_rules::HealthRegistry` is a **non-singleton** path
+(`engine/src/monitoring/dead_rules.rs:118-273`) whose `detect_dead_rules()` returns *all*
+rules with a confidence score (`:195-232`), hardcodes a 24-hour threshold (`:203`) although
+it reads `SlidingWindowConfig` into `config` (`:200`) for the confidence window only
+(`:219-224`), and whose `find_dead_rules(min_inactive)` also requires
+`activation_count == 0` (`:179-185`).
+
+**Per-engine metrics.** Engines hold `crate::engine::metrics::SimpleMetricsCollector`
+(`engine/src/engine/metrics.rs:98-166`) behind `crate::engine::metrics::MetricsCollector`
+(`:63-94`); `EngineMetrics` (`:13-33`) carries `rules_fired`, `facts_inserted`,
+`facts_retracted`, `alpha_memory_size`, `beta_memory_size`, `network_traversals`,
+`execution_time_ms`, `cache_hits`, `cache_misses`, with `total_operations` (`:42-44`),
+`firing_rate` (`:47-53`), `total_memory_estimate` (`:56-59`) and Prometheus/JSON export
+(`:177-282`). A **second** stack with a different trait and struct of the same names lives in
+`engine/src/metrics/mod.rs:3-124` (`memory_bytes = (alpha+beta)*8`, `:100-103`) with no engine
+users, and `engine/src/metrics/prometheus.rs` is gated on a `metrics` feature that
+`engine/Cargo.toml` never declares (`engine/src/metrics/mod.rs:127-128`,
+`#![allow(unexpected_cfgs)]` at `:1`), so it never compiles — as does
+`engine/src/engine/metrics.rs:284-308`, which would return an empty `String`.
+
+**Singleton implications.** Coverage and dead-rule state are shared by every engine, session and
+request in the process (`monitoring/coverage.rs:86-90`, `monitoring/detection.rs:91-97`), keyed by
+rule id only: two rulesets reusing an id (`"r1"`) collide silently, counters are cumulative rather
+than per request, `coverage_percent` mixes rule identities, and rule names are never refreshed
+because recording uses `or_insert_with` (`monitoring/detection.rs:121-125`, `:140-144`). Tests must
+`clear()` under `#[serial]`, as the module's own tests do (`monitoring/detection.rs:345-461`). The
+per-engine `SimpleMetricsCollector` is *not* shared — it lives in each engine value, hence per
+request when engines are built per request (`api/src/v1/execution.rs:618-640`).
+
+## Simulation and testing utilities
+
+**What-if contract.** `SimulationRequest{name, base_state, proposed_changes, fact_sets}`
+(`engine/src/simulation/types.rs:17-37`); `RuleChange` =
+`AddCondition|RemoveCondition|ModifyAction|RemoveRule|AddRule|DisableRule` carrying JSON-encoded
+AST (`:41-78`); `SimulationResult` (`:116-129`), `TestCaseResult{fact_set_index, variants,
+differences}` (`:133-146`), `VariantResult{variant_label, rules_fired, execution_time_ms, output,
+success, error}` (`:150-174`), `ChangeReport` = `RuleFiredBeforeButNotAfter|
+RuleFiredAfterButNotBefore|DifferentResultsForRule|ChangeApplicationError` (`:178-206`). The
+documented runner contract (`engine/src/simulation/runner.rs:44-51`): run the base per fact set,
+clone-and-modify per change, run each variant over the same fact sets, diff. `run()` is that
+skeleton only — empty `fact_sets` yields no cases (`:62-68`), an empty individual set is skipped
+(`:83-85`), the base runs first (`:91-110`), one variant per change follows (`:113-134`), each
+diffed against the base (`:137-147`, `compute_differences` `:258-300`). Execution itself is a
+placeholder: each variant clones the `Engine` (`:173`, `:216`), parses each `TestFact` and
+**drops it** (`let _fact = ...`, `:188`, `:231`), calls the placeholder
+`Engine::execute_forward()` (`:192`, `:235`), and hardcodes `rules_fired: Vec::new()` /
+`output: None` (`:193`, `:201`, `:236`, `:245`); `change` only feeds the label (`:241`), and
+`base_state` is never read (defined once at `engine/src/simulation/types.rs:25`). Hence
+`differences` is empty apart from `ChangeApplicationError`, `success` is always `true`, and the
+HTTP endpoint forwards straight into it (`api/src/v1/simulation.rs:150-161`).
+
+| Utility | Lines | Contract |
+|---|---|---|
+| `TestSession` | `engine/src/testing/mod.rs:286-353` | Fresh `EngineBuilder::new().build()` + UUID per instance (`:308-317`); `insert_fact` writes working memory (`:340-342`); backward execution clones the engine and calls the placeholder (`:345-352`). |
+| `FixtureBuilder` | `:371-398` | Accumulates `Fact::new(name, payload)`, builds a `WorkingMemory` (`:391-397`). |
+| `ForwardChainingTester` | `:406-597` | Session + manual `activations: Vec<String>`; `execute_forward` never fills it (`:449-462`), so `assert_rule_sequence` (`:482-491`), `assert_fired_count` (`:496-505`), `assert_fired_in_order` (`:510-526`) and `assert_rule_not_fired` (`:531-539`) only inspect data pushed by hand; `add_rule` discards the rule (`:465-467`). |
+| `BackwardChainingTrace` | `:599-636` | Both recorders are empty stubs (`:627-635`). |
+| `DeterministicMode` | `:642-650` | Consumed only by `deterministic_conflict_strategy` (`:653-661`), which the execution path never calls. |
+| `assert_eq_test!`/`assert_test!` | `:667-708` | Macros returning `TestError::AssertionFailed`. |
+| `ValueSnapshot`/`FactSnapshot`/`WorkingMemorySnapshot` | `:41-196` | Snapshot DTOs; FEEL-only `Value` variants degrade to `Debug` strings (`:102-131`); `compare` keys facts by `fact_type` (`:160-163`), collapsing same-type facts; `SnapshotDiff` renders Added/Removed/Changed (`:199-243`). |
+| `SnapshotManager` | `engine/src/testing/snapshot.rs:68-269` | Baselines at `{base_dir}/{test}.snapshot.json` (`:105-107`); `SnapshotMode::{Read,Update,Skip}` (`:15-23`) drive `assert_matches_baseline` (`:189-231`); `update_baseline` aliases `save_baseline` (`:176-186`). |
+| `serialize_deterministic`, `deserialize_working_memory` | `engine/src/testing/json.rs:22-38` | Recursive key sorting for stable snapshot text. |
+
+## Invariants and limits
+
+* A rule fires **at most once per `execute()` call** (`engine/src/engine/direct_eval.rs:102-104`,
+  `engine/src/engine/rete/mod.rs:408-410`).
+* A pass ends when nothing newly fires; passes ≤ `RRULES_MAX_CHAIN_ITERATIONS` (default 1000)
+  (`engine/src/engine/direct_eval.rs:73-76`, `:134-136`).
+* Firing order is rule-vector order and mutations are visible to later rules in the same pass
+  (`engine/src/engine/direct_eval.rs:100-133`); salience is inert.
+* `fired_rule_ids` is unordered; only `TraceData.events` is in firing order
+  (`engine/src/engine/registry.rs:141-146`, `:165-172`).
+* `success` is always `true` and `trace` is `None` unless `set_collect_trace(true)` *and* a rule
+  fired (`engine/src/engine/registry.rs:183-191`, `engine/src/engine/direct_eval.rs:165-176`).
+* `Condition::Pattern` requires an existing fact of the named type (`engine/src/rules.rs:196-211`).
+* Working memory is `HashMap<String, Fact>` keyed by `Uuid::to_string()`
+  (`engine/src/fact.rs:16`, `engine/src/engine/direct_eval.rs:69`).
+* Retraction is idempotent for Rete/TREAT/LEAPS and unimplemented for PHREAK
+  (`engine/src/engine/phreak/mod.rs:650-653`).
+* `facts_retracted` is always `0` (`engine/src/engine/metrics.rs:77`, `:139-141`).
+* Coverage/dead-rule state is process-global; tests need `clear()` + `#[serial]`
+  (`engine/src/monitoring/detection.rs:239-249`).
+* `available_engines()` order is unspecified; consumers sort
+  (`engine/src/engine/registry.rs:288-293`, `api/src/v1/execution.rs:1142-1149`).
+* `reset()` drops loaded rules but preserves `collect_trace`
+  (`engine/src/engine/rete/mod.rs:612`, `:614`).
+
+## Known gaps
+
+1. **Duplicated evaluator bodies.** Rete's `execute_rules`
+   (`engine/src/engine/rete/mod.rs:374-492`) is an inlined copy of
+   `direct_eval::direct_execute` (`engine/src/engine/direct_eval.rs:67-179`), and
+   `apply_action` is verbatim duplicated (`rete/mod.rs:507-562` vs `direct_eval.rs:193-247`).
+   The copies already diverge in metrics: Rete records `record_rule_fired()` inside the loop
+   (`rete/mod.rs:439`) while the helper leaves it to callers (`treat/mod.rs:398-400`).
+2. **LEAPS looks alpha facts up by node id as if it were a fact type**
+   (`engine/src/engine/leaps/mod.rs:338`) whereas Rete resolves the predecessor test node
+   (`engine/src/engine/rete/mod.rs:326`); LEAPS beta memory therefore normally stays empty.
+3. **PHREAK retraction is a stub returning `Ok(false)` for every id**
+   (`engine/src/engine/phreak/mod.rs:650-653`, `:617-626`), leaving working memory, both
+   memories and the TMS intact — indistinguishable from "id was absent".
+4. **PHREAK truth maintenance is dead weight:** facts are supported (`phreak/mod.rs:487`), no
+   `Justification` is ever created, `justification_count()` is structurally 0 (asserted `:793`),
+   and `execute_rules` ignores the TMS (`:574-577`).
+5. **TREAT's cache is neither LRU nor sound:** key-sorted eviction (`treat/mod.rs:66-73`),
+   per-node key that can skip a different fact (`:267`, `:275-279`), hardcoded `stats()`
+   (`:110-117`), duplicate counters (`:191-192`), `with_cache_size` ignoring its argument
+   (`:507-510`).
+6. **LEAPS aggregation never computes:** `recalculate` returns `None`
+   (`leaps/mod.rs:133-137`), `execute_aggregations` discards its result (`:367-380`), and every
+   fact is fed to every node (`:293-297`); only `compute_aggregation` (`:426-440`) works.
+7. **Salience/conflict resolution unwired:** no evaluator reads `Rule.salience`
+   (`engine/src/rules.rs:22`), `Agenda`/`ConflictResolver` have no production callers,
+   `ConflictStrategy`/`ConflictResolver` are duplicated
+   (`salience/agenda.rs:113-207` vs `salience/conflict_resolution.rs:9-116`), and
+   `no_loop`/`lock_on_active` (`rules.rs:24-26`) are never honoured.
+8. **Chaining does not run:** `execute_forward` returns a default result
+   (`engine/src/forward_chaining.rs:45-57`), `execute_backward` returns a fixed failure trace
+   (`engine/src/backward_chaining.rs:80-93`), `Engine::execute_forward` returns
+   "not yet implemented" (`engine/src/environment.rs:132-138`), and three parallel
+   `ExecutionResult`/`InferenceTrace` type pairs coexist
+   (`forward_chaining.rs:9-40`, `backward_chaining.rs:9-49`, `environment.rs:211-246`).
+9. **What-if simulation is a skeleton:** facts parsed and dropped
+   (`engine/src/simulation/runner.rs:177-189`, `:219-232`), `RuleChange` never applied
+   (`:208-248`), `rules_fired` always empty (`:193`, `:236`), `base_state` ignored
+   (`engine/src/simulation/types.rs:25`).
+10. **Two parallel metric stacks and a dead file:** `engine::engine::metrics`
+    (`engine/src/engine/metrics.rs:63-166`) is used, `engine::metrics`
+    (`engine/src/metrics/mod.rs:3-124`) is not, and `engine/src/metrics/prometheus.rs` is gated
+    on the undeclared `metrics` feature (`engine/src/metrics/mod.rs:127-128`).
+11. **Two coverage implementations plus a duplicated file:** singleton
+    `CoverageTracking` (`monitoring/coverage.rs:86-233`) versus `CoverageTracker`
+    (`engine/src/coverage/mod.rs:26-234`) with different `record_fire` and percentage
+    semantics; `engine/src/coverage/history/mod.rs` is a byte-identical copy compiled under
+    `history`.
+12. **Dead test module:** `engine/src/tests/mod.rs` is not declared in `engine/src/lib.rs`, so it
+    never compiles; it calls `Agenda::with_strategy` (`tests/mod.rs:367`, `:378`, `:782`,
+    `:795`, `:808`), which does not exist on `Agenda` (`salience/agenda.rs:50-111`).
+13. **LEAPS metrics count non-events:** `record_rule_fired()` on aggregated-join traversal
+    (`leaps/mod.rs:322-324`) inflates `rules_fired` beyond `EngineResult.rules_fired`.
+14. **`HealthRegistry::detect_dead_rules` returns live rules too** and hardcodes a 24-hour
+    threshold while ignoring `SlidingWindowConfig` for it
+    (`monitoring/dead_rules.rs:195-232`, `:203`); its `find_dead_rules` additionally requires
+    `activation_count == 0` (`:179-185`), so the two APIs disagree.
+15. **`EngineSelector` over-advertises:** `with_defaults()` lists four engines regardless of
+    features (`engine/src/engine/selector.rs:77-79`) and `from_yaml`/`from_json` always error
+    (`:127-144`); the runtime resolves names through the registry instead
+    (`api/src/v1/execution.rs:606-613`).
+16. **`facts_matched` is not a match count** — it sums working-memory size once per firing
+    (`engine/src/engine/direct_eval.rs:116`), so it scales as `|facts| × firings`.
+17. **`RRULES_DEFAULT_ENGINE` fallback is startup-only:** the warning/fallback
+    (`api/src/main.rs:63-69`) affects only `selector.current_engine()`, while per-request
+    resolution re-reads the raw env var (`api/src/v1/execution.rs:600-602`) and rejects the
+    value with 400 (`:606-613`).
+18. **`EngineBuilder::max_iterations` (default 1000, `engine/src/environment.rs:29`) is not wired
+    to the evaluator**, which reads `RRULES_MAX_CHAIN_ITERATIONS` instead
+    (`engine/src/engine/direct_eval.rs:73-76`); the two knobs can disagree.

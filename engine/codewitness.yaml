@@ -1,0 +1,912 @@
+# CodeWitness configuration for the rRules engine crate.
+#
+# Run from the repository root:
+#
+#   codewitness verify engine --requirements specs/requirements.md --in-place
+#
+# The scenarios below are the executable half of `specs/requirements.md`. Each
+# one states an oracle in Rust — the setup, the calls, the observation and the
+# invariant — and CodeWitness supplies boundary enumeration, seeded random search
+# and reproducible counterexamples. The fragments call the crate under test by
+# name (`engine::...`), so they are ordinary Cargo integration tests and need no
+# dependency beyond the standard library.
+#
+# Requirements without a scenario here (the HTTP API and process-wide isolation
+# claims) are evidenced by the existing test suite instead: their identifiers
+# appear in the test sources, which is how CodeWitness maps a test class to a
+# requirement.
+
+project:
+  name: rrules-engine
+
+language:
+  adapter: rust
+
+verification:
+  timeout: 10m
+  max_duration: 20m
+  max_test_generation_iterations: 3
+  max_generated_tests: 200
+  max_mutation_time: 10m
+
+tests:
+  enabled: true
+
+mutation:
+  enabled: true
+  tool: rust-text
+
+property_testing:
+  enabled: true
+  max_scenarios: 20
+
+static_analysis:
+  enabled: true
+  analyzers: [heuristics]
+
+security:
+  enabled: true
+
+llm:
+  enabled: false
+  provider: none
+
+report:
+  html: true
+  json: true
+
+sandbox:
+  mode: local-process
+  allow_network: false
+
+scenarios:
+  # ---------------------------------------------------------------- FEEL
+
+  - id: SC-FEEL-001
+    requirement: FEEL-001
+    description: Decimal arithmetic is exact and integers compare with decimals
+    mode: single
+    steps:
+      - call: |
+          let a = engine::dmn::feel::parser::parse_expression("0.1 + 0.2 = 0.3");
+          let b = engine::dmn::feel::parser::parse_expression("1 = 1.0");
+          let c = engine::dmn::feel::parser::parse_expression("0.1 + 0.2");
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let value = format!(
+              "{}|{}|{}",
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&a, &scope)),
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&b, &scope)),
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&c, &scope))
+          );
+    observation: "value"
+    invariant: 'observation == "Bool(true)|Bool(true)|Number(0.3)"'
+    cases: 1
+    seed: 1
+
+  - id: SC-FEEL-002
+    requirement: FEEL-002
+    description: A number and a string never coerce into each other
+    mode: single
+    steps:
+      - call: |
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let add = engine::dmn::feel::parser::parse_expression("1 + \"2\"");
+          let eq = engine::dmn::feel::parser::parse_expression("\"1\" = 1");
+          let value = format!(
+              "{}|{}",
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&add, &scope)),
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&eq, &scope))
+          );
+    observation: "value"
+    invariant: 'observation == "Null|Null"'
+    cases: 1
+    seed: 1
+
+  - id: SC-FEEL-003
+    requirement: FEEL-003
+    description: Null propagates through arithmetic and boolean logic
+    mode: single
+    steps:
+      - call: |
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let mut parts: Vec<String> = Vec::new();
+          for expression in [
+              "1 + null",
+              "null = null",
+              "null = 1",
+              "null < 3",
+              "true or null",
+              "false and null",
+              "not(null)",
+          ] {
+              let ast = engine::dmn::feel::parser::parse_expression(expression);
+              parts.push(format!("{:?}", engine::dmn::feel::eval::evaluate(&ast, &scope)));
+          }
+          let value = parts.join("|");
+    observation: "value"
+    invariant: 'observation == "Null|Bool(true)|Bool(false)|Null|Bool(true)|Bool(false)|Null"'
+    cases: 1
+    seed: 1
+
+  - id: SC-FEEL-004
+    requirement: FEEL-004
+    description: Multi-word built-in names parse and evaluate
+    mode: single
+    steps:
+      - call: |
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let mut parts: Vec<String> = Vec::new();
+          for expression in [
+              "upper case(\"hello\")",
+              "lower case(\"HELLO\")",
+              "string length(\"hello\")",
+              "string join([\"a\", \"b\"], \"-\")",
+              "list contains([1, 2, 3], 2)",
+              "substring before(\"hello world\", \" world\")",
+              "starts with(\"abc\", \"a\")",
+              "get value({a: 1}, \"a\")",
+          ] {
+              let ast = engine::dmn::feel::parser::parse_expression(expression);
+              parts.push(format!("{:?}", engine::dmn::feel::eval::evaluate(&ast, &scope)));
+          }
+          let value = parts.join("|");
+    observation: "value"
+    invariant: 'observation == "String(\"HELLO\")|String(\"hello\")|Integer(5)|String(\"a-b\")|Bool(true)|String(\"hello\")|Bool(true)|Number(1)"'
+    cases: 1
+    seed: 1
+
+  - id: SC-FEEL-005
+    requirement: FEEL-005
+    description: Rounding honours the scale argument and its tie direction
+    mode: single
+    steps:
+      - call: |
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let mut parts: Vec<String> = Vec::new();
+          for expression in [
+              "round half up(1.25, 1)",
+              "round half down(1.25, 1)",
+              "round up(1.121, 2)",
+              "round down(1.129, 2)",
+              "round half up(-1.25, 1)",
+              "round up(1.5, null)",
+              "round half up(1.25)",
+          ] {
+              let ast = engine::dmn::feel::parser::parse_expression(expression);
+              parts.push(format!("{:?}", engine::dmn::feel::eval::evaluate(&ast, &scope)));
+          }
+          let value = parts.join("|");
+    observation: "value"
+    invariant: 'observation == "Number(1.3)|Number(1.2)|Number(1.13)|Number(1.12)|Number(-1.3)|Null|Number(1)"'
+    cases: 1
+    seed: 1
+
+  - id: SC-FEEL-006
+    requirement: FEEL-006
+    description: sort orders by the comparator and keeps empty lists empty
+    mode: single
+    steps:
+      - call: |
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let descending = engine::dmn::feel::parser::parse_expression("sort([3, 1, 2], function(x, y) x > y)");
+          let numeric = engine::dmn::feel::parser::parse_expression("sort([3, 1, 2], function(x, y) x - y)");
+          let empty = engine::dmn::feel::parser::parse_expression("sort([])");
+          let null_list = engine::dmn::feel::parser::parse_expression("sort(null)");
+          let value = format!(
+              "{}|{}|{}|{}",
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&descending, &scope)),
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&numeric, &scope)),
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&empty, &scope)),
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&null_list, &scope))
+          );
+    observation: "value"
+    invariant: 'observation == "Array([Number(3), Number(2), Number(1)])|Array([Number(1), Number(2), Number(3)])|Array([])|Null"'
+    cases: 1
+    seed: 1
+
+  - id: SC-FEEL-007
+    requirement: FEEL-007
+    description: get entries returns key and value contexts, sorted by key
+    mode: single
+    steps:
+      - call: |
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let ast = engine::dmn::feel::parser::parse_expression("get entries({b: 2, a: 1})");
+          let entries = engine::dmn::feel::eval::evaluate(&ast, &scope);
+          let mut rendered = String::new();
+          if let engine::data_types::Value::Array(items) = &entries {
+              for item in items {
+                  if let engine::data_types::Value::Object(map) = item {
+                      let key = match map.get("key") {
+                          Some(engine::data_types::Value::String(k)) => k.clone(),
+                          _ => String::from("?"),
+                      };
+                      let val = match map.get("value") {
+                          Some(engine::data_types::Value::Number(n)) => n.to_string(),
+                          Some(engine::data_types::Value::Integer(i)) => i.to_string(),
+                          other => format!("{other:?}"),
+                      };
+                      rendered.push_str(&format!("{key}={val};"));
+                  }
+              }
+          }
+          let value = rendered;
+    observation: "value"
+    invariant: 'observation == "a=1;b=2;"'
+    cases: 1
+    seed: 1
+
+  - id: SC-FEEL-008
+    requirement: FEEL-008
+    description: years and months duration between two dates
+    mode: single
+    steps:
+      - call: |
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let forward = engine::dmn::feel::parser::parse_expression(
+              "years and months duration(date(\"2020-01-01\"), date(\"2021-03-01\"))",
+          );
+          let backward = engine::dmn::feel::parser::parse_expression(
+              "years and months duration(date(\"2021-03-01\"), date(\"2020-01-01\"))",
+          );
+          let value = format!(
+              "{}|{}",
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&forward, &scope)),
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&backward, &scope))
+          );
+    observation: "value"
+    invariant: 'observation == "YearsMonthsDuration(YearsMonthsDuration { months: 14 })|YearsMonthsDuration(YearsMonthsDuration { months: -14 })"'
+    cases: 1
+    seed: 1
+
+  - id: SC-FEEL-009
+    requirement: FEEL-009
+    description: Built-ins accept named arguments, reject unknown names
+    mode: single
+    steps:
+      - call: |
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let mut parts: Vec<String> = Vec::new();
+          for expression in [
+              "abs(n: -1)",
+              "round half up(n: 1.25, scale: 1)",
+              "round half up(n: 1.25)",
+              "abs(bogus: -1)",
+              "abs(n: -1, 2)",
+          ] {
+              let ast = engine::dmn::feel::parser::parse_expression(expression);
+              parts.push(format!("{:?}", engine::dmn::feel::eval::evaluate(&ast, &scope)));
+          }
+          let value = parts.join("|");
+    observation: "value"
+    invariant: 'observation == "Number(1)|Number(1.3)|Number(1)|Null|Null"'
+    cases: 1
+    seed: 1
+
+  - id: SC-FEEL-010
+    requirement: FEEL-010
+    description: abs is defined for durations as well as numbers
+    mode: single
+    steps:
+      - call: |
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let days = engine::dmn::feel::parser::parse_expression("abs(duration(\"-P1D\"))");
+          let years = engine::dmn::feel::parser::parse_expression("abs(duration(\"-P1Y\"))");
+          let null_value = engine::dmn::feel::parser::parse_expression("abs(null)");
+          let value = format!(
+              "{}|{}|{}",
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&days, &scope)),
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&years, &scope)),
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&null_value, &scope))
+          );
+    observation: "value"
+    invariant: 'observation == "DaysTimeDuration(TimeDelta { secs: 86400, nanos: 0 })|YearsMonthsDuration(YearsMonthsDuration { months: 12 })|Null"'
+    cases: 1
+    seed: 1
+
+  - id: SC-FEEL-011
+    requirement: FEEL-011
+    description: An IANA zone survives duration arithmetic
+    mode: single
+    steps:
+      - call: |
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let parsed = engine::dmn::feel::parser::parse_expression(
+              "date and time(\"2020-01-01T10:00:00@Australia/Melbourne\")",
+          );
+          let shifted = engine::dmn::feel::parser::parse_expression(
+              "date and time(\"2020-01-01T10:00:00@Australia/Melbourne\") + duration(\"PT1H\")",
+          );
+          let value = format!(
+              "{}|{}",
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&parsed, &scope)),
+              format!("{:?}", engine::dmn::feel::eval::evaluate(&shifted, &scope))
+          );
+    observation: "value.contains(\"Iana\") && value.contains(\"11:00\")"
+    invariant: "observation"
+    cases: 1
+    seed: 1
+
+  - id: SC-FEEL-012
+    requirement: FEEL-012
+    description: Parser guards bound depth and token count without panicking
+    mode: single
+    steps:
+      - call: |
+          let deep = format!("{}1{}", "(".repeat(400), ")".repeat(400));
+          let deep_ast = engine::dmn::feel::parser::parse_expression(&deep);
+          let wide = "1 + ".repeat(6000) + "1";
+          let wide_ast = engine::dmn::feel::parser::parse_expression(&wide);
+          let value = format!(
+              "{}|{}",
+              matches!(deep_ast, engine::dmn::feel::ast::FeelExpression::Err(_, _)),
+              matches!(wide_ast, engine::dmn::feel::ast::FeelExpression::Err(_, _))
+          );
+    observation: "value"
+    invariant: 'observation == "true|true"'
+    cases: 1
+    seed: 1
+
+  # ---------------------------------------------------------------- DMN
+
+  - id: SC-DMN-001
+    requirement: DMN-001
+    description: A DOCTYPE is rejected and a well-formed DMN 1.5 document parses
+    mode: single
+    steps:
+      - call: |
+          let with_doctype = concat!(
+              "<?xml version=\"1.0\"?>\n",
+              "<!DOCTYPE definitions [ <!ENTITY xxe SYSTEM \"file:///etc/passwd\"> ]>\n",
+              "<definitions xmlns=\"https://www.omg.org/spec/DMN/20230324/MODEL/\" id=\"d\" name=\"n\" namespace=\"http://example.com\">",
+              "<decision id=\"x\" name=\"y\"/></definitions>"
+          );
+          let good = engine::dmn::test_util::small_decision_table_dmn();
+          let value = format!(
+              "{}|{}",
+              engine::dmn::parser::parse_dmn(with_doctype).is_err(),
+              engine::dmn::parser::parse_dmn(good).is_ok()
+          );
+    observation: "value"
+    invariant: 'observation == "true|true"'
+    cases: 1
+    seed: 1
+
+  - id: SC-DMN-002
+    requirement: DMN-002
+    description: Export then re-parse yields an equal canonical IR
+    mode: single
+    steps:
+      - call: |
+          let good = engine::dmn::test_util::small_decision_table_dmn();
+          let first = engine::dmn::parser::parse_dmn(good).expect("parse");
+          let exported = engine::dmn::exporter::export_dmn(&first).expect("export");
+          let second = engine::dmn::parser::parse_dmn(&exported).expect("re-parse");
+          let value = first == second;
+    observation: "value"
+    invariant: "observation"
+    cases: 1
+    seed: 1
+
+  - id: SC-DMN-003
+    requirement: DMN-003
+    description: A UNIQUE decision table resolves to the matching rule's output
+    mode: single
+    steps:
+      - call: |
+          let model = engine::dmn::parser::parse_dmn(engine::dmn::test_util::small_decision_table_dmn()).expect("parse");
+          let cache = engine::dmn::feel::cache::FeelAstCache::new();
+          let shared = std::sync::Arc::new(std::sync::RwLock::new(
+              engine::dmn::evaluator::SharedDmnModel::new(model, cache),
+          ));
+          let evaluator = engine::dmn::evaluator::DecisionEvaluator::new(shared);
+          let mut inputs = std::collections::HashMap::new();
+          inputs.insert("age".to_string(), engine::data_types::Value::Integer(20));
+          let adult = evaluator
+              .evaluate("decision_1", engine::dmn::evaluator::EvaluateRequest { inputs, trace: false })
+              .expect("evaluate adult");
+          let mut inputs = std::collections::HashMap::new();
+          inputs.insert("age".to_string(), engine::data_types::Value::Integer(10));
+          let minor = evaluator
+              .evaluate("decision_1", engine::dmn::evaluator::EvaluateRequest { inputs, trace: false })
+              .expect("evaluate minor");
+          let mut empty = std::collections::HashMap::new();
+          empty.insert("age".to_string(), engine::data_types::Value::Null);
+          let unknown = evaluator
+              .evaluate("decision_1", engine::dmn::evaluator::EvaluateRequest { inputs: empty, trace: false })
+              .expect("evaluate null input");
+          let value = format!(
+              "{:?}|{:?}|{:?}",
+              adult.outputs.get("status"),
+              minor.outputs.get("status"),
+              unknown.outputs.get("status")
+          );
+    observation: "value"
+    invariant: 'observation == "Some(String(\"adult\"))|Some(String(\"minor\"))|Some(Null)"'
+    cases: 1
+    seed: 1
+
+  - id: SC-DMN-006
+    requirement: DMN-006
+    description: Evaluation reports outputs, fired rules and rejects unknown decisions
+    mode: single
+    steps:
+      - call: |
+          let model = engine::dmn::parser::parse_dmn(engine::dmn::test_util::small_decision_table_dmn()).expect("parse");
+          let cache = engine::dmn::feel::cache::FeelAstCache::new();
+          let shared = std::sync::Arc::new(std::sync::RwLock::new(
+              engine::dmn::evaluator::SharedDmnModel::new(model, cache),
+          ));
+          let evaluator = engine::dmn::evaluator::DecisionEvaluator::new(shared);
+          let mut inputs = std::collections::HashMap::new();
+          inputs.insert("age".to_string(), engine::data_types::Value::Integer(20));
+          let result = evaluator
+              .evaluate("decision_1", engine::dmn::evaluator::EvaluateRequest { inputs, trace: false })
+              .expect("evaluate");
+          let unknown = evaluator.evaluate(
+              "no-such-decision",
+              engine::dmn::evaluator::EvaluateRequest { inputs: std::collections::HashMap::new(), trace: false },
+          );
+          let value = format!(
+              "{}|{}|{}|{}",
+              result.rules_fired,
+              result.outputs.len(),
+              result.drd_chain_depth >= 1,
+              unknown.is_err()
+          );
+    observation: "value"
+    invariant: 'observation == "1|1|true|true"'
+    cases: 1
+    seed: 1
+
+  # ------------------------------------------------------------- engine
+
+  - id: SC-ENG-001
+    requirement: ENG-001
+    description: Two rules fire once each and their actions compose
+    mode: single
+    steps:
+      - call: |
+          use engine::engine::registry::ExecutionEngine;
+          let mut engine = engine::engine::rete::ReteEngine::new();
+          let mut payload = std::collections::HashMap::new();
+          payload.insert("score".to_string(), engine::data_types::Value::Integer(0));
+          engine
+              .insert_fact(engine::fact::Fact::new("scorecard", payload))
+              .expect("insert");
+
+          let mut set = engine::rules::RuleSet::new();
+          for (id, delta) in [("r1", 1), ("r2", 2)] {
+              let mut rule = engine::rules::Rule::new(id, id);
+              let mut fields = std::collections::HashMap::new();
+              fields.insert(
+                  "score".to_string(),
+                  engine::rules::Expression::Add(
+                      Box::new(engine::rules::Expression::FieldRef {
+                          fact_type: "scorecard".to_string(),
+                          field: "score".to_string(),
+                      }),
+                      Box::new(engine::rules::Expression::Literal(
+                          engine::data_types::Value::Integer(delta),
+                      )),
+                  ),
+              );
+              rule.actions = vec![engine::rules::Action::UpdateFact {
+                  id: "scorecard".to_string(),
+                  fields,
+              }];
+              set.add_rule(rule).expect("valid rule");
+          }
+          engine.load_ruleset(&set).expect("load");
+
+          let result = engine.execute();
+          let score = engine
+              .get_facts()
+              .iter()
+              .find(|fact| fact.fact_type_id == "scorecard")
+              .and_then(|fact| fact.payload.get("score").cloned());
+          let value = format!("{}|{:?}", result.rules_fired, score);
+    observation: "value"
+    invariant: 'observation == "2|Some(Integer(3))"'
+    cases: 1
+    seed: 1
+
+  - id: SC-ENG-002
+    requirement: ENG-002
+    description: The registry reports the compiled engines and refuses unknown names
+    mode: single
+    steps:
+      - call: |
+          use engine::engine::registry::ExecutionEngine;
+          let mut registry = engine::engine::registry::EngineRegistry::new();
+          registry.register_default_engines();
+          let mut names = registry.available_engines();
+          names.sort_unstable();
+          let unknown = registry.create_engine_by_name("no-such-engine").is_none();
+          // Constructing one engine per name proves the factory path, not just the label.
+          let built = ["rete", "treat", "leaps", "phreak"]
+              .iter()
+              .all(|name| registry.create_engine_by_name(name).is_some());
+          let value = format!("{}|{}|{}", names.join(","), unknown, built);
+    observation: "value"
+    invariant: 'observation == "leaps,phreak,rete,treat|true|true"'
+    cases: 1
+    seed: 1
+
+  - id: SC-ENG-003
+    requirement: ENG-003
+    description: Retraction is idempotent in all four engines
+    mode: single
+    steps:
+      - call: |
+          use engine::engine::registry::ExecutionEngine;
+          let mut rendered = String::new();
+          for kind in ["rete", "treat", "leaps", "phreak"] {
+              let mut engine: Box<dyn ExecutionEngine> = match kind {
+                  "rete" => Box::new(engine::engine::rete::ReteEngine::new()),
+                  "treat" => Box::new(engine::engine::treat::TreatEngine::new()),
+                  "leaps" => Box::new(engine::engine::leaps::LeapsEngine::new()),
+                  _ => Box::new(engine::engine::phreak::PhreakEngine::new()),
+              };
+              let fact = engine::fact::Fact::new("customer", std::collections::HashMap::new());
+              let id = fact.id.to_string();
+              engine.insert_fact(fact).expect("insert");
+              let first = engine.retract_fact(&id).expect("retract");
+              let second = engine.retract_fact(&id).expect("re-retract");
+              let remaining = engine.get_facts().len();
+              rendered.push_str(&format!("{kind}:{first}/{second}/{remaining};"));
+          }
+          let value = rendered;
+    observation: "value"
+    invariant: 'observation == "rete:true/false/0;treat:true/false/0;leaps:true/false/0;phreak:true/false/0;"'
+    cases: 1
+    seed: 1
+
+  - id: SC-ENG-004
+    requirement: ENG-004
+    description: Conditions compare integers, decimals and strings predictably
+    mode: single
+    steps:
+      - call: |
+          let mut payload = std::collections::HashMap::new();
+          payload.insert("age".to_string(), engine::data_types::Value::Integer(30));
+          payload.insert(
+              "ratio".to_string(),
+              engine::data_types::Value::Number("0.75".parse::<engine::Decimal>().expect("decimal")),
+          );
+          let fact = engine::fact::Fact::new("customer", payload);
+          let facts = vec![&fact];
+          let checks = [
+              ("age", engine::data_types::Value::Integer(18), true),
+              ("ratio", engine::data_types::Value::Integer(1), false),
+              ("missing", engine::data_types::Value::Integer(1), false),
+              ("age", engine::data_types::Value::String("30".to_string()), false),
+          ];
+          let mut rendered = String::new();
+          for (field, value, expected) in checks {
+              let condition = engine::rules::Condition::Pattern {
+                  fact_type: "customer".to_string(),
+                  field: field.to_string(),
+                  value,
+                  op: engine::rules::ComparisonOp::Ge,
+              };
+              rendered.push_str(&format!("{}={};", field, condition.evaluate(&facts)));
+              let _ = expected;
+          }
+          let value = rendered;
+    observation: "value"
+    invariant: 'observation == "age=true;ratio=false;missing=false;age=false;"'
+    cases: 1
+    seed: 1
+
+  - id: SC-ENG-005
+    requirement: ENG-005
+    description: UpdateFact rewrites working memory and RetractFact removes it
+    mode: single
+    steps:
+      - call: |
+          use engine::engine::registry::ExecutionEngine;
+          let mut engine = engine::engine::rete::ReteEngine::new();
+          let mut payload = std::collections::HashMap::new();
+          payload.insert("score".to_string(), engine::data_types::Value::Integer(7));
+          let fact = engine::fact::Fact::new("scorecard", payload);
+          let fact_id = fact.id.to_string();
+          engine.insert_fact(fact).expect("insert");
+
+          let mut set = engine::rules::RuleSet::new();
+          let mut update = engine::rules::Rule::new("bump", "bump");
+          let mut fields = std::collections::HashMap::new();
+          fields.insert(
+              "score".to_string(),
+              engine::rules::Expression::Literal(engine::data_types::Value::Integer(42)),
+          );
+          update.actions = vec![engine::rules::Action::UpdateFact {
+              id: "scorecard".to_string(),
+              fields,
+          }];
+          set.add_rule(update).expect("update rule");
+          engine.load_ruleset(&set).expect("load");
+          let _ = engine.execute();
+          let updated = engine
+              .get_facts()
+              .iter()
+              .find(|f| f.fact_type_id == "scorecard")
+              .and_then(|f| f.payload.get("score").cloned());
+
+          let mut removal = engine::rules::RuleSet::new();
+          let mut retract = engine::rules::Rule::new("drop", "drop");
+          retract.actions = vec![engine::rules::Action::RetractFact { id: fact_id.clone() }];
+          removal.add_rule(retract).expect("retract rule");
+          engine.load_ruleset(&removal).expect("reload");
+          let _ = engine.execute();
+          let remaining = engine.get_facts().len();
+          let value = format!("{:?}|{}", updated, remaining);
+    observation: "value"
+    invariant: 'observation == "Some(Integer(42))|0"'
+    cases: 1
+    seed: 1
+
+  - id: SC-ENG-006
+    requirement: ENG-006
+    description: Higher salience fires first regardless of load order
+    mode: single
+    steps:
+      - call: |
+          use engine::engine::registry::ExecutionEngine;
+          let mut rendered = String::new();
+          for kind in ["rete", "treat", "leaps", "phreak"] {
+              let mut engine: Box<dyn ExecutionEngine> = match kind {
+                  "rete" => Box::new(engine::engine::rete::ReteEngine::new()),
+                  "treat" => Box::new(engine::engine::treat::TreatEngine::new()),
+                  "leaps" => Box::new(engine::engine::leaps::LeapsEngine::new()),
+                  _ => Box::new(engine::engine::phreak::PhreakEngine::new()),
+              };
+              let mut payload = std::collections::HashMap::new();
+              payload.insert("score".to_string(), engine::data_types::Value::Integer(0));
+              engine
+                  .insert_fact(engine::fact::Fact::new("scorecard", payload))
+                  .expect("insert");
+              let mut set = engine::rules::RuleSet::new();
+              for (id, salience, value) in [("r1", 0, 1), ("r2", 10, 2)] {
+                  let mut rule = engine::rules::Rule::new(id, id);
+                  rule.salience = salience;
+                  let mut fields = std::collections::HashMap::new();
+                  fields.insert(
+                      "score".to_string(),
+                      engine::rules::Expression::Literal(engine::data_types::Value::Integer(value)),
+                  );
+                  rule.actions = vec![engine::rules::Action::UpdateFact {
+                      id: "scorecard".to_string(),
+                      fields,
+                  }];
+                  set.add_rule(rule).expect("valid rule");
+              }
+              engine.load_ruleset(&set).expect("load");
+              let _ = engine.execute();
+              let score = engine
+                  .get_facts()
+                  .iter()
+                  .find(|f| f.fact_type_id == "scorecard")
+                  .and_then(|f| f.payload.get("score").cloned());
+              rendered.push_str(&format!("{kind}:{:?};", score));
+          }
+          let value = rendered;
+    observation: "value"
+    invariant: 'observation == "rete:Some(Integer(1));treat:Some(Integer(1));leaps:Some(Integer(1));phreak:Some(Integer(1));"'
+    cases: 1
+    seed: 1
+
+  - id: SC-ENG-007
+    requirement: ENG-007
+    description: Coverage records each rule once per execution
+    mode: single
+    steps:
+      - call: |
+          use engine::engine::registry::ExecutionEngine;
+          let tracker = engine::monitoring::coverage::CoverageTracking;
+          tracker.clear();
+          let mut engine = engine::engine::rete::ReteEngine::new();
+          let mut payload = std::collections::HashMap::new();
+          payload.insert("score".to_string(), engine::data_types::Value::Integer(0));
+          engine
+              .insert_fact(engine::fact::Fact::new("scorecard", payload))
+              .expect("insert");
+          let mut set = engine::rules::RuleSet::new();
+          for (id, delta) in [("r1", 1), ("r2", 2)] {
+              let mut rule = engine::rules::Rule::new(id, id);
+              let mut fields = std::collections::HashMap::new();
+              fields.insert(
+                  "score".to_string(),
+                  engine::rules::Expression::Add(
+                      Box::new(engine::rules::Expression::FieldRef {
+                          fact_type: "scorecard".to_string(),
+                          field: "score".to_string(),
+                      }),
+                      Box::new(engine::rules::Expression::Literal(
+                          engine::data_types::Value::Integer(delta),
+                      )),
+                  ),
+              );
+              rule.actions = vec![engine::rules::Action::UpdateFact {
+                  id: "scorecard".to_string(),
+                  fields,
+              }];
+              set.add_rule(rule).expect("valid rule");
+          }
+          engine.load_ruleset(&set).expect("load");
+          let result = engine.execute();
+          let summary = tracker.get_summary();
+          let one = tracker.get_rule_state("r1");
+          let value = format!(
+              "{}|{}|{}|{}|{:?}|{}",
+              result.rules_fired,
+              summary.evaluated_count,
+              summary.fired_count,
+              summary.total_rules,
+              one.as_ref().map(|state| (state.evaluation_count, state.fire_count)),
+              one.map(|state| state.fired).unwrap_or(false)
+          );
+          tracker.clear();
+    observation: "value"
+    invariant: 'observation == "2|2|2|2|Some((1, 1))|true"'
+    cases: 1
+    seed: 1
+
+  - id: SC-SYS-001
+    requirement: SYS-001
+    description: The engine crate builds and runs the real engines by default
+    mode: single
+    steps:
+      - call: |
+          let all_four = ["rete", "treat", "leaps", "phreak"]
+              .iter()
+              .all(|name| match *name {
+                  "rete" => {
+                      let _ = engine::engine::rete::ReteEngine::new();
+                      true
+                  }
+                  "treat" => {
+                      let _ = engine::engine::treat::TreatEngine::new();
+                      true
+                  }
+                  "leaps" => {
+                      let _ = engine::engine::leaps::LeapsEngine::new();
+                      true
+                  }
+                  _ => {
+                      let _ = engine::engine::phreak::PhreakEngine::new();
+                      true
+                  }
+              });
+          let value = all_four;
+    observation: "value"
+    invariant: "observation"
+    cases: 1
+    seed: 1
+
+  - id: SC-DMN-004
+    requirement: DMN-004
+    description: A null input never matches a unary test, and ranges/lists do match
+    mode: single
+    steps:
+      - call: |
+          let matches = |value: engine::data_types::Value, test: &str| -> String {
+              let ast = engine::dmn::feel::parser::parse_simple_unary_tests(test);
+              match engine::dmn::feel::eval::eval_in_unary_test(value, &ast) {
+                  Some(true) => String::from("true"),
+                  Some(false) => String::from("false"),
+                  None => String::from("null"),
+              }
+          };
+          let value = format!(
+              "{}|{}|{}|{}|{}",
+              matches(engine::data_types::Value::Null, "> 3"),
+              matches(engine::data_types::Value::Integer(5), "[1..10]"),
+              matches(engine::data_types::Value::Integer(11), "(1..10)"),
+              matches(engine::data_types::Value::Integer(5), "1, 5, 9"),
+              matches(engine::data_types::Value::String("a".to_string()), "\"a\", \"b\"")
+          );
+    observation: "value"
+    invariant: 'observation == "null|true|false|true|true"'
+    cases: 1
+    seed: 1
+
+  - id: SC-DMN-005
+    requirement: DMN-005
+    description: A dependency cycle is reported as an error, not a hang
+    mode: single
+    steps:
+      - call: |
+          let cyclic = concat!(
+              "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+              "<definitions xmlns=\"https://www.omg.org/spec/DMN/20230324/MODEL/\" id=\"defs1\" name=\"cycle\" namespace=\"http://example.com/cycle\">",
+              "<decision id=\"a\" name=\"a\"><variable name=\"a\"/>",
+              "<informationRequirement id=\"r1\"><requiredDecision href=\"#b\"/></informationRequirement>",
+              "<literalExpression id=\"l1\"><text>b + 1</text></literalExpression></decision>",
+              "<decision id=\"b\" name=\"b\"><variable name=\"b\"/>",
+              "<informationRequirement id=\"r2\"><requiredDecision href=\"#a\"/></informationRequirement>",
+              "<literalExpression id=\"l2\"><text>a + 1</text></literalExpression></decision>",
+              "</definitions>"
+          );
+          let model = engine::dmn::parser::parse_dmn(cyclic).expect("parse cyclic model");
+          let cache = engine::dmn::feel::cache::FeelAstCache::new();
+          let shared = std::sync::Arc::new(std::sync::RwLock::new(
+              engine::dmn::evaluator::SharedDmnModel::new(model, cache),
+          ));
+          let evaluator = engine::dmn::evaluator::DecisionEvaluator::new(shared);
+          let outcome = evaluator.evaluate(
+              "a",
+              engine::dmn::evaluator::EvaluateRequest { inputs: std::collections::HashMap::new(), trace: false },
+          );
+          let value = outcome.is_err();
+    observation: "value"
+    invariant: "observation"
+    cases: 1
+    seed: 1
+
+  - id: SC-SYS-002
+    requirement: SYS-002
+    description: Malformed FEEL and DMN input produce errors, never a panic
+    mode: single
+    steps:
+      - call: |
+          let scope = engine::dmn::feel::eval::Scope::empty();
+          let mut survived = true;
+          for garbage in [
+              "(((((",
+              "if then else",
+              "1 +",
+              "\"unterminated",
+              "for x in return x",
+              "a b c d",
+              "}}}}",
+              "\\u{0}",
+          ] {
+              let ast = engine::dmn::feel::parser::parse_expression(garbage);
+              let _ = engine::dmn::feel::eval::evaluate(&ast, &scope);
+              survived = true;
+          }
+          let malformed_dmn = "<definitions><decision id=\"x\"";
+          let dmn_ok = engine::dmn::parser::parse_dmn(malformed_dmn).is_err();
+          let value = format!("{}|{}", survived, dmn_ok);
+    observation: "value"
+    invariant: 'observation == "true|true"'
+    cases: 1
+    seed: 1
+
+  - id: SC-SYS-003
+    requirement: SYS-003
+    description: The coverage singleton can be cleared so tests stay independent
+    mode: single
+    steps:
+      - call: |
+          use engine::engine::registry::ExecutionEngine;
+          let tracker = engine::monitoring::coverage::CoverageTracking;
+          tracker.clear();
+          let before = tracker.get_summary().total_rules;
+
+          let mut engine = engine::engine::rete::ReteEngine::new();
+          let mut payload = std::collections::HashMap::new();
+          payload.insert("score".to_string(), engine::data_types::Value::Integer(0));
+          engine.insert_fact(engine::fact::Fact::new("scorecard", payload)).expect("insert");
+          let mut set = engine::rules::RuleSet::new();
+          let mut rule = engine::rules::Rule::new("r1", "r1");
+          rule.actions = vec![engine::rules::Action::UpdateFact {
+              id: "scorecard".to_string(),
+              fields: std::collections::HashMap::from([(
+                  "score".to_string(),
+                  engine::rules::Expression::Literal(engine::data_types::Value::Integer(1)),
+              )]),
+          }];
+          set.add_rule(rule).expect("rule");
+          engine.load_ruleset(&set).expect("load");
+          let _ = engine.execute();
+          let after_run = tracker.get_summary().total_rules;
+
+          tracker.clear();
+          let after_clear = tracker.get_summary().total_rules;
+          let value = format!("{}|{}|{}", before, after_run, after_clear);
+    observation: "value"
+    invariant: 'observation == "0|1|0"'
+    cases: 1
+    seed: 1
