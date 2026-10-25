@@ -38,3 +38,7 @@ Thumbs.db
 
 # ── Local agent tooling (not part of the project) ─────────────
 .tools/
+
+# Scratch checkouts used when reproducing CI (never part of the project)
+/.fstage*/
+/ci-repro/
