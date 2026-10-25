@@ -1,28 +1,106 @@
-# AGENTS.md — rules for agents working in this repository
+# rRules — agent instructions
 
-The canonical agent rules for this project live one level up, in
-[`../AGENTS.md`](../AGENTS.md). Read that first; this file exists so the rule travels with the
-repository and is visible to anyone who clones it.
+This file travels with the repository. The same guidance exists in the parent workspace's
+`AGENTS.md`; keep the two in sync.
 
-The project's own instructions are in [`CLAUDE.md`](CLAUDE.md): current state, quality gates
-(`make ci`, `make tck`, `make verify`), and where the specification lives (`specs/`).
+## What the project is
+
+rRules is a production-grade **Business Rules Management System** built in Rust, with a React
+frontend. A team defines business decisions as reusable rules, deploys them without a rebuild, and
+watches their impact.
+
+**Core value:** users define complex business decisions as reusable rules, deploy them instantly, and
+monitor their impact — without modifying application code.
+
+**Layout:** a Cargo workspace (`engine/`, `api/`, `engine_state/`) plus `frontend/` (React 19 +
+TypeScript + Vite + TanStack). Storage is hybrid — Git for rule versioning, PostgreSQL for runtime
+metadata. Ships as a Docker image and a Helm chart (`helm/rrules-server`, with dev/staging/prod
+overlays; `k8s/` holds the equivalent raw manifests for `kubectl apply -k`).
+
+**Key requirements:** a Rete-family rule engine with forward/backward chaining and runtime-selectable
+algorithms (Rete, TREAT, LEAPS, PHREAK); a web rule-authoring IDE; a REST API for execution and
+management; RBAC with maker-checker approval; OMG DMN 1.5 support with measured TCK conformance.
+
+## Current state
+
+Milestone v8.0 is complete and tagged (`v1.0`–`v8.0`). The project has a specification and
+independent verification; the measured state below is the only state worth quoting.
+
+- **`specs/` is the specification.** `requirements.md` holds 35 normative requirements with stable
+  ids (`ENG-*`, `DMN-*`, `FEEL-*`, `API-*`, `SYS-*`). `domain-model.md`, `rule-engine.md`,
+  `dmn-feel.md` and `http-api.md` are implementation-derived, cite `path:line`, and each ends with a
+  `Known gaps` section stating what the code does **not** do.
+- **Verification:** [CodeWitness](https://github.com/codewitness/codewitness) executes the
+  requirements — **28 VERIFIED, 0 FAILED, 7 UNVERIFIED** for `engine`; the 7 are the HTTP API
+  requirements, covered from `api` where their integration suites pass.
+- **DMN conformance:** **143 layer results pass, 31 fail, 0 skip** across 51 vectors
+  (`TCK-COVERAGE-GAPS.md` lists every remaining failure by class). The sweep gates on that baseline,
+  so a regression fails the build.
+- **Build:** `cargo test --workspace` green, `cargo clippy --workspace -- -D warnings` clean,
+  `cargo fmt --all -- --check` clean.
+
+**A claim without a gate behind it is not a claim this project should make.** The v8.0
+"51/51 TCK vectors" figure was written from phase summaries and did not survive execution; it is now
+recorded as wrong wherever it appeared outside the historical archives.
+
+## Quality gates — run these before saying anything is done
+
+```bash
+make ci          # build, test, clippy -D warnings, fmt --check, frontend build + tests
+make tck         # DMN TCK sweep, baseline-gated, per-layer report
+make verify      # CodeWitness against specs/requirements.md (engine + api)
+```
+
+`make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).
+`make bench`, `make memcheck` and `make fuzz` need a nightly toolchain or a frozen baseline snapshot.
+
+## Where things live
+
+| Artifact | Location |
+|----------|----------|
+| Specification (start here) | `specs/README.md` |
+| Normative requirements | `specs/requirements.md` |
+| Verification config | `engine/codewitness.yaml`, `api/codewitness.yaml` |
+| DMN TCK conformance | `TCK-COVERAGE-GAPS.md` |
+| API reference / user guide | `docs/API.md`, `docs/user-guide.md` |
+| Documentation index | `docs/README.md` |
+| Historical documents (superseded) | `docs/archive/` — do not treat as current |
+| Roadmap, state, milestones, tech debt | `.planning/` |
+| Changelog | `CHANGELOG.md` |
+
+`.planning/phases/**` and `.planning/milestones/**` are the project's process history: records of
+what past phases claimed, not current documentation. Do not cite them as truth.
+
+## Working conventions
+
+- **Verify before claiming.** Run the gate, paste the evidence, then report. Prefer a smaller change
+  with a passing test over a larger one with a plausible story.
+- **Keep the specification true.** If you change behaviour, update the matching `specs/` document in
+  the same commit. If you close a documented gap, strike the entry and say what replaced it; a spec
+  that keeps asserting a fixed defect is as wrong as code that keeps the bug.
+- **Prefer deletion to accretion.** This code base accumulated a duplicated evaluator, placeholder
+  tests (`assert!(true)`), a second Helm chart and a committed `node_modules`. When two things do one
+  job, delete one.
+- **State limits plainly.** If something is stubbed, partially wired or unverifiable here, write it in
+  the `Known gaps` section instead of describing intent as fact.
+- **Do not rewrite history** without explicit permission, and never commit secrets.
 
 ## Never commit binaries
 
-**No built or generated binaries in git. Ever.** Not in a commit, not in history.
+**No built or generated binaries in git. Ever.** Not in a commit, not in history, not "just this
+once" to unblock a build.
 
 This repository paid for that mistake: compiled test binaries under `target/debug/deps/`
-(126–129 MB each) and a committed `frontend/node_modules` were in its history, which inflated `.git`
-to **5.5 GB** and made the repository unpushable — GitHub rejects any file over 100 MB (`GH001`).
-The history was rewritten on 2026-10-25 to remove them; every commit SHA and every tag changed. The
-repository is now ~4 MB packed.
-
-In practice:
+(126–129 MB each) and a committed `frontend/node_modules` inflated `.git` to **5.5 GB**, made the
+repository unpushable — GitHub rejects any file over 100 MB with `GH001` — and forced a full history
+rewrite on 2026-10-25 in which every commit SHA and every tag changed. The repository is now
+~3.4 MB packed.
 
 - Do not weaken `.gitignore`, and never `git add -f` a path it ignores. It covers `target/`,
-  `frontend/node_modules/`, `frontend/dist/`, `engine/fuzz/target/`, `engine/benches/snapshots/v6.0-current.json`,
-  `.codewitness/`, `.codebase-memory/` and the DMN runtime store `api/dmn/`.
-- `.gitignore` does not untrack what is already tracked. Check what you stage:
+  `frontend/node_modules/`, `frontend/dist/`, `engine/fuzz/target/`,
+  `engine/benches/snapshots/v6.0-current.json`, `.codewitness/`, `.codebase-memory/` and the DMN
+  runtime store `api/dmn/`.
+- **Ignore rules never untrack what is already tracked.** Check what you stage:
   `git status --short`, then `git diff --cached --stat`. A surprising file count is a red flag.
 - Large **source** assets are fine — TCK XML corpora, fixtures, frozen benchmark snapshots. The rule
   is about build output and dependency trees, not size.
@@ -35,5 +113,18 @@ git count-objects -vH
 git cat-file --batch-check --batch-all-objects | awk '$2=="blob" && $3>10000000 {print $3}'
 ```
 
-Both should report nothing alarming. A blob over 100 MB makes the push fail outright, and a
-repository over 1 GB means something regenerable has slipped in.
+Both should be unremarkable. A blob over 100 MB makes the push fail outright; a repository over 1 GB
+means something regenerable has slipped in.
+
+## History, and where it came from
+
+Shipped milestones: v1.0 MVP → v2.0 Testing Framework → v3.0 Pluggable Engines → v4.0 Production
+Platform → v5.0 Live Execution → v6.0 DMN Level 3 Compliance → v7.0 Performance + Production
+Readiness → v8.0 Close TCK Evaluator Gaps. The v1.0 scope (core engine, rule-authoring IDE, REST
+API, governance, testing/monitoring, DMN compliance) is all delivered; the DMN commitment is measured
+rather than asserted, which is what `TCK-COVERAGE-GAPS.md` exists to do.
+
+**Next step:** no milestone is in flight. Scope the next one from `.planning/TECH-DEBT.md`,
+`TCK-COVERAGE-GAPS.md` and the `Known gaps` sections of `specs/` — candidates: DMN 1.6 / FEEL 1.6
+(COLLECT `distinct`), business-knowledge-model and decision-service evaluation, real
+`PostgresDmnStore` queries, and PostgreSQL-backed tenants. There is no git remote configured yet.

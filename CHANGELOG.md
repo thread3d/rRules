@@ -12,6 +12,23 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **`AGENTS.md` replaces `CLAUDE.md` as the project's instruction file.** It
+  carries the same information an agent needs — what the project is, the measured
+  state, the quality gates, where the specification lives, the working conventions
+  — plus the rule that no built or generated binaries may enter git. It exists in
+  two copies: this repository (version-controlled, travels with a clone) and the
+  parent workspace. The `.claude/` directory and its tracked `settings.json` are
+  removed.
+- **History rewritten** to strip build artifacts: `target/`,
+  `frontend/node_modules/` and `frontend/dist/` were in every commit, which inflated
+  `.git` to 5.45 GB and made a push to GitHub impossible (the six 126–129 MB test
+  binaries exceed the 100 MB per-file limit). The repository is now 3.3 MiB packed
+  with 605 tracked files; all 494 commits and all eight tags survive, every SHA
+  re-pointed. A `frontend/node_modules` that had been committed despite being
+  listed in `.gitignore` was part of what came out — ignore rules never untrack
+  what is already tracked.
+
 ### Added
 - **A specification that can be executed.** `specs/` now holds the system
   specification — `requirements.md` (35 normative requirements with stable ids),
@@ -274,7 +291,7 @@ adheres to [Semantic Versioning](https://semver.org/).
   WebSocket metrics streaming, audit/approval/branch UI wired to backend.
 
 <!-- Link references will be populated once a git remote is configured
-     (currently local-only — see CLAUDE.md "Next Steps" #2). -->
+     (currently local-only — see AGENTS.md, "History, and where it came from"). -->
 [Unreleased]: #unreleased
 [v8.0]: #v800---2026-07-15---close-tck-evaluator-gaps
 [v7.0]: #v700---2026-07-15---performance--production-readiness

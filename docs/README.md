@@ -15,4 +15,4 @@
 - **What the system must do** → `specs/requirements.md`.
 - **How a subsystem works** → `specs/domain-model.md`, `specs/rule-engine.md`, `specs/dmn-feel.md`, `specs/http-api.md`.
 - **What is verified, and with what evidence** → `specs/README.md` and the CodeWitness report under `<crate>/.codewitness/runs/`.
-- **How to run it** → the top-level `Makefile` (`make help`) and `CLAUDE.md`.
+- **How to run it, and the rules for working here** → `AGENTS.md`, plus the `Makefile` (`make help`).
