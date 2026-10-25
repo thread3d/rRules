@@ -79,6 +79,79 @@ pub struct EvaluateResult {
     pub outputs_evaluated: Vec<String>,
 }
 
+/// Unwrap a singleton list when the decision declares a scalar type.
+///
+/// A decision's declared type decides its shape: `Employees[item = "Bob"]`
+/// evaluates to a one-element list, and a decision whose variable is `string`
+/// yields that element (`0021-singleton-list`, `decision5`).
+fn coerce_to_declared_shape(model: &SharedDmnModel, decision: &Decision, value: Value) -> Value {
+    use crate::dmn::model::DefinitionsChild;
+    let Some(type_ref) = decision
+        .variable
+        .as_ref()
+        .and_then(|variable| variable.type_ref.clone())
+    else {
+        return value;
+    };
+    let Value::Array(items) = value else {
+        return value;
+    };
+    // Primitives are scalars; an item definition says whether it is a collection.
+    let is_collection = match type_ref.as_str() {
+        "string"
+        | "number"
+        | "boolean"
+        | "date"
+        | "time"
+        | "date and time"
+        | "duration"
+        | "years and months duration"
+        | "integer" => Some(false),
+        _ => model.model.definitions.children.iter().find_map(|child| {
+            let DefinitionsChild::ItemDefinition(item) = child else {
+                return None;
+            };
+            if item.name == type_ref || item.id.as_deref() == Some(type_ref.as_str()) {
+                Some(item.is_collection)
+            } else {
+                None
+            }
+        }),
+    };
+    match (is_collection, items.len()) {
+        (Some(false), 1) => items.into_iter().next().unwrap_or(Value::Null),
+        _ => Value::Array(items),
+    }
+}
+
+/// Bind the model's business knowledge models into a scope as function values.
+///
+/// A call then resolves through the ordinary FEEL invocation path, which matters
+/// for a call inside a `for` body or a `some`/`every` quantifier: those bind their
+/// iteration variables at evaluation time, where a static rewrite of the AST
+/// cannot see them (`0033-for-loops`).
+fn bind_model_functions(scope: &mut crate::dmn::feel::eval::Scope, model: &SharedDmnModel) {
+    use crate::dmn::feel::types::{FeelFunction, FeelType};
+    for (name, invocable) in &model.invocable_index {
+        let Invocable::Function { parameters, body } = invocable else {
+            continue;
+        };
+        let ast = model
+            .ast_cache
+            .get_or_parse(&body.text.content, ParseEntry::Expression);
+        let function = FeelFunction {
+            arity: parameters.len(),
+            param_types: vec![FeelType::Any; parameters.len()],
+            ret_type: Box::new(FeelType::Any),
+            param_names: parameters.clone(),
+            body: Some(ast),
+            captured: Some(std::sync::Arc::new(scope.clone())),
+            external: false,
+        };
+        scope.bind(name.clone(), Value::Function(function), vec![]);
+    }
+}
+
 /// Replace every call to a model-defined invocable with its value.
 ///
 /// FEEL evaluation has no view of the model, so a call to a business knowledge
@@ -121,7 +194,7 @@ fn resolve_invocations(
                     .collect::<Vec<_>>()
             });
             if let Ast::Name(name) = callee.as_ref() {
-                if let Some(invocable) = index.get(name) {
+                if let Some(invocable @ Invocable::Service { .. }) = index.get(name) {
                     let value = call_invocable(
                         invocable,
                         &resolved_args,
@@ -145,12 +218,56 @@ fn resolve_invocations(
             lhs: Box::new(resolve_invocations(lhs, scope, model, index, depth)),
             rhs: Box::new(resolve_invocations(rhs, scope, model, index, depth)),
         },
-        Ast::List(items) => Ast::List(
-            items
+        Ast::Neg(operand) => Ast::Neg(Box::new(resolve_invocations(
+            operand, scope, model, index, depth,
+        ))),
+        Ast::If { cond, then, else_ } => Ast::If {
+            cond: Box::new(resolve_invocations(cond, scope, model, index, depth)),
+            then: Box::new(resolve_invocations(then, scope, model, index, depth)),
+            else_: Box::new(resolve_invocations(else_, scope, model, index, depth)),
+        },
+        Ast::For { iters, body } => Ast::For {
+            iters: iters
                 .iter()
-                .map(|item| resolve_invocations(item, scope, model, index, depth))
+                .map(|(name, source)| {
+                    (
+                        name.clone(),
+                        resolve_invocations(source, scope, model, index, depth),
+                    )
+                })
                 .collect(),
-        ),
+            body: Box::new(resolve_invocations(body, scope, model, index, depth)),
+        },
+        Ast::Quantified {
+            kind,
+            iters,
+            satisfies,
+        } => Ast::Quantified {
+            kind: *kind,
+            iters: iters
+                .iter()
+                .map(|(name, source)| {
+                    (
+                        name.clone(),
+                        resolve_invocations(source, scope, model, index, depth),
+                    )
+                })
+                .collect(),
+            satisfies: Box::new(resolve_invocations(satisfies, scope, model, index, depth)),
+        },
+        Ast::Range {
+            start,
+            end,
+            start_inclusive,
+            end_inclusive,
+            point,
+        } => Ast::Range {
+            start: Box::new(resolve_invocations(start, scope, model, index, depth)),
+            end: Box::new(resolve_invocations(end, scope, model, index, depth)),
+            start_inclusive: *start_inclusive,
+            end_inclusive: *end_inclusive,
+            point: *point,
+        },
         Ast::Path { target, name } => Ast::Path {
             target: Box::new(resolve_invocations(target, scope, model, index, depth)),
             name: name.clone(),
@@ -158,6 +275,47 @@ fn resolve_invocations(
         Ast::Filter { target, predicate } => Ast::Filter {
             target: Box::new(resolve_invocations(target, scope, model, index, depth)),
             predicate: Box::new(resolve_invocations(predicate, scope, model, index, depth)),
+        },
+        Ast::InstanceOf { expr, ty } => Ast::InstanceOf {
+            expr: Box::new(resolve_invocations(expr, scope, model, index, depth)),
+            ty: ty.clone(),
+        },
+        Ast::List(items) => Ast::List(
+            items
+                .iter()
+                .map(|item| resolve_invocations(item, scope, model, index, depth))
+                .collect(),
+        ),
+        Ast::Relation { columns, rows } => Ast::Relation {
+            columns: columns.clone(),
+            rows: rows
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|cell| resolve_invocations(cell, scope, model, index, depth))
+                        .collect()
+                })
+                .collect(),
+        },
+        Ast::Context(entries) => Ast::Context(
+            entries
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        resolve_invocations(value, scope, model, index, depth),
+                    )
+                })
+                .collect(),
+        ),
+        Ast::FunctionDefinition {
+            params,
+            body,
+            external,
+        } => Ast::FunctionDefinition {
+            params: params.clone(),
+            external: *external,
+            body: Box::new(resolve_invocations(body, scope, model, index, depth)),
         },
         other => other.clone(),
     }
@@ -220,18 +378,34 @@ fn call_invocable(
             // data: an argument replaces the internal computation of that name.
             let mut inputs: HashMap<String, Value> = caller_scope.bindings.clone();
             for (position, parameter) in parameters.iter().enumerate() {
+                // An argument may name the parameter by id or by its variable
+                // name (`decision_009_3: "bar"` in the TCK).
+                let parameter_name = element_name(model, parameter);
                 let value = evaluated_named
                     .iter()
-                    .find(|(key, _)| key == parameter)
+                    .find(|(key, _)| {
+                        key == parameter || parameter_name.as_ref().is_some_and(|name| name == key)
+                    })
                     .map(|(_, value)| value.clone())
                     .or_else(|| evaluated.get(position).cloned());
                 if let Some(value) = value {
-                    // The parameter is an id; bind it under the id, and under the
-                    // id's variable name so the output decisions see it.
+                    // Bind under the id and under the variable name, so the
+                    // service's own decisions see the supplied value.
                     inputs.insert(parameter.clone(), value.clone());
-                    if let Some(name) = element_name(model, parameter) {
+                    if let Some(name) = parameter_name {
                         inputs.insert(name, value);
                     }
+                }
+            }
+            // Every parameter must receive a value: a decision service called
+            // with too few arguments is an error (`0085`, `002_a`).
+            for (position, parameter) in parameters.iter().enumerate() {
+                let parameter_name = element_name(model, parameter);
+                let supplied = evaluated_named.iter().any(|(key, _)| {
+                    key == parameter || parameter_name.as_ref().is_some_and(|name| name == key)
+                }) || position < evaluated.len();
+                if !supplied {
+                    return Value::Null;
                 }
             }
             let mut collected: HashMap<String, Value> = HashMap::new();
@@ -333,16 +507,18 @@ fn invocables(model: &DmnModel) -> HashMap<String, Invocable> {
             }
             DefinitionsChild::DecisionService(service) => {
                 let name = service.name.clone().unwrap_or_else(|| service.id.clone());
-                // Parameters, in declaration order: the service's input
-                // decisions, then its input data.
-                let mut parameters = Vec::new();
-                for id in service
-                    .input_decisions
-                    .iter()
-                    .chain(service.input_data.iter())
-                {
-                    parameters.push(id.clone());
-                }
+                // Parameters in document order: that is the order positional
+                // arguments bind in (`0085-decision-services`, `decision_011_1`).
+                let parameters = if service.input_parameters.is_empty() {
+                    service
+                        .input_decisions
+                        .iter()
+                        .chain(service.input_data.iter())
+                        .cloned()
+                        .collect()
+                } else {
+                    service.input_parameters.clone()
+                };
                 index.insert(
                     name,
                     Invocable::Service {
@@ -380,6 +556,17 @@ fn evaluate_boxed_value(
                 ParseEntry::Expression,
                 scope_names,
             );
+            let ast = if shared.invocable_index.is_empty() {
+                ast
+            } else {
+                std::sync::Arc::new(resolve_invocations(
+                    &ast,
+                    scope,
+                    shared,
+                    &shared.invocable_index,
+                    0,
+                ))
+            };
             crate::dmn::feel::eval::evaluate(&ast, scope)
         }
         BoxedValue::List(list) => Value::Array(
@@ -398,6 +585,22 @@ fn evaluate_boxed_value(
             }
             Value::Object(entries)
         }
+        BoxedValue::Relation(relation) => Value::Array(
+            relation
+                .rows
+                .iter()
+                .map(|row| {
+                    let mut entries = HashMap::new();
+                    for (column, cell) in relation.columns.iter().zip(row.iter()) {
+                        entries.insert(
+                            column.clone(),
+                            evaluate_boxed_value(cell, scope, shared, scope_names),
+                        );
+                    }
+                    Value::Object(entries)
+                })
+                .collect(),
+        ),
         BoxedValue::Unsupported(_) => Value::Null,
     }
 }
@@ -768,6 +971,16 @@ fn evaluate_single_decision(
     decision: &Decision,
     scope: &Scope,
 ) -> Result<SingleDecisionOutput, DecisionEvalError> {
+    // The model's business knowledge models become callable values in this
+    // decision's scope (see `bind_model_functions`).
+    let mut scope_storage;
+    let scope = if shared.invocable_index.is_empty() {
+        scope
+    } else {
+        scope_storage = scope.clone();
+        bind_model_functions(&mut scope_storage, shared);
+        &scope_storage
+    };
     let mut outputs = HashMap::new();
     let mut outputs_evaluated = Vec::new();
     let rules_fired: u64;
@@ -862,7 +1075,42 @@ fn evaluate_single_decision(
             .map(|variable| variable.name.clone())
             .or_else(|| decision.name.clone())
             .unwrap_or_else(|| decision.id.clone());
-        outputs.insert(name.clone(), Value::Object(entries));
+        outputs.insert(
+            name.clone(),
+            coerce_to_declared_shape(shared, decision, Value::Object(entries)),
+        );
+        METRIC_OUTPUT_EVALUATIONS_TOTAL
+            .with_label_values(&[decision.id.as_str(), name.as_str()])
+            .inc();
+        outputs_evaluated.push(name);
+        rules_fired = 0;
+    } else if let Some(relation) = &decision.boxed_relation {
+        let scope_names: Vec<String> = scope.bindings.keys().cloned().collect();
+        let mut local = scope.clone();
+        let rows: Vec<Value> = relation
+            .rows
+            .iter()
+            .map(|row| {
+                let mut entries = HashMap::new();
+                for (column, cell) in relation.columns.iter().zip(row.iter()) {
+                    entries.insert(
+                        column.clone(),
+                        evaluate_boxed_value(cell, &mut local, shared, &scope_names),
+                    );
+                }
+                Value::Object(entries)
+            })
+            .collect();
+        let name = decision
+            .variable
+            .as_ref()
+            .map(|variable| variable.name.clone())
+            .or_else(|| decision.name.clone())
+            .unwrap_or_else(|| decision.id.clone());
+        outputs.insert(
+            name.clone(),
+            coerce_to_declared_shape(shared, decision, Value::Array(rows)),
+        );
         METRIC_OUTPUT_EVALUATIONS_TOTAL
             .with_label_values(&[decision.id.as_str(), name.as_str()])
             .inc();
@@ -883,7 +1131,10 @@ fn evaluate_single_decision(
             .map(|variable| variable.name.clone())
             .or_else(|| decision.name.clone())
             .unwrap_or_else(|| decision.id.clone());
-        outputs.insert(name.clone(), Value::Array(items));
+        outputs.insert(
+            name.clone(),
+            coerce_to_declared_shape(shared, decision, Value::Array(items)),
+        );
         METRIC_OUTPUT_EVALUATIONS_TOTAL
             .with_label_values(&[decision.id.as_str(), name.as_str()])
             .inc();
@@ -1030,19 +1281,13 @@ impl DecisionEvaluator {
                 if work.len() > 1 {
                     work.par_iter()
                         .map(|(id, decision, scope)| {
-                            (
-                                id.clone(),
-                                evaluate_single_decision(guard, decision, scope),
-                            )
+                            (id.clone(), evaluate_single_decision(guard, decision, scope))
                         })
                         .collect()
                 } else {
                     work.iter()
                         .map(|(id, decision, scope)| {
-                            (
-                                id.clone(),
-                                evaluate_single_decision(guard, decision, scope),
-                            )
+                            (id.clone(), evaluate_single_decision(guard, decision, scope))
                         })
                         .collect()
                 };

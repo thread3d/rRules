@@ -215,6 +215,8 @@ pub struct Decision {
     pub boxed_context: Option<BoxedContext>,
     /// The decision's boxed `<list>`, when that is its body.
     pub boxed_list: Option<BoxedList>,
+    /// The decision's boxed `<relation>`, when that is its body.
+    pub boxed_relation: Option<BoxedRelation>,
     /// IDs of upstream decisions (DRD edges from `informationRequirement`).
     pub required_decisions: Vec<String>,
     /// IDs of upstream input data.
@@ -268,6 +270,12 @@ pub struct DecisionService {
     pub input_data: Vec<String>,
     /// IDs of decisions the service accepts as parameters, in declaration order.
     pub input_decisions: Vec<String>,
+    /// Every input parameter (input decisions and input data) in document order —
+    /// the order positional arguments bind in.
+    pub input_parameters: Vec<String>,
+    /// The service's child element ids (outputs, encapsulated decisions and
+    /// parameters) in document order, so the XML re-emits exactly as it was read.
+    pub child_order: Vec<String>,
     pub annotations: Vec<Annotation>,
 }
 
@@ -368,6 +376,24 @@ pub struct BoxedList {
     pub description: Option<TextContent>,
 }
 
+/// A boxed `<relation>` expression — named columns and their rows.
+///
+/// A relation is a list of contexts: each row binds every column name to the
+/// row's value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BoxedRelation {
+    pub id: Option<String>,
+    /// Column names, in order.
+    pub columns: Vec<String>,
+    /// Column ids, in order (the XML gives each column an id).
+    pub column_ids: Vec<Option<String>>,
+    /// Rows, each with one value expression per column.
+    pub rows: Vec<Vec<BoxedValue>>,
+    /// Row ids, in order.
+    pub row_ids: Vec<Option<String>>,
+    pub description: Option<TextContent>,
+}
+
 /// The value expression inside a boxed construct.
 ///
 /// Only the nests that appear in real models are modelled: a literal expression,
@@ -382,6 +408,8 @@ pub enum BoxedValue {
     List(BoxedList),
     /// `<context>…</context>`.
     Context(BoxedContext),
+    /// `<relation>…</relation>`.
+    Relation(BoxedRelation),
     /// An element this IR does not model; its name is preserved.
     Unsupported(String),
 }

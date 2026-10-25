@@ -580,6 +580,7 @@ impl<'a> Parser<'a> {
             literal_expression: None,
             boxed_context: None,
             boxed_list: None,
+            boxed_relation: None,
             required_decisions: Vec::new(),
             required_inputs: Vec::new(),
             required_knowledge: Vec::new(),
@@ -625,6 +626,10 @@ impl<'a> Parser<'a> {
                         "list" => {
                             let attrs = collect_attrs(&e)?;
                             dec.boxed_list = Some(self.parse_boxed_list(attrs)?);
+                        }
+                        "relation" => {
+                            let attrs = collect_attrs(&e)?;
+                            dec.boxed_relation = Some(self.parse_boxed_relation(attrs)?);
                         }
                         "annotation" => {
                             let attrs = collect_attrs(&e)?;
@@ -905,6 +910,80 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(context)
+    }
+
+    /// Parse a boxed `<relation>`: named columns, then rows of value expressions.
+    fn parse_boxed_relation(
+        &mut self,
+        attrs: Attrs,
+    ) -> Result<crate::dmn::model::BoxedRelation, DmnParseError> {
+        use crate::dmn::model::BoxedRelation;
+        let mut relation = BoxedRelation {
+            id: attrs.get("id").cloned(),
+            columns: Vec::new(),
+            column_ids: Vec::new(),
+            rows: Vec::new(),
+            row_ids: Vec::new(),
+            description: None,
+        };
+        loop {
+            self.buf.clear();
+            match self.reader.read_event_into(&mut self.buf) {
+                Ok(Event::Start(e)) => {
+                    let ln = local_name_str(e.name());
+                    match ln.as_str() {
+                        "description" => relation.description = Some(self.read_text_content(&ln)?),
+                        "column" => {
+                            let attributes = collect_attrs(&e)?;
+                            relation
+                                .columns
+                                .push(attributes.get("name").cloned().unwrap_or_default());
+                            relation.column_ids.push(attributes.get("id").cloned());
+                            self.skip_element(&ln)?;
+                        }
+                        "row" => {
+                            let row_attributes = collect_attrs(&e)?;
+                            relation.row_ids.push(row_attributes.get("id").cloned());
+                            let mut cells = Vec::new();
+                            loop {
+                                self.buf.clear();
+                                match self.reader.read_event_into(&mut self.buf) {
+                                    Ok(Event::Start(inner)) => {
+                                        let inner_name = local_name_str(inner.name());
+                                        if inner_name == "description" {
+                                            self.skip_element(&inner_name)?;
+                                        } else {
+                                            cells.push(self.parse_boxed_value(&inner_name)?);
+                                        }
+                                    }
+                                    Ok(Event::End(end)) => {
+                                        if local_name_str(end.name()) == "row" {
+                                            break;
+                                        }
+                                    }
+                                    Ok(Event::Eof) => break,
+                                    Ok(_) => {}
+                                    Err(error) => {
+                                        return Err(DmnParseError::XmlError(error.to_string()))
+                                    }
+                                }
+                            }
+                            relation.rows.push(cells);
+                        }
+                        _ => self.skip_element(&ln)?,
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    if local_name_str(e.name()) == "relation" {
+                        break;
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+                Err(error) => return Err(DmnParseError::XmlError(error.to_string())),
+            }
+        }
+        Ok(relation)
     }
 
     /// Parse a boxed `<list>`: a sequence of value expressions.
@@ -1548,6 +1627,8 @@ impl<'a> Parser<'a> {
             encapsulated_decisions: Vec::new(),
             input_data: Vec::new(),
             input_decisions: Vec::new(),
+            input_parameters: Vec::new(),
+            child_order: Vec::new(),
             annotations: Vec::new(),
         };
         loop {
@@ -1561,25 +1642,35 @@ impl<'a> Parser<'a> {
                         }
                         "outputDecision" => {
                             if let Some(h) = read_href_attribute(&e)? {
-                                ds.output_decisions.push(strip_href(&h));
+                                let id = strip_href(&h);
+                                ds.child_order.push(id.clone());
+                                ds.output_decisions.push(id);
                             }
                             self.skip_element(&ln)?;
                         }
                         "encapsulatedDecision" => {
                             if let Some(h) = read_href_attribute(&e)? {
-                                ds.encapsulated_decisions.push(strip_href(&h));
+                                let id = strip_href(&h);
+                                ds.child_order.push(id.clone());
+                                ds.encapsulated_decisions.push(id);
                             }
                             self.skip_element(&ln)?;
                         }
                         "inputData" => {
                             if let Some(h) = read_href_attribute(&e)? {
-                                ds.input_data.push(strip_href(&h));
+                                let id = strip_href(&h);
+                                ds.child_order.push(id.clone());
+                                ds.input_parameters.push(id.clone());
+                                ds.input_data.push(id);
                             }
                             self.skip_element(&ln)?;
                         }
                         "inputDecision" => {
                             if let Some(h) = read_href_attribute(&e)? {
-                                ds.input_decisions.push(strip_href(&h));
+                                let id = strip_href(&h);
+                                ds.child_order.push(id.clone());
+                                ds.input_parameters.push(id.clone());
+                                ds.input_decisions.push(id);
                             }
                             self.skip_element(&ln)?;
                         }
@@ -1614,6 +1705,14 @@ impl<'a> Parser<'a> {
                 Err(e) => return Err(DmnParseError::XmlError(e.to_string())),
             }
         }
+        // Parameters bind positionally: input data first, then input decisions,
+        // each in document order (`0085-decision-services`).
+        ds.input_parameters = ds
+            .input_data
+            .iter()
+            .chain(ds.input_decisions.iter())
+            .cloned()
+            .collect();
         Ok(ds)
     }
 

@@ -317,6 +317,9 @@ fn emit_decision(writer: &mut Writer<Vec<u8>>, dec: &Decision) -> Result<(), Dmn
     if let Some(list) = dec.boxed_list.as_ref() {
         emit_boxed_list(writer, list)?;
     }
+    if let Some(relation) = dec.boxed_relation.as_ref() {
+        emit_boxed_relation(writer, relation)?;
+    }
     if let Some(dt) = dec.decision_table.as_ref() {
         emit_decision_table(writer, dt)?;
     }
@@ -385,6 +388,39 @@ fn emit_boxed_context(
     Ok(())
 }
 
+/// Emit a boxed `<relation>`: columns, then rows of value expressions.
+fn emit_boxed_relation(
+    writer: &mut Writer<Vec<u8>>,
+    relation: &crate::dmn::model::BoxedRelation,
+) -> Result<(), DmnExportError> {
+    let mut start = BytesStart::new("relation");
+    if let Some(id) = relation.id.as_deref() {
+        start.push_attribute(("id", id));
+    }
+    writer.write_event(Event::Start(start))?;
+    for (index, column) in relation.columns.iter().enumerate() {
+        let mut element = BytesStart::new("column");
+        element.push_attribute(("name", column.as_str()));
+        if let Some(id) = relation.column_ids.get(index).and_then(|id| id.as_deref()) {
+            element.push_attribute(("id", id));
+        }
+        writer.write_event(Event::Empty(element))?;
+    }
+    for (index, row) in relation.rows.iter().enumerate() {
+        let mut start_element = BytesStart::new("row");
+        if let Some(id) = relation.row_ids.get(index).and_then(|id| id.as_deref()) {
+            start_element.push_attribute(("id", id));
+        }
+        writer.write_event(Event::Start(start_element))?;
+        for cell in row {
+            emit_boxed_value(writer, cell)?;
+        }
+        writer.write_event(Event::End(BytesEnd::new("row")))?;
+    }
+    writer.write_event(Event::End(BytesEnd::new("relation")))?;
+    Ok(())
+}
+
 /// Emit a boxed `<list>` and its items, preserving document order.
 fn emit_boxed_list(
     writer: &mut Writer<Vec<u8>>,
@@ -423,6 +459,7 @@ fn emit_boxed_value(
         }
         BoxedValue::List(list) => emit_boxed_list(writer, list)?,
         BoxedValue::Context(context) => emit_boxed_context(writer, context)?,
+        BoxedValue::Relation(relation) => emit_boxed_relation(writer, relation)?,
         BoxedValue::Unsupported(name) => {
             writer.write_event(Event::Start(BytesStart::new(name.as_str())))?;
             writer.write_event(Event::End(BytesEnd::new(name.as_str())))?;
@@ -674,25 +711,41 @@ fn emit_decision_service(
     if let Some(desc) = ds.description.as_ref() {
         emit_text_element(writer, "description", desc)?;
     }
-    for rid in &ds.output_decisions {
-        let mut e = BytesStart::new("outputDecision");
-        e.push_attribute(("href", format!("#{rid}").as_str()));
-        writer.write_event(Event::Empty(e))?;
-    }
-    for rid in &ds.encapsulated_decisions {
-        let mut e = BytesStart::new("encapsulatedDecision");
-        e.push_attribute(("href", format!("#{rid}").as_str()));
-        writer.write_event(Event::Empty(e))?;
-    }
-    for rid in &ds.input_data {
-        let mut e = BytesStart::new("inputData");
-        e.push_attribute(("href", format!("#{rid}").as_str()));
-        writer.write_event(Event::Empty(e))?;
-    }
-    for rid in &ds.input_decisions {
-        let mut e = BytesStart::new("inputDecision");
-        e.push_attribute(("href", format!("#{rid}").as_str()));
-        writer.write_event(Event::Empty(e))?;
+    // Re-emit the child references in the order they were read: a decision
+    // service interleaves its outputs and parameters, and the order is what
+    // positional arguments bind in.
+    let emit = |writer: &mut Writer<Vec<u8>>, tag: &str, id: &str| -> Result<(), DmnExportError> {
+        let mut element = BytesStart::new(tag);
+        element.push_attribute(("href", format!("#{id}").as_str()));
+        writer.write_event(Event::Empty(element))?;
+        Ok(())
+    };
+    if ds.child_order.is_empty() {
+        for rid in &ds.output_decisions {
+            emit(writer, "outputDecision", rid)?;
+        }
+        for rid in &ds.encapsulated_decisions {
+            emit(writer, "encapsulatedDecision", rid)?;
+        }
+        for rid in &ds.input_data {
+            emit(writer, "inputData", rid)?;
+        }
+        for rid in &ds.input_decisions {
+            emit(writer, "inputDecision", rid)?;
+        }
+    } else {
+        for rid in &ds.child_order {
+            let tag = if ds.output_decisions.contains(rid) {
+                "outputDecision"
+            } else if ds.encapsulated_decisions.contains(rid) {
+                "encapsulatedDecision"
+            } else if ds.input_decisions.contains(rid) {
+                "inputDecision"
+            } else {
+                "inputData"
+            };
+            emit(writer, tag, rid)?;
+        }
     }
     for ann in &ds.annotations {
         emit_annotation(writer, ann)?;
