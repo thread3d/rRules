@@ -12,6 +12,7 @@ resources:
     cpu: "200m"
 
 ingress:
+  enabled: true
   hosts:
     - host: dev.example.com
       paths:

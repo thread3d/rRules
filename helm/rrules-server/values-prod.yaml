@@ -15,6 +15,7 @@ resources:
     cpu: "1000m"
 
 ingress:
+  enabled: true
   hosts:
     - host: prod.example.com
       paths:

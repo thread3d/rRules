@@ -51,3 +51,21 @@ helm upgrade rrules ./helm/rrules-server --values custom-values.yaml
 ```bash
 helm uninstall rrules
 ```
+
+## Environments
+
+The chart ships per-environment value overlays:
+
+```bash
+helm install rrules ./helm/rrules-server -f helm/rrules-server/values-dev.yaml
+helm install rrules ./helm/rrules-server -f helm/rrules-server/values-staging.yaml
+helm install rrules ./helm/rrules-server -f helm/rrules-server/values-prod.yaml
+```
+
+`values.yaml` is the default (ingress off, two replicas). The overlays set their
+own replica count, image tag, resources, database URL and ingress host, and they
+turn the ingress on. `secret.yaml.template` is a starting point for the
+credentials the deployment expects; it is not rendered by Helm.
+
+`k8s/` holds the equivalent raw manifests for `kubectl apply -k k8s/` when Helm is
+not available.

@@ -15,6 +15,7 @@ resources:
     cpu: "500m"
 
 ingress:
+  enabled: true
   hosts:
     - host: staging.example.com
       paths:
