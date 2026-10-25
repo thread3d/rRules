@@ -168,8 +168,8 @@ Auth column: **yes** = requires a valid Bearer JWT (inside the `/v1` wrap);
 
 | Method | Path | Request | Success response | Errors | Auth | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/health/live` | — | `200`, empty body | — | no | `api/src/health.rs:14-16` |
-| GET | `/health/ready` | — | `200`, empty body | — | no | No dependency checks; comment says in-memory only (`health.rs:27-32`). There is **no** `GET /health`. |
+| GET | `/health`, `/health/live` | — | `200`, empty body | — | no | `api/src/health.rs` |
+| GET | `/health/ready`, `/ready` | — | `200`, empty body | — | no | No dependency checks: the stores are in-memory (`health.rs`). The flat `/health` and `/ready` are aliases, because the Kubernetes manifests and the Helm chart probe those paths. |
 | GET | `/metrics` | — | `200` HTML / JSON / Prometheus text | — | no | Content-negotiated on `Accept` (`api/src/metrics.rs:330-383`); see drift note. |
 | GET | `/api-docs/openapi.json` | — | `200` OpenAPI 3 JSON | — | no | `api/src/main.rs:307-310` |
 | GET | `/swagger-ui/{_:.*}` | — | `200` HTML | — | no | Same registration. |
@@ -471,7 +471,7 @@ Doc/code drift in `docs/API.md` (each item verified against the handlers):
 
 | Claim | Reality |
 |---|---|
-| `GET /live`, `GET /ready` returning `{"status":"ok","service":"rrules-api"}` (`docs/API.md:47-57`) | Routes are `GET /health/live`, `GET /health/ready` with empty bodies; there is no `/live` or `/ready` (`api/src/health.rs:35-41`) |
+| `GET /live`, `GET /ready` returning `{"status":"ok","service":"rrules-api"}` (`docs/API.md:47-57`) | Routes are `GET /health/live`, `GET /health/ready`, plus the aliases `GET /health` and `GET /ready` the deployment probes; all return an empty 200 body, never that JSON (`api/src/health.rs`) |
 | `/metrics/dead-rules`, `/metrics/coverage` at root (`docs/API.md:92-119`) | Registered only as `/v1/metrics/dead-rules`, `/v1/metrics/coverage` (`api/src/metrics.rs:452-455`); root `/metrics` scope has a single route (`:437-442`) |
 | Prometheus samples named `engine_rules_fired`, `engine_memory_bytes` (`docs/API.md:84-90`) | Only `rrules_execute_requests_total`, `rrules_execute_rules_fired_total`, `rrules_execute_duration_seconds`, `rrules_sessions_active` exist (`api/src/metrics.rs:100-137`) |
 | `GET /v1/metrics/dmn` returns `DmnMetricsSnapshot` JSON (`docs/API.md:142-144`) | Returns Prometheus text (`api/src/v1/dmn_metrics.rs:115-126`) |

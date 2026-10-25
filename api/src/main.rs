@@ -41,8 +41,17 @@ use engine::engine::{EngineRegistry, EngineSelector};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // `RRULES_BIND_ADDRESS` and `PORT` decide where the server listens. The
+    // default is loopback, which is right for a laptop and wrong for a container:
+    // an image sets `RRULES_BIND_ADDRESS=0.0.0.0` so the port is reachable.
+    let bind_address = {
+        let host = std::env::var("RRULES_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+        format!("{host}:{port}")
+    };
+
     println!("rRules REST API Server v9.0.0");
-    println!("Starting on http://127.0.0.1:8080");
+    println!("Starting on http://{bind_address}");
 
     // Create engine state for hot reload functionality
     let engine_state = web::Data::new(v1::execution::EngineState::new());
@@ -498,9 +507,9 @@ async fn main() -> std::io::Result<()> {
                     .show_files_listing(),
             )
     })
-    .bind("127.0.0.1:8080")?;
+    .bind(&bind_address)?;
 
-    println!("Server running at http://127.0.0.1:8080");
+    println!("Server running at http://{bind_address}");
     println!("Metrics endpoint available at /metrics");
     server.run().await
 }

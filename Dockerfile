@@ -1,64 +1,81 @@
-# Build stage - use nightly for edition 2024 support with musl tools
-FROM rustlang/rust:nightly-slim AS builder
+# rRules server image: the web interface and the API binary in one container.
+#
+#   docker build -t rrules-server:latest .
+#
+# The binary serves the IDE from `FRONTEND_DIST`, so the interface is built in its
+# own stage and copied in — an API-only image would answer requests but serve no UI.
 
-WORKDIR /build
+# ---- 1. Web interface -------------------------------------------------------
+FROM node:22-bookworm-slim AS frontend
 
-# Install musl-tools for static linking on Debian-based image
+WORKDIR /src/frontend
+
+# Manifests first, so this layer is cached until the dependencies change.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY frontend/ ./
+RUN npm run build
+
+# ---- 2. Server binary ------------------------------------------------------
+FROM rust:1-slim-bookworm AS backend
+
+WORKDIR /src
+
+# `libgit2-sys` compiles libgit2's C sources; the tree needs no OpenSSL.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    musl-tools \
-    file \
+        build-essential \
+        pkg-config \
+        cmake \
+        zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Add musl target for cross-compilation
-RUN rustup target add x86_64-unknown-linux-musl
-
-# Stage 1: Cache dependencies only (leverages Docker layer caching)
-FROM builder AS deps-cached
-
-WORKDIR /build
-
-# Copy only Cargo.toml and Cargo.lock files to cache dependencies
-COPY api/Cargo.lock api/Cargo.toml ./
+# The workspace manifests and the lockfile, so resolution matches the repository.
+COPY Cargo.toml Cargo.lock ./
 COPY engine/Cargo.toml ./engine/
-COPY shared/Cargo.toml ./shared/ 2>/dev/null || true
+COPY api/Cargo.toml ./api/
+COPY engine_state/Cargo.toml ./engine_state/
 
-# Pre-fetch dependencies (cached unless Cargo.toml changes)
-RUN cargo fetch --manifest-path api/Cargo.toml
+# The whole member directories, not just their `src`: a crate's manifest declares
+# its bench and test targets, and cargo refuses the manifest if those files are
+# absent. `.dockerignore` keeps build output and dependencies out of the context.
+COPY engine ./engine
+COPY api ./api
+COPY engine_state ./engine_state
 
-# Stage 2: Build release binary with musl for static linking
-FROM builder AS release-builder
+RUN cargo build --release --locked -p api --bin rRules-server
 
-WORKDIR /build
+# ---- 3. Runtime ------------------------------------------------------------
+FROM debian:bookworm-slim AS runtime
 
-COPY . .
-
-# Build with musl for static linking (no glibc dependency)
-RUN cargo build --release \
-    --target x86_64-unknown-linux-musl \
-    --bin rRules-server \
-    --manifest-path api/Cargo.toml \
-    --features engine/default && \
-    # Verify binary is statically linked
-    file target/x86_64-unknown-linux-musl/release/rRules-server && \
-    # Strip binary to reduce size
-    strip /build/target/x86_64-unknown-linux-musl/release/rRules-server
-
-# Final stage - use alpine for smallest possible image
-FROM alpine:3.20
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g 1000 rrules \
+    && useradd -u 1000 -g 1000 -s /usr/sbin/nologin -M rrules
 
 WORKDIR /app
 
-# Install CA certificates and timezone data for TLS/HTTPS support
-RUN apk add --no-cache ca-certificates tzdata && \
-    # Create non-root user with fixed UID for security
-    addgroup -g 1000 rrules && \
-    adduser -u 1000 -G rrules -s /bin/sh -D rrules
+COPY --from=backend /src/target/release/rRules-server /usr/local/bin/rrules-server
+COPY --from=frontend /src/frontend/dist /app/frontend/dist
 
-# Copy the compiled binary from builder (statically linked, no runtime deps)
-COPY --from=release-builder /build/target/x86_64-unknown-linux-musl/release/rRules-server /usr/local/bin/rules-server
+# Every path the server reads at startup is set explicitly, so the container needs
+# no working-directory assumptions. Mount a volume over /data to persist rules.
+ENV RUST_LOG=info \
+    FRONTEND_DIST=/app/frontend/dist \
+    RULE_STORAGE_PATH=/data/rules \
+    DMN_STORAGE_PATH=/data/dmn \
+    WATCH_RULES_DIR=true \
+    PORT=8080
 
-EXPOSE 8080
+RUN mkdir -p /data/rules /data/dmn && chown -R rrules:rrules /data
 
 USER rrules
 
-ENTRYPOINT ["/usr/local/bin/rules-server"]
+EXPOSE 8080
+
+# Liveness and readiness probes live in the Helm chart (`/health`, `/ready`), not
+# here: an in-image check would need a shell and a client the image does not carry.
+
+ENTRYPOINT ["/usr/local/bin/rrules-server"]

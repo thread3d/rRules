@@ -12,6 +12,34 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — the container image and the deployment probes
+
+The `Deploy` workflow failed on its first run, and the image it built would not
+have worked if it had. The `Dockerfile` predated the workspace layout: it copied
+`api/Cargo.lock` and a `shared/` crate that do not exist, used `COPY … 2>/dev/null
+|| true` (a `COPY` instruction has no shell), and asked cargo for
+`--features engine/default`, which cannot select another member's features. It also
+never built the web interface, so the image would have served an API and no UI.
+
+`Dockerfile` is rewritten against the actual layout: a Node stage builds
+`frontend/dist`, a Rust stage builds `-p api --bin rRules-server --locked` from the
+workspace root, and a Debian slim runtime carries both with every startup path set
+explicitly and a non-root user. `.dockerignore` no longer excludes `Cargo.lock`
+(`Cargo.*.lock` matched it) and now drops the build output, dependencies and
+process documentation from the context.
+
+Two defects surfaced while verifying the runtime, both of which would have kept the
+deployment from ever becoming healthy:
+
+- The server bound `127.0.0.1:8080` unconditionally. In a container that is
+  reachable only from inside it. It now reads `RRULES_BIND_ADDRESS` and `PORT`
+  (defaults unchanged for local work), and the image sets `0.0.0.0`.
+- The chart and the `k8s/` manifests probe `/health` and `/ready`, while the
+  application served only `/health/live` and `/health/ready` — so every probe got a
+  404, the container was restarted before it could become ready, and the Service
+  had no endpoints. Both flat paths are now aliases of the existing handlers.
+
+
 ## [v9.0] - 2026-10-25 — Verified Conformance
 
 The release where the project's claims became measurable. rRules ships with a specification it can

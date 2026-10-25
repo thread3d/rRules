@@ -30,7 +30,9 @@ jobs:
   image:
     name: Build and push the container image
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # The Dockerfile compiles the workspace in release mode inside the builder, so
+    # a cold cache costs several minutes before the image exists.
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

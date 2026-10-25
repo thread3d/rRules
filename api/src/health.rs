@@ -31,11 +31,19 @@ pub async fn ready() -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
-/// Configure health endpoints
+/// Configure health endpoints.
+///
+/// The nested paths (`/health/live`, `/health/ready`) are the documented
+/// contract; the flat aliases (`/health`, `/ready`) are what the Kubernetes
+/// manifests and the Helm chart probe. Serving both means a probe does not have
+/// to know which form this version uses, and neither name 404s.
 pub fn configure_health(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/health")
+            .route("", web::get().to(live))
+            .route("/", web::get().to(live))
             .route("/live", web::get().to(live))
             .route("/ready", web::get().to(ready)),
-    );
+    )
+    .route("/ready", web::get().to(ready));
 }

@@ -1,45 +1,49 @@
-# Cargo build artifacts
+# Build context for the server image. The Dockerfile copies only what it compiles
+# and serves, so keep this list aligned with it: a context that includes `target/`
+# or a dependency tree costs minutes per build and buys nothing.
+
+# Build artifacts and dependency trees
 target/
+**/target/
+node_modules/
+**/node_modules/
+frontend/dist/
 *.rlib
 *.o
 *.d
 
-# Cargo lock files (use only Cargo.lock for reproducible builds)
-Cargo.*.lock
-
-# IDE and editor files
+# Version control and editor files
+.git/
+.gitignore
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
 
-# Test coverage reports
+# Local run artifacts (see .gitignore)
+api/dmn/
+.codewitness/
+.codebase-memory/
+engine/benches/snapshots/*-current.json
+*.log
 coverage/
 .tarpaulin.html
 
-# Documentation generation artifacts
-target/doc/
-
-# Git metadata
-.git/
-.github/
-.gitignore
-
-# Development config (use environment variables in production)
-.env
-.env.*
-config/*.dev.*
-
-# CI/CD files (not needed at runtime)
+# CI and deployment configuration — not part of the image
 .github/
 .gitlab-ci.yml
 .travis.yml
+helm/
+k8s/
 
-# Large non-essential directories
-node_modules/
-frontend/node_modules/
-
-# Documentation (README, CHANGELOG, etc.)
+# Documentation and process history — not part of the image
+docs/
+specs/
+planning/
 *.md
-!.md
+!frontend/README.md
+
+# Local secrets and environment files
+.env
+.env.*
