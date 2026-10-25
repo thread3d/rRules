@@ -211,6 +211,10 @@ pub struct Decision {
     /// `<literalExpression>` (DMN 1.5 §10.3.2). A decision has at most one of
     /// `decision_table` / `literal_expression`.
     pub literal_expression: Option<LiteralExpression>,
+    /// The decision's boxed `<context>`, when that is its body.
+    pub boxed_context: Option<BoxedContext>,
+    /// The decision's boxed `<list>`, when that is its body.
+    pub boxed_list: Option<BoxedList>,
     /// IDs of upstream decisions (DRD edges from `informationRequirement`).
     pub required_decisions: Vec<String>,
     /// IDs of upstream input data.
@@ -328,6 +332,62 @@ pub struct DecisionTable {
 
 /// `<literalExpression>` — a decision whose value is one FEEL expression.
 ///
+/// A boxed `<context>` expression — a literal, ordered set of named entries.
+///
+/// Used as a decision's body, where each entry is a named sub-expression. Entries
+/// evaluate in document order, so a later entry may refer to an earlier one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BoxedContext {
+    pub id: Option<String>,
+    /// Entries in document order: the context key and its value expression.
+    pub entries: Vec<BoxedContextEntry>,
+    pub description: Option<TextContent>,
+}
+
+/// One `<contextEntry>` of a [`BoxedContext`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BoxedContextEntry {
+    /// The `<variable name="…"/>` of the entry — the context key.
+    pub key: String,
+    /// The entry's value expression.
+    pub value: BoxedValue,
+}
+
+/// A boxed `<list>` expression — an ordered list of sub-expressions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BoxedList {
+    pub id: Option<String>,
+    /// The items in document order.
+    pub items: Vec<BoxedValue>,
+    pub description: Option<TextContent>,
+}
+
+/// The value expression inside a boxed construct.
+///
+/// Only the nests that appear in real models are modelled: a literal expression,
+/// a nested list, a nested context. Anything else is kept as
+/// [`BoxedValue::Unsupported`] with its element name, so the document still
+/// round-trips instead of silently losing an element.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum BoxedValue {
+    /// `<literalExpression><text>…</text></literalExpression>`.
+    Literal(BoxedLiteral),
+    /// `<list>…</list>`.
+    List(BoxedList),
+    /// `<context>…</context>`.
+    Context(BoxedContext),
+    /// An element this IR does not model; its name is preserved.
+    Unsupported(String),
+}
+
+/// A literal expression inside a boxed value (text plus its attributes).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BoxedLiteral {
+    pub id: Option<String>,
+    pub type_ref: Option<String>,
+    pub text: TextContent,
+}
+
 /// The IR keeps the expression text verbatim (with its CDATA flag) rather than
 /// re-shaping it: the evaluator parses it on demand through the AST cache, and
 /// the exporter writes it back unchanged, so a literal decision round-trips.

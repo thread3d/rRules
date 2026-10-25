@@ -578,6 +578,8 @@ impl<'a> Parser<'a> {
             allowed_answers: attrs.get("allowedAnswers").cloned(),
             decision_table: None,
             literal_expression: None,
+            boxed_context: None,
+            boxed_list: None,
             required_decisions: Vec::new(),
             required_inputs: Vec::new(),
             required_knowledge: Vec::new(),
@@ -615,6 +617,14 @@ impl<'a> Parser<'a> {
                         "literalExpression" => {
                             let attrs = collect_attrs(&e)?;
                             dec.literal_expression = Some(self.parse_literal_expression(attrs)?);
+                        }
+                        "context" => {
+                            let attrs = collect_attrs(&e)?;
+                            dec.boxed_context = Some(self.parse_boxed_context(attrs)?);
+                        }
+                        "list" => {
+                            let attrs = collect_attrs(&e)?;
+                            dec.boxed_list = Some(self.parse_boxed_list(attrs)?);
                         }
                         "annotation" => {
                             let attrs = collect_attrs(&e)?;
@@ -825,6 +835,140 @@ impl<'a> Parser<'a> {
 
     /// Parse `<literalExpression>` (DMN 1.5 §10.3.2): an id/typeRef plus the
     /// `<text>` child holding the FEEL expression.
+    /// Parse a boxed `<context>`: ordered `<contextEntry>` elements, each with a
+    /// `<variable name="…"/>` key and a value expression.
+    fn parse_boxed_context(
+        &mut self,
+        attrs: Attrs,
+    ) -> Result<crate::dmn::model::BoxedContext, DmnParseError> {
+        use crate::dmn::model::{BoxedContext, BoxedContextEntry, BoxedValue};
+        let mut context = BoxedContext {
+            id: attrs.get("id").cloned(),
+            entries: Vec::new(),
+            description: None,
+        };
+        loop {
+            self.buf.clear();
+            match self.reader.read_event_into(&mut self.buf) {
+                Ok(Event::Start(e)) => {
+                    let ln = local_name_str(e.name());
+                    match ln.as_str() {
+                        "description" => context.description = Some(self.read_text_content(&ln)?),
+                        "contextEntry" => {
+                            let mut key = String::new();
+                            let mut value: Option<BoxedValue> = None;
+                            loop {
+                                self.buf.clear();
+                                match self.reader.read_event_into(&mut self.buf) {
+                                    Ok(Event::Start(inner)) => {
+                                        let inner_name = local_name_str(inner.name());
+                                        match inner_name.as_str() {
+                                            "variable" => {
+                                                let inner_attrs = collect_attrs(&inner)?;
+                                                key = inner_attrs
+                                                    .get("name")
+                                                    .cloned()
+                                                    .unwrap_or_default();
+                                            }
+                                            _ => {
+                                                value = Some(self.parse_boxed_value(&inner_name)?);
+                                            }
+                                        }
+                                    }
+                                    Ok(Event::End(end)) => {
+                                        if local_name_str(end.name()) == "contextEntry" {
+                                            break;
+                                        }
+                                    }
+                                    Ok(Event::Eof) => break,
+                                    Ok(_) => {}
+                                    Err(error) => {
+                                        return Err(DmnParseError::XmlError(error.to_string()))
+                                    }
+                                }
+                            }
+                            if let Some(value) = value {
+                                context.entries.push(BoxedContextEntry { key, value });
+                            }
+                        }
+                        _ => self.skip_element(&ln)?,
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    if local_name_str(e.name()) == "context" {
+                        break;
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+                Err(error) => return Err(DmnParseError::XmlError(error.to_string())),
+            }
+        }
+        Ok(context)
+    }
+
+    /// Parse a boxed `<list>`: a sequence of value expressions.
+    fn parse_boxed_list(
+        &mut self,
+        attrs: Attrs,
+    ) -> Result<crate::dmn::model::BoxedList, DmnParseError> {
+        use crate::dmn::model::BoxedList;
+        let mut list = BoxedList {
+            id: attrs.get("id").cloned(),
+            items: Vec::new(),
+            description: None,
+        };
+        loop {
+            self.buf.clear();
+            match self.reader.read_event_into(&mut self.buf) {
+                Ok(Event::Start(e)) => {
+                    let ln = local_name_str(e.name());
+                    if ln == "description" {
+                        list.description = Some(self.read_text_content(&ln)?);
+                    } else {
+                        list.items.push(self.parse_boxed_value(&ln)?);
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    if local_name_str(e.name()) == "list" {
+                        break;
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+                Err(error) => return Err(DmnParseError::XmlError(error.to_string())),
+            }
+        }
+        Ok(list)
+    }
+
+    /// Parse one boxed value expression, dispatching on its element name.
+    fn parse_boxed_value(
+        &mut self,
+        element: &str,
+    ) -> Result<crate::dmn::model::BoxedValue, DmnParseError> {
+        use crate::dmn::model::{BoxedLiteral, BoxedValue};
+        match element {
+            "literalExpression" => {
+                let attrs = Attrs::default();
+                let literal = self.parse_literal_expression(attrs)?;
+                Ok(BoxedValue::Literal(BoxedLiteral {
+                    id: literal.id,
+                    type_ref: literal.type_ref,
+                    text: literal.text,
+                }))
+            }
+            "context" => Ok(BoxedValue::Context(
+                self.parse_boxed_context(Attrs::default())?,
+            )),
+            "list" => Ok(BoxedValue::List(self.parse_boxed_list(Attrs::default())?)),
+            other => {
+                self.skip_element(other)?;
+                Ok(BoxedValue::Unsupported(other.to_string()))
+            }
+        }
+    }
+
     fn parse_literal_expression(
         &mut self,
         attrs: Attrs,

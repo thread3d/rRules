@@ -108,39 +108,140 @@ where
 
 /// `date(x)` — parse a string into a FEEL date. Returns Null on failure or null input.
 fn built_in_date(args: &[Value]) -> Value {
-    if args.is_empty() {
-        return Value::Null;
-    }
-    match &args[0] {
-        Value::Null => Value::Null,
-        Value::String(s) => {
-            // Delegate to parse_at_literal — handles date format.
-            crate::dmn::feel::temporal::parse_at_literal(s).unwrap_or(Value::Null)
+    match args.len() {
+        // `date(year, month, day)` — the component constructor (DMN 1.5 §10.3.4.1).
+        3 => {
+            let (Some(year), Some(month), Some(day)) = (
+                integer_argument(&args[0]),
+                integer_argument(&args[1]),
+                integer_argument(&args[2]),
+            ) else {
+                return Value::Null;
+            };
+            let year = match i32::try_from(year) {
+                Ok(year) => year,
+                Err(_) => return Value::Null,
+            };
+            let month = match u32::try_from(month) {
+                Ok(month) => month,
+                Err(_) => return Value::Null,
+            };
+            let day = match u32::try_from(day) {
+                Ok(day) => day,
+                Err(_) => return Value::Null,
+            };
+            match chrono::NaiveDate::from_ymd_opt(year, month, day) {
+                Some(date) => Value::Date(date),
+                None => Value::Null,
+            }
         }
-        _ => Value::Null, // non-string → null (no implicit conversion)
+        // `date(date and time)` — the date part; `date(date)` is the identity.
+        1 => match &args[0] {
+            Value::Null => Value::Null,
+            Value::Date(date) => Value::Date(*date),
+            Value::DateTime(naive) => Value::Date(naive.date()),
+            Value::DateTimeTz(_) => match date_of(&args[0]) {
+                Some(date) => Value::Date(date),
+                None => Value::Null,
+            },
+            Value::String(text) => match crate::dmn::feel::temporal::parse_at_literal(text) {
+                Some(Value::Date(date)) => Value::Date(date),
+                _ => Value::Null,
+            },
+            _ => Value::Null,
+        },
+        _ => Value::Null,
     }
 }
 
 /// `time(x)` — parse a string into a FEEL time. Returns Null on failure or null input.
 fn built_in_time(args: &[Value]) -> Value {
-    if args.is_empty() {
-        return Value::Null;
-    }
-    match &args[0] {
-        Value::Null => Value::Null,
-        Value::String(s) => crate::dmn::feel::temporal::parse_at_literal(s).unwrap_or(Value::Null),
+    match args.len() {
+        // `time(hour, minute, second)` and `time(hour, minute, second, offset)`.
+        3 | 4 => {
+            let (Some(hour), Some(minute), Some(second)) = (
+                integer_argument(&args[0]),
+                integer_argument(&args[1]),
+                integer_argument(&args[2]),
+            ) else {
+                return Value::Null;
+            };
+            let (Ok(hour), Ok(minute), Ok(second)) = (
+                u32::try_from(hour),
+                u32::try_from(minute),
+                u32::try_from(second),
+            ) else {
+                return Value::Null;
+            };
+            let Some(naive) = chrono::NaiveTime::from_hms_opt(hour, minute, second) else {
+                return Value::Null;
+            };
+            if args.len() == 3 {
+                return Value::Time(crate::dmn::feel::temporal::TimeValue::Local(naive));
+            }
+            // The fourth argument is a duration used as the UTC offset.
+            let offset = match &args[3] {
+                Value::DaysTimeDuration(duration) => duration.num_seconds(),
+                _ => return Value::Null,
+            };
+            let Ok(offset) = i32::try_from(offset) else {
+                return Value::Null;
+            };
+            let Some(zone) = chrono::FixedOffset::east_opt(offset) else {
+                return Value::Null;
+            };
+            let Some(epoch) = chrono::NaiveDate::from_ymd_opt(1970, 1, 1) else {
+                return Value::Null;
+            };
+            use chrono::TimeZone;
+            match zone.from_local_datetime(&epoch.and_time(naive)).single() {
+                Some(fixed) => Value::Time(crate::dmn::feel::temporal::TimeValue::Offset(fixed)),
+                None => Value::Null,
+            }
+        }
+        1 => match &args[0] {
+            Value::Null => Value::Null,
+            Value::String(text) => {
+                crate::dmn::feel::temporal::parse_at_literal(text).unwrap_or(Value::Null)
+            }
+            _ => Value::Null,
+        },
         _ => Value::Null,
     }
 }
 
 /// `date and time(x)` — parse a string into a FEEL date and time. Returns Null on failure or null input.
 fn built_in_date_and_time(args: &[Value]) -> Value {
-    if args.is_empty() {
-        return Value::Null;
-    }
-    match &args[0] {
-        Value::Null => Value::Null,
-        Value::String(s) => crate::dmn::feel::temporal::parse_at_literal(s).unwrap_or(Value::Null),
+    use crate::dmn::feel::temporal::{DateTimeValue, TimeValue};
+    match args.len() {
+        // `date and time(date, time)` — combine the two values.
+        2 => match (&args[0], &args[1]) {
+            (Value::Date(date), Value::Time(time)) => {
+                let naive = date.and_time(match time {
+                    TimeValue::Fixed(naive) | TimeValue::Local(naive) => *naive,
+                    TimeValue::Offset(fixed) => fixed.time(),
+                });
+                match time {
+                    TimeValue::Offset(fixed) => {
+                        let offset = *fixed.offset();
+                        use chrono::TimeZone;
+                        match offset.from_local_datetime(&naive).single() {
+                            Some(combined) => Value::DateTimeTz(DateTimeValue::Fixed(combined)),
+                            None => Value::Null,
+                        }
+                    }
+                    _ => Value::DateTime(naive),
+                }
+            }
+            _ => Value::Null,
+        },
+        1 => match &args[0] {
+            Value::Null => Value::Null,
+            Value::String(text) => {
+                crate::dmn::feel::temporal::parse_at_literal(text).unwrap_or(Value::Null)
+            }
+            _ => Value::Null,
+        },
         _ => Value::Null,
     }
 }
@@ -1636,23 +1737,66 @@ pub fn built_in_day_of_year(args: &[Value]) -> Value {
 ///
 /// DMN 1.5 §10.3.2.3.7: Returns an integer in `[1, 7]`. Null arg → null.
 pub fn built_in_day_of_week(args: &[Value]) -> Value {
-    let d = match args.first() {
-        Some(Value::Date(d)) => *d,
-        _ => return Value::Null,
+    // The TCK expects the *name* of the day (`"Tuesday"`), not the ISO number.
+    let date = match args.first().and_then(date_of) {
+        Some(date) => date,
+        None => return Value::Null,
     };
-    Value::Integer(iso_weekday_num(d) as i64)
+    let name = match Datelike::weekday(&date) {
+        chrono::Weekday::Mon => "Monday",
+        chrono::Weekday::Tue => "Tuesday",
+        chrono::Weekday::Wed => "Wednesday",
+        chrono::Weekday::Thu => "Thursday",
+        chrono::Weekday::Fri => "Friday",
+        chrono::Weekday::Sat => "Saturday",
+        chrono::Weekday::Sun => "Sunday",
+    };
+    Value::String(name.to_string())
+}
+
+/// The calendar date a temporal value denotes, for the accessor functions.
+///
+/// A `date and time` contributes its date part (in its own offset), which is what
+/// the accessors on a date-time are defined to return.
+fn date_of(value: &Value) -> Option<chrono::NaiveDate> {
+    use crate::dmn::feel::temporal::DateTimeValue;
+    match value {
+        Value::Date(date) => Some(*date),
+        Value::DateTime(naive) => Some(naive.date()),
+        Value::DateTimeTz(DateTimeValue::Fixed(zoned)) => Some(zoned.date_naive()),
+        Value::DateTimeTz(DateTimeValue::Iana(zoned)) => Some(zoned.date_naive()),
+        Value::DateTimeTz(DateTimeValue::Local(naive)) => Some(naive.date()),
+        _ => None,
+    }
+}
+
+fn month_name(month: u32) -> &'static str {
+    match month {
+        1 => "January",
+        2 => "February",
+        3 => "March",
+        4 => "April",
+        5 => "May",
+        6 => "June",
+        7 => "July",
+        8 => "August",
+        9 => "September",
+        10 => "October",
+        11 => "November",
+        _ => "December",
+    }
 }
 
 /// `month of year(<date>)` — month number (1–12).
 ///
 /// DMN 1.5 §10.3.2.3.7: Returns an integer in `[1, 12]`. Null arg → null.
 pub fn built_in_month_of_year(args: &[Value]) -> Value {
-    let d = match args.first() {
-        Some(Value::Date(d)) => *d,
-        _ => return Value::Null,
+    // The TCK expects the month's *name* (`"September"`), matching `day of week`.
+    let date = match args.first().and_then(date_of) {
+        Some(date) => date,
+        None => return Value::Null,
     };
-    // Use Datelike trait (imported above) for .month().
-    Value::Integer(Datelike::month(&d) as i64)
+    Value::String(month_name(Datelike::month(&date)).to_string())
 }
 
 /// `week of year(<date>)` — ISO week number (1–53).
@@ -2374,6 +2518,9 @@ pub fn is_variadic_builtin(name: &str) -> bool {
             | "sort"
             | "all"
             | "any"
+            | "date"
+            | "time"
+            | "date and time"
             | "context merge"
             | "min"
             | "max"
@@ -3856,10 +4003,7 @@ mod list {
             ])
         );
         // An empty list has no mode but is not an error.
-        assert_eq!(
-            built_in_mode(&[Value::Array(vec![])]),
-            Value::Array(vec![])
-        );
+        assert_eq!(built_in_mode(&[Value::Array(vec![])]), Value::Array(vec![]));
     }
 
     /// `stddev([1,2,3,4])` computes without panicking.
@@ -4473,6 +4617,7 @@ mod range {
             end: Some(Value::Number(rust_decimal::Decimal::from(e))),
             start_incl: true,
             end_incl: true,
+            point: false,
         }))
     }
 

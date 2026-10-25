@@ -311,6 +311,12 @@ fn emit_decision(writer: &mut Writer<Vec<u8>>, dec: &Decision) -> Result<(), Dmn
     if let Some(literal) = dec.literal_expression.as_ref() {
         emit_literal_expression(writer, literal)?;
     }
+    if let Some(context) = dec.boxed_context.as_ref() {
+        emit_boxed_context(writer, context)?;
+    }
+    if let Some(list) = dec.boxed_list.as_ref() {
+        emit_boxed_list(writer, list)?;
+    }
     if let Some(dt) = dec.decision_table.as_ref() {
         emit_decision_table(writer, dt)?;
     }
@@ -356,6 +362,75 @@ fn emit_information_item(
 ///
 /// The expression text is written back through [`emit_text_element`], so a
 /// CDATA-encoded expression stays CDATA and a plain one stays escaped.
+/// Emit a boxed `<context>` and its entries, preserving document order.
+fn emit_boxed_context(
+    writer: &mut Writer<Vec<u8>>,
+    context: &crate::dmn::model::BoxedContext,
+) -> Result<(), DmnExportError> {
+    let mut start = BytesStart::new("context");
+    if let Some(id) = context.id.as_deref() {
+        start.push_attribute(("id", id));
+    }
+    writer.write_event(Event::Start(start))?;
+    for entry in &context.entries {
+        writer.write_event(Event::Start(BytesStart::new("contextEntry")))?;
+        let mut variable = BytesStart::new("variable");
+        variable.push_attribute(("name", entry.key.as_str()));
+        writer.write_event(Event::Start(variable))?;
+        writer.write_event(Event::End(BytesEnd::new("variable")))?;
+        emit_boxed_value(writer, &entry.value)?;
+        writer.write_event(Event::End(BytesEnd::new("contextEntry")))?;
+    }
+    writer.write_event(Event::End(BytesEnd::new("context")))?;
+    Ok(())
+}
+
+/// Emit a boxed `<list>` and its items, preserving document order.
+fn emit_boxed_list(
+    writer: &mut Writer<Vec<u8>>,
+    list: &crate::dmn::model::BoxedList,
+) -> Result<(), DmnExportError> {
+    let mut start = BytesStart::new("list");
+    if let Some(id) = list.id.as_deref() {
+        start.push_attribute(("id", id));
+    }
+    writer.write_event(Event::Start(start))?;
+    for item in &list.items {
+        emit_boxed_value(writer, item)?;
+    }
+    writer.write_event(Event::End(BytesEnd::new("list")))?;
+    Ok(())
+}
+
+/// Emit one boxed value expression.
+fn emit_boxed_value(
+    writer: &mut Writer<Vec<u8>>,
+    value: &crate::dmn::model::BoxedValue,
+) -> Result<(), DmnExportError> {
+    use crate::dmn::model::BoxedValue;
+    match value {
+        BoxedValue::Literal(literal) => {
+            let mut start = BytesStart::new("literalExpression");
+            if let Some(id) = literal.id.as_deref() {
+                start.push_attribute(("id", id));
+            }
+            if let Some(type_ref) = literal.type_ref.as_deref() {
+                start.push_attribute(("typeRef", type_ref));
+            }
+            writer.write_event(Event::Start(start))?;
+            emit_text_element(writer, "text", &literal.text)?;
+            writer.write_event(Event::End(BytesEnd::new("literalExpression")))?;
+        }
+        BoxedValue::List(list) => emit_boxed_list(writer, list)?,
+        BoxedValue::Context(context) => emit_boxed_context(writer, context)?,
+        BoxedValue::Unsupported(name) => {
+            writer.write_event(Event::Start(BytesStart::new(name.as_str())))?;
+            writer.write_event(Event::End(BytesEnd::new(name.as_str())))?;
+        }
+    }
+    Ok(())
+}
+
 fn emit_literal_expression(
     writer: &mut Writer<Vec<u8>>,
     literal: &LiteralExpression,

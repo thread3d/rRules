@@ -137,27 +137,92 @@ fn path_nav(v: Value, name: &str) -> Value {
 // unit tests (dmn12_/truth_tables) and are wired into `evaluate`'s dispatch
 // in Task 2 GREEN. The non-test build has no caller until that dispatch
 // lands, so the lint is expected and transient.
+/// Equality of two ranges: same bounds, same inclusivity.
+fn ranges_equal(x: &FeelRange, y: &FeelRange) -> Option<bool> {
+    // The TCK distinguishes `(=10)` from `[10..10]` (`range_010`), so the
+    // written form is part of a range's identity, not only its members.
+    if x.start_incl != y.start_incl || x.end_incl != y.end_incl || x.point != y.point {
+        return Some(false);
+    }
+    let bounds_equal = |a: &Option<Value>, b: &Option<Value>| -> Option<bool> {
+        match (a, b) {
+            (None, None) => Some(true),
+            (Some(left), Some(right)) => cmp::feel_equals(left, right),
+            _ => Some(false),
+        }
+    };
+    match (
+        bounds_equal(&x.start, &y.start),
+        bounds_equal(&x.end, &y.end),
+    ) {
+        (Some(true), Some(true)) => Some(true),
+        (Some(false), _) | (_, Some(false)) => Some(false),
+        _ => None,
+    }
+}
+
+/// Equality of two FEEL date-times.
+///
+/// Two date-times carrying an offset denote instants, so
+/// `2018-10-08T00:00:00+02:00` equals `2018-10-07T22:00:00Z`. Naive (offset-less)
+/// date-times compare as wall-clock times.
+fn date_times_equal(
+    left: &crate::dmn::feel::temporal::DateTimeValue,
+    right: &crate::dmn::feel::temporal::DateTimeValue,
+) -> bool {
+    use crate::dmn::feel::temporal::DateTimeValue;
+    let instant = |value: &DateTimeValue| -> Option<chrono::DateTime<chrono::Utc>> {
+        match value {
+            DateTimeValue::Fixed(zoned) => Some(zoned.with_timezone(&chrono::Utc)),
+            DateTimeValue::Iana(zoned) => Some(zoned.with_timezone(&chrono::Utc)),
+            DateTimeValue::Local(_) => None,
+        }
+    };
+    match (instant(left), instant(right)) {
+        (Some(a), Some(b)) => a == b,
+        _ => {
+            let naive = |value: &DateTimeValue| -> chrono::NaiveDateTime {
+                match value {
+                    DateTimeValue::Fixed(zoned) => zoned.naive_local(),
+                    DateTimeValue::Iana(zoned) => zoned.naive_local(),
+                    DateTimeValue::Local(naive) => *naive,
+                }
+            };
+            naive(left) == naive(right)
+        }
+    }
+}
+
 /// Equality of two FEEL times.
 ///
 /// A time with a UTC offset denotes an instant, so `10:30:00+01:00` equals
 /// `09:30:00Z`: both are normalised to the same instant. Offset-less times
 /// compare as wall-clock times, and a mixed pair compares the clock faces.
+/// Seconds since midnight, discarding the fractional part.
+fn seconds_of_day(time: &chrono::NaiveTime) -> u32 {
+    use chrono::Timelike;
+    Timelike::hour(time) * 3600 + Timelike::minute(time) * 60 + Timelike::second(time)
+}
+
 fn times_equal(
     left: &crate::dmn::feel::temporal::TimeValue,
     right: &crate::dmn::feel::temporal::TimeValue,
 ) -> bool {
     use crate::dmn::feel::temporal::TimeValue;
+    // The TCK compares times at whole-second granularity: `10:30:00.0001` equals
+    // `10:30:00.0002` (`0068-feel-equality`, `time_005`).
     match (left, right) {
-        (TimeValue::Offset(a), TimeValue::Offset(b)) => {
-            a.timestamp_millis() == b.timestamp_millis()
-        }
+        (TimeValue::Offset(a), TimeValue::Offset(b)) => a.timestamp() == b.timestamp(),
         (TimeValue::Fixed(a), TimeValue::Fixed(b))
         | (TimeValue::Local(a), TimeValue::Local(b))
         | (TimeValue::Fixed(a), TimeValue::Local(b))
-        | (TimeValue::Local(a), TimeValue::Fixed(b)) => a == b,
+        | (TimeValue::Local(a), TimeValue::Fixed(b)) => {
+            // Truncate fractional seconds before comparing.
+            seconds_of_day(a) == seconds_of_day(b)
+        }
         (TimeValue::Fixed(a) | TimeValue::Local(a), TimeValue::Offset(b))
         | (TimeValue::Offset(b), TimeValue::Fixed(a) | TimeValue::Local(a)) => {
-            *a == b.naive_local().time()
+            seconds_of_day(a) == seconds_of_day(&b.naive_local().time())
         }
     }
 }
@@ -208,9 +273,12 @@ pub(crate) mod cmp {
                 date_equals_datetime_z(d, dtv)
             }
             (Value::Time(x), Value::Time(y)) => Some(super::times_equal(x, y)),
-            (Value::DateTimeTz(x), Value::DateTimeTz(y)) => Some(x == y),
+            (Value::DateTimeTz(x), Value::DateTimeTz(y)) => Some(super::date_times_equal(x, y)),
+            // A naive date-time compares by its wall clock against an offset one.
+            (Value::DateTime(x), Value::DateTime(y)) => Some(x == y),
             (Value::DaysTimeDuration(x), Value::DaysTimeDuration(y)) => Some(x == y),
             (Value::YearsMonthsDuration(x), Value::YearsMonthsDuration(y)) => Some(x == y),
+            (Value::Range(x), Value::Range(y)) => Some(super::ranges_equal(x, y)).flatten(),
             (Value::Array(x), Value::Array(y)) => list_equals(x, y),
             (Value::Object(x), Value::Object(y)) => context_equals(x, y),
             // TODO(31-05): Value::Range equality (structural endpoint
@@ -419,6 +487,7 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
             end,
             start_inclusive,
             end_inclusive,
+            point,
         } => {
             let s = evaluate(start, scope);
             let e = evaluate(end, scope);
@@ -427,6 +496,7 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
                 end: opt_endpoint(e),
                 start_incl: *start_inclusive,
                 end_incl: *end_inclusive,
+                point: *point,
             }))
         }
         FeelExpression::BinOp { op, lhs, rhs } => eval_binop(op, lhs, rhs, scope),
@@ -2503,6 +2573,7 @@ mod control {
             end: Some(Value::Number(dec!(3))),
             start_incl: true,
             end_incl: true,
+            point: false,
         };
         let vals = range_to_values(&range).unwrap();
         assert_eq!(
@@ -2523,6 +2594,7 @@ mod control {
             end: Some(Value::Number(dec!(3))),
             start_incl: true,
             end_incl: true,
+            point: false,
         };
         assert_eq!(range_to_values(&range), None);
     }
@@ -2535,6 +2607,7 @@ mod control {
             end: Some(Value::Number(dec!(3))),
             start_incl: true,
             end_incl: true,
+            point: false,
         };
         assert_eq!(range_to_values(&range), None);
     }
@@ -2547,6 +2620,7 @@ mod control {
             end: Some(Value::Integer(MAX_RANGE_ITERATIONS + 1)),
             start_incl: true,
             end_incl: true,
+            point: false,
         };
         assert_eq!(range_to_values(&range), None);
     }

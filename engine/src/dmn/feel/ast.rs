@@ -176,6 +176,9 @@ pub enum FeelExpression {
         start_inclusive: bool,
         /// Whether the end endpoint is inclusive (`]`).
         end_inclusive: bool,
+        /// True for the singleton form `= value`, which the TCK distinguishes
+        /// from the equivalent-but-differently-written `[value..value]`.
+        point: bool,
     },
 
     // ----- Binary & unary operators (rules 19–24, 47–49) -----
@@ -326,6 +329,7 @@ mod tests {
             end: Box::new(FeelExpression::Literal(Value::Number(dec!(10)))),
             start_inclusive: true,
             end_inclusive: false,
+            point: false,
         };
         let _binop = FeelExpression::BinOp {
             op: BinOpKind::Add,

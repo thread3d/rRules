@@ -1087,6 +1087,9 @@ struct Parser {
     /// contain spaces, so a name like `Monthly Salary` has to be recognised as
     /// one name rather than two adjacent identifiers.
     known_names: Vec<String>,
+    /// True while parsing the upper bound of a range, where a `[` closes the
+    /// range (`[1..10[`) instead of starting a filter.
+    in_range_bound: bool,
 }
 
 impl Parser {
@@ -1101,6 +1104,7 @@ impl Parser {
             depth: 0,
             max_depth: DEFAULT_MAX_DEPTH,
             known_names,
+            in_range_bound: false,
         }
     }
 
@@ -1331,12 +1335,13 @@ impl Parser {
                     if next_is_dot {
                         self.advance(); // first .
                         self.advance(); // second .
-                        let end = self.parse_expr(0);
+                        let end = self.parse_range_bound();
                         base = FeelExpression::Range {
                             start: Box::new(base),
                             end: Box::new(end),
                             start_inclusive: true,
                             end_inclusive: true,
+                            point: false,
                         };
                         continue;
                     }
@@ -1358,6 +1363,12 @@ impl Parser {
                     };
                 }
                 Token::LBracket => {
+                    // Inside a range bound, or directly after a range literal, a
+                    // `[` closes the range (`[1..10[`, `]1..10[`) — it does not
+                    // index or filter anything.
+                    if self.in_range_bound || matches!(base, FeelExpression::Range { .. }) {
+                        return base;
+                    }
                     self.advance();
                     let pred = self.parse_expr(0);
                     if !matches!(self.peek(), Token::RBracket) {
@@ -1453,6 +1464,9 @@ impl Parser {
             }
             Token::LParen => {
                 self.advance();
+                // `(=v)` is a singleton range, not a parenthesised `..` range:
+                // its inclusivity is already correct and the `)` is not a bound.
+                let singleton_range = matches!(self.peek(), Token::Eq);
                 let inner = self.parse_expr(0);
                 // Propagate Err nodes (e.g. depth-guard errors) without
                 // wrapping them in a "expected ')'" error.
@@ -1464,6 +1478,14 @@ impl Parser {
                 // start) and `end_inclusive` from the closing bracket
                 // (`)` → exclusive, `]` → inclusive). This handles the
                 // `(a..b)` and `(a..b]` range syntaxes (rule 8).
+                if singleton_range && matches!(inner, FeelExpression::Range { .. }) {
+                    if !matches!(self.peek(), Token::RParen) {
+                        self.sync_to_boundary();
+                        return self.err_here("expected ')' after singleton range");
+                    }
+                    self.advance();
+                    return inner;
+                }
                 if let FeelExpression::Range { start, end, .. } = inner {
                     let end_inclusive = matches!(self.peek(), Token::RBracket);
                     if !matches!(self.peek(), Token::RParen | Token::RBracket) {
@@ -1476,6 +1498,7 @@ impl Parser {
                         end,
                         start_inclusive: false,
                         end_inclusive,
+                        point: false,
                     };
                 }
                 if !matches!(self.peek(), Token::RParen) {
@@ -1486,6 +1509,46 @@ impl Parser {
                 inner
             }
             Token::LBracket => self.parse_list_or_range(),
+            // `]a..b]` — the alternative exclusive-start bracket.
+            Token::RBracket => {
+                self.advance();
+                let inner = self.parse_expr(0);
+                if matches!(inner, FeelExpression::Err(_, _)) {
+                    return inner;
+                }
+                let FeelExpression::Range { start, end, .. } = inner else {
+                    self.sync_to_boundary();
+                    return self.err_here("expected a range after ']'");
+                };
+                let end_inclusive = matches!(self.peek(), Token::RBracket);
+                if !matches!(
+                    self.peek(),
+                    Token::RBracket | Token::LBracket | Token::RParen
+                ) {
+                    self.sync_to_boundary();
+                    return self.err_here("expected ']', '[' or ')' after range");
+                }
+                self.advance();
+                FeelExpression::Range {
+                    start,
+                    end,
+                    start_inclusive: false,
+                    end_inclusive,
+                    point: false,
+                }
+            }
+            // `= value` — a singleton range (the same as `[value..value]`).
+            Token::Eq => {
+                self.advance();
+                let value = self.parse_range_bound();
+                FeelExpression::Range {
+                    start: Box::new(value.clone()),
+                    end: Box::new(value),
+                    start_inclusive: true,
+                    end_inclusive: true,
+                    point: true,
+                }
+            }
             Token::LBrace => self.parse_context(),
             Token::Name(s) => {
                 match s.as_str() {
@@ -1530,6 +1593,16 @@ impl Parser {
             Token::Eof => self.err_here("unexpected end of input"),
             other => self.err_here(&format!("unexpected token: {:?}", other)),
         }
+    }
+
+    /// Parse a range bound: a `[` after it closes the range, so the postfix loop
+    /// must not treat it as a filter.
+    fn parse_range_bound(&mut self) -> FeelExpression {
+        let previous = self.in_range_bound;
+        self.in_range_bound = true;
+        let bound = self.parse_expr(0);
+        self.in_range_bound = previous;
+        bound
     }
 
     /// Join the words of a name the model declares (`Monthly Salary`,
@@ -1643,10 +1716,15 @@ impl Parser {
             ..
         } = first
         {
+            // FEEL writes an exclusive end as `[` (`[1..10[`) and an inclusive
+            // one as `]`; `)` is also accepted for `[1..10)`.
             let end_inclusive = matches!(self.peek(), Token::RBracket);
-            if !matches!(self.peek(), Token::RBracket | Token::RParen) {
+            if !matches!(
+                self.peek(),
+                Token::RBracket | Token::RParen | Token::LBracket
+            ) {
                 self.sync_to_boundary();
-                return self.err_here("expected ']' or ')' after range");
+                return self.err_here("expected ']', '[' or ')' after range");
             }
             self.advance(); // consume closing bracket
             return FeelExpression::Range {
@@ -1654,6 +1732,7 @@ impl Parser {
                 end,
                 start_inclusive,
                 end_inclusive,
+                point: false,
             };
         }
 
@@ -1673,9 +1752,12 @@ impl Parser {
         if next_is_dot && next_next_is_dot {
             self.advance(); // first .
             self.advance(); // second .
-            let end = self.parse_expr(0);
+            let end = self.parse_range_bound();
             let end_inclusive = matches!(self.peek(), Token::RBracket);
-            if !matches!(self.peek(), Token::RBracket | Token::RParen) {
+            if !matches!(
+                self.peek(),
+                Token::RBracket | Token::RParen | Token::LBracket
+            ) {
                 self.sync_to_boundary();
             }
             self.advance(); // consume ] or )
@@ -1684,6 +1766,7 @@ impl Parser {
                 end: Box::new(end),
                 start_inclusive: true,
                 end_inclusive,
+                point: false,
             };
         }
         // It's a list

@@ -408,10 +408,17 @@ fn parse_day_time_duration(body: &str, neg: bool) -> Option<TimeDelta> {
 
 /// Parse an XML Schema time literal (`HH:mm:ss` or `HH:mm:ss+HH:mm`) into a
 /// [`TimeValue`].
+/// Parse `HH:MM:SS` with optional fractional seconds.
+fn parse_time_of_day(text: &str) -> Option<NaiveTime> {
+    NaiveTime::parse_from_str(text, "%H:%M:%S%.f")
+        .or_else(|_| NaiveTime::parse_from_str(text, "%H:%M:%S"))
+        .ok()
+}
+
 fn parse_time(s: &str) -> Option<TimeValue> {
     // `Z` is the UTC designator: `09:30:00Z` is `09:30:00+00:00`.
     if let Some(without_z) = s.strip_suffix('Z').or_else(|| s.strip_suffix('z')) {
-        let naive = NaiveTime::parse_from_str(without_z, "%H:%M:%S").ok()?;
+        let naive = parse_time_of_day(without_z)?;
         let dt_naive = NaiveDate::from_ymd_opt(1970, 1, 1)?.and_time(naive);
         let utc = FixedOffset::east_opt(0)?;
         return utc
@@ -422,15 +429,14 @@ fn parse_time(s: &str) -> Option<TimeValue> {
     // Try offset form first (HH:mm:ss+HH:mm).
     if let Some(pos) = s.find('+').or_else(|| s.find('-').filter(|&p| p > 0)) {
         let (time_part, off_part) = s.split_at(pos);
-        let naive = NaiveTime::parse_from_str(time_part, "%H:%M:%S").ok()?;
+        let naive = parse_time_of_day(time_part)?;
         let dt_naive = NaiveDate::from_ymd_opt(1970, 1, 1)?.and_time(naive);
         let off = parse_fixed_offset(off_part)?;
         let dt = off.from_local_datetime(&dt_naive).single()?;
         return Some(TimeValue::Offset(dt));
     }
     // Local time (no offset).
-    let naive = NaiveTime::parse_from_str(s, "%H:%M:%S").ok()?;
-    Some(TimeValue::Local(naive))
+    Some(TimeValue::Local(parse_time_of_day(s)?))
 }
 
 /// Parse a date-time literal (`YYYY-MM-DDTHH:mm:ss` + optional `@Zone/Name` or

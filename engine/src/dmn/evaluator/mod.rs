@@ -84,6 +84,43 @@ pub struct EvaluateResult {
 ///
 /// The parser uses these to recognise names that contain spaces. Ids are
 /// deliberately excluded — a decision table cell refers to a name, not an id.
+/// Evaluate one boxed value (literal, nested list, nested context).
+fn evaluate_boxed_value(
+    value: &crate::dmn::model::BoxedValue,
+    scope: &mut crate::dmn::feel::eval::Scope,
+    shared: &SharedDmnModel,
+    scope_names: &[String],
+) -> Value {
+    use crate::dmn::model::BoxedValue;
+    match value {
+        BoxedValue::Literal(literal) => {
+            let ast = shared.ast_cache.get_or_parse_with_names(
+                &literal.text.content,
+                ParseEntry::Expression,
+                scope_names,
+            );
+            crate::dmn::feel::eval::evaluate(&ast, scope)
+        }
+        BoxedValue::List(list) => Value::Array(
+            list.items
+                .iter()
+                .map(|item| evaluate_boxed_value(item, scope, shared, scope_names))
+                .collect(),
+        ),
+        BoxedValue::Context(context) => {
+            let mut entries = HashMap::new();
+            let mut inner = scope.clone();
+            for entry in &context.entries {
+                let evaluated = evaluate_boxed_value(&entry.value, &mut inner, shared, scope_names);
+                inner.bind(entry.key.clone(), evaluated.clone(), vec![]);
+                entries.insert(entry.key.clone(), evaluated);
+            }
+            Value::Object(entries)
+        }
+        BoxedValue::Unsupported(_) => Value::Null,
+    }
+}
+
 fn declared_names(model: &DmnModel) -> Vec<String> {
     use crate::dmn::model::DefinitionsChild;
     let mut names: Vec<String> = Vec::new();
@@ -507,10 +544,55 @@ fn evaluate_single_decision(
             .inc();
         outputs_evaluated.push(name);
         rules_fired = 0;
+    } else if let Some(context) = &decision.boxed_context {
+        // A boxed `<context>` decision evaluates each entry in document order in
+        // the decision's scope, binding the key as it goes so a later entry can
+        // refer to an earlier one.
+        let scope_names: Vec<String> = scope.bindings.keys().cloned().collect();
+        let mut local = scope.clone();
+        let mut entries = HashMap::new();
+        for entry in &context.entries {
+            let value = evaluate_boxed_value(&entry.value, &mut local, shared, &scope_names);
+            local.bind(entry.key.clone(), value.clone(), vec![]);
+            entries.insert(entry.key.clone(), value);
+        }
+        let name = decision
+            .variable
+            .as_ref()
+            .map(|variable| variable.name.clone())
+            .or_else(|| decision.name.clone())
+            .unwrap_or_else(|| decision.id.clone());
+        outputs.insert(name.clone(), Value::Object(entries));
+        METRIC_OUTPUT_EVALUATIONS_TOTAL
+            .with_label_values(&[decision.id.as_str(), name.as_str()])
+            .inc();
+        outputs_evaluated.push(name);
+        rules_fired = 0;
+    } else if let Some(list) = &decision.boxed_list {
+        // A boxed `<list>` decision evaluates each item in order.
+        let scope_names: Vec<String> = scope.bindings.keys().cloned().collect();
+        let mut local = scope.clone();
+        let items: Vec<Value> = list
+            .items
+            .iter()
+            .map(|item| evaluate_boxed_value(item, &mut local, shared, &scope_names))
+            .collect();
+        let name = decision
+            .variable
+            .as_ref()
+            .map(|variable| variable.name.clone())
+            .or_else(|| decision.name.clone())
+            .unwrap_or_else(|| decision.id.clone());
+        outputs.insert(name.clone(), Value::Array(items));
+        METRIC_OUTPUT_EVALUATIONS_TOTAL
+            .with_label_values(&[decision.id.as_str(), name.as_str()])
+            .inc();
+        outputs_evaluated.push(name);
+        rules_fired = 0;
     } else {
-        // Neither a table nor a literal expression — surface the scope bindings
-        // as outputs (this keeps a decision whose body is an unsupported boxed
-        // expression observable instead of silently empty).
+        // Neither a table nor a modelled boxed expression — surface the scope
+        // bindings as outputs (this keeps a decision whose body is an
+        // unsupported boxed expression observable instead of silently empty).
         for (key, value) in &scope.bindings {
             outputs.insert(key.clone(), value.clone());
             METRIC_OUTPUT_EVALUATIONS_TOTAL

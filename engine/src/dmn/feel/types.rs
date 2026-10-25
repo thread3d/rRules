@@ -94,6 +94,12 @@ pub struct FeelRange {
     pub start_incl: bool,
     /// Whether the end endpoint is inclusive.
     pub end_incl: bool,
+    /// True for the singleton form `= value`.
+    ///
+    /// The TCK treats `(=10)` and `[10..10]` as *different* ranges
+    /// (`0068-feel-equality`, `range_010`), so the written form is part of a
+    /// range's identity rather than only its set of members.
+    pub point: bool,
 }
 
 /// FEEL function value carrier — the payload of [`Value::Function`].
@@ -896,6 +902,7 @@ mod tests {
             end: None,
             start_incl: true,
             end_incl: false,
+            point: false,
         };
         assert!(r.start_incl);
         assert!(r.end.is_none());

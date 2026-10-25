@@ -216,8 +216,7 @@ fn numeric_functions_follow_spec() {
     let sd = ev("stddev([2, 4, 4, 4, 5, 5, 7, 9])");
     match sd {
         Value::Number(value) => {
-            let expected =
-                Decimal::from_str("2.138089935299395").expect("valid decimal literal");
+            let expected = Decimal::from_str("2.138089935299395").expect("valid decimal literal");
             let difference: Decimal = value - expected;
             assert!(
                 difference.abs() < Decimal::from_str("0.000001").expect("valid decimal literal"),
