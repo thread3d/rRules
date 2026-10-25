@@ -41,7 +41,7 @@ use engine::engine::{EngineRegistry, EngineSelector};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    println!("rRules REST API Server v0.1.0");
+    println!("rRules REST API Server v9.0.0");
     println!("Starting on http://127.0.0.1:8080");
 
     // Create engine state for hot reload functionality

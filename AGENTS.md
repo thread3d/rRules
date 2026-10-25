@@ -23,8 +23,8 @@ management; RBAC with maker-checker approval; OMG DMN 1.5 support with measured 
 
 ## Current state
 
-Milestone v8.0 is complete and tagged (`v1.0`–`v8.0`). The project has a specification and
-independent verification; the measured state below is the only state worth quoting.
+Release **9.0.0** (tag `v9.0`) is complete: the project has a specification and independent
+verification, and the measured state below is the only state worth quoting.
 
 - **`specs/` is the specification.** `requirements.md` holds 35 normative requirements with stable
   ids (`ENG-*`, `DMN-*`, `FEEL-*`, `API-*`, `SYS-*`). `domain-model.md`, `rule-engine.md`,
@@ -132,11 +132,13 @@ means something regenerable has slipped in.
 
 Shipped milestones: v1.0 MVP → v2.0 Testing Framework → v3.0 Pluggable Engines → v4.0 Production
 Platform → v5.0 Live Execution → v6.0 DMN Level 3 Compliance → v7.0 Performance + Production
-Readiness → v8.0 Close TCK Evaluator Gaps. The v1.0 scope (core engine, rule-authoring IDE, REST
+Readiness → v8.0 Close TCK Evaluator Gaps → **v9.0 Verified Conformance** (specification,
+verification, and a green conformance corpus). The v1.0 scope (core engine, rule-authoring IDE, REST
 API, governance, testing/monitoring, DMN compliance) is all delivered; the DMN commitment is measured
 rather than asserted, which is what `TCK-COVERAGE-GAPS.md` exists to do.
 
 **Next step:** no milestone is in flight. Scope the next one from `../.planning/TECH-DEBT.md`,
 `TCK-COVERAGE-GAPS.md` and the `Known gaps` sections of `specs/` — candidates: DMN 1.6 / FEEL 1.6
-(COLLECT `distinct`), business-knowledge-model and decision-service evaluation, real
-`PostgresDmnStore` queries, and PostgreSQL-backed tenants. There is no git remote configured yet.
+(COLLECT `distinct`, the one remaining corpus divergence), `<functionDefinition>`/`<invocation>`
+decision bodies, non-literal business knowledge model bodies, real `PostgresDmnStore` queries, and
+PostgreSQL-backed tenants. There is no git remote configured yet.

@@ -12,6 +12,23 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v9.0] - 2026-10-25 — Verified Conformance
+
+The release where the project's claims became measurable. rRules ships with a specification it can
+be checked against, and with the OMG DMN conformance suite green: **170 layer results pass, none
+fail, four skipped as one recorded divergence** across 51 vectors, up from the 143 pass / 31 fail
+that the first honest measurement reported.
+
+Two changes define the release. The **specification** (`specs/`) states what the system does as 35
+normative requirements plus four implementation-derived subsystem documents, each citing the code and
+each ending with the gaps it does *not* close. **Verification** executes those requirements
+(CodeWitness: 28 verified, 0 failed, 7 covered from the API crate) and the conformance corpus
+(`make tck`), so a claim about this system now has a gate behind it.
+
+Closing the conformance gap meant fixing the evaluator rather than the harness — boxed decision
+bodies, business knowledge models, decision services, real FEEL filter semantics, a context-free
+lexer, the temporal model, and the full arithmetic matrix. The details are below.
+
 ### Changed — DMN conformance measured at 170 passed / 0 failed / 4 skipped
 
 The vendored OMG DMN TCK corpus now evaluates cleanly: **170 layer results pass, none fail,
@@ -394,6 +411,8 @@ worked around (`number(number)` is a type error; `mode` returns a list).
 <!-- Link references will be populated once a git remote is configured
      (currently local-only — see AGENTS.md, "History, and where it came from"). -->
 [Unreleased]: #unreleased
+[v9.0]: #v90---2026-10-25--verified-conformance
+[9.0.0]: #v90---2026-10-25--verified-conformance
 [v8.0]: #v800---2026-07-15---close-tck-evaluator-gaps
 [v7.0]: #v700---2026-07-15---performance--production-readiness
 [v6.0]: #v600---2026-07-10---dmn-level-3-compliance

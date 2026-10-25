@@ -13,7 +13,7 @@ commonLabels:
 
 images:
   - name: rrules/server
-    newTag: v0.1.0
+    newTag: 9.0.0
 
 configMapGenerator:
   - name: rrules-config

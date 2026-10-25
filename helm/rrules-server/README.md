@@ -37,7 +37,7 @@ helm install rrules ./helm/rrules-server
 ### Install with custom values
 
 ```bash
-helm install rrules ./helm/rrules-server --set replicaCount=3 --set image.tag=v0.1.0
+helm install rrules ./helm/rrules-server --set replicaCount=3 --set image.tag=9.0.0
 ```
 
 ### Upgrade
