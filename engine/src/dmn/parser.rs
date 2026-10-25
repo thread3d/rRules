@@ -969,6 +969,45 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse a BKM's `<encapsulatedLogic>`: formal parameters plus the body
+    /// expression (which this IR models as a literal expression, the form every
+    /// real model uses for a business knowledge model).
+    fn parse_encapsulated_logic(
+        &mut self,
+        bkm: &mut crate::dmn::model::BusinessKnowledgeModel,
+    ) -> Result<(), DmnParseError> {
+        loop {
+            self.buf.clear();
+            match self.reader.read_event_into(&mut self.buf) {
+                Ok(Event::Start(e)) => {
+                    let ln = local_name_str(e.name());
+                    match ln.as_str() {
+                        "formalParameter" => {
+                            let attrs = collect_attrs(&e)?;
+                            // `parse_information_item` consumes the whole element.
+                            let parameter = self.parse_information_item(attrs, &ln)?;
+                            bkm.parameters.push(parameter);
+                        }
+                        "literalExpression" => {
+                            let attrs = collect_attrs(&e)?;
+                            bkm.body = Some(self.parse_literal_expression(attrs)?);
+                        }
+                        _ => self.skip_element(&ln)?,
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    if local_name_str(e.name()) == "encapsulatedLogic" {
+                        break;
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+                Err(error) => return Err(DmnParseError::XmlError(error.to_string())),
+            }
+        }
+        Ok(())
+    }
+
     fn parse_literal_expression(
         &mut self,
         attrs: Attrs,
@@ -1439,6 +1478,8 @@ impl<'a> Parser<'a> {
             description: None,
             variable: None,
             knowledge_requirement: Vec::new(),
+            parameters: Vec::new(),
+            body: None,
             annotations: Vec::new(),
         };
         loop {
@@ -1456,6 +1497,9 @@ impl<'a> Parser<'a> {
                         }
                         "knowledgeRequirement" => {
                             self.collect_required_knowledge(&ln, &mut bkm.knowledge_requirement)?;
+                        }
+                        "encapsulatedLogic" => {
+                            self.parse_encapsulated_logic(&mut bkm)?;
                         }
                         "annotation" => {
                             let attrs = collect_attrs(&e)?;
@@ -1503,6 +1547,7 @@ impl<'a> Parser<'a> {
             output_decisions: Vec::new(),
             encapsulated_decisions: Vec::new(),
             input_data: Vec::new(),
+            input_decisions: Vec::new(),
             annotations: Vec::new(),
         };
         loop {
@@ -1529,6 +1574,12 @@ impl<'a> Parser<'a> {
                         "inputData" => {
                             if let Some(h) = read_href_attribute(&e)? {
                                 ds.input_data.push(strip_href(&h));
+                            }
+                            self.skip_element(&ln)?;
+                        }
+                        "inputDecision" => {
+                            if let Some(h) = read_href_attribute(&e)? {
+                                ds.input_decisions.push(strip_href(&h));
                             }
                             self.skip_element(&ln)?;
                         }

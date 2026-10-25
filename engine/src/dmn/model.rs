@@ -246,6 +246,10 @@ pub struct BusinessKnowledgeModel {
     pub variable: Option<InformationItem>,
     /// IDs of required knowledge (from `knowledgeRequirement`).
     pub knowledge_requirement: Vec<String>,
+    /// The function's formal parameters, in declaration order.
+    pub parameters: Vec<InformationItem>,
+    /// The function body (`<encapsulatedLogic>`), when the model defines one.
+    pub body: Option<LiteralExpression>,
     pub annotations: Vec<Annotation>,
 }
 
@@ -262,6 +266,8 @@ pub struct DecisionService {
     pub encapsulated_decisions: Vec<String>,
     /// IDs of input data the service accepts.
     pub input_data: Vec<String>,
+    /// IDs of decisions the service accepts as parameters, in declaration order.
+    pub input_decisions: Vec<String>,
     pub annotations: Vec<Annotation>,
 }
 

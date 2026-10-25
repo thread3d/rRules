@@ -79,6 +79,287 @@ pub struct EvaluateResult {
     pub outputs_evaluated: Vec<String>,
 }
 
+/// Replace every call to a model-defined invocable with its value.
+///
+/// FEEL evaluation has no view of the model, so a call to a business knowledge
+/// model or a decision service would evaluate to null. This pass walks the
+/// decision's AST, evaluates the arguments of each invocable call in the caller's
+/// scope, computes the result, and substitutes a literal — leaving the rest of
+/// the expression to the ordinary evaluator.
+fn resolve_invocations(
+    expression: &crate::dmn::feel::ast::FeelExpression,
+    scope: &crate::dmn::feel::eval::Scope,
+    model: &SharedDmnModel,
+    index: &HashMap<String, Invocable>,
+    depth: u32,
+) -> crate::dmn::feel::ast::FeelExpression {
+    use crate::dmn::feel::ast::FeelExpression as Ast;
+    if depth > MAX_INVOCATION_DEPTH {
+        return Ast::Literal(Value::Null);
+    }
+    match expression {
+        Ast::FunctionInvocation {
+            callee,
+            args,
+            named,
+        } => {
+            // Resolve nested calls first so an argument that is itself a call is
+            // already a value.
+            let resolved_args: Vec<Ast> = args
+                .iter()
+                .map(|arg| resolve_invocations(arg, scope, model, index, depth + 1))
+                .collect();
+            let resolved_named = named.as_ref().map(|pairs| {
+                pairs
+                    .iter()
+                    .map(|(key, arg)| {
+                        (
+                            key.clone(),
+                            resolve_invocations(arg, scope, model, index, depth + 1),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            });
+            if let Ast::Name(name) = callee.as_ref() {
+                if let Some(invocable) = index.get(name) {
+                    let value = call_invocable(
+                        invocable,
+                        &resolved_args,
+                        resolved_named.as_deref(),
+                        scope,
+                        model,
+                        index,
+                        depth,
+                    );
+                    return Ast::Literal(value);
+                }
+            }
+            Ast::FunctionInvocation {
+                callee: Box::new(resolve_invocations(callee, scope, model, index, depth + 1)),
+                args: resolved_args,
+                named: resolved_named,
+            }
+        }
+        Ast::BinOp { op, lhs, rhs } => Ast::BinOp {
+            op: *op,
+            lhs: Box::new(resolve_invocations(lhs, scope, model, index, depth)),
+            rhs: Box::new(resolve_invocations(rhs, scope, model, index, depth)),
+        },
+        Ast::List(items) => Ast::List(
+            items
+                .iter()
+                .map(|item| resolve_invocations(item, scope, model, index, depth))
+                .collect(),
+        ),
+        Ast::Path { target, name } => Ast::Path {
+            target: Box::new(resolve_invocations(target, scope, model, index, depth)),
+            name: name.clone(),
+        },
+        Ast::Filter { target, predicate } => Ast::Filter {
+            target: Box::new(resolve_invocations(target, scope, model, index, depth)),
+            predicate: Box::new(resolve_invocations(predicate, scope, model, index, depth)),
+        },
+        other => other.clone(),
+    }
+}
+
+/// Evaluate one call to a model-defined invocable.
+#[allow(clippy::too_many_arguments)]
+fn call_invocable(
+    invocable: &Invocable,
+    args: &[crate::dmn::feel::ast::FeelExpression],
+    named: Option<&[(String, crate::dmn::feel::ast::FeelExpression)]>,
+    caller_scope: &crate::dmn::feel::eval::Scope,
+    model: &SharedDmnModel,
+    index: &HashMap<String, Invocable>,
+    depth: u32,
+) -> Value {
+    let evaluated: Vec<Value> = args
+        .iter()
+        .map(|arg| crate::dmn::feel::eval::evaluate(arg, caller_scope))
+        .collect();
+    let evaluated_named: Vec<(String, Value)> = named
+        .unwrap_or_default()
+        .iter()
+        .map(|(key, arg)| {
+            (
+                key.clone(),
+                crate::dmn::feel::eval::evaluate(arg, caller_scope),
+            )
+        })
+        .collect();
+
+    match invocable {
+        Invocable::Function { parameters, body } => {
+            // Each parameter takes its named argument when one is given, and
+            // otherwise the next positional argument.
+            let mut scope = crate::dmn::feel::eval::Scope::empty();
+            scope.bindings = caller_scope.bindings.clone();
+            let mut positional = evaluated.iter();
+            for (position, parameter) in parameters.iter().enumerate() {
+                let value = evaluated_named
+                    .iter()
+                    .find(|(key, _)| key == parameter)
+                    .map(|(_, value)| value.clone())
+                    .or_else(|| positional.next().cloned())
+                    .or_else(|| evaluated.get(position).cloned())
+                    .unwrap_or(Value::Null);
+                scope.bind(parameter.clone(), value, vec![]);
+            }
+            let body_ast = model
+                .ast_cache
+                .get_or_parse(&body.text.content, ParseEntry::Expression);
+            let resolved = resolve_invocations(&body_ast, &scope, model, index, depth + 1);
+            crate::dmn::feel::eval::evaluate(&resolved, &scope)
+        }
+        Invocable::Service {
+            parameters,
+            outputs,
+        } => {
+            // The service's parameters are its own input decisions and input
+            // data: an argument replaces the internal computation of that name.
+            let mut inputs: HashMap<String, Value> = caller_scope.bindings.clone();
+            for (position, parameter) in parameters.iter().enumerate() {
+                let value = evaluated_named
+                    .iter()
+                    .find(|(key, _)| key == parameter)
+                    .map(|(_, value)| value.clone())
+                    .or_else(|| evaluated.get(position).cloned());
+                if let Some(value) = value {
+                    // The parameter is an id; bind it under the id, and under the
+                    // id's variable name so the output decisions see it.
+                    inputs.insert(parameter.clone(), value.clone());
+                    if let Some(name) = element_name(model, parameter) {
+                        inputs.insert(name, value);
+                    }
+                }
+            }
+            let mut collected: HashMap<String, Value> = HashMap::new();
+            for output in outputs {
+                let request = EvaluateRequest {
+                    inputs: inputs.clone(),
+                    trace: false,
+                };
+                match DecisionEvaluator::evaluate_with_model(model, output, request) {
+                    Ok(result) => {
+                        for (name, value) in result.outputs {
+                            collected.insert(name, value);
+                        }
+                    }
+                    Err(_) => return Value::Null,
+                }
+            }
+            match collected.len() {
+                0 => Value::Null,
+                1 => collected.into_values().next().unwrap_or(Value::Null),
+                _ => Value::Object(collected),
+            }
+        }
+    }
+}
+
+/// The variable name of the element an id refers to (a decision's variable name,
+/// or an input data's variable name).
+fn element_name(model: &SharedDmnModel, id: &str) -> Option<String> {
+    use crate::dmn::model::DefinitionsChild;
+    for child in &model.model.definitions.children {
+        match child {
+            DefinitionsChild::Decision(decision) if decision.id == id => {
+                return decision
+                    .variable
+                    .as_ref()
+                    .map(|variable| variable.name.clone())
+                    .or_else(|| decision.name.clone());
+            }
+            DefinitionsChild::InputData(input) if input.id == id => {
+                return input
+                    .variable
+                    .as_ref()
+                    .map(|variable| variable.name.clone())
+                    .or_else(|| input.name.clone());
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// A callable the model defines: a business knowledge model (with a function
+/// body) or a decision service (whose outputs are decisions).
+#[derive(Clone, Debug)]
+enum Invocable {
+    /// A function with formal parameters and a FEEL body.
+    Function {
+        parameters: Vec<String>,
+        body: crate::dmn::model::LiteralExpression,
+    },
+    /// A decision service: parameters are its input decisions and input data, and
+    /// its value is the output decisions' values (a context when there are
+    /// several).
+    Service {
+        parameters: Vec<String>,
+        outputs: Vec<String>,
+    },
+}
+
+/// Index the invocables the model defines, keyed by the name they are called by.
+fn invocables(model: &DmnModel) -> HashMap<String, Invocable> {
+    use crate::dmn::model::DefinitionsChild;
+    let mut index: HashMap<String, Invocable> = HashMap::new();
+    for child in &model.definitions.children {
+        match child {
+            DefinitionsChild::BusinessKnowledgeModel(knowledge) => {
+                let Some(body) = knowledge.body.clone() else {
+                    continue;
+                };
+                let name = knowledge
+                    .variable
+                    .as_ref()
+                    .map(|variable| variable.name.clone())
+                    .or_else(|| knowledge.name.clone());
+                if let Some(name) = name {
+                    index.insert(
+                        name,
+                        Invocable::Function {
+                            parameters: knowledge
+                                .parameters
+                                .iter()
+                                .map(|parameter| parameter.name.clone())
+                                .collect(),
+                            body,
+                        },
+                    );
+                }
+            }
+            DefinitionsChild::DecisionService(service) => {
+                let name = service.name.clone().unwrap_or_else(|| service.id.clone());
+                // Parameters, in declaration order: the service's input
+                // decisions, then its input data.
+                let mut parameters = Vec::new();
+                for id in service
+                    .input_decisions
+                    .iter()
+                    .chain(service.input_data.iter())
+                {
+                    parameters.push(id.clone());
+                }
+                index.insert(
+                    name,
+                    Invocable::Service {
+                        parameters,
+                        outputs: service.output_decisions.clone(),
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+    index
+}
+
+/// Recursion cap for nested invocations, so a cyclic model cannot hang a request.
+const MAX_INVOCATION_DEPTH: u32 = 32;
+
 /// Every name the model declares as a *value*: input data, decision variables,
 /// decision names, and business-knowledge-model variables.
 ///
@@ -165,6 +446,9 @@ fn declared_names(model: &DmnModel) -> Vec<String> {
 /// Shared snapshot of a loaded DMN model + its AST cache (Phase 25 pattern).
 #[derive(Debug)]
 pub struct SharedDmnModel {
+    /// Model-defined callables (business knowledge models and decision services)
+    /// by name, built once when the snapshot is created.
+    invocable_index: HashMap<String, Invocable>,
     /// The parsed IR.
     pub model: DmnModel,
     /// Pre-parsed FEEL ASTs for all cells in the model.
@@ -184,8 +468,10 @@ impl SharedDmnModel {
         // FEEL names may contain spaces, so the parser needs the model's names
         // to tell `Monthly Salary` (one input) from two adjacent identifiers.
         ast_cache.set_known_names(declared_names(&model));
+        let invocable_index = invocables(&model);
         Self {
             model,
+            invocable_index,
             ast_cache,
             generation: 1,
             drd_order_cache: RwLock::new(HashMap::new()),
@@ -531,6 +817,20 @@ fn evaluate_single_decision(
             ParseEntry::Expression,
             &scope_names,
         );
+        // A call to a business knowledge model or a decision service is resolved
+        // here: FEEL evaluation has no view of the model, so the call is replaced
+        // by its value before the expression runs.
+        let ast = if shared.invocable_index.is_empty() {
+            ast
+        } else {
+            std::sync::Arc::new(resolve_invocations(
+                &ast,
+                scope,
+                shared,
+                &shared.invocable_index,
+                0,
+            ))
+        };
         let value = crate::dmn::feel::eval::evaluate(&ast, scope);
         let name = decision
             .variable
@@ -647,19 +947,30 @@ impl DecisionEvaluator {
         decision_id: &str,
         request: EvaluateRequest,
     ) -> Result<EvaluateResult, DecisionEvalError> {
-        let start = std::time::Instant::now();
-
-        // 1. Lock the shared snapshot (read-only) for the whole call. The
-        //    parallel tasks below borrow `&SharedDmnModel` (Sync); no inner
-        //    lock acquisition happens in the parallel path, and the DRD order
-        //    is precomputed before parallelism begins.
+        // Lock the shared snapshot (read-only) for the whole call. The parallel
+        // tasks below borrow `&SharedDmnModel` (Sync); no inner lock acquisition
+        // happens in the parallel path, and the DRD order is precomputed before
+        // parallelism begins. Invoking a business knowledge model or a decision
+        // service re-enters `evaluate_with_model` with this same borrow rather
+        // than taking the lock again.
         let guard = self.shared.read().map_err(|e| {
             DecisionEvalError::Internal(format!("failed to acquire read lock: {}", e))
         })?;
+        Self::evaluate_with_model(&guard, decision_id, request)
+    }
+
+    /// Evaluate one decision against an already-borrowed model snapshot.
+    fn evaluate_with_model(
+        model: &SharedDmnModel,
+        decision_id: &str,
+        request: EvaluateRequest,
+    ) -> Result<EvaluateResult, DecisionEvalError> {
+        let start = std::time::Instant::now();
+        let guard = model;
 
         // 2. Resolve DRD order (memoized, PERF-08) and derive topological levels.
         let drd_order = guard.resolve_drd_order_cached(decision_id)?;
-        let levels = resolve_drd_levels(&guard, &drd_order);
+        let levels = resolve_drd_levels(guard, &drd_order);
 
         // Observe DRD chain depth for metrics (Phase 35).
         METRIC_DRD_CHAIN_DEPTH
@@ -696,11 +1007,16 @@ impl DecisionEvaluator {
                 .iter()
                 .filter_map(|id| {
                     let decision = *decision_map.get(id)?;
+                    // Upstream results first, then the caller's inputs: an
+                    // input the caller supplies wins over a value this engine
+                    // would compute for the same name. That is what invoking a
+                    // decision service means — the given inputs replace the
+                    // service's internal decisions (`0085-decision-services`).
                     let mut scope = Scope::empty();
-                    for (k, v) in &base_inputs {
+                    for (k, v) in &merged_context {
                         scope.bindings.insert(k.clone(), v.clone());
                     }
-                    for (k, v) in &merged_context {
+                    for (k, v) in &base_inputs {
                         scope.bindings.insert(k.clone(), v.clone());
                     }
                     Some((id.clone(), decision, scope))
@@ -716,7 +1032,7 @@ impl DecisionEvaluator {
                         .map(|(id, decision, scope)| {
                             (
                                 id.clone(),
-                                evaluate_single_decision(&guard, decision, scope),
+                                evaluate_single_decision(guard, decision, scope),
                             )
                         })
                         .collect()
@@ -725,7 +1041,7 @@ impl DecisionEvaluator {
                         .map(|(id, decision, scope)| {
                             (
                                 id.clone(),
-                                evaluate_single_decision(&guard, decision, scope),
+                                evaluate_single_decision(guard, decision, scope),
                             )
                         })
                         .collect()

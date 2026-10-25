@@ -643,6 +643,16 @@ fn emit_bkm(
         writer.write_event(Event::Empty(rk))?;
         writer.write_event(Event::End(BytesEnd::new("knowledgeRequirement")))?;
     }
+    if bkm.body.is_some() || !bkm.parameters.is_empty() {
+        writer.write_event(Event::Start(BytesStart::new("encapsulatedLogic")))?;
+        for parameter in &bkm.parameters {
+            emit_information_item(writer, parameter, "formalParameter")?;
+        }
+        if let Some(body) = bkm.body.as_ref() {
+            emit_literal_expression(writer, body)?;
+        }
+        writer.write_event(Event::End(BytesEnd::new("encapsulatedLogic")))?;
+    }
     for ann in &bkm.annotations {
         emit_annotation(writer, ann)?;
     }
@@ -676,6 +686,11 @@ fn emit_decision_service(
     }
     for rid in &ds.input_data {
         let mut e = BytesStart::new("inputData");
+        e.push_attribute(("href", format!("#{rid}").as_str()));
+        writer.write_event(Event::Empty(e))?;
+    }
+    for rid in &ds.input_decisions {
+        let mut e = BytesStart::new("inputDecision");
         e.push_attribute(("href", format!("#{rid}").as_str()));
         writer.write_event(Event::Empty(e))?;
     }
