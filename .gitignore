@@ -38,3 +38,6 @@ Thumbs.db
 *.swp
 # ── CodeWitness run artifacts (local only) ────────────────────
 .codewitness/
+
+# ── Local agent tooling (not part of the project) ─────────────
+.tools/
