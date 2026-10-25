@@ -13,6 +13,33 @@ adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **A specification that can be executed.** `specs/` now holds the system
+  specification — `requirements.md` (35 normative requirements with stable ids),
+  plus `domain-model.md`, `rule-engine.md`, `dmn-feel.md` and `http-api.md`
+  derived from the code with `path:line` citations and an explicit `Known gaps`
+  section each. `engine/codewitness.yaml` (28 Rust scenarios) and
+  `api/codewitness.yaml` (integration-suite mapping) wire
+  [CodeWitness](https://github.com/codewitness/codewitness) to it. Measured:
+  28 VERIFIED, 0 FAILED, 7 UNVERIFIED (the API requirements, covered from the
+  `api` project instead).
+- `engine/tests/rule_semantics.rs` — firing order, fixpoint, numeric comparison
+  and retraction pinned across all four engines.
+- `engine/tests/tck_values.rs` — typed parsing of TCK test XML (values, lists,
+  contexts) with tolerance-aware structural comparison.
+
+### Changed
+- `tck_sweep` records every layer outcome, prints each failure reason, evaluates
+  every `resultNode` of a case, and gates on a documented baseline instead of
+  hiding failures. Measured TCK state: 136 layer results pass, 24 fail, 14 skip.
+- `engine` enables its four engines by default, so `cargo test -p engine` tests
+  them.
+- `SemanticValidator` lost its unused lifetime parameter and the `unsafe`
+  transmute that propped it up.
+
+### Removed
+- The legacy React tree under `api/src/{components,features}` (18 files) — dead
+  code in the Rust crate, superseded by `frontend/`.
+
 - **Tenant management API** — `GET/POST /v1/tenants` and
   `GET/DELETE /v1/tenants/{id}` are now registered behind the `/v1` auth scope.
   The handlers build on `engine::governance::tenant::MemoryTenantStore`, which
