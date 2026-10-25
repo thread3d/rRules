@@ -8,11 +8,8 @@
 use crate::engine::registry::{EngineFactory, EngineResult, EngineType, ExecutionEngine};
 use crate::engine::metrics::MetricsCollector;
 use crate::fact::Fact;
-use crate::rules::Action;
 use std::collections::{HashMap, HashSet};
 
-use crate::monitoring::coverage::CoverageTracking;
-use crate::monitoring::detection::RuleExecutionTracker;
 
 /// A unique identifier for a fact in working memory.
 pub type FactId = String;
@@ -380,201 +377,29 @@ impl ReteEngine {
     pub fn execute_rules(&mut self) -> EngineResult {
         let start = std::time::Instant::now();
 
-        // D-07: fixpoint cap — explicit setting, then env var, then default 1000.
-        let max_iter = self
-            .max_iterations
-            .unwrap_or_else(|| {
-                std::env::var("RRULES_MAX_CHAIN_ITERATIONS")
-                    .ok()
-                    .and_then(|value| value.parse::<usize>().ok())
-                    .unwrap_or(1000)
-            })
-            .max(1);
+        // Rete delegates to the same evaluator as TREAT/LEAPS/PHREAK. It used to
+        // inline a copy of the fixpoint loop and of `apply_action`, and the two
+        // copies had already diverged: the inlined loop honoured neither
+        // agenda-group locking nor deterministic fact resolution. One evaluator
+        // means one place to change and one set of semantics to test.
+        let (fired_set, _evaluated_set, trace) =
+            crate::engine::direct_eval::direct_execute_with_limit(
+                &self.rules,
+                &mut self.working_facts,
+                self.collect_trace,
+                self.max_iterations,
+            );
 
-        let mut fired_set: HashSet<String> = HashSet::new();
-        let mut evaluated_set: HashSet<String> = HashSet::new();
-
-        // Phase 28 (D-01 / EXEC-04, C1 site 2): Rete keeps its own inlined
-        // fixpoint loop (it does NOT delegate to `direct_eval::direct_execute`),
-        // so trace emission is mirrored here independently. When
-        // `self.collect_trace` is false, no `Vec`/`String`/`chrono` work
-        // happens (SC-3 latency neutrality). `trace_start` is captured once
-        // at loop entry; events are pushed in firing order inside the loop.
-        let trace_start = if self.collect_trace { Some(std::time::Instant::now()) } else { None };
-        let mut trace_events: Vec<crate::engine::registry::TraceEvent> = Vec::new();
-        let mut facts_matched: usize = 0;
-
-        // Fixpoint loop: repeat passes until no rule newly fires in a full
-        // pass (D-07). Each rule fires at most once per execute() call
-        // (fired_set guard) — this bounds the loop at |rules| passes and is
-        // the once-per-rule semantic that makes coverage recording truthful
-        // (L-06 / Pitfall 6). The max_iter cap is the ultimate safety net
-        // for pathological rule sets.
-        // Salience decides the order rules are considered in each pass: higher
-        // salience first, ties in load order (stable sort). Rete keeps its own
-        // loop, so this ordering is mirrored here rather than shared.
-        let mut firing_order: Vec<usize> = (0..self.rules.len()).collect();
-        firing_order.sort_by(|a, b| self.rules[*b].salience.cmp(&self.rules[*a].salience));
-
-        for _pass in 0..max_iter {
-            let mut newly_fired_this_pass = false;
-            // Index-based iteration so we can mutate `working_facts` while
-            // reading `rules` without conflicting borrows.
-            for &rule_idx in &firing_order {
-                let rule_id = self.rules[rule_idx].id.clone();
-                if fired_set.contains(&rule_id) {
-                    continue;
-                }
-                // Evaluate the condition against the current working memory.
-                let facts: Vec<&Fact> = self.working_facts.values().collect();
-                evaluated_set.insert(rule_id.clone());
-                let matched = self.rules[rule_idx].condition.evaluate(&facts);
-                if matched {
-                    // Phase 28 (D-01, C1 site 2): emit a TraceEvent at the
-                    // moment the rule fires — IN FIRING ORDER. Guarded by
-                    // `self.collect_trace` so the off path skips the chrono
-                    // call + String allocation entirely (SC-3). `facts.len()`
-                    // is the honest count of facts in working memory that the
-                    // condition matched against (D-01 discretion).
-                    if self.collect_trace {
-                        facts_matched += facts.len();
-                        trace_events.push(crate::engine::registry::TraceEvent {
-                            rule_id: rule_id.clone(),
-                            timestamp: chrono::Utc::now().to_rfc3339(),
-                            event_type: "rule_fired",
-                        });
-                    }
-                    // Apply actions. Clone the actions Vec so the immutable
-                    // borrow of `self.rules` ends before we mutably borrow
-                    // `self.working_facts`.
-                    let actions = self.rules[rule_idx].actions.clone();
-                    for action in &actions {
-                        apply_action(action, &mut self.working_facts);
-                    }
-                    fired_set.insert(rule_id);
-                    newly_fired_this_pass = true;
-                    self.metrics.record_rule_fired();
-                }
-            }
-            if !newly_fired_this_pass {
-                break;
-            }
+        for _ in &fired_set {
+            self.metrics.record_rule_fired();
         }
-
-        // L-06 / Pitfall 6: record coverage ONCE per rule OUTSIDE the inner
-        // loop. `record_rule_eval` once per evaluated rule (fired or not);
-        // `record_rule_fire` once per fired rule. This replaces the old
-        // per-nagram double-count at the placeholder site.
-        //
-        // Plan 26-02 / C1: also record into the `RuleExecutionTracker`
-        // singleton (D-03, L-02) at the same call sites. Rete keeps its
-        // own inlined `execute_rules` (C1 — it does NOT delegate to
-        // `direct_eval.rs`), so this site must be wired independently.
-        // The id→name lookup is built once from `self.rules` (Pitfall 4).
-        let id_to_name: HashMap<&String, &String> =
-            self.rules.iter().map(|r| (&r.id, &r.name)).collect();
-        for id in &evaluated_set {
-            CoverageTracking::record_rule_eval(id);
-            RuleExecutionTracker::record_evaluation(id, id_to_name[id]);
-        }
-        for id in &fired_set {
-            CoverageTracking::record_rule_fire(id);
-            RuleExecutionTracker::record_fire(id, id_to_name[id]);
-        }
-
-        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-        self.metrics.set_execution_time_ms(elapsed_ms);
-
-        // Phase 28 (D-01, C1 site 2): build the TraceData payload only when
-        // `collect_trace` is true AND at least one rule fired. When
-        // `collect_trace` is false, `trace_events` is empty and `trace_start`
-        // is None — `result.trace` stays `None` (SC-3 latency neutrality).
-        let trace = if self.collect_trace && !trace_events.is_empty() {
-            let total_duration_ms = trace_start
-                .map(|s| s.elapsed().as_secs_f64() * 1000.0)
-                .unwrap_or(0.0);
-            Some(crate::engine::registry::TraceData {
-                events: trace_events,
-                total_duration_ms,
-                facts_matched,
-            })
-        } else {
-            None
-        };
+        self.metrics
+            .set_execution_time_ms(start.elapsed().as_secs_f64() * 1000.0);
 
         let mut result = EngineResult::success(fired_set.len());
         result.fired_rule_ids = fired_set.iter().cloned().collect();
         result.trace = trace;
         result
-    }
-}
-
-/// Apply a single `Action` to the engine's working memory (D-04). Mirrors
-/// `WorkingMemory::insert_fact`/`update_fact`/`retract_fact` (fact.rs:169-216)
-/// but operates on the Rete engine's `HashMap<FactId, Fact>` keyed by
-/// `fact.id.to_string()`.
-///
-/// For `Action::UpdateFact { id, fields }`: the target fact is located by
-/// exact `FactId` key first, then by the first fact whose `fact_type_id`
-/// matches `id` (the keystone scenario uses `id: "scorecard"`, a fact type).
-/// Each field's `Expression` is evaluated against the current working memory
-/// snapshot and written into the fact's payload. `Action::CallFunction` and
-/// `Action::LogMessage` are no-ops in Phase 23 (function dispatch and logging
-/// are out of scope for the direct evaluator).
-fn apply_action(action: &Action, working_facts: &mut HashMap<FactId, Fact>) {
-    match action {
-        Action::UpdateFact { id, fields } => {
-            // Snapshot the facts for Expression evaluation (FieldRef reads).
-            // Cloning is O(facts) and acceptable per action application.
-            let facts_snapshot: Vec<Fact> = working_facts.values().cloned().collect();
-            let facts_refs: Vec<&Fact> = facts_snapshot.iter().collect();
-
-            // Locate the target fact: exact FactId key first, else first
-            // fact of the named fact_type_id.
-            let key_opt = if working_facts.contains_key(id) {
-                Some(id.clone())
-            } else {
-                working_facts
-                    .iter()
-                    .find(|(_, f)| f.fact_type_id == *id)
-                    .map(|(k, _)| k.clone())
-            };
-            let key = match key_opt {
-                Some(k) => k,
-                None => return,
-            };
-            let fact = match working_facts.get_mut(&key) {
-                Some(f) => f,
-                None => return,
-            };
-            for (field, expr) in fields {
-                let value = expr.evaluate(&facts_refs);
-                fact.payload.insert(field.clone(), value);
-            }
-        }
-        Action::InsertFact { fact_type, fields } => {
-            let fact = Fact::new(fact_type.clone(), fields.clone());
-            working_facts.insert(fact.id.to_string(), fact);
-        }
-        Action::RetractFact { id } => {
-            if working_facts.contains_key(id) {
-                working_facts.remove(id);
-            } else {
-                let key_opt = working_facts
-                    .iter()
-                    .find(|(_, f)| f.fact_type_id == *id)
-                    .map(|(k, _)| k.clone());
-                if let Some(k) = key_opt {
-                    working_facts.remove(&k);
-                }
-            }
-        }
-        Action::CallFunction { .. } => {
-            // No-op in Phase 23 — function dispatch is out of scope (D-06).
-        }
-        Action::LogMessage { .. } => {
-            // No-op — logging is not wired in the direct evaluator.
-        }
     }
 }
 

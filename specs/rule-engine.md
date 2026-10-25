@@ -3,12 +3,13 @@
 The `engine` crate exposes **one** boxed-trait execution surface (`ExecutionEngine`,
 `engine/src/engine/registry.rs:64-117`), **four** registered algorithm names
 (`EngineType::{Rete, Treat, Leaps, Phreak}`, `engine/src/engine/registry.rs:10-19`) and
-**one** shared evaluate-and-apply routine (`direct_eval::direct_execute`,
-`engine/src/engine/direct_eval.rs:67-179`) that three of the four engines delegate to.
-Only `ReteEngine` inlines its own copy of that routine
-(`engine/src/engine/rete/mod.rs:374-492`); TREAT, LEAPS and PHREAK call the shared helper
-(`engine/src/engine/treat/mod.rs:388-410`, `engine/src/engine/leaps/mod.rs:394-416`,
-`engine/src/engine/phreak/mod.rs:578-600`). All four ship network structures (alpha/beta
+**one** shared evaluate-and-apply routine (`direct_eval::direct_execute_with_limit`,
+`engine/src/engine/direct_eval.rs:81-224`) that **all four** engines delegate to
+(`engine/src/engine/rete/mod.rs:374-402`, `engine/src/engine/treat/mod.rs:388-410`,
+`engine/src/engine/leaps/mod.rs:394-416`, `engine/src/engine/phreak/mod.rs:578-600`).
+Rete used to inline its own copy; the copies had already diverged (no agenda-group
+locking, no deterministic fact resolution) and it now shares the evaluator. All four
+ship separate network structures (alpha/beta
 memory, join nodes, caches, aggregation nodes, truth maintenance) that fact insertion
 populates but rule execution never consults. The four names therefore select a metrics
 identity plus a set of bookkeeping structures, not four matching strategies.
@@ -183,7 +184,7 @@ the cloned rules vector, `SimpleMetricsCollector`, and the semantics above.
 | `TestNode`, `JoinNode`, `ActionNode` | `144-193` | Node records only: `JoinNode` is built with `NodeId("placeholder")` predecessors (`:173-174`) and no join condition is ever evaluated; `ActionNode`s are stored (`:219-221`) but nothing propagates into them. |
 | `assert_fact` | `274-294` | Stores the fact, inserts into alpha memory **only if a matching test node exists** (`:282-291`). |
 | `join_propagation` | `315-358` | Appends `alpha × existing-nagram` products and singletons with no dedup and no predicate (`:337-355`); nagram count grows quadratically. |
-| `execute_rules` | `374-492` | The inlined evaluator; doc comment states it bypasses the network (`:360-373`). |
+| `execute_rules` | `374-402` | Delegates to the shared evaluator; the network is never consulted by execution. |
 | metrics | `293`, `357`, `439`, `596-601` | `alpha_memory_size`/`beta_memory_size` are overwritten from live memory at read time (`:598-599`). |
 
 There is no token propagation, no join predicate, no agenda, no negative/aggregate node: the
@@ -281,7 +282,7 @@ rules against the reduced working memory.
   (`engine/src/tests/mod.rs:282-400`, `engine/src/salience/**` tests) and the test-only
   `deterministic_conflict_strategy` (`engine/src/testing/mod.rs:653-661`).
 
-Net: salience and agenda-group locking affect execution through the evaluators' own ordering; the
+Net: salience and agenda-group locking affect execution through the evaluator's own ordering; the
 `salience::Agenda`/`ConflictResolver` types remain a tested standalone utility that the live path
 does not use, so the two could drift.
 
@@ -443,12 +444,11 @@ HTTP endpoint forwards straight into it (`api/src/v1/simulation.rs:150-161`).
 
 ## Known gaps
 
-1. **Duplicated evaluator bodies.** Rete's `execute_rules`
-   (`engine/src/engine/rete/mod.rs:374-492`) is an inlined copy of
-   `direct_eval::direct_execute` (`engine/src/engine/direct_eval.rs:67-179`), and
-   `apply_action` is verbatim duplicated (`rete/mod.rs:507-562` vs `direct_eval.rs:193-247`).
-   The copies already diverge in metrics: Rete records `record_rule_fired()` inside the loop
-   (`rete/mod.rs:439`) while the helper leaves it to callers (`treat/mod.rs:398-400`).
+1. **~~Duplicated evaluator bodies.~~** Closed 2026-10-25: Rete now calls
+   `direct_execute_with_limit` like the other three engines and its duplicate `apply_action`
+   is deleted. The copies had already diverged — the inlined loop honoured neither
+   `lock_on_active` nor deterministic fact resolution — which is exactly the drift the
+   duplication invited.
 2. **LEAPS looks alpha facts up by node id as if it were a fact type**
    (`engine/src/engine/leaps/mod.rs:338`) whereas Rete resolves the predecessor test node
    (`engine/src/engine/rete/mod.rs:326`); LEAPS beta memory therefore normally stays empty.
