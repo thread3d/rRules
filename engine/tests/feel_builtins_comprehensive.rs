@@ -79,10 +79,17 @@ fn multiword_names_are_parsed_as_single_callees() {
 
 #[test]
 fn date_and_time_is_a_multiword_callee() {
+    // An offset-less date-time is a plain date-time; one with an offset or an
+    // IANA zone uses the zoned carrier.
     let value = ev("date and time(\"2020-05-06T10:00:00\")");
     assert!(
-        matches!(value, Value::DateTimeTz(_)),
+        matches!(value, Value::DateTime(_)),
         "expected a date-and-time value, got {value:?}"
+    );
+    let zoned = ev("date and time(\"2020-05-06T10:00:00+02:00\")");
+    assert!(
+        matches!(zoned, Value::DateTimeTz(_)),
+        "expected a zoned date-and-time value, got {zoned:?}"
     );
 }
 

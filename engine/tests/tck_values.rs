@@ -45,6 +45,8 @@ pub struct TckCase {
     /// True when the case declares `errorResult="true"` (a null result is
     /// expected because the expression is invalid).
     pub expects_error: bool,
+    /// `invocableName` — the decision service the case invokes directly.
+    pub invocable: Option<String>,
 }
 
 // =========================================================================
@@ -233,6 +235,7 @@ pub fn parse_test_cases(xml: &str) -> Vec<TckCase> {
             inputs: Vec::new(),
             expected: Vec::new(),
             expects_error: false,
+            invocable: attr(attrs, "invocableName").map(str::to_string),
         };
 
         let mut j = 0;

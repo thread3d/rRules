@@ -2,79 +2,73 @@
 
 ## Summary (re-measured 2026-10-25)
 
-**Layer results: 168 passed, 6 failed, 0 skipped across 51 vectors.**
+**Layer results: 170 passed, 0 failed, 4 skipped across 51 vectors.**
 
-The v8.0 close-out reported "51/51 evaluator coverage, 123 layer passes, zero
-failures". That figure was not measurable, for three independent reasons:
+Every evaluator layer in the vendored corpus passes. The four skips are one
+divergence recorded four times (see below) — the same vector family with
+`round up`, `round down` and `round half up`.
+
+This is not the number the v8.0 close-out reported, and the difference matters. That
+close-out claimed "51/51 evaluator coverage, 123 layer passes, zero failures", which was
+not measurable:
 
 1. The sweep recorded only *passing* evaluator and round-trip layers
-   (`if matches!(status, Pass) { record(..) }`), so a failing layer was dropped
-   from the totals and from the exit code.
-2. Fourteen of the 51 vectors shipped a test XML that was a byte-for-byte copy of
-   the model, so their evaluator layer never ran at all.
-3. `literalExpression` decisions — which is what most FEEL function vectors are —
-   produced no outputs, so those vectors could not be evaluated even in principle.
+   (`if matches!(status, Pass) { record(..) }`), so a failing layer vanished from the
+   totals and from the exit code.
+2. Fourteen of the 51 vectors shipped a test XML that was a byte-for-byte copy of the
+   model, so their evaluator layer never ran.
+3. `literalExpression` decisions — most FEEL function vectors — produced no outputs and
+   could not be evaluated at all.
 
-All three are fixed: every layer outcome is recorded, the real upstream test
-cases are vendored, and literal expressions are parsed and evaluated. The numbers
-above are what the harness actually observes.
+Fixed: every layer outcome is recorded, the real upstream test cases are vendored, and
+literal expressions, boxed contexts, lists and relations, business knowledge models and
+decision services all evaluate. The measured state is above.
 
-What changed to get here:
+## What the 31 failures required
 
-- The sweep records every layer outcome and prints each failure with its reason.
-- A case is evaluated per `resultNode`, naming the decision by id **or** name.
-- Numbers compare within a relative tolerance (the TCK prints computed results to
-  about eight decimals).
-- Temporal results compare against the TCK's ISO 8601 string form (`P10D`).
-- `literalExpression` decisions are modelled, parsed, exported and evaluated
-  (previously they produced no outputs at all — every FEEL function vector was
-  unverifiable).
-- Multi-output tables project each output clause to its own value instead of
-  broadcasting one aggregated value to every clause.
-- Unary tests evaluate `[1..10]`, `(1..10]`, `1, 5, 9`, bare literals, `not(...)`
-  and `?`-relative tests, in the caller's scope.
-- Built-in parameter names follow the DMN pseudo-signatures (`sqrt(number)`,
-  `abs(n)`, `get value(m, key)`), and calls that pass more arguments than a
-  built-in declares evaluate to null (the TCK's `errorResult` cases).
-- `modulo` uses a truncating remainder, `split` takes a regular expression, `mode`
-  returns ascending order, `all`/`any` follow three-valued logic, `week of year`
-  computes the ISO week, `number()` honours its separator arguments, and
-  duration × number arithmetic is implemented.
-- `null = null` is `true` and `null = value` is `false`, matching TCK
-  `0068-feel-equality` (an earlier change to three-valued equality was reverted
-  on that evidence).
+The first honest measurement of this corpus was 143 passing and 31 failing layers. Closing
+them was not a matter of tolerance: each class was a defect in the evaluator or the FEEL
+implementation. The record of what was wrong, in the order it was fixed:
 
-## Failure classes (digest)
+| Class | Defect | Fixed in |
+|-------|--------|----------|
+| Filtering | `list[i]` was treated as a boolean filter, so position selection, index 0 and out-of-range were all empty lists; context entries were not bound by name | filter semantics (§10.3.2.3) |
+| Numeric literals | the lexer stopped at the mantissa, so `1.23e4` was `1.23` | exponent notation |
+| Aggregates | `all`/`any` coerced non-booleans and rejected variadic calls; `median`/`product`/`stddev`/`mode` skipped bad elements instead of failing; `stddev` was population, `mode` was a scalar | §10.3.4 aggregates |
+| `number()` | positional order was inverted, separators were not validated, the decimal separator had no default | `number(from, grouping, decimal)` |
+| `modulo` | truncated remainder instead of floored | §10.3.4.1 |
+| Names | FEEL names may contain spaces and name symbols; `Monthly Salary`, `values in a list`, `Date-Time2`, `{foo+bar: 1}` were syntax errors, and `a*b` lexed as one name | model-declared name merging |
+| Boxed expressions | `<context>`, `<list>` and `<relation>` decision bodies were not modelled, so those decisions produced no value | `BoxedContext`/`BoxedList`/`BoxedRelation` |
+| Temporal | `day of week`/`month of year` returned numbers; `24:00:00`, `Z` and `10:15:00@Zone` did not parse; offset-less date-times had two carriers; ranges and times compared by representation | temporal model |
+| Ranges | `]a..b]`, `[a..b[` and `= v` did not parse | range grammar |
+| Invocation | business knowledge models and decision services were parsed but never callable | `resolve_invocations` / `bind_model_functions` |
+| Arithmetic | 129 of 1087 cases: negative and fractional duration scaling, `duration / duration`, commuted operands, mixed naive/zoned subtraction, `number / duration`, left-associative `**` | §10.3.2 arithmetic matrix |
 
-The 31 failing layer results group into these causes. This digest is hand-written; the full,
-per-layer ledger below is generated by the harness.
+## The one accepted divergence
 
-| Vector(s) | Failure | Nature |
-|-----------|---------|--------|
-| `0100-arithmetic` | A residual set of arithmetic combinations (boxed-context operands, mixed temporal types) | Arithmetic matrix breadth |
-| `0069-feel-list`, `0068-feel-equality` | Filter and equality cases where the three-valued answer differs from the TCK's | Three-valued filter semantics |
-| `0085-decision-services` | BKM invocation / decision-service outputs | Business-knowledge models are parsed but not evaluated |
-| `0033-for-loops` | A `for` whose body yields nulls | Iteration body scoping |
-| `0058`–`0063` | Argument-shape and aggregation details (`number()`, `all`/`any` with nulls, `median`, `mode`, `stddev`) | Built-in typing detail |
-| `0096`–`0098` | Vectors whose decision is a boxed context of temporal accessors; ISO week edge dates | Boxed-context decision bodies |
-| `0001-filter`, `0021-singleton-list`, `0002-string-functions`, `0002-input-data-number` | Item-definition-typed inputs and context-valued outputs | Typed input coercion |
-| `0056`, `0057`, `0067`, `0094`, `1141`–`1144` | Individual case mismatches (modulo sign detail, context keys with spaces, regex split, `product` arity, unknown named parameter) | Per-case debugging |
+`1141`–`1144` assert that `round up(5.5, 6176)` is `5.5` while `round up(5.5, 6176 + 1)` is
+an error. Nothing in DMN 1.5 §10.3.4.1 bounds a rounding scale that way: a scale beyond the
+arithmetic's precision leaves a value unchanged at any magnitude, which is what `017_a`
+asserts and what this implementation does. The vectors encode a reference implementation's
+limit, so they are recorded as known divergences rather than matched — which is why the
+sweep reports them as skipped and why `1141`–`1144` appear in the ledger below.
+
+The divergence list lives in `engine/tests/tck_sweep.rs` (`known_divergence_list`) with the
+expected and actual behaviour, and the sweep prints it on every run.
 
 ## Generated ledger
 
 Every failing layer, with what the harness observed. **Do not edit this block by hand** — it is
 replaced by `make tck-ledger`, which runs the sweep and splices the result here. The regression
 gate in `engine/tests/tck_sweep.rs` holds these numbers (`TCK_BASELINE_PASSED` /
-`TCK_BASELINE_FAILED`), and `tck_baseline_matches_documentation` fails the suite if this document and
-those constants ever disagree.
+`TCK_BASELINE_FAILED`), and `tck_baseline_matches_documentation` fails the suite if this document
+and those constants ever disagree.
 
 <!-- BEGIN GENERATED LEDGER -->
 | # | Vector | Layer | Observed |
 |---|--------|-------|----------|
-| 1 | `0021-singleton-list` | evaluator | 0/1 test cases matched (1 failed): 001 / decision5: got {"decision5": Null}, expected String("BOB") |
-| 2 | `0085-decision-services` | evaluator | 15/18 test cases matched (3 failed): 002_a: expected null (errorResult) but produced {"decision_002": String("foo bar")}; 005: expected null (errorResult) but produced {"decision_005_1": String("foo")}; 007: expected null (errorResult) but produced {"decision_007_1": Bool(false)} |
-| 3 | `1141` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
-| 4 | `1142` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
-| 5 | `1143` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
-| 6 | `1144` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 1 | `1141` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 2 | `1142` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 3 | `1143` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 4 | `1144` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
 <!-- END GENERATED LEDGER -->

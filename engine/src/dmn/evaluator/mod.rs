@@ -397,14 +397,39 @@ fn call_invocable(
                     }
                 }
             }
-            // Every parameter must receive a value: a decision service called
-            // with too few arguments is an error (`0085`, `002_a`).
+            // The call must match the service's parameters exactly: every one
+            // supplied, none left over, and no argument naming a parameter that
+            // does not exist (`0085`, cases `002_a`, `005`, `010`).
+            if evaluated.len() + evaluated_named.len() != parameters.len() {
+                return Value::Null;
+            }
             for (position, parameter) in parameters.iter().enumerate() {
                 let parameter_name = element_name(model, parameter);
                 let supplied = evaluated_named.iter().any(|(key, _)| {
                     key == parameter || parameter_name.as_ref().is_some_and(|name| name == key)
                 }) || position < evaluated.len();
                 if !supplied {
+                    return Value::Null;
+                }
+            }
+            for (key, _) in &evaluated_named {
+                let known = parameters.iter().any(|parameter| {
+                    key == parameter
+                        || element_name(model, parameter)
+                            .as_ref()
+                            .is_some_and(|name| name == key)
+                });
+                if !known {
+                    return Value::Null;
+                }
+            }
+            // A positional argument must match the declared type of its
+            // parameter (`007`: a number where a string is declared).
+            for (position, value) in evaluated.iter().enumerate() {
+                let Some(parameter) = parameters.get(position) else {
+                    return Value::Null;
+                };
+                if !argument_matches_parameter(model, parameter, value) {
                     return Value::Null;
                 }
             }
@@ -429,6 +454,45 @@ fn call_invocable(
                 _ => Value::Object(collected),
             }
         }
+    }
+}
+
+/// Whether an argument is acceptable for a parameter, judged by the parameter's
+/// declared type when it is a primitive.
+///
+/// A decision service parameter is one of the model's decisions or input data, so
+/// it has a declared `typeRef`. Only the primitive incompatibilities the TCK
+/// asserts are enforced (`0085`, case `007`).
+fn argument_matches_parameter(model: &SharedDmnModel, parameter: &str, value: &Value) -> bool {
+    use crate::dmn::model::DefinitionsChild;
+    let declared = model
+        .model
+        .definitions
+        .children
+        .iter()
+        .find_map(|child| match child {
+            DefinitionsChild::Decision(decision) if decision.id == parameter => decision
+                .variable
+                .as_ref()
+                .and_then(|variable| variable.type_ref.clone()),
+            DefinitionsChild::InputData(input) if input.id == parameter => input
+                .variable
+                .as_ref()
+                .and_then(|variable| variable.type_ref.clone()),
+            _ => None,
+        });
+    let Some(declared) = declared else {
+        return true;
+    };
+    match (declared.as_str(), value) {
+        ("string", Value::String(_)) => true,
+        ("number", Value::Number(_) | Value::Integer(_)) => true,
+        ("boolean", Value::Bool(_)) => true,
+        ("string", _) => false,
+        ("number", _) => false,
+        ("boolean", _) => false,
+        // Any other declared type (including an item definition) is accepted.
+        _ => true,
     }
 }
 
@@ -1440,6 +1504,7 @@ mod drd_cache_tests {
             literal_expression: None,
             boxed_context: None,
             boxed_list: None,
+            boxed_relation: None,
             required_decisions: req,
             required_inputs: vec![],
             required_knowledge: vec![],
@@ -1575,6 +1640,7 @@ mod parallel_eval_tests {
             literal_expression: None,
             boxed_context: None,
             boxed_list: None,
+            boxed_relation: None,
             required_decisions: req,
             required_inputs: vec![],
             required_knowledge: vec![],

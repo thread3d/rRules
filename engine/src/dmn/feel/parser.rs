@@ -2357,27 +2357,25 @@ mod parser_tests {
 
     /// Test: parse_expression("2 ** 3 ** 2") yields BinOp(Pow, 2, BinOp(Pow, 3, 2)) (right-assoc, Pitfall 2).
     #[test]
-    fn parse_pow_right_associative() {
+    fn parse_pow_left_associative() {
+        // `2 ** 3 ** 2` groups as `(2 ** 3) ** 2`: the TCK's `3 ** 4 ** 5` is
+        // `(3 ** 4) ** 5` (`0100-arithmetic`, `exponent_003`).
         let expr = parse_expression("2 ** 3 ** 2");
         match expr {
             FeelExpression::BinOp {
                 op: BinOpKind::Pow,
                 lhs,
-                rhs,
-            } => {
-                assert_num(&lhs, 2);
-                match rhs.as_ref() {
-                    FeelExpression::BinOp {
-                        op: BinOpKind::Pow, ..
-                    } => {}
-                    other => panic!("expected BinOp(Pow) on rhs (right-assoc), got {:?}", other),
-                }
-            }
-            other => panic!("expected BinOp(Pow), got {:?}", other),
+                ..
+            } => match lhs.as_ref() {
+                FeelExpression::BinOp {
+                    op: BinOpKind::Pow, ..
+                } => {}
+                other => panic!("expected BinOp(Pow) on lhs (left-assoc), got {:?}", other),
+            },
+            other => panic!("expected BinOp(Pow) at the root, got {:?}", other),
         }
     }
 
-    /// Test: parse_expression("a or b and c") yields BinOp(Or, a, BinOp(And, b, c)) (or < and).
     #[test]
     fn parse_or_and_precedence() {
         let expr = parse_expression("a or b and c");

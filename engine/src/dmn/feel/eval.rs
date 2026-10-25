@@ -677,6 +677,12 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
                             }
                         }
                     };
+                    // A scalar parameter accepts a one-element list and uses its
+                    // element (DMN 1.5 §10.3.4: "if a parameter is declared with
+                    // a type, a list of one element of that type is unboxed").
+                    // `upper case( Employees[item = "Bob"] )` is the TCK case
+                    // (`0021-singleton-list`, `decision5`).
+                    let evaluated_args = unbox_singleton_arguments(name, evaluated_args);
                     return f(&evaluated_args);
                 }
             }
@@ -880,6 +886,34 @@ pub fn apply_function_value(func: &crate::dmn::feel::types::FeelFunction, args: 
         working_scope.bind(name.clone(), value.clone(), vec![]);
     }
     evaluate(body.as_ref(), &working_scope)
+}
+
+/// Unbox one-element lists for the built-ins whose parameters are scalars.
+///
+/// A parameter declared as `list` (or a variadic built-in) keeps its list; every
+/// other parameter takes the single element when given a one-element list.
+fn unbox_singleton_arguments(name: &str, mut arguments: Vec<Value>) -> Vec<Value> {
+    use crate::dmn::feel::builtins::{builtin_param_names, is_variadic_builtin};
+    if is_variadic_builtin(name) {
+        return arguments;
+    }
+    let Some(parameters) = builtin_param_names(name) else {
+        return arguments;
+    };
+    for (index, argument) in arguments.iter_mut().enumerate() {
+        let scalar_parameter = parameters
+            .get(index)
+            .is_some_and(|parameter| *parameter != "list" && *parameter != "elements");
+        if !scalar_parameter {
+            continue;
+        }
+        if let Value::Array(items) = argument {
+            if items.len() == 1 {
+                *argument = items[0].clone();
+            }
+        }
+    }
+    arguments
 }
 
 /// Collect free variable names from a [`FeelExpression`] AST.
@@ -3430,9 +3464,11 @@ fn arithmetic_div_decimal() {
 
 #[cfg(test)]
 #[test]
-fn arithmetic_pow_right_associative_512() {
-    // Pitfall 2: 2 ** 3 ** 2 = 2 ** (3 ** 2) = 2 ** 9 = 512 (NOT 64).
-    assert_eq!(eval_src("2 ** 3 ** 2"), Value::Number(dec!(512)));
+fn arithmetic_pow_is_left_associative() {
+    // `**` associates to the left, which is what the TCK asserts:
+    // `3 ** 4 ** 5` is `(3 ** 4) ** 5 = 3486784401` (`0100-arithmetic`).
+    assert_eq!(eval_src("2 ** 3 ** 2"), Value::Number(dec!(64)));
+    assert_eq!(eval_src("3 ** 4 ** 5"), Value::Number(dec!(3486784401)));
 }
 
 #[cfg(test)]

@@ -1025,6 +1025,7 @@ mod tests {
             literal_expression: None,
             boxed_context: None,
             boxed_list: None,
+            boxed_relation: None,
             required_decisions: Vec::new(),
             required_inputs: Vec::new(),
             required_knowledge: Vec::new(),
@@ -1074,6 +1075,7 @@ mod tests {
                 literal_expression: None,
                 boxed_context: None,
                 boxed_list: None,
+                boxed_relation: None,
                 decision_table: Some(DecisionTable {
                     hit_policy: HitPolicy::Collect,
                     aggregation: Some(BuiltinAggregator::Sum),

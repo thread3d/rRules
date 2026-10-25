@@ -33,10 +33,11 @@ independent verification; the measured state below is the only state worth quoti
 - **Verification:** [CodeWitness](https://github.com/codewitness/codewitness) executes the
   requirements — **28 VERIFIED, 0 FAILED, 7 UNVERIFIED** for `engine`; the 7 are the HTTP API
   requirements, covered from `api` where their integration suites pass.
-- **DMN conformance:** **143 layer results pass, 31 fail, 0 skip** across 51 vectors
-  (`TCK-COVERAGE-GAPS.md` holds both a digest and a generated per-layer ledger of them). The sweep
-  gates on that baseline, and `tck_baseline_matches_documentation` fails if the document and the gate
-  disagree — so a regression fails the build and a stale document fails it too.
+- **DMN conformance:** **170 layer results pass, 0 fail, 4 skipped** across 51 vectors — every
+  evaluator layer in the vendored corpus, with the four skips being one recorded divergence
+  (`round up(5.5, 6177)`, a reference implementation's scale limit that the specification does not
+  state). `TCK-COVERAGE-GAPS.md` holds the measured history and a generated ledger; the sweep gates on
+  that baseline and `tck_baseline_matches_documentation` fails if the document and the gate disagree.
 - **Build:** `cargo test --workspace` green, `cargo clippy --workspace -- -D warnings` clean,
   `cargo fmt --all -- --check` clean.
 

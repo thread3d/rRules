@@ -149,7 +149,7 @@ self.skip_element(...)` arm in every other element loop). There is no `extension
 
 | Dropped content | Cite |
 |---|---|
-| `literalExpression` and every non-table boxed expression (`Decision` carries only `decision_table`) | `engine/src/dmn/model.rs:212-213`, `parser.rs:143-150` |
+| `literalExpression`, `<context>`, `<list>` and `<relation>` decision bodies (`Decision` carries `literal_expression`, `boxed_context`, `boxed_list`, `boxed_relation`); `<functionDefinition>`, `<invocation>` and `<for>` bodies are still unmodelled | `engine/src/dmn/model.rs` |
 | `extensionElements`, `otherElements`, vendor metadata | `parser.rs:613` |
 | `description` on `decisionTable` (explicitly skipped; `DecisionTable` has no such field) and on `textAnnotation` | `parser.rs:870-873`, `1435-1437`; `engine/src/dmn/model.rs:310-328`, `277-283` |
 | `id` on entry elements (`inputEntry`/`outputEntry`/`annotationEntry`) — `RuleEntry` has no id field | `engine/src/dmn/model.rs:379-382` |
@@ -502,17 +502,17 @@ unsupported arities and wrong types, never an error and never a panic.
 | List | `union` | 2 | order preserving, deduplicated by `feel_equals` | `builtins.rs:1105-1134` |
 | List | `distinct values` | 1 | dedupe by `feel_equals` | `builtins.rs:1137-1163` |
 | List | `flatten` | 1 | one level | `builtins.rs:1166-1183` |
-| List | `product` | 1 | numeric elements only; empty → null | `builtins.rs:1186-1206` |
-| List | `median` | 1 | even length → mean of the two middles | `builtins.rs:1209-1246` |
-| List | `stddev` | 1 | **population** standard deviation | `builtins.rs:1249-1295` |
-| List | `mode` | 1 | scalar when exactly one mode, array otherwise | `builtins.rs:1298-1341` |
+| List | `product` | 1 or 1…n | a list or separate numbers; a null or non-numeric element makes the call null; empty → null | `builtins.rs` |
+| List | `median` | 1 or 1…n | a list or separate numbers; even length → mean of the two middles; a null or non-numeric element makes the call null | `builtins.rs` |
+| List | `stddev` | 1 or 1…n | **sample** standard deviation (n − 1); fewer than two values → null | `builtins.rs` |
+| List | `mode` | 1 or 1…n | always an ascending list; `mode([])` is an empty list | `builtins.rs` |
 | List | `sort` | 1–2 | optional FEEL comparator applied via `apply_function_value`; incomparable pairs stable | `builtins.rs:1354-1405` |
 | Date-time | `now` | 0 | `DateTimeValue::Fixed` at the injected clock, UTC | `builtins.rs:1429-1435` |
 | Date-time | `today` | 0 | date part of the same clock | `builtins.rs:1443-1450` |
-| Date-time | `day of year` | 1 | `Date` only; 1–366 | `builtins.rs:1483-1489` |
-| Date-time | `day of week` | 1 | `Date` only; Monday=1 | `builtins.rs:1494-1500` |
-| Date-time | `month of year` | 1 | `Date` only; 1–12 | `builtins.rs:1505-1512` |
-| Date-time | `week of year` | 1 | `Date` only; see §10 — always returns 1 | `builtins.rs:1468-1478`, `1517-1523` |
+| Date-time | `day of year` | 1 | 1–366; accepts a date or a date-and-time | `builtins.rs` |
+| Date-time | `day of week` | 1 | the English day name (`"Tuesday"`); accepts a date or a date-and-time | `builtins.rs` |
+| Date-time | `month of year` | 1 | the English month name (`"September"`); accepts a date or a date-and-time | `builtins.rs` |
+| Date-time | `week of year` | 1 | ISO week number 1–53; accepts a date or a date-and-time | `builtins.rs` |
 | Boolean | `not` | 1 | `not_3vl`; non-bool → null | `builtins.rs:1533-1543` |
 | Context | `context` | 0–1 | empty context, or a context rebuilt from `"k:v"` strings with number/bool/string inference | `builtins.rs:1556-1585` |
 | Context | `context put` | 3 | key must be a string (no coercion despite the doc) | `builtins.rs:1592-1612` |
@@ -717,12 +717,17 @@ HashMap** (arbitrary order), or merge flat when the decision has no variable
 (`evaluator/mod.rs:517-528`).
 
 Decision services are **not supported at evaluation time**: `DecisionService` is modelled and
-round-tripped (`engine/src/dmn/model.rs:251-262`, `engine/src/dmn/parser.rs:1293+`,
-`engine/src/dmn/exporter.rs:551`) but the evaluator's decision map contains only
-`DefinitionsChild::Decision`, so evaluating a service id yields `NotFound`
-(`evaluator/mod.rs:536-541`). The "decision service" contract implemented here is a single
-`Decision` evaluated with per-output results (`evaluator/mod.rs:408-421`), where every output
-clause receives the same table result (`evaluator/mod.rs:354-369`).
+round-tripped, and a call to one is resolved by `resolve_invocations`: the service's
+parameters (its input decisions and input data, in document order) bind the arguments, the
+output decisions are evaluated with them, and the result is the single output's value or a
+context of several (`evaluator/mod.rs`, `call_invocable`). A call that supplies the wrong
+number of arguments, names a parameter that does not exist, or passes a value of the wrong
+primitive type evaluates to null.
+
+A business knowledge model is evaluated the same way, but bound into the decision's scope as a
+function value (`bind_model_functions`) so that a call inside a `for` body sees the iteration
+variables. FEEL evaluation has no view of the model, so call resolution rewrites the decision's
+AST before evaluation, with a depth cap (`MAX_INVOCATION_DEPTH`) against cyclic models.
 
 Prometheus metrics are emitted per evaluation: `rrules_dmn_output_evaluations_total`
 (`evaluator/mod.rs:29-34`) and `rrules_dmn_drd_chain_depth_seconds`, a histogram whose name
@@ -895,7 +900,7 @@ through with what replaced them; the rest are current.
 | 9 | `context put` documents key coercion but returns `Null` for a non-string key | `engine/src/dmn/feel/builtins.rs:1601-1607` |
 | 10 | `get entries` doc says it returns `"key:value"` strings; the code returns `{key, value}` contexts | `engine/src/dmn/feel/builtins.rs:1662-1689` |
 | 11 | `mode` returns a bare scalar when there is exactly one mode, contradicting the "per DMN spec" comment (the spec returns a list of modes) | `engine/src/dmn/feel/builtins.rs:1335-1340` |
-| 12 | `min`/`max`/`sum`/`mean`/`product`/`median`/`stddev` skip non-numeric elements instead of returning null or comparing comparables, so `min(["a","b"])` is null | `engine/src/dmn/feel/builtins.rs:806`, `836`, `859`, `883`, `1195`, `1219`, `1259` |
+| 12 | ~~`min`/`max`/`sum`/`mean`/`product`/`median`/`stddev` skip non-numeric elements instead of returning null~~ **closed 2026-10-25**: `numeric_series` rejects a null or non-numeric element, making the whole call null; `all`/`any` likewise reject non-booleans | `engine/src/dmn/feel/builtins.rs` |
 | 13 | `matches` ignores the optional flags argument; `date`/`time`/`date and time` ignore extra arguments and have no component-based overloads | `engine/src/dmn/feel/builtins.rs:638-658`, `110-150` |
 | 14 | `list replace` returns an empty array on a bad regex while every other regex built-in returns null | `engine/src/dmn/feel/builtins.rs:744-747` |
 | 15 | `FeelExpression::QualifiedName` is never produced by the parser (the lexer splits on `.` and `Path` is built instead), so `Scope::resolve_qn`'s longest-match rule is dead in production | `engine/src/dmn/feel/parser.rs:446-475`, `1266-1277`; only consumer `engine/src/dmn/feel/eval.rs:394` |
@@ -906,7 +911,7 @@ through with what replaced them; the rest are current.
 | 20 | The namespace allow-list is mislabelled (`20200524` is DMN 1.3, not 1.5; `20180521` is 1.2) and omits the real DMN 1.5 URI; the check's result is discarded, so `DmnParseError::InvalidNamespace` is unreachable | `engine/src/dmn/parser.rs:79-87`, `266-268`; variant declared at `engine/src/dmn/model.rs:586-587` |
 | 21 | `DmnParseError::InvalidNamespace`, `DecisionTableError::InvalidOutputValue`, `DecisionEvalError::EvaluationFailed` are never constructed | `engine/src/dmn/model.rs:586`, `engine/src/dmn/decision_table.rs:40`, `engine/src/dmn/evaluator/mod.rs:617` |
 | 22 | Unknown XML children (`extensionElements`, `otherElements`, vendor metadata) are silently dropped, so no extension data survives a round-trip | `engine/src/dmn/parser.rs:613` and the identical `_ => self.skip_element(...)` arm in every element loop |
-| 23 | `BusinessKnowledgeModel` has no body field, so BKM invocation and `required_knowledge` are unimplemented; `required_inputs` is likewise unused by the evaluator | `engine/src/dmn/model.rs:238-246`; `engine/src/dmn/evaluator/mod.rs:190-198`, `237-244` |
+| 23 | ~~`BusinessKnowledgeModel` has no body field, so BKM invocation is unimplemented~~ **closed 2026-10-25**: the BKM carries its formal parameters and body, and a call to one evaluates the body with the arguments bound. `required_knowledge` is still not used to order evaluation, and a BKM whose body is not a literal expression is skipped | `engine/src/dmn/model.rs`, `evaluator/mod.rs` |
 | 24 | `DecisionService` is parsed and exported but cannot be evaluated; a service id yields `NotFound` | `engine/src/dmn/model.rs:251-262`, `engine/src/dmn/evaluator/mod.rs:536-541` |
 | 25 | A cycle **anywhere** in the document fails every evaluation of every decision, because the DFS runs over the whole model before filtering to the target | `engine/src/dmn/evaluator/mod.rs:205-215` |
 | 26 | `drd_resolve` merges upstream output via `out.outputs.iter().next()`, i.e. an arbitrary HashMap entry | `engine/src/dmn/evaluator/mod.rs:519-524` |

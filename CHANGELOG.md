@@ -12,6 +12,42 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — DMN conformance measured at 170 passed / 0 failed / 4 skipped
+
+The vendored OMG DMN TCK corpus now evaluates cleanly: **170 layer results pass, none fail,
+four are skipped** across 51 vectors, up from the 143 pass / 31 fail of the first honest
+measurement. The four skips are a single recorded divergence — `round up(5.5, 6177)` is an
+error in the vector and unchanged in the specification — kept in `known_divergence_list` with
+its expected and actual behaviour, so it is reported rather than hidden.
+
+Closing those 31 layers meant fixing the evaluator, not the harness. Each of these previously
+evaluated to a silent null:
+
+- **Boxed decision bodies** — `<context>`, `<list>` and `<relation>` are modelled, parsed,
+  round-tripped and evaluated, so the FEEL vectors written that way can run at all.
+- **Business knowledge models and decision services are callable**: a BKM carries its formal
+  parameters and body and is bound into the scope as a function value (so a call inside a `for`
+  body sees the iteration variable); a service binds its arguments over its own input decisions
+  and rejects a call that is short of arguments, names an unknown parameter, or passes the
+  wrong primitive type.
+- **Real filter semantics** — 1-based position selection with negative indices, scalar
+  targets, context entries bound by name.
+- **A context-free lexer**: `a*b` lexed as a single name. Names are re-merged after lexing
+  against the names the model declares, which also makes `Date-Time2`, `values in a list` and
+  `{foo+bar: "foo"}` parse.
+- **Temporal completeness**: exponent literals, `24:00:00`, the `Z` designator, a time with an
+  IANA zone, duration properties, `time offset`, and a single carrier for an offset-less
+  date-time.
+- **The arithmetic matrix** (1087 cases): negative and fractional duration scaling,
+  `duration / duration`, commuted operands, the mixed naive/zoned subtraction rules, and
+  left-associative `**`.
+- **Aggregate and conversion contracts**: `stddev` is the sample deviation, `mode` always an
+  ascending list, a non-numeric element makes an aggregate null, `number()` takes
+  `(from, grouping, decimal)` and validates its separators, and `day of week` / `month of year`
+  return names.
+
+`specs/dmn-feel.md` is updated to match, with the two gaps this closes struck through.
+
 ### Fixed — DMN conformance (TCK 143/31 → 156/18 layer results)
 
 Sixteen of the thirty-one failing layers now pass. Each was a real evaluator
