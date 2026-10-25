@@ -108,10 +108,10 @@ struct DmndiLoss {
 /// `tck_baseline_matches_documentation` fails the suite when the two disagree —
 /// so the gate and the document cannot drift apart silently. Closing a gap means
 /// raising both, deliberately.
-const TCK_BASELINE_PASSED: usize = 143;
+const TCK_BASELINE_PASSED: usize = 156;
 
 /// Layer results that fail at the documented conformance baseline.
-const TCK_BASELINE_FAILED: usize = 31;
+const TCK_BASELINE_FAILED: usize = 18;
 
 // =========================================================================
 // Known divergences
@@ -419,6 +419,13 @@ fn execute_evaluator_layer(vector: &test_util::TckVector) -> VectorResult {
         return skip_result(vector, "No decision found in DMN for evaluation".into());
     };
 
+    // `TCK_DEBUG_VECTOR=<vector dir>` prints every failing case for one vector
+    // and lifts the sample limit, so a failure can be diagnosed without editing
+    // the harness. It never changes a verdict.
+    let debug = std::env::var("TCK_DEBUG_VECTOR")
+        .map(|wanted| wanted == vector.dir_name)
+        .unwrap_or(false);
+
     let mut passed_cases = 0usize;
     let mut failures: Vec<String> = Vec::new();
 
@@ -525,6 +532,8 @@ fn execute_evaluator_layer(vector: &test_util::TckVector) -> VectorResult {
 
         if case_ok {
             passed_cases += 1;
+        } else if debug {
+            eprintln!("--- {} / case {}", vector.dir_name, case.id);
         }
     }
 
@@ -538,9 +547,10 @@ fn execute_evaluator_layer(vector: &test_util::TckVector) -> VectorResult {
             message: Some(format!("{passed_cases}/{total} test cases matched")),
         }
     } else {
+        let limit = if debug { usize::MAX } else { 3 };
         let shown = failures
             .iter()
-            .take(3)
+            .take(limit)
             .cloned()
             .collect::<Vec<_>>()
             .join("; ");

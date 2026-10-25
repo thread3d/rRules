@@ -197,6 +197,9 @@ pub fn clear_l1() {
 #[derive(Debug)]
 pub struct FeelAstCache {
     map: DashMap<String, Arc<FeelExpression>>,
+    /// Names the model declares, so multi-word names (`Monthly Salary`) parse as
+    /// one name. Set by the model that owns the cache.
+    known_names: Vec<String>,
     /// Lexer token cache (Phase 37, PERF-05) — warms the parser so repeated
     /// parses of the same cell skip lexing.
     tokens: LexerTokenCache,
@@ -216,10 +219,22 @@ impl FeelAstCache {
     pub fn with_capacity(max_entries: usize) -> Self {
         Self {
             map: DashMap::new(),
+            known_names: Vec::new(),
             tokens: LexerTokenCache::new(),
             order: Mutex::new(VecDeque::new()),
             max_entries,
         }
+    }
+
+    /// Declare the names the owning model defines, so the parser can recognise
+    /// multi-word names. Replaces any previous set.
+    pub fn set_known_names(&mut self, names: Vec<String>) {
+        self.known_names = names;
+    }
+
+    /// The declared names, in the order they were given.
+    pub fn known_names(&self) -> &[String] {
+        &self.known_names
     }
 
     /// Look up or parse `src` under the given entry-point kind. Returns the
@@ -237,8 +252,42 @@ impl FeelAstCache {
     /// points with `Some(&self.tokens)`, so lexing is served from the
     /// [`LexerTokenCache`] and skipped on repeat parses of the same text.
     pub fn get_or_parse(&self, src: &str, entry: ParseEntry) -> Arc<FeelExpression> {
-        let key = cell_key(src, entry);
+        self.get_or_parse_with_names(src, entry, &[])
+    }
 
+    /// As [`Self::get_or_parse`], with additional names in scope.
+    ///
+    /// A request's inputs can add names the model itself does not declare (the
+    /// TCK supplies inputs named things like `values in a list`). Since the same
+    /// text parses differently with a different name set, the extra names are
+    /// part of the cache key.
+    pub fn get_or_parse_with_names(
+        &self,
+        src: &str,
+        entry: ParseEntry,
+        extra_names: &[String],
+    ) -> Arc<FeelExpression> {
+        let mut known = self.known_names.clone();
+        for name in extra_names {
+            if !known.iter().any(|existing| existing == name) {
+                known.push(name.clone());
+            }
+        }
+        let key = if extra_names.is_empty() {
+            cell_key(src, entry)
+        } else {
+            format!("{}|scope:{:?}", cell_key(src, entry), extra_names)
+        };
+        self.store(key, src, entry, &known)
+    }
+
+    fn store(
+        &self,
+        key: String,
+        src: &str,
+        entry: ParseEntry,
+        known_names: &[String],
+    ) -> Arc<FeelExpression> {
         // PERF-06: per-thread L1 cache (see module docs). FEEL text→AST is a
         // pure function, so a thread_local keyed by (entry, content) is correct
         // across model reloads. A live hit returns the SAME Arc the shared
@@ -253,9 +302,12 @@ impl FeelAstCache {
             dashmap::mapref::entry::Entry::Occupied(o) => o.get().clone(),
             dashmap::mapref::entry::Entry::Vacant(v) => {
                 let parsed = match entry {
-                    ParseEntry::Expression => {
-                        Arc::new(parse_expression_with_cache(src, Some(&self.tokens)))
-                    }
+                    ParseEntry::Expression => Arc::new(if known_names.is_empty() {
+                        parse_expression_with_cache(src, Some(&self.tokens))
+                    } else {
+                        // Declared names let multi-word names parse as one name.
+                        crate::dmn::feel::parser::parse_expression_with_names(src, known_names)
+                    }),
                     ParseEntry::SimpleUnaryTests => {
                         Arc::new(parse_simple_unary_tests_with_cache(src, Some(&self.tokens)))
                     }

@@ -208,8 +208,24 @@ fn numeric_functions_follow_spec() {
     assert_ev("modulo(5, 3)", num(2));
     assert_ev("product([1, 2, 3, 4])", num(24));
     assert_ev("median([1, 2, 3])", num(2));
-    assert_ev("mode([1, 2, 2, 3])", num(2));
-    assert_ev("stddev([2, 4, 4, 4, 5, 5, 7, 9])", num(2));
+    // `mode` always returns a list (the TCK expects a one-element list for a
+    // single mode); `stddev` is the *sample* deviation (n − 1).
+    assert_ev("mode([1, 2, 2, 3])", Value::Array(vec![num(2)]));
+    // Sample deviation (n − 1), which is what the TCK expects: the population
+    // value for this data set would be 2, the sample value is 2.1381…
+    let sd = ev("stddev([2, 4, 4, 4, 5, 5, 7, 9])");
+    match sd {
+        Value::Number(value) => {
+            let expected =
+                Decimal::from_str("2.138089935299395").expect("valid decimal literal");
+            let difference: Decimal = value - expected;
+            assert!(
+                difference.abs() < Decimal::from_str("0.000001").expect("valid decimal literal"),
+                "stddev should be the sample deviation, got {value}"
+            );
+        }
+        other => panic!("expected a number, got {other:?}"),
+    }
     assert_ev("decimal(1/3, 2)", dec("0.33"));
 }
 

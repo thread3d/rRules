@@ -164,23 +164,53 @@ fn built_in_number(args: &[Value]) -> Value {
     }
     match &args[0] {
         Value::Null => Value::Null,
-        Value::Number(_) => args[0].clone(), // already a number → identity
+        // `number(from)` converts *text*; a number argument is a type error, not
+        // an identity (the TCK marks `number(123, ".", ".")` as invalid).
         Value::String(s) => {
             // `number(from, decimal separator, grouping separator)` — locale
             // aware parsing: drop the grouping separator, normalise the decimal
             // separator to '.', then parse exactly.
-            let decimal_separator = match args.get(1) {
+            // DMN 1.5 §10.3.4.1: `number(from, grouping separator, decimal
+            // separator)` — the grouping separator comes first.
+            let grouping_separator = match args.get(1) {
                 None | Some(Value::Null) => None,
                 Some(Value::String(separator)) => Some(separator.as_str()),
                 _ => return Value::Null,
             };
-            let grouping_separator = match args.get(2) {
-                None | Some(Value::Null) => None,
+            // An omitted (or null) decimal separator defaults to `.` — the TCK
+            // accepts `number("1,000,000.00", ",", null)` and rejects
+            // `number("1.000.000,01", ".")`, which is only consistent if the
+            // default decimal separator is the full stop.
+            let decimal_separator = match args.get(2) {
+                None | Some(Value::Null) => Some("."),
                 Some(Value::String(separator)) => Some(separator.as_str()),
                 _ => return Value::Null,
             };
 
-            let mut normalised = s.trim().to_string();
+            // The two separators must differ: `number("1,000,000.00", ",", ",")`
+            // is ambiguous and is an error, not a value.
+            if let (Some(decimal), Some(grouping)) = (decimal_separator, grouping_separator) {
+                if decimal == grouping {
+                    return Value::Null;
+                }
+            }
+
+            // The source may only contain digits, a sign, and the declared
+            // separators. A character that is neither (a `.` where the model
+            // declared `,` as the decimal separator) makes the text invalid for
+            // this call rather than something to reinterpret.
+            let trimmed = s.trim();
+            let mut allowed = vec!['+', '-'];
+            allowed.extend(grouping_separator.and_then(|value| value.chars().next()));
+            allowed.extend(decimal_separator.and_then(|value| value.chars().next()));
+            if trimmed
+                .chars()
+                .any(|character| !character.is_ascii_digit() && !allowed.contains(&character))
+            {
+                return Value::Null;
+            }
+
+            let mut normalised = trimmed.to_string();
             if let Some(grouping) = grouping_separator {
                 if !grouping.is_empty() {
                     normalised = normalised.replace(grouping, "");
@@ -409,17 +439,25 @@ fn built_in_modulo(args: &[Value]) -> Value {
             if *b == Decimal::ZERO {
                 return Value::Null; // div-by-zero → null
             }
-            // Use the `%` operator which is defined for Decimal.
-            let result = a % b;
-            Value::Number(result)
+            match floored_remainder(*a, *b) {
+                Some(remainder) => Value::Number(remainder),
+                None => Value::Null,
+            }
         }
         (Value::Integer(a), Value::Integer(b)) => {
             if *b == 0 {
                 return Value::Null;
             }
-            // Truncating remainder: the result takes the sign of the dividend,
-            // so `modulo(-12, 5)` is -2 (TCK `0056-feel-modulo-function`).
-            Value::Integer(a % b)
+            // Floored remainder, so the result takes the sign of the divisor:
+            // `modulo(-12, 5)` is 3 and `modulo(12, -5)` is -3
+            // (TCK `0056-feel-modulo-function`).
+            let remainder = a % b;
+            let floored = if remainder != 0 && (remainder < 0) != (*b < 0) {
+                remainder + b
+            } else {
+                remainder
+            };
+            Value::Integer(floored)
         }
         _ => Value::Null, // mixed types → null
     }
@@ -482,6 +520,14 @@ fn built_in_odd(args: &[Value]) -> Value {
 }
 
 /// `even(x)` — true if x is an even integer. Null propagates.
+/// Floored remainder: `a - b * floor(a / b)`, whose sign follows `b`.
+fn floored_remainder(a: Decimal, b: Decimal) -> Option<Decimal> {
+    let quotient = a.checked_div(b)?;
+    // `Decimal::floor` is exact for the magnitudes FEEL deals with.
+    let floored = quotient.floor();
+    a.checked_sub(b.checked_mul(floored)?)
+}
+
 fn built_in_even(args: &[Value]) -> Value {
     null_unary(args, |v| match v {
         Value::Integer(i) => Value::Bool(i % 2 == 0),
@@ -965,59 +1011,69 @@ fn built_in_mean(args: &[Value]) -> Value {
 
 /// `all(list)` — true if all elements are truthy. all([]) == true (vacuously).
 fn built_in_all(args: &[Value]) -> Value {
-    if args.is_empty() || matches!(args[0], Value::Null) {
+    // Three-valued `all` over the flattened arguments: false as soon as one
+    // element is false, true when every element is true, null when the series
+    // contains a null and nothing is false. A non-boolean element makes the
+    // whole call null (the TCK marks `all([true, 123, true])` as an error).
+    let Some(values) = boolean_series(args) else {
+        return Value::Null;
+    };
+    if values.iter().any(|value| matches!(value, Some(false))) {
+        return Value::Bool(false);
+    }
+    if values.iter().any(Option::is_none) {
         return Value::Null;
     }
-    let elems = match &args[0] {
-        Value::Array(elems) => elems.clone(),
-        _ => return Value::Null,
-    };
-    if elems.is_empty() {
-        return Value::Bool(true); // vacuously true per DMN 1.5
-    }
-    // Three-valued `all`: true when every element is true, false as soon as one
-    // element is false (a false overrides an earlier null), null otherwise.
-    let mut saw_null = false;
-    for value in &elems {
-        match crate::dmn::feel::coercion::coerce_to_bool(value) {
-            Some(true) => {}
-            Some(false) => return Value::Bool(false),
-            None => saw_null = true,
-        }
-    }
-    if saw_null {
-        Value::Null
-    } else {
-        Value::Bool(true)
-    }
+    Value::Bool(true)
 }
 
-/// `any(list)` — true if any element is truthy. any([]) == false.
 fn built_in_any(args: &[Value]) -> Value {
-    if args.is_empty() || matches!(args[0], Value::Null) {
+    // Dual of `all`: true as soon as one element is true, false when every
+    // element is false, null when the series contains a null and nothing is true.
+    let Some(values) = boolean_series(args) else {
+        return Value::Null;
+    };
+    if values.iter().any(|value| matches!(value, Some(true))) {
+        return Value::Bool(true);
+    }
+    if values.iter().any(Option::is_none) {
         return Value::Null;
     }
-    let elems = match &args[0] {
-        Value::Array(elems) => elems.clone(),
-        _ => return Value::Null,
-    };
-    if elems.is_empty() {
-        return Value::Bool(false); // vacuously false per DMN 1.5
+    Value::Bool(false)
+}
+
+/// The booleans an `all`/`any` call is applied to.
+///
+/// Accepts a list or separate arguments, and treats a single boolean as a
+/// one-element list (`all(true)` is true). Returns `None` when an argument is
+/// neither a boolean, `null`, nor a list of those — a non-boolean is an error,
+/// not something to coerce.
+fn boolean_series(args: &[Value]) -> Option<Vec<Option<bool>>> {
+    if args.is_empty() {
+        return None;
     }
-    // Three-valued `any`: true as soon as one element is true, false when every
-    // element is false, null otherwise.
-    let mut saw_null = false;
-    for value in &elems {
-        match crate::dmn::feel::coercion::coerce_to_bool(value) {
-            Some(true) => return Value::Bool(true),
-            Some(false) => {}
-            None => saw_null = true,
+    let mut values = Vec::new();
+    for argument in args {
+        match argument {
+            Value::Array(elements) => {
+                for element in elements {
+                    values.push(boolean_of(element)?);
+                }
+            }
+            other => values.push(boolean_of(other)?),
         }
     }
-    if saw_null {
-        Value::Null
-    } else {
-        Value::Bool(false)
+    // An empty list is a valid series — `all([])` is vacuously true and
+    // `any([])` vacuously false — so only the no-argument call is null.
+    Some(values)
+}
+
+/// `Some(Some(b))` for a boolean, `Some(None)` for null, `None` for anything else.
+fn boolean_of(value: &Value) -> Option<Option<bool>> {
+    match value {
+        Value::Bool(boolean) => Some(Some(*boolean)),
+        Value::Null => Some(None),
+        _ => None,
     }
 }
 
@@ -1292,162 +1348,145 @@ fn built_in_flatten(args: &[Value]) -> Value {
 }
 
 /// `product(list)` — product of numeric elements. product([]) == Null.
-fn built_in_product(args: &[Value]) -> Value {
-    if args.is_empty() || matches!(args[0], Value::Null) {
-        return Value::Null;
-    }
-    let elems = match &args[0] {
-        Value::Array(elems) => elems.clone(),
-        _ => return Value::Null,
-    };
-    if elems.is_empty() {
-        return Value::Null; // empty product → null (consistent with sum)
-    }
-    let mut total = Decimal::ONE;
-    for v in &elems {
-        match v {
-            Value::Number(d) => total *= d,
-            Value::Integer(i) => total *= rust_decimal::Decimal::from(*i),
-            _ => {} // skip non-numeric
+/// The numbers an aggregate function is applied to.
+///
+/// Accepts the two forms the specification and the TCK use: a single list, or
+/// the numbers given as separate arguments (`product(2, 3, 4)`, `median(4)`).
+/// Returns `None` — making the whole call null — when there is no numeric input
+/// at all, or when any element is null or not a number: an aggregate over a list
+/// containing a non-number is an error, not a value computed from a subset.
+fn numeric_series(args: &[Value]) -> Option<Vec<Decimal>> {
+    let mut numbers = Vec::new();
+    for argument in args {
+        match argument {
+            Value::Array(elements) => {
+                for element in elements {
+                    numbers.push(number_of(element)?);
+                }
+            }
+            other => numbers.push(number_of(other)?),
         }
     }
-    Value::Number(total)
-}
-
-/// `median(list)` — median of numeric values. median([]) == Null.
-fn built_in_median(args: &[Value]) -> Value {
-    if args.is_empty() || matches!(args[0], Value::Null) {
-        return Value::Null;
-    }
-    let elems = match &args[0] {
-        Value::Array(elems) => elems.clone(),
-        _ => return Value::Null,
-    };
-    if elems.is_empty() {
-        return Value::Null;
-    }
-    // Collect numeric values.
-    let mut nums: Vec<Decimal> = vec![];
-    for v in &elems {
-        match v {
-            Value::Number(d) => nums.push(*d),
-            Value::Integer(i) => nums.push(rust_decimal::Decimal::from(*i)),
-            _ => {} // skip non-numeric
-        }
-    }
-    if nums.is_empty() {
-        return Value::Null;
-    }
-    nums.sort();
-    let n = nums.len();
-    if n % 2 == 1 {
-        // Odd: middle element.
-        Value::Number(nums[n / 2])
+    if numbers.is_empty() {
+        None
     } else {
-        // Even: average of two middle elements.
-        let mid = n / 2;
-        let sum = nums[mid - 1] + nums[mid];
-        match sum.checked_div(rust_decimal::Decimal::from(2u64)) {
-            Some(r) => Value::Number(r),
-            None => Value::Null,
-        }
+        Some(numbers)
     }
 }
 
-/// `stddev(list)` — population standard deviation. stddev([]) == Null.
-fn built_in_stddev(args: &[Value]) -> Value {
-    if args.is_empty() || matches!(args[0], Value::Null) {
-        return Value::Null;
+/// One numeric element, or `None` for anything that is not a number.
+fn number_of(value: &Value) -> Option<Decimal> {
+    match value {
+        Value::Number(decimal) => Some(*decimal),
+        Value::Integer(integer) => Some(Decimal::from(*integer)),
+        _ => None,
     }
-    let elems = match &args[0] {
-        Value::Array(elems) => elems.clone(),
-        _ => return Value::Null,
-    };
-    if elems.is_empty() {
-        return Value::Null;
-    }
-    // Collect numeric values.
-    let mut nums: Vec<Decimal> = vec![];
-    for v in &elems {
-        match v {
-            Value::Number(d) => nums.push(*d),
-            Value::Integer(i) => nums.push(rust_decimal::Decimal::from(*i)),
-            _ => {} // skip non-numeric
-        }
-    }
-    if nums.is_empty() {
-        return Value::Null;
-    }
-    // Compute mean.
-    let n = rust_decimal::Decimal::from(nums.len());
-    let sum: Decimal = nums.iter().sum();
-    let mean = match sum.checked_div(n) {
-        Some(r) => r,
-        None => return Value::Null,
-    };
-    // Compute variance (population stddev).
-    let mut var_sum = Decimal::ZERO;
-    for x in &nums {
-        let diff = x - mean;
-        var_sum += diff * diff;
-    }
-    let variance = match var_sum.checked_div(n) {
-        Some(r) => r,
-        None => return Value::Null,
-    };
-    // sqrt(variance). Use checked_sqrt (returns None for negative, but variance >= 0 always).
-    use rust_decimal::MathematicalOps;
-    match variance.sqrt() {
-        Some(r) => Value::Number(r),
+}
+
+/// `product(list | n, …)` — the product of the numbers.
+///
+/// `product([])`, `product(null)` and any non-numeric element are null.
+fn built_in_product(args: &[Value]) -> Value {
+    match numeric_series(args) {
+        Some(numbers) => Value::Number(numbers.into_iter().fold(Decimal::ONE, |acc, n| acc * n)),
         None => Value::Null,
     }
 }
 
-/// `mode(list)` — most frequent value(s). Returns Array of modes. mode([]) == Null.
-fn built_in_mode(args: &[Value]) -> Value {
-    if args.is_empty() || matches!(args[0], Value::Null) {
+/// `median(list | n, …)` — the middle value (mean of the two middles when even).
+///
+/// `median([])` and any non-numeric element are null.
+fn built_in_median(args: &[Value]) -> Value {
+    let Some(mut numbers) = numeric_series(args) else {
         return Value::Null;
-    }
-    let elems = match &args[0] {
-        Value::Array(elems) => elems.clone(),
-        _ => return Value::Null,
     };
-    if elems.is_empty() {
+    numbers.sort();
+    let length = numbers.len();
+    if length % 2 == 1 {
+        return Value::Number(numbers[length / 2]);
+    }
+    let middle = length / 2;
+    let sum = numbers[middle - 1] + numbers[middle];
+    match sum.checked_div(Decimal::from(2u64)) {
+        Some(mean) => Value::Number(mean),
+        None => Value::Null,
+    }
+}
+
+/// `stddev(list | n, …)` — the **sample** standard deviation (n − 1).
+///
+/// The TCK's expected values are sample deviations (`stddev([2,4,7,5])` is
+/// 2.0816…, not the population 1.8027…), so a one-element or empty series has no
+/// deviation and is null.
+fn built_in_stddev(args: &[Value]) -> Value {
+    let Some(numbers) = numeric_series(args) else {
+        return Value::Null;
+    };
+    if numbers.len() < 2 {
         return Value::Null;
     }
-    // Count occurrences using feel_equals for comparison (NOT Rust ==).
-    let mut counts: Vec<(Value, i64)> = vec![];
-    for v in &elems {
-        let mut found = false;
-        for (existing, count) in &mut counts {
-            if crate::dmn::feel::eval::cmp::feel_equals(existing, v) == Some(true) {
-                *count += 1;
-                found = true;
-                break;
-            } else if crate::dmn::feel::eval::cmp::feel_equals(existing, v).is_none() {
-                // Null propagation: skip this pair.
-                continue;
-            }
+    let count = Decimal::from(numbers.len());
+    let mean = match numbers.iter().sum::<Decimal>().checked_div(count) {
+        Some(mean) => mean,
+        None => return Value::Null,
+    };
+    let sum_of_squares: Decimal = numbers
+        .iter()
+        .map(|value| {
+            let deviation = *value - mean;
+            deviation * deviation
+        })
+        .sum();
+    let variance = match sum_of_squares.checked_div(count - Decimal::ONE) {
+        Some(variance) => variance,
+        None => return Value::Null,
+    };
+    use rust_decimal::MathematicalOps;
+    match variance.sqrt() {
+        Some(sd) => Value::Number(sd),
+        None => Value::Null,
+    }
+}
+
+/// `mode(list | n, …)` — the most frequent value(s), ascending.
+///
+/// Always a list (the TCK expects a one-element list for a single mode), and an
+/// empty list for empty input. A non-numeric element makes the call null.
+fn built_in_mode(args: &[Value]) -> Value {
+    let Some(mut numbers) = numeric_series(args) else {
+        return match numeric_series(&[Value::Array(Vec::new())]) {
+            // `mode([])` is an empty list, not null; distinguish it from a
+            // null/non-numeric argument (which is null above).
+            _ if is_empty_list_only(args) => Value::Array(Vec::new()),
+            _ => Value::Null,
+        };
+    };
+    numbers.sort();
+    let mut best_count = 0usize;
+    let mut best: Vec<Decimal> = Vec::new();
+    let mut index = 0;
+    while index < numbers.len() {
+        let value = numbers[index];
+        let mut end = index + 1;
+        while end < numbers.len() && numbers[end] == value {
+            end += 1;
         }
-        if !found {
-            counts.push((v.clone(), 1));
+        let count = end - index;
+        if count > best_count {
+            best_count = count;
+            best.clear();
+            best.push(value);
+        } else if count == best_count {
+            best.push(value);
         }
+        index = end;
     }
-    if counts.is_empty() {
-        return Value::Array(vec![]);
-    }
-    let max_count = counts.iter().map(|(_, c)| *c).max().unwrap_or(0);
-    let modes: Vec<Value> = counts
-        .into_iter()
-        .filter(|(_, c)| *c == max_count)
-        .map(|(v, _)| v)
-        .collect();
-    if modes.len() == 1 {
-        // Single mode — return the value directly (per DMN spec).
-        modes.into_iter().next().unwrap_or(Value::Null)
-    } else {
-        Value::Array(modes)
-    }
+    Value::Array(best.into_iter().map(Value::Number).collect())
+}
+
+/// True when the arguments are exactly one empty list and nothing else.
+fn is_empty_list_only(args: &[Value]) -> bool {
+    args.len() == 1 && matches!(&args[0], Value::Array(elements) if elements.is_empty())
 }
 
 /// `sort(list)` / `sort(list, comparator)` — sort a list (DMN 1.5 §10.3.4.2.5).
@@ -2283,7 +2322,7 @@ pub fn builtin_param_names(name: &str) -> Option<&'static [&'static str]> {
         "round up" | "round down" | "round half up" | "round half down" => ROUND,
         "modulo" => &["dividend", "divisor"],
         "decimal" => &["n", "scale"],
-        "number" => &["from", "decimal separator", "grouping separator"],
+        "number" => &["from", "grouping separator", "decimal separator"],
         "median" | "mode" | "stddev" | "product" | "sum" | "min" | "max" | "mean" => LIST,
         // String family.
         "substring" => &["string", "start position", "length"],
@@ -2333,6 +2372,8 @@ pub fn is_variadic_builtin(name: &str) -> bool {
         "append"
             | "concatenate"
             | "sort"
+            | "all"
+            | "any"
             | "context merge"
             | "min"
             | "max"
@@ -2598,11 +2639,12 @@ mod conversion {
         assert_eq!(result, Value::Null);
     }
 
-    /// `number(5)` → Number(5) (identity for already-numeric).
+    /// `number(5)` → null: the function converts text, and a number argument is
+    /// a type error rather than an identity (`0058-feel-number-function`).
     #[test]
-    fn number_already_numeric() {
-        let result = built_in_number(&[Value::Number(dec!(5))]);
-        assert_eq!(result, Value::Number(dec!(5)));
+    fn number_rejects_non_text() {
+        assert_eq!(built_in_number(&[Value::Number(dec!(5))]), Value::Null);
+        assert_eq!(built_in_number(&[Value::Integer(5)]), Value::Null);
     }
 
     /// `string(123)` → String("123").
@@ -3785,18 +3827,39 @@ mod list {
         }
     }
 
-    /// `mode([1,1,2])` → 1 (most frequent).
+    /// `mode([1,1,2])` → [1]: always a list, and the modes ascend.
     #[test]
     fn mode_basic() {
-        let result = built_in_mode(&[Value::Array(vec![
-            Value::Integer(1),
-            Value::Integer(1),
-            Value::Integer(2),
-        ])]);
-        match &result {
-            Value::Integer(1) => {} // single mode returns the value directly
-            other => panic!("expected Integer(1), got {:?}", other),
-        }
+        assert_eq!(
+            built_in_mode(&[Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(1),
+                Value::Integer(2),
+            ])]),
+            Value::Array(vec![Value::Number(dec!(1))])
+        );
+        // Several modes come back in ascending order.
+        assert_eq!(
+            built_in_mode(&[Value::Array(vec![
+                Value::Integer(3),
+                Value::Integer(6),
+                Value::Integer(1),
+                Value::Integer(9),
+                Value::Integer(6),
+                Value::Integer(1),
+                Value::Integer(3),
+            ])]),
+            Value::Array(vec![
+                Value::Number(dec!(1)),
+                Value::Number(dec!(3)),
+                Value::Number(dec!(6)),
+            ])
+        );
+        // An empty list has no mode but is not an error.
+        assert_eq!(
+            built_in_mode(&[Value::Array(vec![])]),
+            Value::Array(vec![])
+        );
     }
 
     /// `stddev([1,2,3,4])` computes without panicking.

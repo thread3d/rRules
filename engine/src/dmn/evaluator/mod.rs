@@ -79,6 +79,52 @@ pub struct EvaluateResult {
     pub outputs_evaluated: Vec<String>,
 }
 
+/// Every name the model declares as a *value*: input data, decision variables,
+/// decision names, and business-knowledge-model variables.
+///
+/// The parser uses these to recognise names that contain spaces. Ids are
+/// deliberately excluded — a decision table cell refers to a name, not an id.
+fn declared_names(model: &DmnModel) -> Vec<String> {
+    use crate::dmn::model::DefinitionsChild;
+    let mut names: Vec<String> = Vec::new();
+    let mut push = |name: &str| {
+        if !name.is_empty() && !names.iter().any(|known| known == name) {
+            names.push(name.to_string());
+        }
+    };
+    for child in &model.definitions.children {
+        match child {
+            DefinitionsChild::InputData(input) => {
+                if let Some(name) = &input.name {
+                    push(name);
+                }
+                if let Some(variable) = &input.variable {
+                    push(&variable.name);
+                }
+            }
+            DefinitionsChild::Decision(decision) => {
+                if let Some(name) = &decision.name {
+                    push(name);
+                }
+                if let Some(variable) = &decision.variable {
+                    push(&variable.name);
+                }
+            }
+            DefinitionsChild::BusinessKnowledgeModel(knowledge) => {
+                if let Some(name) = &knowledge.name {
+                    push(name);
+                }
+                if let Some(variable) = &knowledge.variable {
+                    push(&variable.name);
+                }
+            }
+            DefinitionsChild::ItemDefinition(item) => push(&item.name),
+            _ => {}
+        }
+    }
+    names
+}
+
 /// Shared snapshot of a loaded DMN model + its AST cache (Phase 25 pattern).
 #[derive(Debug)]
 pub struct SharedDmnModel {
@@ -97,7 +143,10 @@ pub struct SharedDmnModel {
 }
 
 impl SharedDmnModel {
-    pub fn new(model: DmnModel, ast_cache: FeelAstCache) -> Self {
+    pub fn new(model: DmnModel, mut ast_cache: FeelAstCache) -> Self {
+        // FEEL names may contain spaces, so the parser needs the model's names
+        // to tell `Monthly Salary` (one input) from two adjacent identifiers.
+        ast_cache.set_known_names(declared_names(&model));
         Self {
             model,
             ast_cache,
@@ -437,9 +486,14 @@ fn evaluate_single_decision(
     } else if let Some(literal) = &decision.literal_expression {
         // DMN 1.5 §10.3.2: a literal-expression decision's value is the result
         // of evaluating its FEEL text against the decision's scope.
-        let ast = shared
-            .ast_cache
-            .get_or_parse(&literal.text.content, ParseEntry::Expression);
+        // Names bound in this evaluation (a request's inputs can introduce
+        // names the model does not declare, including names with spaces).
+        let scope_names: Vec<String> = scope.bindings.keys().cloned().collect();
+        let ast = shared.ast_cache.get_or_parse_with_names(
+            &literal.text.content,
+            ParseEntry::Expression,
+            &scope_names,
+        );
         let value = crate::dmn::feel::eval::evaluate(&ast, scope);
         let name = decision
             .variable

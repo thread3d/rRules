@@ -137,7 +137,31 @@ fn path_nav(v: Value, name: &str) -> Value {
 // unit tests (dmn12_/truth_tables) and are wired into `evaluate`'s dispatch
 // in Task 2 GREEN. The non-test build has no caller until that dispatch
 // lands, so the lint is expected and transient.
-#[allow(dead_code)]
+/// Equality of two FEEL times.
+///
+/// A time with a UTC offset denotes an instant, so `10:30:00+01:00` equals
+/// `09:30:00Z`: both are normalised to the same instant. Offset-less times
+/// compare as wall-clock times, and a mixed pair compares the clock faces.
+fn times_equal(
+    left: &crate::dmn::feel::temporal::TimeValue,
+    right: &crate::dmn::feel::temporal::TimeValue,
+) -> bool {
+    use crate::dmn::feel::temporal::TimeValue;
+    match (left, right) {
+        (TimeValue::Offset(a), TimeValue::Offset(b)) => {
+            a.timestamp_millis() == b.timestamp_millis()
+        }
+        (TimeValue::Fixed(a), TimeValue::Fixed(b))
+        | (TimeValue::Local(a), TimeValue::Local(b))
+        | (TimeValue::Fixed(a), TimeValue::Local(b))
+        | (TimeValue::Local(a), TimeValue::Fixed(b)) => a == b,
+        (TimeValue::Fixed(a) | TimeValue::Local(a), TimeValue::Offset(b))
+        | (TimeValue::Offset(b), TimeValue::Fixed(a) | TimeValue::Local(a)) => {
+            *a == b.naive_local().time()
+        }
+    }
+}
+
 pub(crate) mod cmp {
     use crate::data_types::Value;
     use std::cmp::Ordering;
@@ -183,7 +207,7 @@ pub(crate) mod cmp {
             (Value::Date(d), Value::DateTimeTz(dtv)) | (Value::DateTimeTz(dtv), Value::Date(d)) => {
                 date_equals_datetime_z(d, dtv)
             }
-            (Value::Time(x), Value::Time(y)) => Some(x == y),
+            (Value::Time(x), Value::Time(y)) => Some(super::times_equal(x, y)),
             (Value::DateTimeTz(x), Value::DateTimeTz(y)) => Some(x == y),
             (Value::DaysTimeDuration(x), Value::DaysTimeDuration(y)) => Some(x == y),
             (Value::YearsMonthsDuration(x), Value::YearsMonthsDuration(y)) => Some(x == y),
@@ -1523,29 +1547,85 @@ fn evaluate_path(target: &FeelExpression, name: &str, scope: &Scope) -> Value {
 
 /// `target[predicate]` — filter expression (rule 50).
 fn evaluate_filter(target: &FeelExpression, predicate: &FeelExpression, scope: &Scope) -> Value {
-    let t = evaluate(target, scope);
-    match t {
-        Value::Array(elems) => {
-            let mut result = Vec::new();
-            for elem in elems {
-                let mut scoped = scope.clone();
-                scoped.bind("item".to_string(), elem.clone(), vec![]);
-                if matches!(evaluate(predicate, &scoped), Value::Bool(true)) {
-                    result.push(elem);
-                }
+    let target_value = evaluate(target, scope);
+    if matches!(target_value, Value::Null) {
+        return Value::Null;
+    }
+
+    // DMN 1.5 §10.3.2.3 defines two forms:
+    //
+    //   filter(list, number)    → 1-based position selection (negative counts
+    //                             from the end); a scalar target counts as a
+    //                             one-element list.
+    //   filter(list, boolean)   → keep the elements for which the predicate is
+    //                             exactly true.
+    //
+    // The predicate is evaluated once against the enclosing scope to decide
+    // which form this is; only the boolean form re-evaluates it per element.
+    if let Some(index) = filter_index(&evaluate(predicate, scope)) {
+        return filter_select(&target_value, index);
+    }
+
+    let elements: Vec<Value> = match target_value {
+        Value::Array(elements) => elements,
+        scalar => vec![scalar],
+    };
+
+    let mut kept = Vec::with_capacity(elements.len());
+    for element in elements {
+        let mut scoped = scope.clone();
+        scoped.bind("item".to_string(), element.clone(), vec![]);
+        // A context element also exposes its entries by name, so `[a >= 2]`
+        // works as well as `[item.a >= 2]`; an entry named `item` shadows the
+        // implicit binding, which is what the TCK expects.
+        if let Value::Object(entries) = &element {
+            for (name, value) in entries {
+                scoped.bind(name.clone(), value.clone(), vec![]);
             }
-            Value::Array(result)
         }
-        Value::Null => Value::Null,
-        other => {
-            let mut scoped = scope.clone();
-            scoped.bind("item".to_string(), other.clone(), vec![]);
-            if matches!(evaluate(predicate, &scoped), Value::Bool(true)) {
-                Value::Array(vec![other])
+        if matches!(evaluate(predicate, &scoped), Value::Bool(true)) {
+            kept.push(element);
+        }
+    }
+    Value::Array(kept)
+}
+
+/// The position a filter predicate names, when it is an integer.
+fn filter_index(value: &Value) -> Option<i64> {
+    match value {
+        Value::Integer(index) => Some(*index),
+        Value::Number(decimal) => {
+            use rust_decimal::prelude::ToPrimitive;
+            if decimal.fract().is_zero() {
+                decimal.to_i64()
             } else {
-                Value::Array(vec![])
+                None
             }
         }
+        _ => None,
+    }
+}
+
+/// Select one element by 1-based position (`0` and out-of-range are null).
+///
+/// A non-list target behaves as a one-element list: `100[1]` is `100` and
+/// `100[0]` is null.
+fn filter_select(target: &Value, index: i64) -> Value {
+    if index == 0 {
+        return Value::Null;
+    }
+    match target {
+        Value::Array(elements) => {
+            let length = elements.len() as i64;
+            let zero_based = if index > 0 { index - 1 } else { length + index };
+            if zero_based < 0 || zero_based >= length {
+                Value::Null
+            } else {
+                elements[zero_based as usize].clone()
+            }
+        }
+        scalar if index == 1 || index == -1 => scalar.clone(),
+        _ => Value::Null,
     }
 }
 

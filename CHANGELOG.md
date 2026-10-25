@@ -12,6 +12,44 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — DMN conformance (TCK 143/31 → 156/18 layer results)
+
+Sixteen of the thirty-one failing layers now pass. Each was a real evaluator
+defect, found by reading the vector rather than the summary:
+
+- **Filter semantics** (`0069-feel-list`): `list[i]` selects by 1-based position
+  (negative counts from the end, `0` and out-of-range are null, a scalar target
+  behaves as a one-element list), `list[boolean]` filters, and a context element
+  exposes its entries by name so `[{a:1}][a >= 2]` works. Previously every form
+  was treated as a boolean filter over a list.
+- **Numeric literals with an exponent** (`0068-feel-equality`): `1.23e4` lexed as
+  `1.23` and the exponent was silently dropped — `12300 = 1.23e4` was false.
+- **Aggregates** (`0059`–`0063`, `0094`): `all`/`any` take a list *or* separate
+  arguments, accept a single boolean, reject non-booleans (rather than coercing),
+  and treat `all([])`/`any([])` as vacuously true/false. `median`, `product`,
+  `stddev` and `mode` accept the same two forms and treat any non-numeric element
+  as an error instead of skipping it; `stddev` is the **sample** deviation and
+  needs two values; `mode` always returns an ascending list.
+- **`number()`** (`0058`): the positional order is
+  `number(from, grouping separator, decimal separator)`, separators must differ,
+  an omitted decimal separator defaults to `.`, and text containing a character
+  that is not a digit, sign or declared separator is rejected.
+- **`modulo`** (`0056`): the remainder is floored, so its sign follows the
+  divisor (`modulo(-12, 5)` is 3).
+- **Multi-word names** (`0016`, `0002-input-data-number`): FEEL allows spaces in
+  names, and models use them (`values in a list`, `Monthly Salary`). The parser now
+  merges a run of words when the joined text is a name the model or the request
+  declares — previously such a name was a syntax error.
+- **Context keys with spaces** (`0057`): `{foo bar: "foo"}` parses.
+- **Regular expressions in string literals** (`0067`): an unknown escape keeps its
+  backslash, so `"\s"` reaches `split` as `\s` instead of `s`.
+- **`Z` time designator and offset-aware time equality** (`0068`):
+  `time("09:30:00Z")` parses, and `time("10:30:00+01:00") = time("09:30:00Z")` is
+  true because both denote the same instant.
+
+Two unit tests encoded the superseded behaviour and were corrected rather than
+worked around (`number(number)` is a type error; `mode` returns a list).
+
 ### Added
 - **`make tck-ledger`** — the conformance record now carries a generated ledger of every failing
   layer (vector, layer, observed-versus-expected) alongside the hand-written digest of causes. The

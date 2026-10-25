@@ -374,7 +374,12 @@ impl<'a> Lexer<'a> {
                         }
                     }
                     other => {
-                        // Unknown escape — push the char literally.
+                        // Unknown escape: keep the backslash as well as the
+                        // character. FEEL lists the valid escapes, but models
+                        // (and the TCK) pass regular expressions through string
+                        // literals — `"\s"` must reach `split` as backslash-s,
+                        // not as `s`.
+                        out.push('\\');
                         out.push(other as char);
                     }
                 }
@@ -418,10 +423,28 @@ impl<'a> Lexer<'a> {
                 self.col += 1;
             }
         }
+        // Optional exponent (FEEL rule 31): `e`/`E`, an optional sign, digits.
+        // Without this the lexer stopped at the mantissa and the exponent was
+        // silently dropped, so `1.23e4` evaluated to `1.23`.
+        if matches!(self.peek_at(0), Some(b'e') | Some(b'E')) {
+            let mut lookahead = 1;
+            if matches!(self.peek_at(lookahead), Some(b'+') | Some(b'-')) {
+                lookahead += 1;
+            }
+            if self.peek_at(lookahead).is_some_and(|c| c.is_ascii_digit()) {
+                self.cursor += lookahead;
+                self.col += lookahead as u32;
+                while self.cursor < self.src.len() && self.src[self.cursor].is_ascii_digit() {
+                    self.cursor += 1;
+                    self.col += 1;
+                }
+            }
+        }
+
         let text = std::str::from_utf8(&self.src[start..self.cursor]).unwrap_or("");
-        match Decimal::from_str_exact(text) {
-            Ok(d) => Token::Number(d),
-            Err(_) => Token::LexError(format!("invalid numeric literal: {:?}", text)),
+        match parse_numeric_literal(text) {
+            Some(d) => Token::Number(d),
+            None => Token::LexError(format!("invalid numeric literal: {:?}", text)),
         }
     }
 
@@ -1031,20 +1054,53 @@ use crate::data_types::Value;
 const DEFAULT_MAX_DEPTH: u32 = 256;
 
 /// The recursive-descent + Pratt parser over `Vec<TokenSpan>`.
+/// Parse a FEEL numeric literal, including scientific notation.
+///
+/// `rust_decimal` parses a plain decimal exactly; the exponent is applied here by
+/// repeated multiplication (bounded to the decimal scale) so `1.23e4` is `12300`
+/// and `1.23e-4` is `0.000123`.
+fn parse_numeric_literal(text: &str) -> Option<Decimal> {
+    let (mantissa, exponent) = match text.find(['e', 'E']) {
+        Some(index) => (&text[..index], text[index + 1..].parse::<i32>().ok()?),
+        None => (text, 0),
+    };
+    let mut value = Decimal::from_str_exact(mantissa).ok()?;
+    let ten = Decimal::from(10);
+    // `rust_decimal` holds at most 28 fractional digits, so a larger magnitude
+    // exponent cannot be represented either way.
+    for _ in 0..exponent.unsigned_abs().min(28) {
+        value = if exponent >= 0 {
+            value.checked_mul(ten)?
+        } else {
+            value.checked_div(ten)?
+        };
+    }
+    Some(value)
+}
+
 struct Parser {
     tokens: Vec<TokenSpan>,
     pos: usize,
     depth: u32,
     max_depth: u32,
+    /// Names the model declares (inputs, decisions, variables). FEEL names may
+    /// contain spaces, so a name like `Monthly Salary` has to be recognised as
+    /// one name rather than two adjacent identifiers.
+    known_names: Vec<String>,
 }
 
 impl Parser {
     fn new(tokens: Vec<TokenSpan>) -> Self {
+        Self::with_known_names(tokens, Vec::new())
+    }
+
+    fn with_known_names(tokens: Vec<TokenSpan>, known_names: Vec<String>) -> Self {
         Self {
             tokens,
             pos: 0,
             depth: 0,
             max_depth: DEFAULT_MAX_DEPTH,
+            known_names,
         }
     }
 
@@ -1455,6 +1511,12 @@ impl Parser {
                     // (the Pratt loop decides if `or`/`and`/`between`/`in`/
                     // `instance` are operators vs names).
                     _ => {
+                        if let Some(declared) = self.merge_declared_name(&s) {
+                            // `merge_declared_name` leaves the position on the
+                            // last word of the name; consume it.
+                            self.advance();
+                            return FeelExpression::Name(declared);
+                        }
                         let name = self.merge_multiword_name(&s);
                         self.advance();
                         FeelExpression::Name(name)
@@ -1468,6 +1530,43 @@ impl Parser {
             Token::Eof => self.err_here("unexpected end of input"),
             other => self.err_here(&format!("unexpected token: {:?}", other)),
         }
+    }
+
+    /// Join the words of a name the model declares (`Monthly Salary`,
+    /// `values in a list`) into one `Name` node.
+    ///
+    /// The longest declared name that starts at the current position wins; the
+    /// parser position is left on the last consumed word so the caller's
+    /// `advance()` consumes it. Returns `None` when no declared multi-word name
+    /// matches here, leaving the ordinary single-name path to run.
+    fn merge_declared_name(&mut self, first: &str) -> Option<String> {
+        if self.known_names.is_empty() {
+            return None;
+        }
+        let mut words = vec![first.to_string()];
+        let mut best: Option<(String, usize)> = None;
+        let mut probe = self.pos + 1;
+        loop {
+            let candidate = words.join(" ");
+            if self.known_names.contains(&candidate) {
+                best = Some((candidate.clone(), words.len()));
+            }
+            let next = match self.tokens.get(probe) {
+                Some(TokenSpan {
+                    token: Token::Name(word),
+                    ..
+                }) => word.clone(),
+                _ => break,
+            };
+            words.push(next);
+            probe += 1;
+        }
+        let (name, word_count) = best?;
+        if word_count < 2 {
+            return None;
+        }
+        self.pos += word_count - 1;
+        Some(name)
     }
 
     /// Join a multi-word built-in function name whose words the lexer emitted
@@ -1611,15 +1710,23 @@ impl Parser {
             return FeelExpression::Context(entries);
         }
         loop {
-            let key = match self.advance() {
-                Some(TokenSpan {
-                    token: Token::Name(n),
-                    ..
-                }) => n,
-                Some(TokenSpan {
-                    token: Token::String(s),
-                    ..
-                }) => s,
+            // A context key is a name or a string. FEEL names may contain
+            // spaces (`{foo bar: "foo"}`), so a run of adjacent name tokens up to
+            // the `:` is one key.
+            let key = match self.peek().clone() {
+                Token::String(value) => {
+                    self.advance();
+                    value
+                }
+                Token::Name(first) => {
+                    self.advance();
+                    let mut words = vec![first];
+                    while let Token::Name(next) = self.peek().clone() {
+                        words.push(next.clone());
+                        self.advance();
+                    }
+                    words.join(" ")
+                }
                 _ => {
                     self.sync_to_boundary();
                     return self.err_here("expected context key (name or string)");
@@ -1918,6 +2025,18 @@ impl Parser {
 /// cached tokens with zero lexical overhead.
 pub fn parse_expression(src: &str) -> FeelExpression {
     parse_expression_with_cache(src, None)
+}
+
+/// Parse a FEEL `Expression`, resolving names the model declares.
+///
+/// `known_names` lets the parser recognise a name that contains spaces (DMN
+/// allows them, and models use them: `Monthly Salary`, `values in a list`).
+/// Without it such a name parses as two adjacent names, which is a syntax error.
+pub fn parse_expression_with_names(src: &str, known_names: &[String]) -> FeelExpression {
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize();
+    let mut parser = Parser::with_known_names(tokens, known_names.to_vec());
+    parser.parse_expr(0)
 }
 
 /// Parse a FEEL `Expression` (grammar rule 1) from `src` using an optional lexer cache.

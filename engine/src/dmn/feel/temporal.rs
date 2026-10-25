@@ -409,6 +409,16 @@ fn parse_day_time_duration(body: &str, neg: bool) -> Option<TimeDelta> {
 /// Parse an XML Schema time literal (`HH:mm:ss` or `HH:mm:ss+HH:mm`) into a
 /// [`TimeValue`].
 fn parse_time(s: &str) -> Option<TimeValue> {
+    // `Z` is the UTC designator: `09:30:00Z` is `09:30:00+00:00`.
+    if let Some(without_z) = s.strip_suffix('Z').or_else(|| s.strip_suffix('z')) {
+        let naive = NaiveTime::parse_from_str(without_z, "%H:%M:%S").ok()?;
+        let dt_naive = NaiveDate::from_ymd_opt(1970, 1, 1)?.and_time(naive);
+        let utc = FixedOffset::east_opt(0)?;
+        return utc
+            .from_local_datetime(&dt_naive)
+            .single()
+            .map(TimeValue::Offset);
+    }
     // Try offset form first (HH:mm:ss+HH:mm).
     if let Some(pos) = s.find('+').or_else(|| s.find('-').filter(|&p| p > 0)) {
         let (time_part, off_part) = s.split_at(pos);
