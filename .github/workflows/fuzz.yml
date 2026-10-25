@@ -1,0 +1,74 @@
+name: Fuzz
+
+# Bounded fuzzing of the two untrusted-input surfaces: the FEEL parser and the
+# decision-table loader. Nightly, on demand, or on a PR labelled `fuzz` — a
+# five-minute fuzz run on every pull request would spend the budget without
+# telling anyone anything new.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [master, main]
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  # 300 s per target keeps the job inside the timeout and the budget.
+  FUZZ_MAX_TOTAL_TIME: "300"
+  FUZZ_RUNS: "600000"
+
+jobs:
+  fuzz:
+    name: Fuzz FEEL parser and decision tables
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'fuzz')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust nightly (cargo-fuzz requirement)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            engine/fuzz -> target
+
+      - name: Build fuzz targets
+        run: make fuzz-build
+
+      - name: Fuzz the FEEL parser
+        run: make fuzz TARGET=feel_parser
+
+      - name: Fuzz the decision-table loader
+        run: make fuzz TARGET=decision_table
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-artifacts
+          path: |
+            engine/fuzz/artifacts/
+            **/crash-*
+            **/oom-*
+            **/timeout-*
+          if-no-files-found: ignore
+          retention-days: 30

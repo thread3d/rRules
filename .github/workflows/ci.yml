@@ -1,0 +1,57 @@
+name: CI
+
+# The local gates are the contract (`make ci`, `make tck`); this workflow runs
+# exactly those, so a green check here means the same thing as a green run on a
+# developer's machine. Keeping them identical is deliberate: a CI that checks
+# something different from the Makefile teaches people to distrust one of them.
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: "22"
+
+jobs:
+  gates:
+    name: Build, test, lint, format, frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # One command, one definition of "green": build, test, clippy with
+      # warnings-as-errors, fmt --check, frontend production build, vitest.
+      - name: Run the gates
+        run: make ci
+
+      # The DMN conformance sweep is baseline-gated (143 pass / 31 documented
+      # failures): it fails on a regression, not on the known gap set.
+      - name: DMN conformance baseline
+        run: make tck

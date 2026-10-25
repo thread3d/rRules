@@ -12,15 +12,20 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Removed
-- **`.github/` (four GitHub Actions workflows).** `ci.yml` (build/test/clippy/fmt/frontend),
-  `deploy.yml` (Docker build + Helm release), `bench.yml` (nightly memory-regression gate) and
-  `fuzz.yml` (nightly `cargo-fuzz`). They could not run as written — three triggered on `main` while
-  the branch is `master`, the deploy job needed a cluster and secrets it guarded with an `if:` on a
-  secret (which GitHub forbids), `bench.yml` uploaded the same artifact twice, three used the retired
-  `actions/cache@v3`, and together they covered less than `make ci`. The gates they were meant to
-  enforce run locally: `make ci`, `make tck`, `make verify`; the benchmark gate is `make memcheck`.
-  `engine/benches/README.md` now documents the local commands instead of the removed workflow.
+### Fixed
+- **GitHub Actions workflows restored and repaired.** The four workflows had been removed because
+  none of them could run as written; they are back, fixed:
+
+  | Workflow | Was | Now |
+  |---|---|---|
+  | `ci.yml` | triggered on `main` only; skipped frontend tests, the TCK sweep | triggers on `master` **and** `main`; runs `make ci` and `make tck`, so CI and the local gate cannot disagree |
+  | `deploy.yml` | guarded the cluster step with `if: ${{ secrets.KUBE_CONFIG != '' }}`, which GitHub forbids; failed on every push | builds and pushes the image on every push, deploys only when `KUBE_CONFIG` is set (checked through a job-level `env`), and logs a notice when it is not |
+  | `bench.yml` | uploaded the same artifact twice, `actions/cache@v3` | separate `benchmarks` and `memory-gate` jobs with distinct artifacts; the gate runs nightly and on the `bench-regression` label, not on every PR |
+  | `fuzz.yml` | `actions/cache@v3`; ran on every PR | runs nightly and on the `fuzz` label; `taiki-e/install-action` for `cargo-fuzz` |
+
+  All four pin `permissions` to the least privilege they need and add a concurrency group so
+  superseded runs cancel. `make fuzz` now honours `FUZZ_MAX_TOTAL_TIME`/`FUZZ_RUNS` instead of
+  hardcoding 60 s, and `engine/benches/README.md` documents the jobs and the thresholds again.
 
 ### Changed
 - **`AGENTS.md` replaces `CLAUDE.md` as the project's instruction file.** It

@@ -91,15 +91,22 @@ fuzz-build:
 	cd engine && cargo +nightly fuzz build
 
 # Run DMN fuzz targets (Phase 38+; requires nightly + cargo-fuzz).
-# Usage: make fuzz TARGET=decision_table   (default: all targets)
+# Usage: make fuzz TARGET=decision_table FUZZ_MAX_TOTAL_TIME=300
+#        (no TARGET runs every target; defaults bound each run to 60 s)
+FUZZ_MAX_TOTAL_TIME ?= 60
+FUZZ_RUNS ?= 600000
 fuzz:
-	@if [ -z "$$TARGET" ]; then \
-		echo "Fuzzing all targets (bounded, ~60s each)..."; \
-		cd engine && cargo +nightly fuzz run feel_parser -- -max_total_time=60; \
-		cd engine && cargo +nightly fuzz run decision_table -- -max_total_time=60; \
+	@set -e; \
+	run() { \
+		echo "Fuzzing $$1 ($(FUZZ_RUNS) runs, max $(FUZZ_MAX_TOTAL_TIME) s)..."; \
+		cd engine && cargo +nightly fuzz run $$1 -- \
+			-runs=$(FUZZ_RUNS) -max_total_time=$(FUZZ_MAX_TOTAL_TIME); \
+	}; \
+	if [ -z "$(TARGET)" ]; then \
+		run feel_parser; \
+		run decision_table; \
 	else \
-		echo "Fuzzing target: $$TARGET"; \
-		cd engine && cargo +nightly fuzz run $$TARGET -- -max_total_time=60; \
+		run "$(TARGET)"; \
 	fi
 
 help:

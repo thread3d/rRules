@@ -54,9 +54,12 @@ make verify      # CodeWitness against specs/requirements.md (engine + api)
 `make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).
 `make bench`, `make memcheck` and `make fuzz` need a nightly toolchain or a frozen baseline snapshot.
 
-**These local gates are the only gates.** The repository has no hosted CI: the GitHub Actions
-workflows were removed because they could not run (wrong branch trigger, secrets not configured, no
-remote, and they covered less than `make ci`). Nothing will check your work for you — run the gates.
+**CI runs exactly these gates.** `.github/workflows/ci.yml` invokes `make ci` and `make tck` on
+pushes and pull requests to `master`/`main`, so a green check means the same thing as a green run
+locally. `bench.yml` runs the benchmark and memory-regression gates nightly, `fuzz.yml` fuzzes the
+parser and decision-table loader nightly, and `deploy.yml` publishes the image on every push and
+deploys only when `KUBE_CONFIG` is configured. Run the gates yourself anyway — do not push something
+you have not seen pass.
 
 ## Where things live
 

@@ -1,0 +1,84 @@
+name: Benchmarks
+
+# Criterion benchmarks on demand, and the memory-regression gate nightly.
+#
+# `make bench` records measurements; `make memcheck` compares them with the
+# frozen v6.0 baseline and exits non-zero on a regression beyond the threshold.
+# The gate runs nightly (and on a PR labelled `bench-regression`) because it
+# needs a quiet machine to be meaningful — a shared CI runner cannot be trusted
+# with a 10% RSS threshold on every push.
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  BENCH_RSS_THRESHOLD_PCT: "10"
+  BENCH_ALLOC_THRESHOLD_PCT: "10"
+
+jobs:
+  benchmarks:
+    name: Criterion benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run benchmarks
+        run: make bench
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-results
+          path: |
+            target/criterion/
+            engine/benches/snapshots/
+          if-no-files-found: warn
+          retention-days: 14
+
+  memory-gate:
+    name: Memory regression gate
+    # Nightly and on demand only: this is the gate that should fail a release,
+    # not every pull request.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'bench-regression')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate the current snapshot and compare it with the baseline
+        run: make memcheck
+
+      - name: Upload the snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-snapshot
+          path: |
+            engine/benches/snapshots/
+          if-no-files-found: warn
+          retention-days: 30

@@ -44,25 +44,33 @@ The combined corpus is loaded automatically; no configuration needed.
 
 ## Running the gate
 
-Benchmarks and the memory-regression gate run locally; the project has no hosted CI at present
-(the GitHub Actions workflows were removed because they could not run without a configured remote,
-cluster and secrets).
+Locally:
 
 ```bash
-make bench       # Criterion DMN benchmarks, results under target/criterion/
-make memcheck    # regenerate the snapshot and compare it to the frozen v6.0 baseline
-make baseline-update   # accept new numbers as the baseline (commit the result)
+make bench            # Criterion benchmarks, results under target/criterion/
+make memcheck         # regenerate the snapshot, compare with the frozen v6.0 baseline
+make baseline-update  # accept new numbers as the baseline (commit the result)
 ```
 
-`make memcheck` compares current measurements against the frozen `v6.0-baseline.json` and exits
-non-zero when RSS or allocation counts regress beyond the threshold:
+In CI (`.github/workflows/bench.yml`, nightly at 02:00 UTC and on demand):
+
+| Job | When | What |
+|-----|------|------|
+| `benchmarks` | every PR, nightly, manual | `make bench`; Criterion results uploaded as an artifact (informational) |
+| `memory-gate` | nightly, manual, or a PR labelled `bench-regression` | `make memcheck`; fails the run on a regression beyond the threshold |
+
+The gate is deliberately not on every pull request: a 10% RSS threshold needs a quiet machine, and a
+shared runner cannot provide one.
+
+### Regression thresholds
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BENCH_RSS_THRESHOLD_PCT` | 10 | RSS regression threshold (% above baseline) |
 | `BENCH_ALLOC_THRESHOLD_PCT` | 10 | Allocation count regression threshold (%) |
 
-It is worth running before a release, and whenever the parser or evaluator changes shape.
+Set them in the workflow's `env:` block (both are already there) or in the environment of a local
+`make memcheck`.
 
 ## Benchmark Groups
 
