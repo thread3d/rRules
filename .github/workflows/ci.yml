@@ -62,3 +62,32 @@ jobs:
       # the one documented divergence does not.
       - name: DMN conformance baseline
         run: make tck
+
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      # The chart is otherwise only exercised during a deploy, where a broken
+      # template looks like a deployment failure. Lint and render it here instead:
+      # no cluster, no secrets, and a chart error is reported as a chart error.
+      - name: Lint the chart
+        run: helm lint helm/rrules-server
+
+      - name: Render the default values
+        run: helm template rrules helm/rrules-server > /dev/null
+
+      - name: Render each environment overlay
+        run: |
+          for overlay in helm/rrules-server/values-*.yaml; do
+            echo "rendering with $overlay"
+            helm template rrules helm/rrules-server -f "$overlay" > /dev/null
+          done

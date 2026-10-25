@@ -18,6 +18,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Buildx otherwise renders a progress block that is unreadable in the Actions log.
+  BUILDKIT_PROGRESS: plain
   IMAGE_NAME: ${{ github.repository_owner }}/rrules-server
   HELM_CHART_PATH: helm/rrules-server
   KUBE_NAMESPACE: default
@@ -51,6 +53,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          # Provenance attestations add minutes to a build that already compiles the
+          # workspace from scratch, and nothing here publishes them.
+          provenance: false
           file: Dockerfile
           push: true
           tags: |
@@ -73,6 +78,16 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: v3.14.0
+
+      - name: Lint the chart
+        run: helm lint "$HELM_CHART_PATH"
+
+      - name: Render the chart with this release's values
+        run: |
+          helm template rrules-server "$HELM_CHART_PATH" \
+            --namespace "$KUBE_NAMESPACE" \
+            --set image.repository="ghcr.io/$IMAGE_NAME" \
+            --set image.tag="${{ github.sha }}" > /dev/null
 
       - name: Configure cluster access
         if: env.KUBE_CONFIG != ''
