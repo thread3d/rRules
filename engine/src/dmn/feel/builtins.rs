@@ -200,25 +200,57 @@ fn built_in_string(args: &[Value]) -> Value {
 
 /// `years and months duration(x)` — parse a string into a FEEL years-months duration.
 fn built_in_years_and_months_duration(args: &[Value]) -> Value {
-    if args.is_empty() {
-        return Value::Null;
+    // DMN 1.5 §10.3.4.1: `years and months duration(from, to)` returns the
+    // years-and-months duration between two date/date-and-time values.
+    if args.len() >= 2 {
+        let (Some((y1, m1)), Some((y2, m2))) = (year_month(&args[0]), year_month(&args[1])) else {
+            return Value::Null;
+        };
+        let months = (y2 as i64 - y1 as i64) * 12 + (m2 as i64 - m1 as i64);
+        return Value::YearsMonthsDuration(crate::dmn::feel::temporal::YearsMonthsDuration {
+            months,
+        });
     }
-    match &args[0] {
-        Value::Null => Value::Null,
-        Value::String(s) => {
-            // Only accept year-month duration form (P... without T/D/H/S).
+
+    // Single-argument form: accept an ISO year-month duration string
+    // (e.g. `years and months duration("P1Y2M")`).
+    match args.first() {
+        Some(Value::Null) | None => Value::Null,
+        Some(Value::String(s)) => {
             let trimmed = s.trim();
             if !trimmed.starts_with('P') && !trimmed.starts_with("-P") {
                 return Value::Null;
             }
-            let body = trimmed.strip_prefix('-').unwrap_or(trimmed).strip_prefix('P').unwrap_or("");
+            let body = trimmed
+                .strip_prefix('-')
+                .unwrap_or(trimmed)
+                .strip_prefix('P')
+                .unwrap_or("");
             // If body contains T, D, H, or S → it's a days-time duration, not YMD.
             if body.contains('T') || body.contains('D') || body.contains('H') || body.contains('S') {
                 return Value::Null;
             }
             crate::dmn::feel::temporal::parse_at_literal(trimmed).unwrap_or(Value::Null)
         }
+        Some(Value::YearsMonthsDuration(_)) => args[0].clone(),
         _ => Value::Null,
+    }
+}
+
+/// Extract `(year, month)` from a FEEL date or date-and-time value.
+fn year_month(v: &Value) -> Option<(i32, u32)> {
+    use chrono::Datelike;
+    match v {
+        Value::Date(d) => Some((d.year(), d.month())),
+        Value::DateTimeTz(dt) => {
+            let naive = match dt {
+                crate::dmn::feel::temporal::DateTimeValue::Fixed(f) => f.naive_local(),
+                crate::dmn::feel::temporal::DateTimeValue::Iana(z) => z.naive_local(),
+                crate::dmn::feel::temporal::DateTimeValue::Local(l) => *l,
+            };
+            Some((naive.year(), naive.month()))
+        }
+        _ => None,
     }
 }
 
@@ -237,7 +269,7 @@ fn built_in_decimal(args: &[Value]) -> Value {
     };
     // `scale` is the number of decimal places (non-negative integer).
     let scale: u32 = match &args[1] {
-        Value::Integer(n) => (*n as i64).max(0) as u32,
+        Value::Integer(n) => (*n).max(0) as u32,
         Value::Number(d) => {
             // Truncate to integer first, then take absolute value.
             d.trunc().abs().to_i64().unwrap_or(0) as u32
@@ -267,91 +299,59 @@ fn built_in_ceiling(args: &[Value]) -> Value {
     })
 }
 
-/// `round up(x)` — round away from zero to nearest integer. Null propagates.
+/// Extract the optional `scale` argument of the DMN rounding functions.
+///
+/// `None` means "the whole result is null": either the scale argument was
+/// explicitly null or it was not a non-negative integer/number.
+fn rounding_scale(args: &[Value]) -> Option<u32> {
+    match args.get(1) {
+        // Omitted → scale 0 (round to an integer), per DMN 1.5 §10.3.4.1.
+        None => Some(0),
+        Some(Value::Integer(i)) if *i >= 0 => u32::try_from(*i).ok(),
+        Some(Value::Number(d)) if d.is_sign_positive() && d.fract().is_zero() => {
+            u32::try_from(*d).ok()
+        }
+        // null or a non-integral/negative scale → null result.
+        Some(_) => None,
+    }
+}
+
+/// Apply a rounding strategy to `args[0]` at the requested scale.
+fn round_with(args: &[Value], strategy: rust_decimal::RoundingStrategy) -> Value {
+    let Some(scale) = rounding_scale(args) else {
+        return Value::Null;
+    };
+    match args.first() {
+        Some(Value::Number(d)) => Value::Number(d.round_dp_with_strategy(scale, strategy)),
+        Some(Value::Integer(i)) => Value::Number(
+            Decimal::from(*i).round_dp_with_strategy(scale, strategy),
+        ),
+        _ => Value::Null,
+    }
+}
+
+/// `round up(n, scale)` — round away from zero at `scale` decimals.
+/// Null propagates. DMN 1.5 §10.3.4.1.
 fn built_in_round_up(args: &[Value]) -> Value {
-    null_unary(args, |v| match v {
-        Value::Number(d) => {
-            let r = if *d >= Decimal::ZERO {
-                d.ceil()
-            } else {
-                d.floor()
-            };
-            Value::Number(r)
-        }
-        _ => Value::Null,
-    })
+    round_with(args, rust_decimal::RoundingStrategy::AwayFromZero)
 }
 
-/// `round down(x)` — round toward zero to nearest integer. Null propagates.
+/// `round down(n, scale)` — round toward zero at `scale` decimals.
+/// Null propagates. DMN 1.5 §10.3.4.1.
 fn built_in_round_down(args: &[Value]) -> Value {
-    null_unary(args, |v| match v {
-        Value::Number(d) => {
-            let r = if *d >= Decimal::ZERO {
-                d.floor()
-            } else {
-                d.ceil()
-            };
-            Value::Number(r)
-        }
-        _ => Value::Null,
-    })
+    round_with(args, rust_decimal::RoundingStrategy::ToZero)
 }
 
-/// `round half up(x)` — round to nearest integer; ties go away from zero. Null propagates.
+/// `round half up(n, scale)` — round to nearest at `scale` decimals, ties away
+/// from zero. Null propagates. DMN 1.5 §10.3.4.1.
 fn built_in_round_half_up(args: &[Value]) -> Value {
-    null_unary(args, |v| match v {
-        Value::Number(d) => {
-            // Implement "half away from zero" explicitly (rust_decimal's `round()` uses
-            // half-to-even / banker's rounding).
-            let frac = d.fract();
-            if frac == Decimal::from(5u64) / Decimal::from(10u64) {
-                // Exact tie: away from zero.
-                if *d >= Decimal::ZERO {
-                    Value::Number(d.ceil())
-                } else {
-                    Value::Number(d.floor())
-                }
-            } else {
-                // Not a tie — round to nearest (half up = same as half down for non-ties).
-                let truncated = d.trunc();
-                let diff = (d - truncated).abs();
-                if diff > Decimal::from(5u64) / Decimal::from(10u64) {
-                    // Closer to next integer.
-                    if *d >= Decimal::ZERO {
-                        Value::Number(truncated + Decimal::ONE)
-                    } else {
-                        Value::Number(truncated - Decimal::ONE)
-                    }
-                } else {
-                    // Closer to truncated (or exact 0.5 already handled above).
-                    Value::Number(truncated)
-                }
-            }
-        }
-        _ => Value::Null,
-    })
+    round_with(args, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
 }
 
-/// `round half down(x)` — round to nearest integer; ties go toward zero. Null propagates.
+/// `round half down(n, scale)` — round to nearest at `scale` decimals, ties
+/// toward zero. Null propagates. DMN 1.5 §10.3.4.1.
 fn built_in_round_half_down(args: &[Value]) -> Value {
-    null_unary(args, |v| match v {
-        Value::Number(d) => {
-            // Check if exactly at .5 threshold.
-            let frac = d.fract();
-            if frac == Decimal::from(5u64) / Decimal::from(10u64) {
-                // Tie: round toward zero (truncate).
-                let r = if *d >= Decimal::ZERO {
-                    d.floor()
-                } else {
-                    d.ceil()
-                };
-                Value::Number(r)
-            } else {
-                Value::Number(d.round())
-            }
-        }
-        _ => Value::Null,
-    })
+    round_with(args, rust_decimal::RoundingStrategy::MidpointTowardZero)
 }
 
 /// `abs(x)` — absolute value. Null propagates.
@@ -1083,9 +1083,7 @@ fn built_in_index_of(args: &[Value]) -> Value {
         Value::Array(elems) => elems.clone(),
         _ => return Value::Null,
     };
-    let val = match &args[1] {
-        v => v.clone(),
-    };
+    let val = args[1].clone();
     if args.is_empty() || matches!(args[0], Value::Null) || matches!(args[1], Value::Null) {
         return Value::Null;
     }
@@ -1232,7 +1230,7 @@ fn built_in_median(args: &[Value]) -> Value {
     } else {
         // Even: average of two middle elements.
         let mid = n / 2;
-        let sum = &nums[mid - 1] + &nums[mid];
+        let sum = nums[mid - 1] + nums[mid];
         match sum.checked_div(rust_decimal::Decimal::from(2u64)) {
             Some(r) => Value::Number(r),
             None => Value::Null,
@@ -1274,8 +1272,8 @@ fn built_in_stddev(args: &[Value]) -> Value {
     // Compute variance (population stddev).
     let mut var_sum = Decimal::ZERO;
     for x in &nums {
-        let diff = x - &mean;
-        var_sum += &diff * &diff;
+        let diff = x - mean;
+        var_sum += diff * diff;
     }
     let variance = match var_sum.checked_div(n) {
         Some(r) => r,
@@ -1335,35 +1333,67 @@ fn built_in_mode(args: &[Value]) -> Value {
     }
 }
 
-/// `sort(list, comparator)` — sort list using optional comparator lambda. Null propagates.
+/// `sort(list)` / `sort(list, comparator)` — sort a list (DMN 1.5 §10.3.4.2.5).
+///
+/// * No comparator: ascending order using FEEL default ordering (numbers,
+///   then strings, then booleans/dates by their natural comparison); elements
+///   that cannot be compared keep their relative order (stable sort).
+/// * Comparator supplied (`function(x, y)`): the function is applied to each
+///   pair. A numeric result orders by sign (negative → `x` first); a boolean
+///   result orders `x` first when `true` (the TCK's `function(x,y) x>y` style).
+/// * `null` list (or any non-list first argument) → `null`.
+/// * Empty list → empty list (the spec never turns a list into `null` here), and
+///   an empty list is produced even when a comparator is supplied.
 fn built_in_sort(args: &[Value]) -> Value {
-    if args.is_empty() || matches!(args[0], Value::Null) {
-        return Value::Null;
-    }
-    let elems = match &args[0] {
-        Value::Array(elems) => elems.clone(),
+    let elems = match args.first() {
+        Some(Value::Array(elems)) => elems.clone(),
         _ => return Value::Null,
     };
-    if args.is_empty() || matches!(args[0], Value::Null) {
-        return Value::Null;
+    if elems.is_empty() {
+        return Value::Array(elems);
     }
-    // Collect items to sort (filter out non-comparable for now).
-    let mut sortable: Vec<Value> = elems.clone();
-    if args.len() >= 2 {
-        // If a comparator lambda is provided, use it. For simplicity in this implementation,
-        // we fall back to default ordering when no comparator or comparator evaluation fails.
-        return Value::Array(sortable); // placeholder — full sort with comparator lands in 31-08
-    }
-    // Default sort: try numeric ordering first, then string.
-    sortable.sort_by(|a, b| {
-        use std::cmp::Ordering;
-        match (a, b) {
-            (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
-            (Value::Integer(x), Value::Integer(y)) => x.cmp(y),
-            (Value::String(x), Value::String(y)) => x.cmp(y),
-            _ => Ordering::Equal, // incomparable → stable sort preserves order
+
+    let mut sortable = elems;
+
+    match args.get(1) {
+        Some(Value::Function(cmp)) => {
+            sortable.sort_by(|a, b| {
+                
+                match crate::dmn::feel::eval::apply_function_value(
+                    cmp,
+                    &[a.clone(), b.clone()],
+                ) {
+                    Value::Number(n) => n.partial_cmp(&Decimal::ZERO).unwrap_or(std::cmp::Ordering::Equal),
+                    Value::Integer(i) => i.cmp(&0),
+                    // Boolean comparator: `true` means "a comes before b".
+                    Value::Bool(true) => std::cmp::Ordering::Less,
+                    Value::Bool(false) => std::cmp::Ordering::Greater,
+                    // Null / unusable comparator result: treat as equal so the
+                    // stable sort preserves input order.
+                    _ => std::cmp::Ordering::Equal,
+                }
+            });
         }
-    });
+        _ => {
+            sortable.sort_by(|a, b| {
+                use std::cmp::Ordering;
+                match (a, b) {
+                    (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+                    (Value::Integer(x), Value::Integer(y)) => x.cmp(y),
+                    (Value::String(x), Value::String(y)) => x.cmp(y),
+                    (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+                    (Value::Number(x), Value::Integer(y)) => {
+                        x.partial_cmp(&Decimal::from(*y)).unwrap_or(Ordering::Equal)
+                    }
+                    (Value::Integer(x), Value::Number(y)) => {
+                        Decimal::from(*x).partial_cmp(y).unwrap_or(Ordering::Equal)
+                    }
+                    _ => Ordering::Equal, // incomparable → stable sort preserves order
+                }
+            });
+        }
+    }
+
     Value::Array(sortable)
 }
 
@@ -1424,7 +1454,7 @@ fn iso_weekday_num(d: chrono::NaiveDate) -> u32 {
     let ndt = d.and_hms_opt(0, 0, 0).unwrap();
     use chrono::TimeZone;
     let dt = chrono::Utc.from_local_datetime(&ndt).single().unwrap();
-    dt.weekday().number_from_monday() as u32
+    dt.weekday().number_from_monday()
 }
 
 /// Helper: ISO week number (1–53) for a `NaiveDate`.
@@ -1623,20 +1653,31 @@ pub fn built_in_get_value(args: &[Value]) -> Value {
 /// DMN 1.5 §10.3.2.3.8: Each entry is formatted as `"key": value_as_string`.
 /// Null arg → null propagation. Non-context arg → null.
 pub fn built_in_get_entries(args: &[Value]) -> Value {
-    let ctx = match args.first() {
-        Some(Value::Object(m)) => m.clone(),
+    // DMN 1.5 §10.3.4.4: `get entries(c)` returns a list of key/value pairs,
+    // each represented as a context with `key` and `value` entries. Keys are
+    // emitted in sorted order so the result is deterministic (the backing
+    // `HashMap` iteration order is not).
+    if args.len() != 1 {
+        return Value::Null;
+    }
+    let ctx = match &args[0] {
+        Value::Object(m) => m,
         _ => return Value::Null,
     };
-    let entries: Vec<Value> = ctx
-        .iter()
-        .map(|(k, v)| {
-            // Format as "key": value — the spec says each entry is a string.
-            // Use format_value for known FEEL types; fall back to debug repr otherwise.
-            let val_str = crate::dmn::feel::temporal::format_value(v)
-                .unwrap_or_else(|| format!("{v:?}"));
-            Value::String(format!("\"{}\": {}", k, val_str))
+
+    let mut keys: Vec<&String> = ctx.keys().collect();
+    keys.sort();
+
+    let entries: Vec<Value> = keys
+        .into_iter()
+        .map(|k| {
+            let mut entry = HashMap::new();
+            entry.insert("key".to_string(), Value::String(k.clone()));
+            entry.insert("value".to_string(), ctx[k].clone());
+            Value::Object(entry)
         })
         .collect();
+
     Value::Array(entries)
 }
 
@@ -2106,6 +2147,25 @@ pub fn built_in_is(args: &[Value]) -> Value {
 
 /// Build the built-in function registry. Returns a `HashMap` mapping FEEL
 /// canonical names (with spaces) to their implementation pointers.
+/// Built-in function names that contain a space (`upper case`, `string join`,
+/// `list contains`, `date and time`, …).
+///
+/// The FEEL lexer emits one `Name` token per word, so the parser needs this
+/// list to re-join a multi-word callee into the single name the registry is
+/// keyed by (see `Parser::merge_multiword_name`).
+pub fn multi_word_builtin_names() -> &'static [&'static str] {
+    static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names: Vec<&'static str> = builtin_registry()
+            .keys()
+            .copied()
+            .filter(|name| name.contains(' '))
+            .collect();
+        names.sort_unstable();
+        names
+    })
+}
+
 pub fn builtin_registry() -> HashMap<&'static str, BuiltinFn> {
     let mut m = HashMap::new();
 

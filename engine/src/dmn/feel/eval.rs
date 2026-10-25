@@ -425,7 +425,7 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
         }
         FeelExpression::Path { target, name } => evaluate_path(target, name, scope),
         FeelExpression::Filter { target, predicate } => evaluate_filter(target, predicate, scope),
-        FeelExpression::InstanceOf { expr, ty } => evaluate_instance_of(expr, &ty, scope),
+        FeelExpression::InstanceOf { expr, ty } => evaluate_instance_of(expr, ty, scope),
         FeelExpression::List(elems) => {
             // Evaluate each element (needed for iteration sources in Task 1).
             let evaluated: Vec<Value> = elems.iter().map(|e| evaluate(e, scope)).collect();
@@ -578,7 +578,42 @@ fn lambda_apply(
 
     // Evaluate the body against the merged scope.
     let body = func.body.as_ref().expect("body.is_some() checked at call site");
-    evaluate(&**body, &working_scope)
+    evaluate(body, &working_scope)
+}
+
+/// Apply a FEEL function *value* to already-evaluated argument values.
+///
+/// `lambda_apply` (below) takes argument ASTs and evaluates them in the
+/// caller's scope, which is what a `FunctionInvocation` node needs. Built-in
+/// functions such as `sort(list, function(x,y) ...)` receive their arguments
+/// already evaluated, so they need this value-based entry point instead.
+///
+/// Returns [`Value::Null`] for external functions (rejected at invocation),
+/// for built-in function pointers without a body, and on arity mismatch.
+pub fn apply_function_value(
+    func: &crate::dmn::feel::types::FeelFunction,
+    args: &[Value],
+) -> Value {
+    if func.external {
+        return Value::Null;
+    }
+    let Some(body) = func.body.as_ref() else {
+        return Value::Null;
+    };
+    if !func.param_names.is_empty() && args.len() != func.param_names.len() {
+        return Value::Null;
+    }
+
+    // Start from the definition-site scope (lexical capture), then bind params.
+    let mut working_scope = func
+        .captured
+        .clone()
+        .map(|arc| (*arc).clone())
+        .unwrap_or_else(Scope::empty);
+    for (name, value) in func.param_names.iter().zip(args.iter()) {
+        working_scope.bind(name.clone(), value.clone(), vec![]);
+    }
+    evaluate(body.as_ref(), &working_scope)
 }
 
 /// Collect free variable names from a [`FeelExpression`] AST.
@@ -978,6 +1013,7 @@ fn eval_pow(l: Value, r: Value) -> Value {
 /// `None` propagates to `Value::Null`. For any non-Range RHS, returns
 /// `Value::Null` — the full unary-test `in` semantics (`a in <positive
 /// unary test>`, `a in (tests)`, `-`, `not(...)`) land in 31-04.
+#[allow(dead_code)]
 fn eval_in(l: Value, r: Value) -> Value {
     let Value::Range(range) = r else {
         // TODO(31-04): full unary-test `in` semantics (positive unary test,
@@ -986,25 +1022,19 @@ fn eval_in(l: Value, r: Value) -> Value {
     };
     let mut ok: Option<bool> = Some(true);
     if let Some(start) = &range.start {
-        let in_lower = match cmp::feel_compare(&l, start) {
-            Some(o) => Some(if range.start_incl {
+        let in_lower = cmp::feel_compare(&l, start).map(|o| if range.start_incl {
                 o != Ordering::Less
             } else {
                 o == Ordering::Greater
-            }),
-            None => None,
-        };
+            });
         ok = cmp::and_3vl(ok, in_lower);
     }
     if let Some(end) = &range.end {
-        let in_upper = match cmp::feel_compare(&l, end) {
-            Some(o) => Some(if range.end_incl {
+        let in_upper = cmp::feel_compare(&l, end).map(|o| if range.end_incl {
                 o != Ordering::Greater
             } else {
                 o == Ordering::Less
-            }),
-            None => None,
-        };
+            });
         ok = cmp::and_3vl(ok, in_upper);
     }
     opt_bool(ok)
@@ -1061,7 +1091,7 @@ fn range_to_values(range: &FeelRange) -> Option<Vec<Value>> {
             if s > e {
                 return None;
             }
-            let count = (*e - *s) as i64 + 1;
+            let count = (*e - *s) + 1;
             if count > MAX_RANGE_ITERATIONS {
                 return None; // DoS guard
             }

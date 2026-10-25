@@ -300,7 +300,7 @@ impl<'a> Lexer<'a> {
         // consumed as a leading-dot decimal when followed by digits.
         if b.is_ascii_digit()
             || (b == b'.'
-                && self.peek_at(1).map_or(false, |c| c.is_ascii_digit())
+                && self.peek_at(1).is_some_and(|c| c.is_ascii_digit())
                 && !(self.cursor > 0 && self.src[self.cursor - 1] == b'.'))
         {
             return self.lex_number();
@@ -414,7 +414,7 @@ impl<'a> Lexer<'a> {
         }
         // Optional fractional part: "." followed by digits.
         if self.peek_at(0) == Some(b'.')
-            && self.peek_at(1).map_or(false, |c| c.is_ascii_digit())
+            && self.peek_at(1).is_some_and(|c| c.is_ascii_digit())
         {
             self.cursor += 1;
             self.col += 1;
@@ -465,7 +465,7 @@ impl<'a> Lexer<'a> {
             // it for qualified-name handling).
             if (c == b'/' || c == b'\'' || c == b'+' || c == b'*' || c == b'-')
                 && start != self.cursor
-                && self.peek_at(1).map_or(false, |nc| nc.is_ascii_alphanumeric() || nc == b'_' || nc == b'?')
+                && self.peek_at(1).is_some_and(|nc| nc.is_ascii_alphanumeric() || nc == b'_' || nc == b'?')
             {
                 self.cursor += 1;
                 self.col += 1;
@@ -551,7 +551,7 @@ impl<'a> Lexer<'a> {
                     Token::NotEq
                 } else {
                     self.advance_byte();
-                    Token::LexError(format!("unexpected character: '!'"))
+                    Token::LexError("unexpected character: '!'".to_string())
                 }
             }
             b'<' => {
@@ -1422,8 +1422,9 @@ impl Parser {
                     // (the Pratt loop decides if `or`/`and`/`between`/`in`/
                     // `instance` are operators vs names).
                     _ => {
+                        let name = self.merge_multiword_name(&s);
                         self.advance();
-                        FeelExpression::Name(s)
+                        FeelExpression::Name(name)
                     }
                 }
             }
@@ -1433,6 +1434,52 @@ impl Parser {
             }
             Token::Eof => self.err_here("unexpected end of input"),
             other => self.err_here(&format!("unexpected token: {:?}", other)),
+        }
+    }
+
+    /// Join a multi-word built-in function name whose words the lexer emitted
+    /// as separate `Name` tokens.
+    ///
+    /// FEEL names may contain spaces (`upper case`, `string join`,
+    /// `list contains`, `get value`, `date and time`, `round half up`, …) and
+    /// the registry is keyed by those full names. Starting from the current
+    /// `Name` token, greedily consume following `Name` tokens while the joined
+    /// text remains a prefix of a registered multi-word built-in, and accept
+    /// the merged name only when it exactly equals one of them. Anything else
+    /// (e.g. `a and contains(x)`, `date and foo`) is left unmerged, so operator
+    /// and variable names keep their single-token meaning.
+    ///
+    /// On success the parser position is left on the last consumed word so the
+    /// caller's [`Parser::advance`] consumes it and the following token is the
+    /// `(` of the invocation.
+    fn merge_multiword_name(&mut self, first: &str) -> String {
+        let candidates = super::builtins::multi_word_builtin_names();
+        if candidates.is_empty() || !candidates.iter().any(|c| c.starts_with(first)) {
+            return first.to_string();
+        }
+
+        let mut joined = first.to_string();
+        let mut probe = self.pos + 1;
+
+        while let Some(TokenSpan {
+            token: Token::Name(word),
+            ..
+        }) = self.tokens.get(probe)
+        {
+            let candidate = format!("{joined} {word}");
+            let is_prefix = candidates.iter().any(|c| c.starts_with(&candidate));
+            if !is_prefix {
+                break;
+            }
+            joined = candidate;
+            probe += 1;
+        }
+
+        if probe > self.pos + 1 && candidates.contains(&joined.as_str()) {
+            self.pos = probe - 1;
+            joined
+        } else {
+            first.to_string()
         }
     }
 
