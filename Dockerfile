@@ -22,12 +22,22 @@ FROM rust:1-slim-bookworm AS backend
 
 WORKDIR /src
 
-# `libgit2-sys` compiles libgit2's C sources; the tree needs no OpenSSL.
+# Build-time system dependencies:
+#   build-essential, pkg-config, zlib1g-dev  libgit2-sys compiles libgit2's C sources
+#   cmake                                    some -sys crates generate with it
+#   curl, ca-certificates                    `utoipa-swagger-ui`'s build script
+#                                            downloads the Swagger UI bundle over
+#                                            HTTPS (its `reqwest` feature is off, so
+#                                            it shells out to `curl`). Without these
+#                                            the build fails with "No such file or
+#                                            directory" from that script.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         pkg-config \
         cmake \
         zlib1g-dev \
+        curl \
+        ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # The workspace manifests and the lockfile, so resolution matches the repository.

@@ -59,6 +59,22 @@ for path in "${COPY_PATHS[@]}"; do
 done
 [ "$missing" -eq 0 ] || { echo "image-check: the Dockerfile copies paths that do not exist" >&2; exit 1; }
 
+# Build scripts that shell out to system tools fail only inside the minimal image,
+# where those tools are absent — the kind of failure this script exists to catch.
+# `utoipa-swagger-ui` downloads its bundle with `curl` (see its build.rs), so the
+# builder stage must install curl and CA certificates.
+echo "==> build-time system dependencies"
+builder_install=$(awk '/^FROM .* AS backend/,/^FROM .* AS runtime/' "$DOCKERFILE")
+for tool in curl ca-certificates; do
+    if printf '%s' "$builder_install" | grep -qw "$tool"; then
+        printf '  ok    builder installs %s\n' "$tool"
+    else
+        printf '  MISSING builder does not install %s (needed by utoipa-swagger-ui build script)\n' "$tool"
+        missing=1
+    fi
+done
+[ "$missing" -eq 0 ] || { echo "image-check: the builder stage is missing a build-time dependency" >&2; exit 1; }
+
 echo "==> stage 1: web interface"
 mkdir -p "$WORK/frontend"
 cp frontend/package.json frontend/package-lock.json "$WORK/frontend/"
