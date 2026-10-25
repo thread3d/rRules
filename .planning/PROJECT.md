@@ -4,7 +4,7 @@
 
 rRules is a production-grade Business Rules Management System (BRMS) built in Rust. It provides a complete platform for defining, deploying, and managing business decision logic — from rule authoring through execution, governance, and monitoring — with a full React/TypeScript web frontend, enterprise governance controls, Prometheus monitoring, and Docker/Kubernetes deployment.
 
-**Shipped:** v5.0 Live Execution (2026-07-06), building on v4.0 Production Platform (2026-07-02). The platform now delivers end-to-end: authors write rules in a browser IDE, governance controls who can change them and how those changes are approved, the engine **actually executes them** (real rule evaluator + `/v1/execute`), and Prometheus/metrics dashboards + a frontend test-runner monitor and exercise their live behaviour.
+**Shipped:** v8.0 Close TCK Evaluator Gaps (2026-07-15), on top of v7.0 Performance + Production Readiness (2026-07-15), v6.0 DMN Level 3 Compliance (2026-07-10) and v5.0 Live Execution (2026-07-06). The platform now delivers end-to-end: authors write rules in a browser IDE, governance controls who can change them and how those changes are approved, the engine **actually executes them** (real rule evaluator + `/v1/execute`), Prometheus/metrics dashboards + a frontend test-runner monitor and exercise their live behaviour, and a real DMN 1.5 parser + FEEL evaluator + decision-table engine now pass **51/51 OMG DMN TCK evaluator vectors** (123/123 layer passes, zero regression).
 
 ## Core Value
 
@@ -38,7 +38,21 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 
 ### Active
 
-**v6.0 DMN Level 3 Compliance** (started 2026-07-06) — make DMN real: deliver a DMN 1.5 parser, a complete FEEL expression-language evaluator, and a decision-table engine with all hit policies, exposed via a decision-evaluation API and wired to the existing frontend decision-table editor. This genuinely delivers `DMN-01..03`, which were marked "validated v1.0" below but shipped as a stub (no `dmn` module exists in source). See `.planning/REQUIREMENTS.md` for the scoped v6.0 requirements.
+**None — milestone v8.0 is complete (2026-07-15).** The next milestone is not yet
+scoped. Candidate work, drawn from the recorded backlog in
+`.planning/TECH-DEBT.md`, `TCK-COVERAGE-GAPS.md`, and the v8.0 audit:
+
+- **DMN 1.6 / FEEL 1.6 extensions** — the one documented TCK divergence
+  (DMN15-31 COLLECT with `distinct`) requires DMN 1.6 semantics.
+- ~~**Engine retraction correctness**~~ — resolved 2026-10-25: `retract_fact()`
+  now removes facts from working/alpha/beta memory in all three engines (see
+  `.planning/TECH-DEBT.md`).
+- **Multi-tenancy finish** — `TenantStore` exists but no `/v1/tenants` routes and
+  rule-CRUD isolation is incomplete.
+- **Postgres persistence** — `engine_state::PostgresDmnStore` is a skeleton
+  (`todo!()` bodies); `DMN_STORAGE_PATH` file store is authoritative.
+
+See `.planning/STATE.md` and `.planning/MILESTONES.md` for shipped milestones.
 
 ### Out of Scope
 
@@ -49,9 +63,9 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 
 ## Current State
 
-**Shipped version:** v5.0 Live Execution (2026-07-06); prior v4.0 Production Platform (2026-07-02)
+**Shipped version:** v8.0 Close TCK Evaluator Gaps (2026-07-15); prior v7.0 Performance + Production Readiness (2026-07-15), v6.0 DMN Level 3 Compliance (2026-07-10), v5.0 Live Execution (2026-07-06), v4.0 Production Platform (2026-07-02).
 
-**Codebase:** Rust backend (engine + actix-web API) + React/TypeScript frontend; 12 phases (17–28) delivered across v4.0 + v5.0 (22 days for v4.0, 4 days for v5.0; 157 commits in the v5.0 range).
+**Codebase:** Rust backend (engine + actix-web API) + React/TypeScript frontend; ~55k lines of Rust across 3 crates (~1,000 test functions) and ~6.5k lines of TS/TSX. Phases 1–43 across nine milestones; 473 commits at v8.0 close.
 
 **Tech stack:**
 - Backend: Rust (actix-web), hybrid Git + PostgreSQL storage
@@ -59,6 +73,7 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 - Monitoring: Prometheus `/metrics` endpoint (HTML/JSON/text, dedicated registry), WebSocket `MetricsSnapshot` streaming, live dead-rule + coverage surfaces
 - Deployment: Multi-stage Alpine Docker, Helm chart (dev/staging/prod), hot-reload with async job tracking
 - Execution: real direct rule evaluator on Rete/TREAT/LEAPS/PHREAK (fresh `Box<dyn ExecutionEngine>` per request), stateful sessions (`SessionManager`), frontend test-runner
+- DMN: DMN 1.5 XML parser + canonical IR + exporter (zero-copy `quick-xml`), full FEEL evaluator (`rust_decimal` Decimal128, `chrono`/`chrono-tz` temporal domain), decision-table engine with all 7 hit policies, DRD resolution with rayon parallel levels, per-thread AST cache, `/v1/decisions` API; 51/51 OMG DMN TCK evaluator vectors passing
 
 **Known tech debt (deferred, non-blocking — logged in the v5.0 milestone audit, `.planning/milestones/v5.0-MILESTONE-AUDIT.md`):**
 - `execute_rules` stub — **FULLY RESOLVED in v5.0 (Phases 23–28, 2026-07-03 → 2026-07-06)**: `POST /v1/execute` fires real rules via `EngineRegistry`; `facts_after` is post-execution working memory (not echoed input); `CoverageTracking` records once per fired rule; live Prometheus counters + WS `MetricsSnapshot` broadcast; real reload-then-swap with `JobStore`; `RuleExecutionTracker` singleton makes dead-rule detection live; stateful sessions; frontend test-runner. The v5.0 milestone audit's 2 cross-phase WARNINGs (`rule_filter` dead input; `/metrics` HTML/JSON `active_sessions` hardcoded) were **resolved post-audit in commit `384b1f17d`** and verified (cargo 118/0, vitest 5/5) — see the re-audit (status `passed`).
@@ -73,24 +88,30 @@ rRules is a production-grade Business Rules Management System (BRMS) built in Ru
 - **v2.0:** Testing Framework Foundation — Rust testing stack, working memory fixtures, forward/backward chaining verification, snapshot testing, deterministic firing mode
 - **v3.0:** Pluggable Engine Architecture — multiple Rete-family algorithms (Rete, TREAT, LEAPS, PHREAK) with runtime selection and engine-specific metrics
 
-## Current Milestone: v8.0 DMN Level 3 Compliance — close Phases 30–35
+## Current Milestone: v8.0 Close TCK Evaluator Gaps — COMPLETE (2026-07-15)
 
-**Goal:** Complete the DMN Level 3 Compliance work by delivering the remaining phases: FEEL parser + evaluator + built-in function library (Phase 31), decision-table engine with all hit policies (Phase 32), decision evaluator + DRD resolution + REST API + metrics (Phase 33), frontend wiring + hit-policy model refactor (Phase 34), and conformance verification + round-trip + monitoring close-out (Phase 35).
+**Goal (met):** raise OMG DMN TCK evaluator coverage from 21/51 to 51/51 vectors
+by implementing the missing FEEL built-in functions across numeric, string,
+list, context, relational, and temporal families, with zero regression in the 30
+vectors that already parsed and round-tripped.
 
-**Target features:**
-- Full FEEL expression-language evaluator — boxed expressions (literal/context/list/relation/function invocation), if/for/quantified, arithmetic/comparison/boolean/string/date-time operators, the DMN built-in function library, and formal semantics (coercion, null, three-valued logic)
-- Decision-table engine with all hit policies (UNIQUE, ANY, PRIORITY, FIRST, RULE ORDER, OUTPUT ORDER, COLLECT) and COLLECT aggregators (SUM/MIN/MAX/COUNT)
-- Decision evaluation API (`POST /v1/decisions/{id}/evaluate`) integrated with the existing engine registry / metrics / inference-trace surfaces from v5.0
-- Wire the existing frontend `DecisionTable.tsx` + `HitPolicySelector.tsx` (built in v4.0) to the real backend DMN evaluator; surface results + trace in the UI
-- Conformance verification against OMG DMN TCK with round-trip fidelity and monitoring close-out
+**Delivered:**
+- Numeric family (Phase 40) — `abs()` duration support, `number(from, grouping, decimal)`
+  3-arg form, named-parameter resolution, `median`/`mode`/`stddev`/`product`, arithmetic
+  edge cases.
+- String + list family (Phase 41) — `sort()` comparator lambdas, empty-list guard,
+  `split`/`filter`/`concatenate`/`insert`/`remove` edge cases and null propagation.
+- Context + relational + temporal families (Phase 42) — verified pre-existing
+  Phase-31 implementations against the TCK; no code changes required.
+- Conformance close-out (Phase 43) — final sweep 51/51 vectors / 123/123 layer
+  passes (compliance-level-2 110/110, compliance-level-3 13/13), audit `passed`,
+  `TCK-COVERAGE-GAPS.md` documenting the single out-of-scope divergence.
 
-**Key context:** Phase 29 (DMN model + parser) and Phase 30 (FEEL value types) are complete. Phases 31–35 remain. The v7.0 perf work (zero-copy parser, per-thread AST cache, parallel DRD eval) directly benefits this milestone. Phase numbering continues from 40 (v7.0 ended at Phase 39).
+**Artifacts:** `.planning/milestones/v8.0-ROADMAP.md`,
+`.planning/milestones/v8.0-MILESTONE-AUDIT.md`, `TCK-COVERAGE-GAPS.md`,
+`.planning/phases/43-tck-conformance-verification-close-out/VERIFICATION.md`.
 
-**Progress:** Not started. Phase 29 (DMN model + parser) and Phase 30 (FEEL value types) are complete from the v6.0 effort. Phases 31–35 are the remaining scope.
-
----
-
-**Milestone v7.0 shipped 2026-07-15** (audit `passed`). v7.0 delivered benchmark infrastructure, parser/evaluator optimizations (zero-copy, per-thread L1 cache, parallel DRD eval), fuzzing, property tests, and TCK corpus expansion. All 12/12 PERF requirements satisfied.
+**Next milestone:** unscoped — see "Active" above for the candidate backlog.
 
 ## Context
 
@@ -145,4 +166,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-15 — Milestone v8.0 started: DMN Level 3 Compliance — close Phases 30–35. v7.0 shipped (12/12 PERF satisfied).*
+*Last updated: 2026-10-25 — Milestone v8.0 COMPLETE and tagged: 51/51 DMN TCK evaluator vectors pass, audit passed, zero regression. v7.0 (12/12 PERF satisfied) and v6.0 shipped before it.*

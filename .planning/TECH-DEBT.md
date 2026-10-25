@@ -4,25 +4,26 @@ Living list of tech-debt items surfaced but intentionally *not* fixed in the
 housekeeping pass that created this file (2026-07-06). Each entry should become
 a phase task or be struck when resolved.
 
-## Engine: fact-retraction network cleanup (3 sites)
+## ✅ RESOLVED (2026-10-25) — Engine: fact-retraction network cleanup
 
-`retract_fact()` was made functional in the v4.0 hardening track (H1 — "Fixed
-retract_fact() in Rete/TREAT/LEAPS, 187 tests pass"), but the *network cleanup*
-half of retraction is still stubbed. Each engine leaves a TODO at the point
-where the Rete/TREAT/LEAPS network nodes ought to be torn down or invalidated
-after a fact is retracted:
+`retract_fact()` was a stub returning `Ok(false)` in all three Rete-family
+engines (`engine/src/engine/{rete,treat,leaps}/mod.rs`), which left four
+integration tests in `engine/tests/retract_integration.rs` permanently RED.
 
-- `engine/src/engine/rete/mod.rs:557` — `// TODO: Implement retraction with proper network cleanup`
-- `engine/src/engine/treat/mod.rs:428` — `// TODO: Implement retraction with proper network cleanup`
-- `engine/src/engine/leaps/mod.rs:452` — `// TODO: Implement retraction with proper network cleanup`
+Fixed by implementing retraction end to end:
 
-**Why deferred:** this is real engine work (correctness/performance of
-truth-maintenance under retraction), not mechanical cleanup. It belongs in a
-dedicated phase task with RED tests for retraction-then-re-derivation
-scenarios, not in a housekeeping commit.
+- `BetaMemory::remove_fact` / `BetaMemory::contains_fact` — drop every nagram
+  that references the retracted fact and prune empty join-node buckets.
+- Each engine's `retract_fact` now removes the fact from `working_facts`,
+  `alpha_memory`, and `beta_memory`, returning `false` for an unknown id
+  (idempotent re-retract).
+- TREAT drops its join-result LRU cache; LEAPS resets its aggregation nodes
+  (`AggregationNode::reset`) instead of serving an aggregate derived from
+  retracted facts.
 
-**Suggested home:** a future engine-correctness milestone (candidate alongside
-or after v6.0 DMN), or a hardening phase modeled on the v4.0 H1 track.
+Verification: `cargo test -p engine --test retract_integration --features
+engine-rete,engine-treat,engine-leaps,engine-phreak` → 8/8 pass (was 4/8), plus
+two new unit tests in `rete/mod.rs` covering alpha/beta removal.
 
 ## Multi-tenancy: v1 tenants route module not wired
 

@@ -1,32 +1,30 @@
 {
   "version": "1.0",
-  "timestamp": "2026-07-15T11:22:00Z",
-  "phase": "40",
-  "phase_name": "Numeric Built-in Functions",
-  "phase_dir": ".planning/phases/40-numeric-built-in-functions",
-  "plan": 1,
+  "timestamp": "2026-10-25T07:30:00Z",
+  "phase": "43",
+  "phase_name": "TCK Conformance Verification + Close-out",
+  "phase_dir": ".planning/phases/43-tck-conformance-verification-close-out",
+  "milestone": "v8.0",
+  "milestone_status": "complete",
+  "plan": 0,
   "task": 0,
-  "total_tasks": 6,
-  "status": "planned",
+  "total_tasks": 0,
+  "status": "milestone_complete",
   "completed_tasks": [],
-  "remaining_tasks": [
-    {"id": "40-01-01", "name": "Extend built_in_abs for duration types", "status": "not_started"},
-    {"id": "40-01-02", "name": "Implement named parameter resolution in evaluator", "status": "not_started"},
-    {"id": "40-02-01", "name": "Implement number(from, grouping, decimal) 3-arg form", "status": "not_started"},
-    {"id": "40-02-02", "name": "Add unit tests for number() 3-arg form", "status": "not_started"},
-    {"id": "40-03-01", "name": "Add unit tests for edge cases across all numeric functions", "status": "not_started"},
-    {"id": "40-03-02", "name": "Run TCK sweep and verify 14 numeric vectors pass", "status": "not_started"}
-  ],
+  "remaining_tasks": [],
   "blockers": [],
   "async_jobs": [],
-  "human_actions_pending": [],
+  "human_actions_pending": [
+    {
+      "action": "Push tags v1.0-v8.0 to a remote",
+      "reason": "Repository is local-only; no git remote is configured."
+    }
+  ],
   "decisions": [
-    {"decision": "Extend abs() for duration types (DaysTimeDuration, YearsMonthsDuration)", "rationale": "TCK tests expect abs(duration('-P1D')) → P1D and abs(duration('-P1Y')) → P1Y", "phase": "40"},
-    {"decision": "Implement number(from, grouping, decimal) 3-arg form with locale-independent parsing", "rationale": "TCK vector 0058 requires it; DMN 1.5 §10.3.4.1", "phase": "40"},
-    {"decision": "Named parameter resolution by positional fallback in evaluator dispatch", "rationale": "TCK tests use named params like abs(n:-1); invalid names return null", "phase": "40"},
-    {"decision": "Add unit tests + TCK sweep verification for all 14 numeric vectors", "rationale": "Verification strategy per VALIDATION.md", "phase": "40"}
+    {"decision": "Close v8.0 as a focused built-in-function gap-closing milestone", "rationale": "Scope locks D-40-01..D-40-05: no new DMN features, no frontend changes, no new API endpoints, zero regression", "phase": "43"},
+    {"decision": "Accept DMN15-31 COLLECT DISTINCT as out of scope", "rationale": "distinct qualifier is a DMN 1.6 / FEEL 1.6 feature; v8.0 targets DMN 1.5 Level 3 conformance", "phase": "43"}
   ],
   "uncommitted_files": [],
-  "next_action": "Execute Phase 40: /gsd-execute-phase 40",
-  "context_notes": "Phase 40 is fully planned and verified (3 plans, 3 waves). All 10 FEEL requirements covered. Ready for execution. Context exhausted mid-autonomous-run — resume with /gsd-autonomous --from 40 or execute directly with /gsd-execute-phase 40."
+  "next_action": "No phase in flight. Scope the next milestone from .planning/TECH-DEBT.md, TCK-COVERAGE-GAPS.md, and .planning/milestones/v8.0-MILESTONE-AUDIT.md (candidates: DMN 1.6 extensions, engine retraction network cleanup, multi-tenancy routes, PostgresDmnStore queries).",
+  "context_notes": "Milestone v8.0 verified complete: TCK evaluator coverage 51/51 vectors (123/123 layer passes, compliance-level-2 110/110, compliance-level-3 13/13), zero regression in the 30 pre-existing vectors, milestone audit passed. Verification evidence in .planning/phases/43-tck-conformance-verification-close-out/VERIFICATION.md and .planning/milestones/v8.0-ROADMAP.md."
 }

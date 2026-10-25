@@ -1,30 +1,85 @@
 # Milestones
 
-## v7.0 Performance + Production Readiness (Shipped: 2026-07-10)
+## v8.0 Close TCK Evaluator Gaps (Shipped: 2026-07-15)
 
-**Phases completed:** 8 phases, 29 plans, 33 tasks
+**Closeout:** verified — all 4 phases complete, milestone audit `passed`, zero regression.
+**Scope:** Phases 40–43 (4 phases, 4 plans, 6 tracked tasks in Phase 40)
+**Timeline:** 2026-07-15
+**Codebase:** Rust backend (engine + actix-web API) + React/TypeScript frontend
+
+**Delivered:** Complete FEEL built-in function coverage verified against the OMG DMN
+TCK — evaluator-layer coverage rose from 21/51 to **51/51 vectors**
+(123/123 layer passes: compliance-level-2 110/110, compliance-level-3 13/13),
+with zero regression in the 30 vectors that already parsed and round-tripped.
+Phase 42 turned out to need no new code: the context/relational/temporal families
+shipped in v6.0 Phase 31 already satisfied their TCK vectors, so the phase is a
+verification record rather than an implementation.
 
 **Key accomplishments:**
 
-- 1. [Rule 3 - Blocking build issue] Created a minimal `model.rs` stub in Task 2 so `cargo build -p engine` passes
-- Streaming namespace-aware quick-xml NsReader parser importing DMN 1.1/1.3/1.5 into the canonical IR with XXE rejection, CDATA preservation, entity reference resolution, and Clause 7 item definitions
-- quick_xml::writer::Writer-based DMN exporter serializing the canonical IR back to .dmn XML with CDATA/element-order/ID preservation, plus an 8-test DOM-compare round-trip gate proving parse(export(parse(x)))==parse(x) for the import corpus (DMN-06)
-- Additive Value enum extension (8 FEEL variants), engine/src/dmn/feel/ module skeleton (FeelType lattice + temporal carriers), chrono-tz dep, and vendored OMG TCK subset with a green Wave-0 precision-audit gate confirming rust_decimal sufficiency (A1)
-- FEEL numeric equality (`feel_numeric_eq`) with null propagation and Number↔Integer cross-type promotion on `rust_decimal::Decimal`, the headline `0.1 + 0.2 = 0.3` DMN-08 proof, and 17 vendored OMG TCK 0100-arithmetic numeric vectors passing against `Value::Number` with a 13-category conformance-gap SKIP_LIST
-- parse_at_literal / format_value / add_months_zoned / add_days_time_zoned for all 5 FEEL temporal types with IANA-zone preservation through duration arithmetic (Pitfall 3), DST-correct gap/overlap handling (Pitfall 5), and the vendored TCK 0100-arithmetic Australia/Melbourne round-trip regression passing
-- The FEEL type lattice (conforms/equivalent/implicit_convert/type_of/resolve_type_ref) implementing DMN 1.5 §10.3.2.9 verbatim with EXACTLY the three spec-defined implicit conversions (no number↔string — the 1+"2"→null prohibition gate), plus the Success Criterion 4 regression audit documenting every Value wildcard in validation.rs/rules.rs as Rete-only
-- 13 failing lexer tests covering numbers (Decimal, never f64), strings with rule-64 escapes, at-literals, keyword-as-name emission, punctuators (**, <=, >=, !=), qualified-name splitting on `.`, max_tokens DoS guard, line/col tracking.
-- 1. [Rule 1 - Bug] Number/Integer operand order reversed in research Pattern 2 feel_compare
-- 1. [Rule 1 - Bug] Between arm ge/le comparisons were swapped
-- FEEL control flow (if/for/some/every), path navigation, filter expressions, instance-of type checks, and unary-test `in` operator — the DMN-14 surface enabling branching, iteration, quantification, navigation, and type conformance.
-- All 10 FEEL boxed-expression evaluators with recursive dispatch, and the boxed-context topological (dependency-order) evaluation with DFS color-marking cycle detection — the DMN-15 surface.
-- User-defined FEEL lambdas (grammar rule 55, non-external) with lexical capture — closure body evaluated against merged captured scope + param bindings; external functions rejected at invocation.
-- 1. [Rule 2 - Missing functionality] Added null-propagation helpers (`null_unary`, `null_binary`, `null_ternary`)
-- `now`, `today`, `day of year`, `day of week`, `month of year`, `week of year`
-- 1. [Rule 3 - Blocking] `Arc<DecisionEvaluator>` wrapping for actix-web Data compatibility
-- 1. [Rule 3 - Blocking] Color enum missing Copy derive
-- 1. [Rule 3 - Blocking] engine::data_types::Value uses internally-tagged serde
-- 2026-07-10
+- Phase 40 (numeric) — `abs()` extended to `DaysTimeDuration`/`YearsMonthsDuration`, `number(from, grouping, decimal)` 3-arg form with locale-independent parsing, named-parameter resolution by positional fallback in evaluator dispatch, `median`/`mode`/`stddev`/`product` and arithmetic edge cases (empty-list SUM/MIN/MAX → null). All 14 numeric TCK vectors pass.
+- Phase 41 (string + list) — `sort()` completed with comparator-lambda support via `apply_function` for correct scope handling, empty-list guard returning null, plus edge-case tests for `split` (no delimiter, empty string, null inputs), `filter`, `concatenate`, `insert`/`remove`, `list contains` null propagation.
+- Phase 42 (context/relational/temporal) — verified the pre-existing Phase-31 implementations against their TCK vectors; no code changes needed.
+- Phase 43 (close-out) — full 51/51 TCK sweep across parser, round-trip, and evaluator layers; `TCK-COVERAGE-GAPS.md` documenting the single out-of-scope divergence (DMN15-31 COLLECT with `distinct`, a DMN 1.6 / FEEL 1.6 feature); milestone audit `passed`.
+
+**Known divergence (out of scope):** DMN15-31 COLLECT with `distinct` — introduced in DMN 1.6, not present in DMN 1.5 / Level 3. Documented in `TCK-COVERAGE-GAPS.md`; candidate for a future DMN 1.6 milestone.
+
+**Archived:** `.planning/milestones/v8.0-ROADMAP.md`, `.planning/milestones/v8.0-MILESTONE-AUDIT.md`
+**Tag:** `v8.0`
+
+---
+
+## v7.0 Performance + Production Readiness (Shipped: 2026-07-15)
+
+**Closeout:** verified — 12/12 PERF requirements satisfied, milestone audit `passed`.
+**Scope:** Phases 36–39 (4 phases)
+**Timeline:** 2026-07-13 → 2026-07-15
+**Codebase:** Rust backend (engine + actix-web API)
+
+**Delivered:** Measurement and speed infrastructure for the DMN subsystem — a
+Criterion benchmark suite with a frozen memory baseline as a regression gate,
+parser/evaluator optimizations (zero-copy XML loading, per-thread FEEL AST cache),
+fuzzing plus property-based tests, and rayon-parallel DRD evaluation.
+
+**Key accomplishments:**
+
+- Phase 36 — Criterion `dmn_benchmarks` suite (parser/exporter/evaluator/decision-table), frozen `v6.0-baseline.json` memory snapshot captured over a 60-file corpus, and `scripts/memcheck-gate.sh` failing CI on RSS/allocation regression (`make memcheck`, `make baseline-update`).
+- Phase 37 — zero-copy DMN XML loader (dropped per-element `into_owned()`), FEEL lexer token cache and parse-with-cache entry point, AST cache warming for decision-table cells.
+- Phase 38 — cargo-fuzz targets (`feel_parser`, `decision_table`) plus proptest invariants for FEEL evaluation and context topological ordering; regression corpus committed under `engine/fuzz/corpus`.
+- Phase 39 — DRD parallelization: topological sort of decision dependencies with rayon level-by-level evaluation of independent decisions inside a single `DecisionEvaluator::evaluate` call.
+
+**Archived:** `.planning/milestones/v7.0-ROADMAP.md`, `.planning/milestones/v7.0-REQUIREMENTS.md`
+**Tag:** `v7.0`
+
+---
+
+## v6.0 DMN Level 3 Compliance (Shipped: 2026-07-10)
+
+**Closeout:** verified — 7/7 phases complete, conformance gate GO (Level 3 checklist + TCK pass), zero regression in the Rete path.
+**Scope:** Phases 29–35 (7 phases)
+**Timeline:** 2026-07-06 → 2026-07-10
+**Codebase:** Rust backend + React/TypeScript frontend
+
+**Delivered:** A real DMN 1.5 implementation replacing the v1.0 Phase 6 stub — XML
+parser with canonical IR and exporter, full FEEL evaluator with the Decimal128
+numeric domain and temporal types, decision tables with all 7 hit policies,
+DRD-chained decision evaluation exposed over REST with Prometheus metrics and
+monitoring, and the existing v4.0 frontend editor wired to the real evaluator.
+
+**Key accomplishments:**
+
+- Real DMN 1.5 parser — namespace-aware (DMN 1.1–1.5), XXE-hardened, CDATA-preserving, entity references resolved, ID/annotation preservation; canonical IR in `engine/src/dmn/model.rs`.
+- Complete FEEL value domain — Decimal128 numbers (`rust_decimal`, no f64 on the production path, `0.1 + 0.2 = 0.3` proven), five temporal types with ISO 8601 `@""` round-trip, IANA zones via `chrono-tz`, DST-correct duration arithmetic, and the spec's exactly-three implicit conversions (`1 + "2" → null`).
+- Full FEEL expression language — grammar rules 1–65, boxed expressions (literal/context/list/relation/function invocation), if/for/some/every, lambdas with lexical capture, three-valued logic and null propagation, ~70+ built-in functions, cells pre-parsed to cached AST.
+- Decision-table engine — all 7 hit policies (UNIQUE, ANY, PRIORITY, FIRST, RULE ORDER, OUTPUT ORDER, COLLECT) with SUM/MIN/MAX/COUNT aggregators, input entries evaluated as FEEL unary tests.
+- Decision evaluation API — `POST /v1/decisions/{id}/evaluate` with multi-output decision services and DRD chaining, per-decision Prometheus counters + DRD depth gauge, `DmnDecisionTracker` dead-decision detection, WS broadcast, hot reload.
+- Frontend wiring — hit-policy model refactored to the DMN canonical 7-policy union with aggregator sub-type; `DecisionTable`/`HitPolicySelector` wired to the backend evaluator with results and trace panels.
+- Conformance close-out — TCK sweep (21 vectors across parser/evaluator/round-trip/DMNDI layers, 0 failures), DMNDI round-trip preservation, Level 3 conformance checklist with evidence, exported decision-service API.
+
+**Known divergences at v6.0:** 2 documented (COLLECT distinct-sum, empty-list SUM) — later narrowed by v8.0 to the single DMN 1.6 `distinct` item.
+
+**Archived:** `.planning/milestones/v6.0-ROADMAP.md`, `.planning/milestones/v6.0-REQUIREMENTS.md`
+**Tag:** `v6.0`
 
 ---
 
