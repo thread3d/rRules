@@ -9,6 +9,8 @@
 //! Note: engine::data_types::Value uses internally-tagged serde (variant name as key).
 //! Input values must be sent as `{"Integer": 25}`, `{"String": "value"}`, etc.
 
+// Requirements covered by this suite: API-005
+
 use std::sync::{Arc, RwLock};
 
 use actix_web::{body::BoxBody, dev::ServiceResponse, test, web, App as ActixApp};

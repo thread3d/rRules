@@ -419,16 +419,37 @@ fn scalar_to_value(xsi_type: Option<&str>, text: &str) -> Value {
     }
 }
 
+/// Relative tolerance for computed numeric results.
+const RELATIVE_TOLERANCE: f64 = 1e-7;
+
+/// Compare two decimals within [`RELATIVE_TOLERANCE`], so a value printed to a
+/// few decimal places still matches the exact result.
+fn numbers_close(a: &Decimal, b: &Decimal) -> bool {
+    if a == b {
+        return true;
+    }
+    // `rust_decimal` exposes `to_f64` through its prelude trait.
+    use rust_decimal::prelude::ToPrimitive;
+    let (Some(a), Some(b)) = (a.to_f64(), b.to_f64()) else {
+        return false;
+    };
+    let scale = a.abs().max(b.abs()).max(1.0);
+    (a - b).abs() <= RELATIVE_TOLERANCE * scale
+}
+
 /// Structural equality with the tolerance a conformance suite needs: numbers
 /// compare by value (not scale), strings compare exactly, lists/contexts
 /// compare element-wise.
 pub fn deep_equal(actual: &Value, expected: &Value) -> bool {
     match (actual, expected) {
         (Value::Null, Value::Null) => true,
-        (Value::Number(a), Value::Number(b)) => a == b,
+        // Numbers compare with a tolerance: the TCK prints computed results
+        // (exp, log, sqrt, ...) rounded to about eight decimal places, so exact
+        // equality would reject a correct implementation.
+        (Value::Number(a), Value::Number(b)) => numbers_close(a, b),
         (Value::Integer(a), Value::Integer(b)) => a == b,
-        (Value::Number(a), Value::Integer(b)) => *a == Decimal::from(*b),
-        (Value::Integer(a), Value::Number(b)) => Decimal::from(*a) == *b,
+        (Value::Number(a), Value::Integer(b)) => numbers_close(a, &Decimal::from(*b)),
+        (Value::Integer(a), Value::Number(b)) => numbers_close(&Decimal::from(*a), b),
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Date(a), Value::Date(b)) => a == b,
@@ -440,12 +461,33 @@ pub fn deep_equal(actual: &Value, expected: &Value) -> bool {
                 && a.iter()
                     .all(|(k, v)| b.get(k).is_some_and(|other| deep_equal(v, other)))
         }
+        // The TCK encodes temporal values as their ISO 8601 lexical string in
+        // some vectors (for example `P10D`), so compare a temporal value with a
+        // string by rendering the value to its lexical form.
+        (temporal, Value::String(expected)) | (Value::String(expected), temporal)
+            if is_temporal(temporal) =>
+        {
+            engine::dmn::feel::temporal::format_value(temporal)
+                .is_some_and(|lexical| lexical == *expected)
+        }
         // Lists of one element may appear where a scalar is expected (and vice
         // versa) because DMN flattens singleton lists in results.
         (Value::Array(a), other) if a.len() == 1 => deep_equal(&a[0], other),
         (other, Value::Array(b)) if b.len() == 1 => deep_equal(other, &b[0]),
         _ => false,
     }
+}
+
+/// True for the five FEEL temporal carriers.
+fn is_temporal(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Date(_)
+            | Value::Time(_)
+            | Value::DateTimeTz(_)
+            | Value::DaysTimeDuration(_)
+            | Value::YearsMonthsDuration(_)
+    )
 }
 
 #[cfg(test)]

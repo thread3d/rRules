@@ -149,7 +149,7 @@ pub async fn query_audit_events(
     let page = query.page.unwrap_or(1).max(1);
     let page_size = query.page_size.unwrap_or(50).clamp(1, 100);
 
-    let store_guard = store.lock().unwrap();
+    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Filter events based on query parameters
     let mut events: Vec<&StoredAuditEvent> = store_guard.values().collect();
@@ -230,7 +230,7 @@ pub async fn get_audit_event(
         }
     };
 
-    let store_guard = store.lock().unwrap();
+    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get(&id) {
         Some(event) => HttpResponse::Ok().json(AuditEvent::from(event)),
@@ -250,7 +250,7 @@ pub async fn get_audit_event(
     ),
 )]
 pub async fn export_audit_log(store: web::Data<AuditStore>) -> impl Responder {
-    let store_guard = store.lock().unwrap();
+    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Build CSV content
     let mut csv = "id,timestamp,user_id,action,resource_type,resource_id,resource_name,details\n".to_string();
@@ -306,7 +306,7 @@ pub fn record_audit_event(
     ip_address: Option<String>,
     user_agent: Option<String>,
 ) {
-    let mut store_guard = store.lock().unwrap();
+    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let event_id = Uuid::new_v4();
 
     let event = StoredAuditEvent {

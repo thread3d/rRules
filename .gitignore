@@ -36,3 +36,5 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+# ── CodeWitness run artifacts (local only) ────────────────────
+.codewitness/

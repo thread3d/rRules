@@ -15,6 +15,8 @@
 //! rules loaded, the now-real engine fires nothing, so `rules_fired == 0` and
 //! `total_fired == 0` hold as they did under the pre-23-05 stub.
 
+// Requirements covered by this suite: API-006
+
 use std::sync::{Arc, RwLock};
 
 use actix_web::{body::BoxBody, test, web, App, HttpResponse, Responder};

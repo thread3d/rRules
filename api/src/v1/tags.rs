@@ -87,7 +87,7 @@ pub async fn create_tag(
     let name = req.name.clone();
     let now = chrono::Utc::now().to_rfc3339();
 
-    let mut store_guard = store.lock().unwrap();
+    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Check for duplicate
     if store_guard.contains_key(&name) {
@@ -118,7 +118,7 @@ pub async fn create_tag(
     ),
 )]
 pub async fn list_tags(store: web::Data<TagStore>) -> impl Responder {
-    let store_guard = store.lock().unwrap();
+    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let tags: Vec<TagResponse> = store_guard.values().map(TagResponse::from).collect();
 
     HttpResponse::Ok().json(serde_json::json!({
@@ -146,7 +146,7 @@ pub async fn get_tag(
 ) -> impl Responder {
     let name = path.into_inner();
 
-    let store_guard = store.lock().unwrap();
+    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get(&name) {
         Some(tag) => HttpResponse::Ok().json(TagResponse::from(tag)),
@@ -179,7 +179,7 @@ pub async fn update_tag(
     let old_name = path.into_inner();
     let new_name = req.name.clone();
 
-    let mut store_guard = store.lock().unwrap();
+    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.remove(&old_name) {
         Some(_) => {
@@ -237,7 +237,7 @@ pub async fn delete_tag(
 ) -> impl Responder {
     let name = path.into_inner();
 
-    let mut store_guard = store.lock().unwrap();
+    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.remove(&name) {
         Some(_) => HttpResponse::NoContent().finish(),
@@ -281,7 +281,7 @@ pub async fn assign_tag_to_rule(
 
     // Create tag if it doesn't exist
     {
-        let mut store_guard = store.lock().unwrap();
+        let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !store_guard.contains_key(&name) {
             let tag = StoredTag {
                 name: name.clone(),
@@ -294,7 +294,7 @@ pub async fn assign_tag_to_rule(
     }
 
     // Assign to rule
-    let mut rule_tag_guard = rule_tag_store.lock().unwrap();
+    let mut rule_tag_guard = rule_tag_store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     rule_tag_guard.insert((rule_id, name.clone()));
 
     HttpResponse::Created().json(serde_json::json!({
@@ -334,7 +334,7 @@ pub async fn remove_tag_from_rule(
         }
     };
 
-    let mut rule_tag_guard = rule_tag_store.lock().unwrap();
+    let mut rule_tag_guard = rule_tag_store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if rule_tag_guard.remove(&(rule_id, tag_name.clone())) {
         HttpResponse::Ok().json(serde_json::json!({
             "rule_id": rule_id.to_string(),

@@ -13,6 +13,8 @@
 //! that Phase 19's coverage gap closure works end-to-end (the endpoint reads
 //! from the tracker rather than a hardcoded empty array).
 
+// Requirements covered by this suite: API-007
+
 use actix_web::{body::BoxBody, test, web, App};
 use serde_json::Value;
 

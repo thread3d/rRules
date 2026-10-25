@@ -14,6 +14,8 @@
 //! at each call site (an explicit return type on an `async fn` helper breaks
 //! `call_service` type inference).
 
+// Requirements covered by this suite: API-001
+
 use actix_web::middleware::from_fn;
 use actix_web::{test, web, App, HttpRequest, HttpResponse, HttpMessage, Responder};
 use api::auth::{self, init_store, Claims};

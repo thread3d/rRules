@@ -26,6 +26,8 @@
 //!
 //! Filter: `cargo test -p api --test execute_integration`
 
+// Requirements covered by this suite: API-002
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};

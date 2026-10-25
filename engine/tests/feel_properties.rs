@@ -42,6 +42,8 @@ proptest! {
     }
 }
 
+/// TCK `0068-feel-equality`: null is an ordinary value for equality, so
+/// `null = null` is true and `null = 1` is false.
 #[test]
 fn test_null_equals_null_is_true() {
     let expr = parse_expression("null = null");

@@ -342,7 +342,7 @@ pub async fn create_rule(
 
     // Check for duplicate name within same tenant and category
     let has_duplicate = {
-        let store_guard = store.lock().unwrap();
+        let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let cats = req.category.clone().unwrap_or_default();
         store_guard.values().any(|r| {
             r.tenant_id == tenant_id && r.rule_name == req.name && r.category == cats
@@ -373,11 +373,11 @@ pub async fn create_rule(
     };
 
     {
-        let mut store_guard = store.lock().unwrap();
+        let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         store_guard.insert((tenant_id.clone(), rule_id), rule);
     }
 
-    HttpResponse::Created().json(RuleResponse::from(store.lock().unwrap().get(&(tenant_id, rule_id)).unwrap()))
+    HttpResponse::Created().json(RuleResponse::from(store.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&(tenant_id, rule_id)).unwrap()))
 }
 
 /// Get paginated list of rules - GET /v1/rules
@@ -408,7 +408,7 @@ pub async fn get_rules(
     let page = query.page.max(1);
     let page_size = query.page_size.clamp(1, 100); // Max 100 per page
 
-    let store_guard = store.lock().unwrap();
+    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     // Filter rules by tenant and other query parameters
     let mut rules: Vec<&StoredRule> = store_guard.values()
@@ -526,7 +526,7 @@ pub async fn get_rule(
         }
     };
 
-    let store_guard = store.lock().unwrap();
+    let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get(&(tenant_id, id)) {
         Some(rule) => HttpResponse::Ok().json(RuleResponse::from(rule)),
@@ -573,7 +573,7 @@ pub async fn update_rule(
     let key = (tenant_id.clone(), id);
 
     {
-        let store_guard = store.lock().unwrap();
+        let store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if let Some(current_rule) = store_guard.get(&key) {
             // Check for duplicate category change before modifying
@@ -597,7 +597,7 @@ pub async fn update_rule(
     }
 
     // Now we can take mutable access to update
-    let mut store_guard = store.lock().unwrap();
+    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get_mut(&key) {
         Some(rule) => {
@@ -675,7 +675,7 @@ pub async fn delete_rule(
     };
 
     let key = (tenant_id, id);
-    let mut store_guard = store.lock().unwrap();
+    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get_mut(&key) {
         Some(rule) => {
@@ -726,7 +726,7 @@ pub async fn undelete_rule(
     };
 
     let key = (tenant_id, id);
-    let mut store_guard = store.lock().unwrap();
+    let mut store_guard = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     match store_guard.get_mut(&key) {
         Some(rule) if rule.status == RuleStatus::Archived => {

@@ -260,7 +260,11 @@ async fn main() -> std::io::Result<()> {
         let cors = {
             let mut c = actix_cors::Cors::default()
                 .allowed_methods(["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
-                .allowed_headers(["Authorization", "Content-Type", "Accept"])
+                // `X-Tenant-ID` is the only tenancy key the API trusts, so a
+                // browser client must be allowed to send it; without it here
+                // every cross-origin request silently lands in the default
+                // tenant.
+                .allowed_headers(["Authorization", "Content-Type", "Accept", "X-Tenant-ID"])
                 .max_age(3600);
             for origin in &cors_allowed_origins {
                 c = c.allowed_origin(origin.as_str());

@@ -5,6 +5,8 @@
 //! these tests stay focused on the tenant handler contract; auth protection is
 //! exercised by `auth_protection.rs`.
 
+// Requirements covered by this suite: API-003 API-004
+
 use actix_web::{body::BoxBody, dev::ServiceResponse, test, web, App};
 use serde_json::{json, Value};
 

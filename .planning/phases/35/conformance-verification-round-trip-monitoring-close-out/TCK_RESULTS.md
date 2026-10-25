@@ -1,6 +1,6 @@
 # TCK Sweep Results - Phase 35
 
-**Duration:** 1.937275311s  
+**Duration:** 1.969981899s  
 **TCK Source:** https://github.com/dmn-tck/tck (commit 0dbcaf9)
 
 ## Summary
