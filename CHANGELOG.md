@@ -408,8 +408,8 @@ worked around (`number(number)` is a type error; `mode` returns a list).
   `/v1`, JWT-protected routes + AuthProvider, mounted orphaned routes, real
   WebSocket metrics streaming, audit/approval/branch UI wired to backend.
 
-<!-- Link references will be populated once a git remote is configured
-     (currently local-only — see AGENTS.md, "History, and where it came from"). -->
+<!-- Link references resolve within this file; the repository is published at
+     github.com/thread3d/rRules. -->
 [Unreleased]: #unreleased
 [v9.0]: #v90---2026-10-25--verified-conformance
 [9.0.0]: #v90---2026-10-25--verified-conformance

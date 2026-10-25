@@ -77,6 +77,7 @@ you have not seen pass.
 | Historical documents (superseded) | `docs/archive/` — do not treat as current |
 | Roadmap, state, milestones, tech debt | `../.planning/` (workspace level, outside this repository) |
 | Changelog | `CHANGELOG.md` |
+| Public entry point | `README.md` (what the system does and what is verified) |
 
 `../.planning/phases/**` and `../.planning/milestones/**` are the project's process history: records
 of what past phases claimed, not current documentation. Do not cite them as truth. They live at the
@@ -141,4 +142,5 @@ rather than asserted, which is what `TCK-COVERAGE-GAPS.md` exists to do.
 `TCK-COVERAGE-GAPS.md` and the `Known gaps` sections of `specs/` — candidates: DMN 1.6 / FEEL 1.6
 (COLLECT `distinct`, the one remaining corpus divergence), `<functionDefinition>`/`<invocation>`
 decision bodies, non-literal business knowledge model bodies, real `PostgresDmnStore` queries, and
-PostgreSQL-backed tenants. There is no git remote configured yet.
+PostgreSQL-backed tenants. The repository is published at
+github.com/thread3d/rRules (`origin`, default branch `main`).
