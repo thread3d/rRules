@@ -5,6 +5,8 @@ name: CI
 # developer's machine. Keeping them identical is deliberate: a CI that checks
 # something different from the Makefile teaches people to distrust one of them.
 on:
+  # `master` is listed alongside `main` so a fork whose default branch still uses
+  # the old name runs the same gates.
   push:
     branches: [master, main]
   pull_request:
