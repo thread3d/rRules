@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger verify docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger verify e2e docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -61,8 +61,14 @@ verify:
 frontend-test:
 	cd frontend && npx vitest run
 
+# Drive the built interface in a real browser against a real server: every route
+# must render, deep links must work, and the app must work once signed in.
+# Catches what jsdom unit tests cannot (a bundle that throws, a route the server 404s).
+e2e:
+	./scripts/e2e-smoke.sh
+
 # Full CI pipeline (build + test + lint + format check + frontend)
-ci: build test lint fmt-check frontend-build frontend-test
+ci: build test lint fmt-check frontend-build frontend-test e2e
 	@echo "CI pipeline complete"
 
 # Run DMN subsystem benchmarks (Criterion, Phase 36+)
@@ -132,4 +138,5 @@ help:
 	@echo "  frontend-dev    - Run frontend dev server"
 	@echo "  frontend-build  - Build frontend for production"
 	@echo "  frontend-test   - Run frontend tests (vitest)"
+	@echo "  e2e             - Browser smoke test of the built UI against a live server"
 	@echo "  ci              - Full CI pipeline (build + test + lint + fmt-check + frontend)"

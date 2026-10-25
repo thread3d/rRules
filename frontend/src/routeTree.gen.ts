@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as GovernanceRouteImport } from './routes/governance'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as RulesIndexRouteImport } from './routes/rules/index'
 import { Route as MonitoringIndexRouteImport } from './routes/monitoring/index'
@@ -26,6 +27,11 @@ import { Route as RulesIdEditRouteImport } from './routes/rules/$id.edit'
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GovernanceRoute = GovernanceRouteImport.update({
+  id: '/governance',
+  path: '/governance',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -64,24 +70,24 @@ const MonitoringCoverageRoute = MonitoringCoverageRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const GovernanceRbacRoute = GovernanceRbacRouteImport.update({
-  id: '/governance/rbac',
-  path: '/governance/rbac',
-  getParentRoute: () => rootRouteImport,
+  id: '/rbac',
+  path: '/rbac',
+  getParentRoute: () => GovernanceRoute,
 } as any)
 const GovernanceBranchesRoute = GovernanceBranchesRouteImport.update({
-  id: '/governance/branches',
-  path: '/governance/branches',
-  getParentRoute: () => rootRouteImport,
+  id: '/branches',
+  path: '/branches',
+  getParentRoute: () => GovernanceRoute,
 } as any)
 const GovernanceAuditRoute = GovernanceAuditRouteImport.update({
-  id: '/governance/audit',
-  path: '/governance/audit',
-  getParentRoute: () => rootRouteImport,
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => GovernanceRoute,
 } as any)
 const GovernanceApprovalsRoute = GovernanceApprovalsRouteImport.update({
-  id: '/governance/approvals',
-  path: '/governance/approvals',
-  getParentRoute: () => rootRouteImport,
+  id: '/approvals',
+  path: '/approvals',
+  getParentRoute: () => GovernanceRoute,
 } as any)
 const RulesIdEditRoute = RulesIdEditRouteImport.update({
   id: '/rules/$id/edit',
@@ -91,6 +97,7 @@ const RulesIdEditRoute = RulesIdEditRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/governance': typeof GovernanceRouteWithChildren
   '/login': typeof LoginRoute
   '/governance/approvals': typeof GovernanceApprovalsRoute
   '/governance/audit': typeof GovernanceAuditRoute
@@ -106,6 +113,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/governance': typeof GovernanceRouteWithChildren
   '/login': typeof LoginRoute
   '/governance/approvals': typeof GovernanceApprovalsRoute
   '/governance/audit': typeof GovernanceAuditRoute
@@ -122,6 +130,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/governance': typeof GovernanceRouteWithChildren
   '/login': typeof LoginRoute
   '/governance/approvals': typeof GovernanceApprovalsRoute
   '/governance/audit': typeof GovernanceAuditRoute
@@ -139,6 +148,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/governance'
     | '/login'
     | '/governance/approvals'
     | '/governance/audit'
@@ -154,6 +164,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/governance'
     | '/login'
     | '/governance/approvals'
     | '/governance/audit'
@@ -169,6 +180,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/governance'
     | '/login'
     | '/governance/approvals'
     | '/governance/audit'
@@ -185,11 +197,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  GovernanceRoute: typeof GovernanceRouteWithChildren
   LoginRoute: typeof LoginRoute
-  GovernanceApprovalsRoute: typeof GovernanceApprovalsRoute
-  GovernanceAuditRoute: typeof GovernanceAuditRoute
-  GovernanceBranchesRoute: typeof GovernanceBranchesRoute
-  GovernanceRbacRoute: typeof GovernanceRbacRoute
   MonitoringCoverageRoute: typeof MonitoringCoverageRoute
   MonitoringDeadRulesRoute: typeof MonitoringDeadRulesRoute
   MonitoringEngineRoute: typeof MonitoringEngineRoute
@@ -206,6 +215,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/governance': {
+      id: '/governance'
+      path: '/governance'
+      fullPath: '/governance'
+      preLoaderRoute: typeof GovernanceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -259,31 +275,31 @@ declare module '@tanstack/react-router' {
     }
     '/governance/rbac': {
       id: '/governance/rbac'
-      path: '/governance/rbac'
+      path: '/rbac'
       fullPath: '/governance/rbac'
       preLoaderRoute: typeof GovernanceRbacRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof GovernanceRoute
     }
     '/governance/branches': {
       id: '/governance/branches'
-      path: '/governance/branches'
+      path: '/branches'
       fullPath: '/governance/branches'
       preLoaderRoute: typeof GovernanceBranchesRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof GovernanceRoute
     }
     '/governance/audit': {
       id: '/governance/audit'
-      path: '/governance/audit'
+      path: '/audit'
       fullPath: '/governance/audit'
       preLoaderRoute: typeof GovernanceAuditRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof GovernanceRoute
     }
     '/governance/approvals': {
       id: '/governance/approvals'
-      path: '/governance/approvals'
+      path: '/approvals'
       fullPath: '/governance/approvals'
       preLoaderRoute: typeof GovernanceApprovalsRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof GovernanceRoute
     }
     '/rules/$id/edit': {
       id: '/rules/$id/edit'
@@ -295,13 +311,28 @@ declare module '@tanstack/react-router' {
   }
 }
 
-const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  LoginRoute: LoginRoute,
+interface GovernanceRouteChildren {
+  GovernanceApprovalsRoute: typeof GovernanceApprovalsRoute
+  GovernanceAuditRoute: typeof GovernanceAuditRoute
+  GovernanceBranchesRoute: typeof GovernanceBranchesRoute
+  GovernanceRbacRoute: typeof GovernanceRbacRoute
+}
+
+const GovernanceRouteChildren: GovernanceRouteChildren = {
   GovernanceApprovalsRoute: GovernanceApprovalsRoute,
   GovernanceAuditRoute: GovernanceAuditRoute,
   GovernanceBranchesRoute: GovernanceBranchesRoute,
   GovernanceRbacRoute: GovernanceRbacRoute,
+}
+
+const GovernanceRouteWithChildren = GovernanceRoute._addFileChildren(
+  GovernanceRouteChildren,
+)
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  GovernanceRoute: GovernanceRouteWithChildren,
+  LoginRoute: LoginRoute,
   MonitoringCoverageRoute: MonitoringCoverageRoute,
   MonitoringDeadRulesRoute: MonitoringDeadRulesRoute,
   MonitoringEngineRoute: MonitoringEngineRoute,

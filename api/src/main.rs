@@ -10,6 +10,7 @@ use crate::openapi::ApiDoc;
 mod health;
 mod metrics;
 mod openapi;
+mod spa;
 
 // Phase 22 modules
 mod auth;
@@ -499,13 +500,21 @@ async fn main() -> std::io::Result<()> {
                     // and /v1/metrics/dmn/ws without conflicts with the root /metrics scope.
                     .configure(v1::configure_dmn_metrics),
             )
+            .app_data(web::Data::new(spa::load(&frontend_dist)))
             .configure(metrics::configure_metrics)
-            // Serve frontend static files at root path (last, so API routes take precedence)
+            // Serve the frontend's real files (JS, CSS, images) from the build
+            // directory, last so every API route takes precedence.
             .service(
                 fs::Files::new("/", &frontend_dist)
                     .index_file("index.html")
                     .show_files_listing(),
             )
+            // Anything that is not a file and not an API route is a client-side
+            // route: serve the application shell and let the router decide. The
+            // interface is a single-page app, so without this every page except
+            // the landing page answered 404 on a reload or a bookmark, before the
+            // router had a chance to run.
+            .default_service(web::get().to(spa::serve_index))
     })
     .bind(&bind_address)?;
 

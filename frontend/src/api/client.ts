@@ -36,10 +36,17 @@ apiClient.interceptors.response.use(
     const status = error.response?.status
 
     if (status === 401) {
-      // Token expired or invalid, clear auth and redirect to login
+      // Token expired or invalid: drop it and tell the app, but do NOT navigate.
+      //
+      // A hard `window.location.href = '/login'` here tore down the running SPA
+      // on every unauthorised response — including the several that fire in
+      // parallel when a page loads — which left the browser stuck mid-navigation
+      // and the page blank. Clearing the session and announcing it lets the
+      // router render the page (with its own error state) and the navbar offer
+      // the login link.
       localStorage.removeItem('auth_token')
       localStorage.removeItem('user')
-      window.location.href = '/login'
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'))
     }
 
     return Promise.reject(error)

@@ -49,11 +49,15 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       # One command, one definition of "green": build, test, clippy with
-      # warnings-as-errors, fmt --check, frontend production build, vitest.
+      # warnings-as-errors, fmt --check, frontend production build, vitest, and the
+      # browser smoke test (`make e2e`), which needs a Chromium binary — the runner
+      # image provides Chrome under `google-chrome`.
       - name: Run the gates
         run: make ci
+        env:
+          E2E_CHROME: google-chrome
 
-      # The DMN conformance sweep is baseline-gated (143 pass / 31 documented
-      # failures): it fails on a regression, not on the known gap set.
+      # The DMN conformance sweep is baseline-gated: a regression fails the build,
+      # the one documented divergence does not.
       - name: DMN conformance baseline
         run: make tck

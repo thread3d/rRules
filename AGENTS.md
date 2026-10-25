@@ -52,10 +52,16 @@ make ci          # build, test, clippy -D warnings, fmt --check, frontend build 
 make tck         # DMN TCK sweep, baseline-gated, per-layer report
 make tck-ledger  # regenerate the failure ledger inside TCK-COVERAGE-GAPS.md
 make verify      # CodeWitness against specs/requirements.md (engine + api)
+make e2e         # browser smoke test of the built UI against a live server
 ```
 
 `make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).
 `make bench`, `make memcheck` and `make fuzz` need a nightly toolchain or a frozen baseline snapshot.
+
+`make ci` includes the browser check, which drives the real bundle in headless
+Chromium: every route must render, a deep link must load, and the app must work once
+signed in. Unit tests in jsdom cannot see a bundle that throws at load or a route the
+server answers with 404 — both of which shipped before this gate existed.
 
 **CI runs exactly these gates.** `.github/workflows/ci.yml` invokes `make ci` and `make tck` on
 pushes and pull requests to `master`/`main`, so a green check means the same thing as a green run

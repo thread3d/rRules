@@ -1,4 +1,4 @@
-import type { Rule, HitPolicyId, Condition, Action, PaginationMeta } from '@/types/common'
+import type { Rule, HitPolicyId, Condition, Action } from '@/types/common'
 
 // API Request/Response types
 
@@ -22,21 +22,25 @@ export interface RuleResponse {
   data: Rule
 }
 
+// `GET /v1/rules` answers the page envelope directly (see `specs/http-api.md`).
 export interface PaginatedRulesResponse {
-  success: boolean
-  data: Rule[]
-  meta: PaginationMeta
+  total_count: number
+  rules: Rule[]
+  page: number
+  page_size: number
+  total_pages: number
 }
 
+// Mirrors `RuleListRequest` in `api/src/v1/rules.rs`. The client previously sent
+// `perPage`, `owner` and `search`, which the server ignores.
 export interface FilterRulesRequest {
   page?: number
-  perPage?: number
+  page_size?: number
   category?: string
-  owner?: string
   status?: string
-  search?: string
-  sortBy?: string
-  sortOrder?: 'asc' | 'desc'
+  tag?: string
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
 }
 
 // Auth API types

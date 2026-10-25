@@ -39,17 +39,14 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
+        // One vendor chunk. An earlier hand-split (react / tanstack / zustand /
+        // vendor) produced a production bundle where `vendor` read `useState`
+        // off an undefined React — the app rendered a blank page in a browser
+        // while every jsdom test passed, because the tests run source modules and
+        // never load the built chunks. Bundle splitting is a caching
+        // optimisation; a build that does not boot is not worth 200 KB.
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom')) {
-              return 'react-vendor'
-            }
-            if (id.includes('@tanstack')) {
-              return 'tanstack-vendor'
-            }
-            if (id.includes('zustand')) {
-              return 'zustand-vendor'
-            }
             return 'vendor'
           }
         },

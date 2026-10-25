@@ -1,7 +1,6 @@
 // Governance routes for rRules BRMS
 
-import { Link } from '@tanstack/react-router'
-import { Outlet } from '@tanstack/react-router'
+import { createFileRoute, Link, Outlet } from '@tanstack/react-router'
 
 export function GovernancePage() {
   return (
@@ -34,3 +33,7 @@ export function GovernancePage() {
     </div>
   )
 }
+
+export const Route = createFileRoute('/governance')({
+  component: GovernancePage,
+})

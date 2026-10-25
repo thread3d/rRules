@@ -12,6 +12,49 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed — the web interface, checked in a real browser for the first time
+
+Every one of these was invisible to the existing tests, because they run source
+modules in jsdom and never load a production bundle or talk to a running server:
+
+- **The production bundle rendered a blank page.** `build.rollupOptions.manualChunks`
+  split React, TanStack and the rest across four chunks, and the `vendor` chunk read
+  `useState` off an undefined React (`TypeError` on load). One vendor chunk now; bundle
+  splitting is a caching optimisation, a build that does not boot is not worth 200 KB.
+- **No single-page-application fallback.** `actix-files` answered 404 for `/rules`,
+  `/login` and every other client-side route, so a reload or a bookmark failed before
+  the router ran. Unknown non-API GETs now serve the shell; an unknown `/v1/...` still
+  returns a 404, so a client typo cannot look like success.
+- **No navigation.** `Navbar` existed and no route mounted it: the application was a
+  landing page with every other page reachable only by typing its URL. It is mounted in
+  the root route and lists Rules, Governance and Monitoring.
+- **The governance section had no layout.** `governance.tsx` never registered its
+  route, so the header and the tab bar for approvals/audit/branches/rbac never rendered.
+- **A 401 hung the browser.** The API client did `window.location.href = '/login'` on
+  every unauthorised response — including the several that fire in parallel when a page
+  loads — which left the page blank and the renderer stuck mid-navigation. It now clears
+  the session and announces it; the page renders its own error and the navbar offers the
+  login link.
+- **The rule list crashed as soon as it had data.** The API returns
+  `{total_count, rules[], page, page_size, total_pages}` and single rules unwrapped; the
+  client read `response.data.data`, so `rules` was `undefined` and `RulesList` threw.
+  The wire format is now mapped to the view model in one place, which also fixes every
+  date field (the API uses `created_at`, the view model `createdAt`, so sorting by date
+  compared `NaN`).
+- **Two client endpoints did not exist.** `PATCH /v1/rules/{id}/status` answered 404 (a
+  status change is a `PUT`), and `/v1/rules/search` was matched by `/v1/rules/{id}` and
+  answered 400.
+
+### Added — `make e2e`: the interface checked in a browser
+
+`frontend/e2e/smoke.mjs` drives the built bundle in headless Chromium over the DevTools
+protocol — no dependencies — and `make e2e` builds the interface, starts the server on a
+spare port with a throwaway store, then checks every route renders, that a deep link
+works as an entry point, and that the app works once signed in. It is part of `make ci`
+and of the CI workflow, so a blank page or a 404 route now fails the build.
+`api/src/spa.rs` carries unit tests for the fallback (a client route serves the shell, an
+unknown API path stays a 404).
+
 ### Fixed — the container image and the deployment probes
 
 The `Deploy` workflow failed on its first run, and the image it built would not

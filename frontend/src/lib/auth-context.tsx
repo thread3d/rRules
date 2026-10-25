@@ -37,6 +37,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth()
   }, [])
 
+  // The API client announces an unauthorised response instead of navigating away
+  // (see `src/api/client.ts`). Reflect it here so the navbar offers the login
+  // link and any page can show its own error, without a reload.
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setState({ user: null, isAuthenticated: false, isLoading: false, error: null })
+    }
+    window.addEventListener('auth:unauthorized', onUnauthorized)
+    return () => window.removeEventListener('auth:unauthorized', onUnauthorized)
+  }, [])
+
   async function checkAuth() {
     try {
       const token = localStorage.getItem('auth_token')
