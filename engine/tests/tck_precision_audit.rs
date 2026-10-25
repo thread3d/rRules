@@ -69,7 +69,11 @@ fn tck_precision_audit() {
                 continue;
             }
         };
-        for lit in iter_numeric_literals(&content) {
+        // Only element *text* carries value-domain literals; attribute values
+        // are ids/UUIDs (e.g. `id="113e6550..."`), which the numeric scanner
+        // would otherwise misread as a mantissa with a huge exponent.
+        let text_only = element_text_only(&content);
+        for lit in iter_numeric_literals(&text_only) {
             let sig = significant_digits(&lit.text);
             if sig > SIG_DIGIT_THRESHOLD {
                 offenders.push(format!(
@@ -150,6 +154,54 @@ struct Literal {
 /// scanner: it favours recall over precision so a 30-digit value is never
 /// missed, while the boundary rule removes the common ID-fragment false
 /// positive.
+/// Strip every `<...>` tag, leaving only element text.
+///
+/// Attributes are excluded deliberately: DMN ids are UUIDs, and a UUID segment
+/// like `113e6550` looks like a number with a gigantic exponent to a naive
+/// numeric scanner.
+fn element_text_only(xml: &str) -> String {
+    let mut out: Vec<u8> = Vec::with_capacity(xml.len());
+    let mut in_tag = false;
+    let mut in_comment = false;
+    let bytes = xml.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if in_comment {
+            if bytes[i..].starts_with(b"-->") {
+                in_comment = false;
+                i += 3;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        match bytes[i] {
+            b'<' => {
+                if bytes[i..].starts_with(b"<!--") {
+                    in_comment = true;
+                    i += 4;
+                } else {
+                    in_tag = true;
+                    i += 1;
+                }
+            }
+            b'>' => {
+                in_tag = false;
+                out.push(b' ');
+                i += 1;
+            }
+            _ => {
+                if !in_tag {
+                    out.push(bytes[i]);
+                }
+                i += 1;
+            }
+        }
+    }
+    // Byte-wise filtering keeps multi-byte characters intact.
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 fn iter_numeric_literals(s: &str) -> Vec<Literal> {
     let bytes = s.as_bytes();
     let mut out = Vec::new();

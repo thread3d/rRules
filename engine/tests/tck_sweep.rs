@@ -5,10 +5,9 @@
 //! report with per-category breakdown, root-cause analysis for failures, and
 //! documented known divergences.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -17,15 +16,19 @@ use engine::dmn::test_util;
 
 use engine::dmn::parser;
 use engine::dmn::exporter;
-use engine::dmn::model::{DmnModel, DefinitionsChild};
+use engine::dmn::model::DefinitionsChild;
 use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest, SharedDmnModel};
 use engine::dmn::feel::cache::FeelAstCache;
+
+#[path = "tck_values.rs"]
+mod tck_values;
 
 // =========================================================================
 // Result types
 // =========================================================================
 
 #[derive(Debug)]
+#[allow(dead_code)] // descriptive fields kept for debugging output
 struct VectorResult {
     dir_name: String,
     category: String,
@@ -43,6 +46,7 @@ enum TestLayer {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // failure/skip reasons are carried for diagnostics
 enum TestStatus { Pass, Fail(String), Skip(String) }
 
 #[derive(Debug)]
@@ -235,57 +239,171 @@ fn execute_parser_layer(vector: &test_util::TckVector) -> VectorResult {
 
 fn execute_evaluator_layer(vector: &test_util::TckVector) -> VectorResult {
     let test_content = match std::fs::read_to_string(&vector.test_xml_path) {
-        Ok(c) => c, Err(_) => return skip_result(vector, "No test XML file found".into()),
+        Ok(c) => c,
+        Err(_) => return skip_result(vector, "No test XML file found".into()),
     };
 
-    if !test_content.contains("<testCase") && !test_content.contains("<testCases") {
-        return skip_result(vector, "Test XML has no testCase elements".into());
-    }
-
     let dmn_content = match std::fs::read_to_string(&vector.dmn_path) {
-        Ok(c) => c, Err(_) => return skip_result(vector, "Cannot read DMN file for evaluation".into()),
+        Ok(c) => c,
+        Err(_) => return skip_result(vector, "Cannot read DMN file for evaluation".into()),
     };
 
     let parsed = match parser::parse_dmn(&dmn_content) {
-        Ok(m) => m, Err(e) => return fail_result(vector, format!("Parse error (evaluation): {:?}", e)),
+        Ok(m) => m,
+        Err(e) => return fail_result(vector, format!("Parse error (evaluation): {:?}", e)),
     };
 
-    let test_cases = parse_test_xml(&test_content);
+    let test_cases = tck_values::parse_test_cases(&test_content);
     if test_cases.is_empty() {
         return skip_result(vector, "No extractable test cases from XML".into());
     }
 
     let ast_cache = FeelAstCache::new();
     let shared = Arc::new(std::sync::RwLock::new(SharedDmnModel::new(parsed, ast_cache)));
-    let evaluator = DecisionEvaluator::new(shared);
+    let evaluator = DecisionEvaluator::new(shared.clone());
 
-    let decision_id = match extract_decision_id(&evaluator.shared) {
-        Some(id) => id, None => return skip_result(vector, "No decision found in DMN for evaluation".into()),
+    let decision_ids = collect_decision_ids(&shared);
+    let Some(default_decision) = decision_ids.first().cloned() else {
+        return skip_result(vector, "No decision found in DMN for evaluation".into());
     };
 
-    let mut any_passed = false;
-    let mut last_error = None;
+    let mut passed_cases = 0usize;
+    let mut failures: Vec<String> = Vec::new();
 
-    for tc in &test_cases {
-        match evaluator.evaluate(&decision_id, EvaluateRequest { inputs: tc.inputs.clone(), trace: false }) {
+    for case in &test_cases {
+        // The TCK names each result node after the decision that produces it;
+        // evaluate that decision when it exists, otherwise the vector default.
+        let decision_id = case
+            .expected
+            .iter()
+            .map(|(name, _)| name.clone())
+            .find(|name| decision_ids.contains(name))
+            .unwrap_or_else(|| default_decision.clone());
+
+        let inputs: std::collections::HashMap<String, engine::data_types::Value> = case
+            .inputs
+            .iter()
+            .map(|(name, node)| (name.clone(), tck_values::to_value(node)))
+            .collect();
+
+        let outcome = evaluator.evaluate(
+            &decision_id,
+            EvaluateRequest {
+                inputs,
+                trace: false,
+            },
+        );
+
+        match outcome {
             Ok(result) => {
-                if !tc.expected_values.is_empty() {
-                    let found = result.outputs.values().any(|v| values_approx_equal(v, &tc.expected_values[0]));
-                    if found { any_passed = true; break; }
+                let mut case_ok = true;
+
+                // An `errorResult="true"` case expects null (invalid expression).
+                if case.expects_error {
+                    if !result.outputs.values().all(|v| matches!(v, engine::data_types::Value::Null)) {
+                        case_ok = false;
+                        failures.push(format!(
+                            "{}: expected null (errorResult) but produced {:?}",
+                            case.id, result.outputs
+                        ));
+                    }
+                } else if case.expected.is_empty() {
+                    case_ok = false;
+                    failures.push(format!("{}: no expected result extracted", case.id));
+                } else {
+                    for (name, expected_node) in &case.expected {
+                        let expected = tck_values::to_value(expected_node);
+                        let actual = result
+                            .outputs
+                            .get(name)
+                            .cloned()
+                            .or_else(|| {
+                                // Output naming varies across vectors; fall back to
+                                // a structural match against any produced output.
+                                result
+                                    .outputs
+                                    .values()
+                                    .find(|v| tck_values::deep_equal(v, &expected))
+                                    .cloned()
+                            });
+                        match actual {
+                            Some(value) if tck_values::deep_equal(&value, &expected) => {}
+                            Some(value) => {
+                                case_ok = false;
+                                failures.push(format!(
+                                    "{} / {}: got {:?}, expected {:?}",
+                                    case.id, name, value, expected
+                                ));
+                            }
+                            None => {
+                                case_ok = false;
+                                failures.push(format!(
+                                    "{}: no output named {} (outputs: {:?})",
+                                    case.id,
+                                    name,
+                                    result.outputs.keys().collect::<Vec<_>>()
+                                ));
+                            }
+                        }
+                    }
                 }
-                last_error = Some(format!("Evaluation produced {:?} but expected {:?}", result.outputs, tc.expected_values.first()));
+
+                if case_ok {
+                    passed_cases += 1;
+                }
             }
-            Err(e) => { last_error = Some(format!("Evaluate error: {:?}", e)); }
+            Err(e) => {
+                if case.expects_error {
+                    passed_cases += 1;
+                } else {
+                    failures.push(format!("{}: evaluate error {:?}", case.id, e));
+                }
+            }
         }
     }
 
-    if any_passed {
-        VectorResult { dir_name: vector.dir_name.clone(), category: vector.category.clone(), layer: TestLayer::Evaluator, status: TestStatus::Pass, message: Some(format!("Evaluation passed for {} test cases", test_cases.len())) }
-    } else if let Some(err) = last_error {
-        fail_result(vector, format!("Evaluation mismatch: {}", err))
+    let total = test_cases.len();
+    if passed_cases == total {
+        VectorResult {
+            dir_name: vector.dir_name.clone(),
+            category: vector.category.clone(),
+            layer: TestLayer::Evaluator,
+            status: TestStatus::Pass,
+            message: Some(format!("{passed_cases}/{total} test cases matched")),
+        }
     } else {
-        skip_result(vector, "No matching expected values found".into())
+        let shown = failures
+            .iter()
+            .take(3)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("; ");
+        fail_result(
+            vector,
+            format!(
+                "{passed_cases}/{total} test cases matched ({} failed): {}",
+                total - passed_cases,
+                shown
+            ),
+        )
     }
+}
+
+/// Collect every decision id in the model (in declaration order).
+fn collect_decision_ids(shared: &Arc<std::sync::RwLock<SharedDmnModel>>) -> Vec<String> {
+    let Ok(guard) = shared.read() else {
+        return Vec::new();
+    };
+    guard
+        .model
+        .definitions
+        .children
+        .iter()
+        .filter_map(|child| match child {
+            DefinitionsChild::Decision(d) => Some(d.id.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn execute_round_trip_layer(vector: &test_util::TckVector) -> VectorResult {
@@ -407,105 +525,9 @@ fn normalize_ns(xml: &str) -> String {
     result
 }
 
-fn extract_decision_id(shared: &Arc<std::sync::RwLock<SharedDmnModel>>) -> Option<String> {
-    let guard = shared.read().ok()?;
-    for child in &guard.model.definitions.children {
-        if let DefinitionsChild::Decision(d) = child { return Some(d.id.clone()); }
-    }
-    None
-}
-
 // =========================================================================
 // Test XML parsing helpers
 // =========================================================================
-
-#[derive(Debug)] struct TestCase { id: String, inputs: HashMap<String, engine::data_types::Value>, expected_values: Vec<engine::data_types::Value> }
-
-fn parse_test_xml(content: &str) -> Vec<TestCase> {
-    let mut cases = Vec::new();
-    let mut remaining = content;
-    while let Some(start) = remaining.find("<testCase") {
-        if let Some(end_tag) = remaining[start..].find("</testCase>") {
-            let block = &remaining[start..start + end_tag + 11];
-            let tc_id = extract_attr(block, "id").unwrap_or_default();
-
-            let mut inputs = HashMap::new();
-            for iv_start in block.match_indices("<inputValues>") {
-                if let Some(iv_end) = block[iv_start.0..].find("</inputValues>") {
-                    let iv_block = &block[iv_start.0..iv_start.0 + iv_end + 14];
-                    if let Some(name_attr) = extract_attr(iv_block, "name") {
-                        if let Some(val_content) = extract_inner_text(iv_block, "value") {
-                            inputs.insert(name_attr, parse_feel_value(&val_content));
-                        }
-                    }
-                }
-            }
-
-            let mut expected_values = Vec::new();
-            for exp_start in block.match_indices("<expected>") {
-                if let Some(exp_end) = block[exp_start.0..].find("</expected>") {
-                    let exp_block = &block[exp_start.0..exp_start.0 + exp_end + 11];
-                    if let Some(val_content) = extract_inner_text(exp_block, "value") {
-                        expected_values.push(parse_feel_value(&val_content));
-                    }
-                }
-            }
-
-            cases.push(TestCase { id: tc_id, inputs, expected_values });
-            remaining = &remaining[start + block.len()..];
-        } else { break; }
-    }
-    cases
-}
-
-fn extract_attr(xml_block: &str, attr_name: &str) -> Option<String> {
-    let pattern = format!("{}=\"", attr_name);
-    if let Some(start) = xml_block.find(&pattern) {
-        let val_start = start + pattern.len();
-        if let Some(end) = xml_block[val_start..].find('"') { return Some(xml_block[val_start..val_start + end].to_string()); }
-    }
-    None
-}
-
-fn extract_inner_text(block: &str, tag: &str) -> Option<String> {
-    let open_pattern = format!("<{}>", tag);
-    if let Some(start) = block.find(&open_pattern) {
-        let text_start = start + open_pattern.len();
-        let close_pattern = format!("</{}>", tag);
-        if let Some(end_offset) = block[text_start..].find(&close_pattern) { return Some(block[text_start..text_start + end_offset].to_string()); }
-    }
-    None
-}
-
-fn parse_feel_value(s: &str) -> engine::data_types::Value {
-    let trimmed = s.trim();
-    if trimmed.eq_ignore_ascii_case("null") || trimmed.is_empty() { return engine::data_types::Value::Null; }
-    if trimmed == "true" { return engine::data_types::Value::Bool(true); }
-    if trimmed == "false" { return engine::data_types::Value::Bool(false); }
-    if trimmed.starts_with("date(") || trimmed.starts_with("time(") || trimmed.starts_with("duration(") || trimmed.starts_with('"') { return engine::data_types::Value::String(trimmed.to_string()); }
-    // Try parsing as Decimal.
-    let cleaned = if s.contains(':') { s.rsplit(':').next().unwrap_or(s).trim() } else { s.trim() };
-    if let Ok(decimal) = DecimalParse::parse(cleaned) { return engine::data_types::Value::Number(decimal); }
-    engine::data_types::Value::String(trimmed.to_string())
-}
-
-mod decimal_parse_helper {
-    use rust_decimal::Decimal;
-    use std::str::FromStr;
-    pub fn parse(s: &str) -> Result<Decimal, ()> {
-        match Decimal::from_str(s) { Ok(d) => Ok(d), Err(_) => { let stripped = s.strip_suffix('s').unwrap_or(s); Decimal::from_str(stripped).map_err(|_| ()) } }
-    }
-}
-use decimal_parse_helper as DecimalParse;
-
-fn values_approx_equal(a: &engine::data_types::Value, b: &engine::data_types::Value) -> bool {
-    match (a, b) {
-        (engine::data_types::Value::Number(da), engine::data_types::Value::Number(db)) => da == db,
-        (engine::data_types::Value::String(sa), engine::data_types::Value::String(sb)) => sa.trim() == sb.trim(),
-        (engine::data_types::Value::Bool(ab), engine::data_types::Value::Bool(bb)) => ab == bb,
-        _ => format!("{:?}", a) == format!("{:?}", b),
-    }
-}
 
 fn categorize_by_level(dir_name: &str) -> String {
     // Classify by directory prefix pattern (mirrors TCK grouping).
