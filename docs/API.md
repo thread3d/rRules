@@ -17,21 +17,26 @@ prose. For the live spec, see Swagger UI at `/swagger-ui`.
   query params and return `total_count` + `total_pages`.
 - **Errors:** non-2xx responses return a JSON body, typically
   `{"error": "<message>"}` (some endpoints add `"status_code": <n>`).
-- **Auth:** **not yet enforced.** No JWT/session is checked at the route layer.
-  Multi-tenancy is header-based: send `X-Tenant-ID: <tenant>` to scope rule CRUD
-  to a tenant (defaults to `"default"` when absent). Real RBAC/JWT enforcement
-  is deferred to a future milestone.
-- **Rule execution is a stub:** `POST /v1/execute` and
-  `POST /v1/rules/batch-execute` build an isolated engine but do not fire rules,
-  so `rules_fired` is always `0`. These endpoints deliver real request handling
-  (and batch concurrency) but not functional inference. Functional rule firing
-  is a future milestone.
+- **Auth:** JWT (HS256) is enforced on the whole `/v1` scope by
+  `middleware::auth::requires_auth`. Send `Authorization: Bearer <token>` on every
+  `/v1` request. The public allowlist is `/v1/auth/login`, `/health`,
+  `/swagger-ui`, `/api-docs`, `/metrics` and `/v1/metrics/ws` (a browser
+  WebSocket upgrade cannot carry an Authorization header, and the stream is
+  read-only). See the **Authentication** section below.
+- **Multi-tenancy:** header-based for rule CRUD — send `X-Tenant-ID: <tenant>`
+  (defaults to `"default"` when absent). Per-tenant *route* management
+  (`/v1/tenants`) is not wired yet; see `.planning/TECH-DEBT.md`.
+- **Rule execution is real:** `POST /v1/execute` builds a fresh engine from
+  `EngineRegistry` per request and fires the rules in the shared `RuleSet`, so
+  `rules_fired`, `rules_not_fired` and `facts_after` reflect actual inference.
 
 ## Status: registered vs. unregistered
 
-Only the routes below are registered in `api/src/main.rs`. Note that
-`/v1/metrics/*` exists in source (`configure_v1_metrics`) but is **never
-registered** — it is dead code. Use the root `/metrics` endpoints instead.
+Everything documented below is registered in `api/src/main.rs`. The
+`api/src/v1/metrics.rs` handlers behind `configure_v1_metrics`
+(`/v1/metrics/engine`, `/v1/metrics/coverage/reset`) are **not** registered and
+return placeholder data; use `/v1/metrics/dead-rules`, `/v1/metrics/coverage`,
+`/v1/metrics/dmn` and the root `/metrics` instead.
 
 ---
 
@@ -91,9 +96,10 @@ Rules that were evaluated but never fired (dead code candidates).
 ```json
 []
 ```
-> Note: the handler builds a **fresh** `RuleExecutionTracker` per request and
-> nothing populates it (rule execution is a stub), so this currently always
-> returns `[]`. This is deferred tech debt, not a v4.0 blocker.
+> Reads the process-wide `RuleExecutionTracker` singleton, which is populated by
+> the evaluator on every execution (`record_evaluation` / `record_fire`), so this
+> reflects live behaviour: a rule that was evaluated but never fired is reported
+> here.
 
 ## GET /metrics/coverage
 Rule coverage data from the global `CoverageTracking` singleton. Rules
@@ -111,6 +117,69 @@ here.
     "coverage_percent": 0.0 }
 }
 ```
+
+---
+
+# Metrics under /v1
+
+Live monitoring surfaces (JWT required, except the WebSocket streams).
+
+## GET /v1/metrics/dead-rules
+Rule ids that were evaluated but never fired. Reads the process-wide
+`RuleExecutionTracker` singleton, so it reflects live executions.
+**Response:** `200` `["rule-id", ...]`.
+
+## GET /v1/metrics/coverage
+Coverage data from the `CoverageTracking` singleton.
+**Response:** `200` `application/json`
+```json
+{ "rules": [ { "rule_id": "discount-rule", "evaluated": true, "fired": true,
+    "evaluation_count": 3, "fire_count": 2, "skipped_reason": null } ],
+  "summary": { "total_rules": 1, "evaluated_count": 1, "fired_count": 1,
+    "coverage_percent": 100.0 } }
+```
+
+## GET /v1/metrics/dmn
+DMN evaluation metrics (per-output counters, DRD chain depth, dead decisions).
+**Response:** `200` `DmnMetricsSnapshot` JSON.
+
+## GET /v1/metrics/dmn/ws — WebSocket
+Live `DmnMetricsSnapshot` broadcast after each decision evaluation.
+**Auth:** none (read-only stream, same rationale as `/v1/metrics/ws`).
+
+## GET /v1/metrics/ws — WebSocket
+Live `MetricsSnapshot` broadcast after each `/v1/execute` call.
+**Auth:** none (read-only stream).
+
+---
+
+# Authentication
+
+JWT (HS256) with a 1-hour token lifetime. All `/v1` routes except
+`/v1/auth/login` require `Authorization: Bearer <token>`.
+
+## POST /v1/auth/login
+**Auth:** none. **Request:**
+```json
+{ "username": "admin", "email": null, "password": "..." }
+```
+`username` or `email` identifies the user. **Response:** `200`
+```json
+{ "token": "<jwt>", "user": { "id": "...", "email": "...",
+  "displayName": "...", "role": "admin", "permissions": ["..."] } }
+```
+`401` on bad credentials.
+
+## GET /v1/auth/me
+Current user, derived from the bearer token. **Response:** `200` `UserResponse`.
+
+## POST /v1/auth/refresh
+Issue a fresh token for a still-valid one. **Response:** `200`
+`{ "token": "<jwt>" }`.
+
+Token claims: `sub` (user id), `role`, `iat`, `exp`. The signing key comes from
+the auth environment/secret configuration; algorithm pinning rejects `alg:none`
+and wrong-secret tokens.
 
 ---
 
@@ -221,26 +290,48 @@ Commit history for a rule (backed by git). **Auth:** `X-Tenant-ID`.
 # Execution
 
 ## POST /v1/execute
-Execute a rule set against supplied facts. **Auth:** none.
+Execute a rule set against supplied facts. **Auth:** Bearer JWT.
 
 **Request** (`ExecuteRequest`):
 ```json
 { "session_id": "sess-1", "facts": { "customer": { "tier": "Gold" } },
-  "rule_filter": { "name_pattern": "gold-*", "categories": ["pricing"] } }
+  "rule_filter": { "name_pattern": "gold-*", "categories": ["pricing"] },
+  "engine": "rete", "trace": false }
 ```
 | Field | Type | Notes |
 |-------|------|-------|
-| `session_id` | string? | optional correlation id |
+| `session_id` | string? | opt-in **stateful** execution: the working memory is kept under this id and resumed on the next call (server UUID returned as `session_id`) |
 | `facts` | map<string, json> | fact type → object payload |
 | `rule_filter.name_pattern` | string? | glob on rule name |
 | `rule_filter.categories` | [string]? | restrict categories |
+| `engine` | string? | `rete`/`treat`/`leaps`/`phreak`; defaults to `RRULES_DEFAULT_ENGINE` (or `rete`). Unknown names → `400` |
+| `trace` | bool? | opt-in inference trace (off by default; no latency cost when off) |
 
 **Response:** `200` `ExecuteResponse`
 ```json
-{ "execution_id": "uuid", "rules_fired": 0, "rules_not_fired": [],
-  "facts_after": { "customer": { "tier": "Gold" } }, "inference_trace": null }
+{ "execution_id": "uuid", "rules_fired": 2, "rules_not_fired": ["r-other"],
+  "facts_after": { "customer": { "tier": "Gold", "discount": 0.1 } },
+  "inference_trace": null, "engine_generation": 7, "session_id": null }
 ```
-> `rules_fired` is `0` because execution is a stub (see Conventions).
+- `facts_after` is post-execution working memory, not the echoed input.
+- `inference_trace` is populated only when `trace: true`; it carries
+  `entries[{timestamp, event_type, rule_name?, data?}]` and
+  `summary{total_duration_ms, facts_matched}`.
+- `session_id` is present once the stateful path created a session.
+
+## GET /v1/engines
+Registered engine names, for the frontend engine selector. **Auth:** Bearer JWT.
+```json
+{ "engines": ["leaps", "phreak", "rete", "treat"], "default": "rete" }
+```
+
+## DELETE /v1/execute/session/{id}
+Dispose a stateful session (frees the retained engine + working memory).
+**Auth:** Bearer JWT. **Response:** `200`/`404`.
+
+## POST /v1/execute/session/{id}/reset
+Clear a session's working memory without disposing it. **Auth:** Bearer JWT.
+**Response:** `200`/`404`.
 
 ## POST /v1/rules/batch-execute
 Execute multiple requests concurrently with bounded parallelism. Each request
@@ -261,7 +352,7 @@ runs in its own task; one failing request does **not** fail the batch.
 ```json
 { "results": [ { "success": true,
     "response": { /* ExecuteResponse */ }, "error": null } ],
-  "total_fired": 0, "succeeded": 2, "failed": 0 }
+  "total_fired": 2, "succeeded": 2, "failed": 0 }
 ```
 `results` preserves submission order. A task panic/JoinError yields
 `{ "success": false, "response": null, "error": "<join error>" }`.
@@ -287,6 +378,68 @@ Reload job status. **Response:** `200` `ReloadJob`, `404` if unknown.
 
 ## GET /v1/jobs
 List all reload jobs. **Response:** `200` `[ReloadJob]`.
+
+---
+
+# Decisions (DMN 1.5)
+
+Manage and evaluate DMN decision documents. Documents are stored as `.dmn` XML
+plus a `.meta.json` sidecar under `DMN_STORAGE_PATH` and parsed into the
+canonical IR on read. **Auth:** Bearer JWT on every endpoint.
+
+## GET /v1/decisions
+List stored decisions. **Query:** `page` (default 1), `per_page` (default 50).
+**Response:** `200`
+```json
+{ "decisions": [ { "id": "uuid", "name": "Loan approval",
+  "version": null, "updated_at": "2026-07-10T10:00:00Z" } ] }
+```
+
+## POST /v1/decisions
+**Request** (`CreateDecisionRequest`): `{ "name": "...", "content": "<dmn ...>", "id": "optional" }`
+**Response:** `201` with the stored decision summary.
+
+## GET /v1/decisions/{id}
+**Response:** `200` `{ "id", "name", "content", "metadata", "created_at", "updated_at" }`,
+`404` if unknown.
+
+## PUT /v1/decisions/{id}
+**Request** (`UpdateDecisionRequest`): `{ "content": "<dmn ...>", "metadata": {...}? }`
+
+## DELETE /v1/decisions/{id}
+**Response:** `200`/`404`.
+
+## POST /v1/decisions/{id}/evaluate
+Evaluate one decision (DRD dependencies are resolved and evaluated first).
+**Request** (`EvaluateDecisionRequest`):
+```json
+{ "inputs": { "Application risk score": 130, "Age": 35 }, "trace": false }
+```
+**Response:** `200` `EvaluateDecisionResponse`
+```json
+{ "decision_id": "decision_1", "outputs": { "Approval": "approved" },
+  "rules_fired": 1, "duration_ms": 0.42,
+  "trace": { "decision_id": "decision_1", "event_count": 6, "duration_ms": 0.42 } }
+```
+`trace` is present only when requested. Unknown decision / DRD cycle → `4xx`
+with `{"error": "..."}`.
+
+## POST /v1/decisions/import
+Import a DMN XML document. **Request** (`ImportDmnRequest`):
+`{ "id": "...", "content": "<dmn ...>" }` (`content` may be raw XML text or a
+byte array — the handler accepts both). **Response:** `201`.
+
+## GET /v1/decisions/{id}/export
+Returns the stored document as `application/xml` (`Content-Disposition:
+attachment`) for round-trip editing.
+
+## GET /v1/decisions/{id}/ir
+Parsed canonical IR as JSON — what the frontend decision-table editor binds to
+(hit policy, rules, input/output clauses, DRD links).
+
+## POST /v1/decisions/reload
+Hot-reload the in-memory shared model after external file changes.
+**Request** (`ReloadDmnRequest`): `{ "dmn_content": "<dmn ...>" }`.
 
 ---
 
