@@ -69,11 +69,29 @@ pub fn direct_execute(
     working_facts: &mut HashMap<String, Fact>,
     collect_trace: bool,
 ) -> (HashSet<String>, HashSet<String>, Option<TraceData>) {
-    // D-07: fixpoint cap — configurable via env var, default 1000.
-    let max_iter = std::env::var("RRULES_MAX_CHAIN_ITERATIONS")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(1000);
+    direct_execute_with_limit(rules, working_facts, collect_trace, None)
+}
+
+/// [`direct_execute`] with an explicit fixpoint cap.
+///
+/// `max_iterations` overrides the `RRULES_MAX_CHAIN_ITERATIONS` environment
+/// variable for this execution, which is how an engine created through
+/// `EngineBuilder::max_iterations` (or `set_config("max_iterations", …)`) makes
+/// its setting take effect instead of being silently ignored.
+pub fn direct_execute_with_limit(
+    rules: &[Rule],
+    working_facts: &mut HashMap<String, Fact>,
+    collect_trace: bool,
+    max_iterations: Option<usize>,
+) -> (HashSet<String>, HashSet<String>, Option<TraceData>) {
+    // D-07: fixpoint cap — explicit setting, then env var, then default 1000.
+    let max_iter = max_iterations.unwrap_or_else(|| {
+        std::env::var("RRULES_MAX_CHAIN_ITERATIONS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(1000)
+    })
+    .max(1);
 
     let mut fired_set: HashSet<String> = HashSet::new();
     let mut evaluated_set: HashSet<String> = HashSet::new();
@@ -102,6 +120,9 @@ pub fn direct_execute(
 
     for _pass in 0..max_iter {
         let mut newly_fired_this_pass = false;
+        // Agenda groups locked by a `lock_on_active` rule that fired in this
+        // pass. A locked group's remaining rules wait for the next pass.
+        let mut locked_groups: HashSet<String> = HashSet::new();
         // Index-based iteration so we can mutate `working_facts` while
         // reading `rules` without conflicting borrows.
         for &rule_index in &firing_order {
@@ -109,6 +130,11 @@ pub fn direct_execute(
             let rule_id = rule.id.clone();
             if fired_set.contains(&rule_id) {
                 continue;
+            }
+            if let Some(group) = rule.agenda_group.as_ref() {
+                if locked_groups.contains(group) {
+                    continue;
+                }
             }
             // Evaluate the condition against the current working memory.
             let facts: Vec<&Fact> = working_facts.values().collect();
@@ -134,6 +160,14 @@ pub fn direct_execute(
                 let actions = rule.actions.clone();
                 for action in &actions {
                     apply_action(action, working_facts);
+                }
+                // `lock_on_active` closes the rule's agenda group for the rest
+                // of this pass: the group's other rules are considered next
+                // pass, after this rule's actions have been applied.
+                if rule.lock_on_active {
+                    if let Some(group) = rule.agenda_group.as_ref() {
+                        locked_groups.insert(group.clone());
+                    }
                 }
                 fired_set.insert(rule_id);
                 newly_fired_this_pass = true;
@@ -186,6 +220,20 @@ pub fn direct_execute(
     (fired_set, evaluated_set, trace)
 }
 
+/// The working-memory entry for a fact type, chosen deterministically.
+///
+/// `working_facts` is a `HashMap`, so "the first fact of this type" is
+/// hash-order dependent and an action could target a different fact between two
+/// runs. Ordering by fact id makes the choice stable: the same working memory
+/// always resolves to the same fact.
+fn first_of_type(working_facts: &HashMap<String, Fact>, fact_type: &str) -> Option<String> {
+    working_facts
+        .iter()
+        .filter(|(_, fact)| fact.fact_type_id == fact_type)
+        .map(|(key, _)| key.clone())
+        .min()
+}
+
 /// Apply a single `Action` to the engine's working memory (D-04). Mirrors
 /// `WorkingMemory::insert_fact`/`update_fact`/`retract_fact` (fact.rs) but
 /// operates on the engine's `HashMap<String, Fact>` keyed by
@@ -211,10 +259,7 @@ pub fn apply_action(action: &Action, working_facts: &mut HashMap<String, Fact>) 
             let key_opt = if working_facts.contains_key(id) {
                 Some(id.clone())
             } else {
-                working_facts
-                    .iter()
-                    .find(|(_, f)| f.fact_type_id == *id)
-                    .map(|(k, _)| k.clone())
+                first_of_type(working_facts, id)
             };
             let key = match key_opt {
                 Some(k) => k,
@@ -236,14 +281,8 @@ pub fn apply_action(action: &Action, working_facts: &mut HashMap<String, Fact>) 
         Action::RetractFact { id } => {
             if working_facts.contains_key(id) {
                 working_facts.remove(id);
-            } else {
-                let key_opt = working_facts
-                    .iter()
-                    .find(|(_, f)| f.fact_type_id == *id)
-                    .map(|(k, _)| k.clone());
-                if let Some(k) = key_opt {
-                    working_facts.remove(&k);
-                }
+            } else if let Some(key) = first_of_type(working_facts, id) {
+                working_facts.remove(&key);
             }
         }
         Action::CallFunction { .. } => {

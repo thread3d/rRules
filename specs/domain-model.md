@@ -528,18 +528,18 @@ Limits and guards (with defaults and configuration points):
   `engine/src/engine/direct_eval.rs:69`). `Action::InsertFact` therefore bypasses the
   empty-payload and duplicate-id guards it appears to respect (`direct_eval.rs:224-227`), and
   `assert_fact` silently overwrites a same-id fact (`rete/mod.rs:279`).
-- **`salience`, `no_loop`, `lock_on_active` are dead weight.** Declared (`engine/src/rules.rs:22-26`)
-  and testable, but no evaluator reads them; `Agenda`/`ConflictResolver` exist and are exported
-  (`engine/src/lib.rs:61-62`, `engine/src/salience/agenda.rs:58-62`) yet are called by no engine or
-  API path. Firing order is rule load order.
-- **`Rule::validate` does not enforce the documented salience range.** The doc comment says
-  `-1000 to 1000` (`rules.rs:21`) and `InvalidSalience` exists (`rules.rs:613`), but validation
-  checks only id/name (`rules.rs:48-57`). `RuleSet::compile` sets a flag and nothing else
-  (`rules.rs:533-540`).
-- **Two max-chain-iteration knobs, only one live.** `EngineBuilder::max_iterations` and
-  `default_salience` are stored and asserted in tests (`engine/src/environment.rs:16,28-29,41-44,
-  47-50,64-65`) but execution reads the `RRULES_MAX_CHAIN_ITERATIONS` env var directly
-  (`direct_eval.rs:73`, `rete/mod.rs:378`).
+- **~~`salience`, `no_loop`, `lock_on_active` are dead weight.~~** Closed 2026-10-25: both
+  evaluators order passes by `salience` (higher first, ties in load order), `lock_on_active` closes
+  the rule's `agenda_group` for the rest of the pass, and `no_loop` is satisfied by the
+  once-per-rule fixpoint. `Agenda`/`ConflictResolver` remain exported but unused — the ordering
+  logic is in `direct_eval` and `rete` rather than in those types.
+- **~~`Rule::validate` does not enforce the documented salience range.~~** Closed 2026-10-25:
+  `validate` returns `InvalidSalience` outside -1000…=1000. `RuleSet::compile` still only sets a
+  flag.
+- **~~Two max-chain-iteration knobs, only one live.~~** Partly closed 2026-10-25: each engine now
+  honours `set_config("max_iterations", …)`, which overrides `RRULES_MAX_CHAIN_ITERATIONS`; the
+  legacy `EngineBuilder` still stores its value without effect because the `Engine`/`Session`
+  surface below is a placeholder.
 - **The `Environment`/`Session` execution surface is a placeholder.** `Engine::load_rules` is a
   no-op, `Engine::execute_forward`/`execute_backward` return fixed messages
   (`environment.rs:122-147`), `Session::insert_fact` discards its argument (`environment.rs:176-183`),
@@ -548,33 +548,31 @@ Limits and guards (with defaults and configuration points):
   `forward_chaining::execute_forward` and `backward_chaining::execute_backward` are stubs
   (`engine/src/forward_chaining.rs:46-57`, `engine/src/backward_chaining.rs:80-93`), even though
   `lib.rs` re-exports both as entry points (`engine/src/lib.rs:71-73`).
-- **Validator module is unused and partly unreachable.** No crate outside
-  `engine/src/validation.rs` references it; `ValidationPipeline::validate_rule_syntax` always
-  returns `Ok(())` (`validation.rs:413-415`), so the pipeline's syntax stage never fails;
-  `with_fact_types` relies on `unsafe` `transmute` to fake `'static` (`validation.rs:383-387`);
+- **Validator module is unused by the API and partly unreachable.** `validate_rule_syntax` now
+  real (it runs `Rule::validate` and syntax-checks string operands), and the `unsafe` `transmute`
+  is gone (the type owns its data), but no crate outside `engine/src/validation.rs` calls the
+  module yet;
   `validate_field_value` is a no-op (`validation.rs:280-309`); `check_circular_references` is a
   no-op (`validation.rs:351-358`); the "Comparison between incompatible types" warning is
   unreachable because `condition_to_value` resolves only `True`/`False` leaves
   (`validation.rs:213-226` vs `312-318`). `ValidationResult` derives `Default`, which yields
   `is_valid = false` for a pristine value and contradicts `ValidationResult::new()`
   (`validation.rs:10,21-27`), and no validation type is `Serialize`d for the API.
-- **`Value::Number` (Decimal) cannot be ordered anywhere.** `compare_values` reaches Decimal only
-  through `as_float`, which returns `None` for `Number` (`data_types.rs:150-156`), so
-  `Number(1) < Number(2)` is `false` and every FEEL numeric comparison through the rule AST is
-  `false` (`rules.rs:411-433`).
-- **"First fact of type" resolution is hash-order dependent.**
-  `Expression::FieldRef` (`rules.rs:274-282`), `Action::UpdateFact` (`direct_eval.rs:201-218`) and
-  `Action::RetractFact` (`direct_eval.rs:228-240`) all pick the first match out of a `HashMap`
-  iteration; `get_all_facts` and the index likewise impose no order (`fact.rs:128-135,232-234`).
+- **~~`Value::Number` (Decimal) cannot be ordered anywhere.~~** Closed 2026-10-25: `compare_values`
+  promotes across Integer/Number/Float and orders decimals exactly, so `Number(1) < Number(2)` and
+  `1 = 1.0` behave. `Value` still has no `Ord`/`PartialOrd`; ordering remains a free function.
+- **~~"First fact of type" resolution is hash-order dependent.~~** Closed 2026-10-25:
+  `Expression::FieldRef`, `Action::UpdateFact` and `Action::RetractFact` all resolve to the fact with
+  the lowest id (`first_of_type`), so the same working memory always yields the same choice.
+  `get_all_facts` still returns hash order, which is documented rather than relied on.
 - **Stubs inside the rule language.** `Expression::Call` returns `Value::Null`
   (`rules.rs:342-345`), `Action::CallFunction` and `Action::LogMessage` are no-ops
   (`direct_eval.rs:241-246`), and `WorkingMemory::match_pattern` always returns an empty vector
   (`fact.rs:237-240`).
-- **`PhreakEngine` retraction is unimplemented.** `retract_fact` returns `Ok(false)` regardless of
-  the id and `retract_fact_with_maintenance` returns `Ok(false)` as a placeholder
-  (`engine/src/engine/phreak/mod.rs:618,650-652`), unlike Rete/TREAT/LEAPS which really remove the
-  fact and its alpha/beta entries (`rete/mod.rs:580-592`, `treat/mod.rs:429-444`,
-  `leaps/mod.rs:459-476`).
+- **~~`PhreakEngine` retraction is unimplemented.~~** Closed 2026-10-25: PHREAK removes the fact
+  from working memory, alpha and beta memory, and prunes its truth-maintenance graph via
+  `TruthMaintenance::forget_fact`. All four engines now retract identically
+  (`engine/tests/retract_integration.rs`, `engine/tests/rule_semantics.rs`).
 - **`TimeValue::Fixed` is unreachable from the lexer.** `parse_time` only ever produces
   `TimeValue::Offset` or `TimeValue::Local` (`temporal.rs:409-422`); `Fixed` is constructed only in
   tests (`temporal.rs:608`) and formats identically to `Local` (`temporal.rs:492`). The carrier's

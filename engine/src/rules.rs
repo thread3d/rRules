@@ -22,8 +22,12 @@ pub struct Rule {
     pub salience: i32,
     /// Prevent this rule from firing again if it just fired
     pub no_loop: bool,
-    /// Prevent other rules with same agenda group from firing when this one fires
+    /// Prevent other rules in the same agenda group from firing in the pass
+    /// this rule fires. Rules with no agenda group are not grouped with anyone.
     pub lock_on_active: bool,
+    /// Agenda group this rule belongs to. `lock_on_active` applies within it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agenda_group: Option<String>,
     /// Condition that must be true for the rule to fire
     pub condition: Condition,
     /// Actions to execute when condition is met
@@ -39,6 +43,7 @@ impl Rule {
             salience: 0,
             no_loop: false,
             lock_on_active: false,
+            agenda_group: None,
             condition: Condition::True,
             actions: Vec::new(),
         }
@@ -52,7 +57,12 @@ impl Rule {
         if self.name.is_empty() {
             return Err(RuleValidationError::MissingName);
         }
-        // More validation can be added here
+        // `salience` is documented as -1000..=1000 (higher fires first). A value
+        // outside that range used to be accepted silently, so an author could
+        // write `salience: i32::MAX` and reorder the whole agenda.
+        if !(-1000..=1000).contains(&self.salience) {
+            return Err(RuleValidationError::InvalidSalience);
+        }
         Ok(())
     }
 
@@ -272,11 +282,15 @@ impl Expression {
         match self {
             Expression::Literal(v) => v.clone(),
             Expression::FieldRef { fact_type, field } => {
-                // Scan for the first fact of the requested type, read the field.
+                // Read the field from the fact of the requested type with the
+                // lowest id. The caller passes facts in hash order, so picking
+                // "the first match" would make an expression's value depend on
+                // `HashMap` iteration order.
                 facts
                     .iter()
-                    .find(|f| f.fact_type_id == *fact_type)
-                    .and_then(|f| f.payload.get(field))
+                    .filter(|fact| fact.fact_type_id == *fact_type)
+                    .min_by_key(|fact| fact.id)
+                    .and_then(|fact| fact.payload.get(field))
                     .cloned()
                     .unwrap_or(Value::Null)
             }

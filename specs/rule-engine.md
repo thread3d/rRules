@@ -259,9 +259,14 @@ rules against the reduced working memory.
 
 ## Conflict resolution and salience
 
-* `Rule.salience: i32` exists (`engine/src/rules.rs:22`, builder `:77-80`) and is **never read
-  by any evaluator** — no `salience` reference exists under `engine/src/engine/**`. Firing
-  order is `Vec` order only.
+* `Rule.salience: i32` (`engine/src/rules.rs:22`, builder `:77-80`) orders every pass: both the
+  shared evaluator (`engine/src/engine/direct_eval.rs:122-124`) and Rete's inlined loop
+  (`engine/src/engine/rete/mod.rs:404-406`) build a stable salience-descending firing order, so
+  higher salience fires first and ties keep load order. Values outside -1000…=1000 are rejected by
+  `Rule::validate`.
+* `no_loop` is satisfied by the once-per-rule fixpoint (a rule never fires twice in one execution).
+  `lock_on_active` closes the rule's `agenda_group` for the rest of the pass
+  (`direct_eval.rs:171-178`), so the group's other rules wait for the next pass.
 * `Agenda` (`engine/src/salience/agenda.rs:45-111`) implements salience-desc/timestamp-asc
   insert (`:57-68`), front-pop (`:71-78`), `remove_activation` for no-loop (`:96-100`) and
   `all_activations` (`:103-105`); `Activation` clones the whole `Rule` (`:12-21`).
@@ -274,11 +279,11 @@ rules against the reduced working memory.
   the latter pair while `engine/src/tests/mod.rs:14-15` imports both.
 * Nothing in the execution path constructs an `Agenda` or `ConflictResolver`: callers are tests
   (`engine/src/tests/mod.rs:282-400`, `engine/src/salience/**` tests) and the test-only
-  `deterministic_conflict_strategy` (`engine/src/testing/mod.rs:653-661`). `no_loop` and
-  `lock_on_active` (`engine/src/rules.rs:24-26`) are stored and never consulted.
+  `deterministic_conflict_strategy` (`engine/src/testing/mod.rs:653-661`).
 
-Net: conflict resolution is a tested standalone utility; the live evaluator has no agenda, so
-salience has no runtime effect.
+Net: salience and agenda-group locking affect execution through the evaluators' own ordering; the
+`salience::Agenda`/`ConflictResolver` types remain a tested standalone utility that the live path
+does not use, so the two could drift.
 
 ## Chaining modes
 
@@ -460,11 +465,12 @@ HTTP endpoint forwards straight into it (`api/src/v1/simulation.rs:150-161`).
 6. **LEAPS aggregation never computes:** `recalculate` returns `None`
    (`leaps/mod.rs:133-137`), `execute_aggregations` discards its result (`:367-380`), and every
    fact is fed to every node (`:293-297`); only `compute_aggregation` (`:426-440`) works.
-7. **Salience/conflict resolution unwired:** no evaluator reads `Rule.salience`
-   (`engine/src/rules.rs:22`), `Agenda`/`ConflictResolver` have no production callers,
-   `ConflictStrategy`/`ConflictResolver` are duplicated
-   (`salience/agenda.rs:113-207` vs `salience/conflict_resolution.rs:9-116`), and
-   `no_loop`/`lock_on_active` (`rules.rs:24-26`) are never honoured.
+7. **~~Salience/conflict resolution unwired~~** (partly closed 2026-10-25): both evaluators now
+   order passes by `salience` and honour `lock_on_active` within an agenda group, and
+   `Rule::validate` rejects an out-of-range salience. Still open: `Agenda`/`ConflictResolver` have
+   no production callers, and `ConflictStrategy`/`ConflictResolver` remain duplicated
+   (`salience/agenda.rs:113-207` vs `salience/conflict_resolution.rs:9-116`), so the exported
+   conflict-resolution API and the live ordering can drift.
 8. **Chaining does not run:** `execute_forward` returns a default result
    (`engine/src/forward_chaining.rs:45-57`), `execute_backward` returns a fixed failure trace
    (`engine/src/backward_chaining.rs:80-93`), `Engine::execute_forward` returns

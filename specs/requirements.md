@@ -33,7 +33,8 @@ codewitness verify engine --requirements specs/requirements.md --in-place
 An execution evaluates the loaded rule set against working memory repeatedly until
 a full pass fires no rule. During one execution each rule fires at most once, so a
 rule that updates a fact cannot loop forever by re-matching its own update. The
-number of passes is bounded (default 100, overridable with the
+number of passes is bounded (default 1000; overridable per engine with
+`ExecutionEngine::set_config("max_iterations", …)` or globally with the
 `RRULES_MAX_CHAIN_ITERATIONS` environment variable); reaching the bound ends the
 execution normally rather than panicking. The result reports how many rules fired,
 which rule ids fired, and the post-execution working memory.
@@ -76,7 +77,12 @@ applied action.
 
 Rules with higher `salience` fire before rules with lower salience within one pass.
 Rules with equal salience fire in a deterministic order for a given rule set, so the
-same inputs produce the same result on every run.
+same inputs produce the same result on every run. Salience outside the documented
+range (-1000…1000) is rejected by `Rule::validate` instead of silently reordering
+the agenda. `lock_on_active` closes a rule's agenda group for the rest of the pass
+in which it fires, so the group's other rules are considered on the next pass;
+`no_loop` is satisfied by the once-per-rule fixpoint (a rule never fires twice in
+one execution).
 
 # ENG-007 Firing is recorded once per rule per execution
 

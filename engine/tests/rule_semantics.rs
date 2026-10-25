@@ -185,3 +185,120 @@ fn eng_003_retraction_is_idempotent_in_every_engine() {
         );
     }
 }
+
+/// ENG-006: a rule outside the documented salience range is rejected at
+/// validation time instead of silently reordering the agenda.
+#[test]
+fn eng_006_salience_range_is_validated() {
+    let mut too_high = Rule::new("r1", "r1");
+    too_high.salience = 1001;
+    assert!(
+        too_high.validate().is_err(),
+        "salience above 1000 must be rejected"
+    );
+
+    let mut too_low = Rule::new("r1", "r1");
+    too_low.salience = -1001;
+    assert!(
+        too_low.validate().is_err(),
+        "salience below -1000 must be rejected"
+    );
+
+    let mut in_range = Rule::new("r1", "r1");
+    in_range.salience = 1000;
+    assert!(in_range.validate().is_ok());
+}
+
+/// ENG-001: an engine's fixpoint cap can be set explicitly through
+/// `set_config`, and it overrides the environment variable.
+#[test]
+fn eng_001_fixpoint_cap_is_configurable() {
+    // Rules are considered in salience order inside a pass, so the dependent
+    // rule is placed first: in pass 1 the fact it needs does not exist yet, and
+    // only a second pass can fire it.
+    fn rules() -> RuleSet {
+        let mut set = RuleSet::new();
+
+        let mut dependent = Rule::new("r2", "r2");
+        dependent.salience = 10;
+        dependent.condition = Condition::Pattern {
+            fact_type: "flag".to_string(),
+            field: "ready".to_string(),
+            value: Value::Bool(true),
+            op: ComparisonOp::Eq,
+        };
+        dependent.actions = vec![Action::UpdateFact {
+            id: "scorecard".to_string(),
+            fields: HashMap::from([("score".to_string(), Expression::Literal(Value::Integer(9)))]),
+        }];
+        set.add_rule(dependent).expect("rule r2");
+
+        let mut insert = Rule::new("r1", "r1");
+        insert.actions = vec![Action::InsertFact {
+            fact_type: "flag".to_string(),
+            fields: HashMap::from([("ready".to_string(), Value::Bool(true))]),
+        }];
+        set.add_rule(insert).expect("rule r1");
+        set
+    }
+
+    // A one-pass cap stops before the dependent rule can match.
+    let mut capped = scorecard_engine("rete");
+    capped
+        .set_config("max_iterations", "1")
+        .expect("max_iterations is a known key");
+    assert!(
+        capped.set_config("not_a_key", "1").is_err(),
+        "unknown configuration keys must be reported, not ignored"
+    );
+    assert!(
+        capped.set_config("max_iterations", "0").is_err(),
+        "a zero cap is meaningless and must be rejected"
+    );
+    insert_scorecard(capped.as_mut(), 0);
+    capped.load_ruleset(&rules()).expect("load");
+    let capped_result = capped.execute();
+    let capped_score = score_of(capped.as_ref());
+
+    // The same rules under the default cap reach the fixpoint.
+    let mut unbounded = scorecard_engine("rete");
+    insert_scorecard(unbounded.as_mut(), 0);
+    unbounded.load_ruleset(&rules()).expect("load");
+    let unbounded_result = unbounded.execute();
+    let unbounded_score = score_of(unbounded.as_ref());
+
+    assert_eq!(capped_result.rules_fired, 1, "one pass fires r1 only");
+    assert_eq!(capped_score, Some(Value::Integer(0)));
+    assert_eq!(unbounded_result.rules_fired, 2, "two passes fire both rules");
+    assert_eq!(unbounded_score, Some(Value::Integer(9)));
+}
+
+/// ENG-006: `lock_on_active` closes the rule's agenda group for the rest of the
+/// pass, so the group's other rules wait instead of firing alongside it.
+#[test]
+fn eng_006_lock_on_active_serialises_an_agenda_group() {
+    for kind in ["rete", "treat", "leaps", "phreak"] {
+        let mut engine = scorecard_engine(kind);
+        insert_scorecard(engine.as_mut(), 0);
+
+        let mut set = RuleSet::new();
+        let mut first = set_score_rule("r1", 10, 1);
+        first.lock_on_active = true;
+        first.agenda_group = Some("pricing".to_string());
+        let mut second = set_score_rule("r2", 0, 2);
+        second.agenda_group = Some("pricing".to_string());
+        set.add_rule(first).expect("rule r1");
+        set.add_rule(second).expect("rule r2");
+        engine.load_ruleset(&set).expect("load");
+
+        let result = engine.execute();
+        // Both rules still fire, but r2 waits for the next pass, so it is the
+        // last writer and its value survives.
+        assert_eq!(result.rules_fired, 2, "{kind}: both rules fire");
+        assert_eq!(
+            score_of(engine.as_ref()),
+            Some(Value::Integer(2)),
+            "{kind}: the locked group's second rule runs after the first"
+        );
+    }
+}

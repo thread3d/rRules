@@ -195,6 +195,10 @@ pub struct TreatEngine {
     /// so the shared helper emits ordered `TraceEvent`s when true. Default
     /// `false` (SC-3 latency neutrality — off-by-default).
     collect_trace: bool,
+    /// Fixpoint cap for this engine. `None` defers to the
+    /// `RRULES_MAX_CHAIN_ITERATIONS` environment variable (default 1000);
+    /// `set_config("max_iterations", …)` sets it explicitly.
+    max_iterations: Option<usize>,
 }
 
 impl TreatEngine {
@@ -210,6 +214,7 @@ impl TreatEngine {
             cache_hits: 0,
             cache_misses: 0,
             collect_trace: false,
+            max_iterations: None,
         }
     }
 
@@ -225,6 +230,7 @@ impl TreatEngine {
             cache_hits: 0,
             cache_misses: 0,
             collect_trace: false,
+            max_iterations: None,
         }
     }
 
@@ -388,10 +394,11 @@ impl TreatEngine {
     pub fn execute_rules(&mut self) -> EngineResult {
         let start = std::time::Instant::now();
 
-        let (fired_set, _evaluated_set, trace) = crate::engine::direct_eval::direct_execute(
+        let (fired_set, _evaluated_set, trace) = crate::engine::direct_eval::direct_execute_with_limit(
             &self.rules,
             &mut self.working_facts,
             self.collect_trace,
+            self.max_iterations,
         );
 
         // Record per-fire metrics for parity with the placeholder loop.
@@ -439,6 +446,23 @@ impl ExecutionEngine for TreatEngine {
         // fact, so drop the cache entries rather than risk stale joins.
         self.network.cache.clear();
         Ok(true)
+    }
+
+    fn set_config(&mut self, key: &str, value: &str) -> Result<(), String> {
+        match key {
+            // Fixpoint cap for this engine, overriding `RRULES_MAX_CHAIN_ITERATIONS`.
+            "max_iterations" => {
+                let limit = value
+                    .parse::<usize>()
+                    .map_err(|_| format!("max_iterations must be a positive integer, got {value:?}"))?;
+                if limit == 0 {
+                    return Err("max_iterations must be at least 1".to_string());
+                }
+                self.max_iterations = Some(limit);
+                Ok(())
+            }
+            other => Err(format!("unknown configuration key: {other}")),
+        }
     }
 
     fn run(&mut self) -> usize {

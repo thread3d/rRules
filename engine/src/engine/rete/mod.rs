@@ -241,6 +241,10 @@ pub struct ReteEngine {
     /// Set via `set_collect_trace` before `execute()`. Default `false`
     /// (SC-3 latency neutrality — off-by-default).
     collect_trace: bool,
+    /// Fixpoint cap for this engine. `None` defers to the
+    /// `RRULES_MAX_CHAIN_ITERATIONS` environment variable (default 1000);
+    /// `set_config("max_iterations", …)` sets it explicitly.
+    max_iterations: Option<usize>,
 }
 
 impl ReteEngine {
@@ -254,6 +258,7 @@ impl ReteEngine {
             rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
             collect_trace: false,
+            max_iterations: None,
         }
     }
 
@@ -267,6 +272,7 @@ impl ReteEngine {
             rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
             collect_trace: false,
+            max_iterations: None,
         }
     }
 
@@ -374,11 +380,16 @@ impl ReteEngine {
     pub fn execute_rules(&mut self) -> EngineResult {
         let start = std::time::Instant::now();
 
-        // D-07: fixpoint cap — configurable via env var, default 1000.
-        let max_iter = std::env::var("RRULES_MAX_CHAIN_ITERATIONS")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(1000);
+        // D-07: fixpoint cap — explicit setting, then env var, then default 1000.
+        let max_iter = self
+            .max_iterations
+            .unwrap_or_else(|| {
+                std::env::var("RRULES_MAX_CHAIN_ITERATIONS")
+                    .ok()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(1000)
+            })
+            .max(1);
 
         let mut fired_set: HashSet<String> = HashSet::new();
         let mut evaluated_set: HashSet<String> = HashSet::new();
@@ -593,6 +604,23 @@ impl ExecutionEngine for ReteEngine {
         self.alpha_memory.remove(&fact.fact_type_id, fact_id);
         self.beta_memory.remove_fact(fact_id);
         Ok(true)
+    }
+
+    fn set_config(&mut self, key: &str, value: &str) -> Result<(), String> {
+        match key {
+            // Fixpoint cap for this engine, overriding `RRULES_MAX_CHAIN_ITERATIONS`.
+            "max_iterations" => {
+                let limit = value
+                    .parse::<usize>()
+                    .map_err(|_| format!("max_iterations must be a positive integer, got {value:?}"))?;
+                if limit == 0 {
+                    return Err("max_iterations must be at least 1".to_string());
+                }
+                self.max_iterations = Some(limit);
+                Ok(())
+            }
+            other => Err(format!("unknown configuration key: {other}")),
+        }
     }
 
     fn run(&mut self) -> usize {

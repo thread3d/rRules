@@ -405,8 +405,60 @@ impl ValidationPipeline {
     }
 
     /// Validates rule syntax only.
-    pub fn validate_rule_syntax(&self, _rule: &Rule) -> Result<(), String> {
+    ///
+    /// The condition's textual parts are checked for balanced parentheses, and
+    /// the rule's own fields through [`Rule::validate`]. An earlier version
+    /// returned `Ok(())` unconditionally, which made a syntax stage that could
+    /// never fail and a pipeline that reported success for any rule.
+    pub fn validate_rule_syntax(&self, rule: &Rule) -> Result<(), String> {
+        rule.validate().map_err(|error| error.to_string())?;
+
+        // Every pattern condition that carries a textual comparison operand is
+        // syntax-checked; a malformed expression is reported here rather than
+        // failing silently at evaluation time.
+        let syntax = SyntaxValidator::new();
+        let mut failures = Vec::new();
+        collect_condition_expressions(&rule.condition, &mut failures);
+
+        for expression in failures {
+            let result = syntax.validate_expression(&expression);
+            if !result.is_valid {
+                let reason = result
+                    .errors
+                    .first()
+                    .map(|error| error.message.clone())
+                    .unwrap_or_else(|| "invalid expression".to_string());
+                return Err(format!("syntax error in {expression:?}: {reason}"));
+            }
+        }
+
         Ok(())
+    }
+}
+
+/// Collect the expression strings a condition tree contains.
+///
+/// Rete conditions hold values, not source text, so the only strings that can be
+/// syntax-checked are pattern field names and any string literal used as an
+/// operand (an author may embed a parenthesised expression there).
+fn collect_condition_expressions(condition: &Condition, out: &mut Vec<String>) {
+    match condition {
+        Condition::Pattern { value, .. } => {
+            if let Value::String(text) = value {
+                out.push(text.clone());
+            }
+        }
+        Condition::And(conditions) | Condition::Or(conditions) => {
+            for child in conditions {
+                collect_condition_expressions(child, out);
+            }
+        }
+        Condition::Not(inner) => collect_condition_expressions(inner, out),
+        Condition::Compare { left, right, .. } => {
+            collect_condition_expressions(left, out);
+            collect_condition_expressions(right, out);
+        }
+        Condition::True | Condition::False => {}
     }
 }
 
