@@ -13,9 +13,9 @@
 // No dependencies: Node 18+ has fetch, Node 22 has WebSocket.
 
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const args = process.argv.slice(2)
 const arg = (name, fallback) => {
@@ -120,6 +120,14 @@ class Page {
   }
 }
 
+/** Kill the browser and wait for it to exit, so its profile can be removed. */
+async function stopChromium(child, timeoutMs = 5_000) {
+  if (!child || child.exitCode !== null) return
+  const exited = new Promise((resolve) => child.once('exit', resolve))
+  child.kill('SIGKILL')
+  await Promise.race([exited, sleep(timeoutMs)])
+}
+
 function launchChromium(profile) {
   const child = spawn(
     CHROME,
@@ -147,7 +155,14 @@ const report = (ok, label, detail) => {
   if (!ok) failures.push(`${label}: ${detail}`)
 }
 
-const profile = mkdtempSync(join(tmpdir(), 'rrules-e2e-'))
+// The browser profile lives under the repository's build directory rather than the
+// system temp dir: it is gitignored, and a profile Chromium has not finished writing
+// cannot escape into `/tmp` on every run.
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const profileRoot = process.env.E2E_PROFILE_DIR || join(repoRoot, 'target', 'e2e')
+mkdirSync(profileRoot, { recursive: true })
+const profile = join(profileRoot, `profile-${process.pid}`)
+rmSync(profile, { recursive: true, force: true })
 const chromium = launchChromium(profile)
 let page
 
@@ -224,8 +239,15 @@ try {
   report(false, 'harness', error.message)
 } finally {
   page?.socket?.close?.()
-  chromium.kill('SIGKILL')
-  rmSync(profile, { recursive: true, force: true })
+  // Chromium keeps writing to its profile for a moment after being killed; deleting
+  // it first can fail with ENOTEMPTY, which is not a failing check. Wait for the
+  // process, and treat a profile that will not go away as untidy rather than fatal.
+  await stopChromium(chromium)
+  try {
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  } catch (error) {
+    console.warn(`could not remove the browser profile ${profile}: ${error.code ?? error}`)
+  }
 }
 
 console.log(`\n${failures.length ? `${failures.length} failure(s)` : 'all checks passed'}`)
