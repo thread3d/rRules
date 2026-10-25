@@ -35,16 +35,22 @@ fn score_scope(score: i64) -> Scope {
     s
 }
 
-/// Test 1: PRIORITY selects rule with highest allowedValues position.
-/// Score=85 matches both rules; second rule's output "High" has position 2 in ["Low","Medium","High"].
+/// Test 1: PRIORITY selects the output that appears **first** in the output's
+/// allowed values.
+///
+/// DMN 1.5 §8.2.12 ranks the enumeration from highest to lowest priority, so the
+/// earliest entry wins: with `["Low", "Medium", "High"]`, a match producing "Low"
+/// beats one producing "High". This assertion used to expect "High" because the
+/// implementation compared positions backwards; OMG DMN TCK `0007-simpletable-P2`
+/// settles the direction (`"Approved", "Declined"` → "Approved").
 #[test]
-fn test_priority_selects_highest_allowed() {
+fn test_priority_selects_first_allowed() {
     let (model, cache) = parse_dmn_with_cache(DMN_HIT_POLICY_TEST).expect("fixture parses");
 
     if let Some(dt) = extract_table(&model, "_dec_priority") {
         let scope = score_scope(85);
         let result = DecisionTableEvaluator::evaluate(dt, &scope, &cache).unwrap();
-        assert_eq!(result, Value::String("High".into()));
+        assert_eq!(result, Value::String("Low".into()));
     } else {
         panic!("expected _dec_priority decision in fixture");
     }

@@ -879,19 +879,19 @@ outputs, exact structural equality) but its outcome is invisible to the pass/fai
 
 ## 10. Known gaps
 
-Implementation defects, stubs and spec/code disagreements. All verified by reading the cited
-lines.
+Implementation defects, stubs and spec/code disagreements. Entries closed on 2026-10-25 are struck
+through with what replaced them; the rest are current.
 
 | # | Gap | Evidence |
 |---|---|---|
-| 1 | Unary tests are evaluated in an **empty scope**, so a cell like `> threshold` can never resolve `threshold`: both the `?`-left and `?`-right arms call `evaluate(rhs, &Scope::empty())` | `engine/src/dmn/feel/eval.rs:1438`, `1385`; also `eval_in_with_ast` at `eval.rs:1394`; caller passes no scope at `engine/src/dmn/decision_table.rs:132` |
-| 2 | `eval_in_unary_test` has arms only for `Or`, `?`-comparisons and `Literal(Bool(true))`; bare literals, `Neg` (`not(...)`) and `Range` (`[1..10]`) fall through to `None`, so those cells **never fire** | `engine/src/dmn/feel/eval.rs:1423-1458` (`_ => None` at `1398`) |
-| 3 | `week of year` always returns 1: `iso_week_num` strips `s[..4]` from `"%G-%V"` output and parses the remaining `"-WW"` as `u32`, which always fails → `unwrap_or(1)` | `engine/src/dmn/feel/builtins.rs:1468-1478` |
-| 4 | Every output clause of a multi-output decision receives the same packed result value (admitted "current simplified semantics"); output keys here use `name` only while the table packer uses `label`→`name`→`output_i` | `engine/src/dmn/evaluator/mod.rs:354-369` vs `engine/src/dmn/decision_table.rs:513-522` |
-| 5 | `COLLECT` reads only the first output column of each matching rule, silently discarding the rest, and `min`/`max` aggregators reject `Integer` outputs | `engine/src/dmn/decision_table.rs:322-327`, `420`, `443` |
-| 6 | TCK sweep swallows evaluator and round-trip failures, so the pass/fail gate cannot see a wrong evaluation | `engine/tests/tck_sweep.rs:149-159`, `129-131` |
-| 7 | TCK typed-value support omits `xsd:time`, `xsd:dateTime`, `xsd:duration`, and `deep_equal` has no temporal arms | `engine/tests/tck_values.rs:384-420`, `425-449` |
-| 8 | `decimal(num, scale)` accepts `Value::Number` only, so `decimal(5, 2)` returns null; its null checks are dead code after the match | `engine/src/dmn/feel/builtins.rs:266-281` |
+| 1 | ~~Unary tests are evaluated in an **empty scope**~~ — **closed 2026-10-25**: `eval_in_unary_test_with_scope` binds `?` to the input and resolves names in the caller's scope, which the decision table passes | `engine/src/dmn/feel/eval.rs` (`eval_in_unary_test_with_scope`), `engine/src/dmn/decision_table.rs:132` |
+| 2 | ~~`eval_in_unary_test` supports only `Or`, `?`-comparisons and the `-` sentinel~~ — **closed 2026-10-25**: ranges (`[1..10]`, `(1..10]`), comma lists, bare literals and `not(...)` all evaluate; a null result does not match | `engine/src/dmn/feel/eval.rs` (`range_contains`) |
+| 3 | ~~`week of year` always returns 1~~ — **closed 2026-10-25**: it formats the ISO week with `%V` and parses it | `engine/src/dmn/feel/builtins.rs` (`iso_week_num`) |
+| 4 | ~~Multi-output decisions broadcast one packed value to every output clause~~ — **closed 2026-10-25**: `project_output` projects each clause out of the context (or out of each element of a rule-order list) | `engine/src/dmn/evaluator/mod.rs` (`project_output`) |
+| 5 | ~~`COLLECT` reads only the first output column~~ — **closed 2026-10-25**: a multi-output COLLECT returns one context per matching rule; single-output tables aggregate as before | `engine/src/dmn/decision_table.rs` (`handle_collect`) |
+| 6 | ~~TCK sweep swallows evaluator and round-trip failures~~ — **closed 2026-10-25**: every layer outcome is recorded and printed, and the suite gates on a documented 143/31 baseline | `engine/tests/tck_sweep.rs` |
+| 7 | ~~TCK typed-value support omits temporal types and `deep_equal` has no temporal arm~~ — **closed 2026-10-25**: a temporal result compares against the TCK's ISO 8601 string (and `xsd:date` parses directly) | `engine/tests/tck_values.rs` (`is_temporal`, `numbers_close`) |
+| 8 | ~~`decimal(num, scale)` accepts `Value::Number` only~~ — the scale argument is now taken from either numeric carrier and clamped to `Decimal::MAX_SCALE`; a null/negative/non-integral scale yields null. A `String` first argument is still null, which is the spec's "no implicit conversion" rule | `engine/src/dmn/feel/builtins.rs` (`builtin_decimal`) |
 | 9 | `context put` documents key coercion but returns `Null` for a non-string key | `engine/src/dmn/feel/builtins.rs:1601-1607` |
 | 10 | `get entries` doc says it returns `"key:value"` strings; the code returns `{key, value}` contexts | `engine/src/dmn/feel/builtins.rs:1662-1689` |
 | 11 | `mode` returns a bare scalar when there is exactly one mode, contradicting the "per DMN spec" comment (the spec returns a list of modes) | `engine/src/dmn/feel/builtins.rs:1335-1340` |
@@ -941,3 +941,17 @@ lines.
 | 55 | An expected value with an unrecognised element shape becomes `TckNode::Null` and then compares equal to a null result — a silent pass, contrary to the module doc's "visible mismatch" claim | `engine/tests/tck_values.rs:331`, `427`, `10-12` |
 | 56 | `errorResult` is captured per `resultNode` but consumed per **case**, so a case mixing normal and error result nodes is judged all-null | `engine/tests/tck_values.rs:249-258` |
 | 57 | `fail_result`/`skip_result` hardcode `TestLayer::ParserOnly`, so every reported failure is attributed to the parser layer regardless of origin | `engine/tests/tck_sweep.rs:539-544` |
+
+### Fixture integrity (fixed 2026-10-25)
+
+14 of the 51 vendored vectors shipped a `*-test-*.xml` that was a byte-for-byte copy of the
+`.dmn` model, so the sweep found no `<testCases>` and *skipped* the evaluator layer for them —
+which is how a suite can report "zero failures" over vectors it never evaluated. The real upstream
+test cases were re-vendored from `github.com/dmn-tck/tck` (all 14 resolved, from
+`compliance-level-2` or `compliance-level-3`), the skip count is now zero, and the evaluator layer
+runs for all 51 vectors.
+
+Two further decision-table defects were found and fixed while doing it: `PRIORITY` compared
+enumeration positions backwards (the *lowest*-priority output won), and an enumeration written the
+way the TCK writes one (`"Approved", "Declined"` as unary-test text) was rejected outright instead
+of being parsed as an ordered list.

@@ -128,8 +128,8 @@ fn tck_sweep() {
     // is green at the baseline and fails on any regression: one more failing
     // layer, or one fewer passing layer than the recorded gap set. Closing a gap
     // means raising these numbers, deliberately.
-    const BASELINE_PASSED: usize = 136;
-    const BASELINE_FAILED: usize = 24;
+    const BASELINE_PASSED: usize = 143;
+    const BASELINE_FAILED: usize = 31;
 
     if results.passed < BASELINE_PASSED || results.failed > BASELINE_FAILED {
         eprintln!(

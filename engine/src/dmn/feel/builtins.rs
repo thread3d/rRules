@@ -917,8 +917,12 @@ fn built_in_mean(args: &[Value]) -> Value {
     if args.is_empty() || matches!(args[0], Value::Null) {
         return Value::Null;
     }
-    let elems = match &args[0] {
-        Value::Array(elems) => elems.clone(),
+    // `mean(list)` is the specification's form; the variadic `mean(a, b, c)`
+    // form is common in models (and in TCK `0012-list-functions`), so several
+    // numeric arguments are treated as the list.
+    let elems = match (&args[0], args.len()) {
+        (Value::Array(elems), _) => elems.clone(),
+        (_, count) if count > 1 => args.to_vec(),
         _ => return Value::Null,
     };
     if elems.is_empty() {
@@ -1003,36 +1007,59 @@ fn built_in_any(args: &[Value]) -> Value {
 
 /// `sublist(list, start)` or `sublist(list, start, length)` — extract sublist. Null propagates.
 fn built_in_sublist(args: &[Value]) -> Value {
-    if args.len() < 2 {
+    if args.is_empty() || matches!(args[0], Value::Null) {
         return Value::Null;
     }
     let list = match &args[0] {
         Value::Array(elems) => elems.clone(),
         _ => return Value::Null,
     };
-    let start = match &args[1] {
-        Value::Integer(n) => *n as usize,
-        Value::Number(d) => d.to_i64().unwrap_or(0) as usize,
-        _ => return Value::Null,
-    };
-    if args.is_empty() || matches!(args[0], Value::Null) || matches!(args[1], Value::Null) {
+
+    // `start` is 1-based and may be negative, counting from the end (`-1` is the
+    // last element); `length` is optional and, when omitted, runs to the end of
+    // the list.
+    let Some(start) = args.get(1).and_then(integer_argument) else {
         return Value::Null;
-    }
-    let start = if start == 0 { 1 } else { start }; // FEEL 1-based
-    let offset = (start - 1).min(list.len());
-    if args.len() >= 3 {
-        let len = match &args[2] {
-            Value::Integer(n) => *n as usize,
-            Value::Number(d) => d.to_i64().unwrap_or(0) as usize,
+    };
+    let length = match args.get(2) {
+        None => None,
+        Some(Value::Null) => return Value::Null,
+        Some(value) => match integer_argument(value) {
+            Some(length) if length >= 0 => Some(length as usize),
             _ => return Value::Null,
-        };
-        if args.is_empty() || matches!(args[2], Value::Null) {
-            return Value::Null;
-        }
-        let end = (offset + len).min(list.len());
-        return Value::Array(list[offset..end].to_vec());
+        },
+    };
+
+    let count = list.len() as i64;
+    let first_index = if start >= 0 {
+        // 1-based: start 0 and start 1 both address the first element.
+        (start.max(1) - 1).min(count)
+    } else {
+        // Negative: -1 is the last element, -2 the one before it.
+        (count + start).max(0)
+    } as usize;
+
+    let end_index = match length {
+        Some(length) => (first_index + length).min(list.len()),
+        None => list.len(),
+    };
+
+    if first_index >= list.len() || first_index > end_index {
+        return Value::Array(Vec::new());
     }
-    Value::Array(list[offset..].to_vec())
+    Value::Array(list[first_index..end_index].to_vec())
+}
+
+/// Read an integer-valued argument (`Integer`, or a `Number` with no fraction).
+fn integer_argument(value: &Value) -> Option<i64> {
+    match value {
+        Value::Integer(i) => Some(*i),
+        Value::Number(d) => {
+            use rust_decimal::prelude::ToPrimitive;
+            d.to_i64()
+        }
+        _ => None,
+    }
 }
 
 /// `append(list, value)` — append a single value to the end of a list.
@@ -1044,10 +1071,13 @@ fn built_in_append(args: &[Value]) -> Value {
         Value::Array(elems) => elems.clone(),
         _ => return Value::Null,
     };
-    if args.is_empty() || matches!(args[0], Value::Null) || matches!(args[1], Value::Null) {
+    // `append(list, item, …)` appends every trailing argument (the TCK's
+    // `append(list, a, b)` form); the single-item case is the common one.
+    let items = &args[1..];
+    if items.iter().any(|item| matches!(item, Value::Null)) {
         return Value::Null;
     }
-    list.push(args[1].clone());
+    list.extend(items.iter().cloned());
     Value::Array(list)
 }
 

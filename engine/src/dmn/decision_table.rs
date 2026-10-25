@@ -221,16 +221,18 @@ impl DecisionTableEvaluator {
         // Get the allowedValues enumeration from the first output clause.
         let enum_order = Self::get_allowed_values_order(table)?;
 
-        // Find each matching rule's position in the enumeration.
+        // PRIORITY means "the output that appears FIRST in the output's allowed
+        // values wins", so the lowest enumeration position is the winner. (The
+        // comparison was inverted, which made the *lowest*-priority value win —
+        // a P2 table returned "Declined" where "Approved" was expected.)
         let mut best_idx: Option<usize> = None;
-        let mut best_pos: i64 = -1;
+        let mut best_pos = i64::MAX;
 
         for (match_idx, (_rule_idx, outputs)) in matches.iter().enumerate() {
             if let Some(first_output) = outputs.first() {
-                // Find position of this output value in the enumeration.
                 if let Some(pos) = enum_order.iter().position(|v| eval::feel_equals_public(v, first_output) == Some(true)) {
                     let pos_i64 = pos as i64;
-                    if best_idx.is_none() || pos_i64 > best_pos {
+                    if pos_i64 < best_pos {
                         best_idx = Some(match_idx);
                         best_pos = pos_i64;
                     }
@@ -318,7 +320,19 @@ impl DecisionTableEvaluator {
             return Ok(Value::Array(Vec::new()));
         }
 
-        // Extract output values from each matching rule (first output column).
+        // A multi-output COLLECT table answers with one context per matching
+        // rule: the aggregator applies to a single output column, so it cannot
+        // be used here (DMN 1.5 §8.2.12). An earlier version kept only the first
+        // output column and silently discarded the rest.
+        if table.output_clauses.len() > 1 {
+            let rows: Vec<Value> = matches
+                .iter()
+                .map(|(_, outputs)| Self::pack_values_as_context(outputs, table))
+                .collect();
+            return Ok(Value::Array(rows));
+        }
+
+        // Single-output table: collect the values, then aggregate if asked.
         let mut values: Vec<Value> = Vec::new();
         for (_, outputs) in matches {
             if let Some(first_output) = outputs.first() {
@@ -326,12 +340,10 @@ impl DecisionTableEvaluator {
             }
         }
 
-        // Apply aggregator if present.
         if let Some(aggregator) = &table.aggregation {
             return Self::apply_aggregator(aggregator, &values);
         }
 
-        // No aggregation: return raw list.
         Ok(Value::Array(values))
     }
 
@@ -350,12 +362,27 @@ impl DecisionTableEvaluator {
     fn parse_allowed_values(allowed: &AllowedValues) -> Result<Vec<Value>, DecisionTableError> {
         let mut values = Vec::new();
         match allowed {
-            AllowedValues::UnaryTests(_text) => {
-                // For PRIORITY/OUTPUT ORDER, the allowedValues is an Enumeration, not UnaryTests.
-                // If it's UnaryTests, we can't determine enumeration order — return error.
-                Err(DecisionTableError::Other(
-                    "allowedValues must be an Enumeration for PRIORITY/OUTPUT ORDER".into(),
-                ))
+            AllowedValues::UnaryTests(text) => {
+                // The TCK writes an enumeration as a unary-test-shaped text
+                // (`"Approved", "Declined"`), so parse each comma-separated
+                // fragment as a FEEL expression and take its value, in order.
+                // A fragment that is a constraint rather than a literal (an
+                // interval, say) yields no enumeration: the caller then falls
+                // back to natural ordering instead of failing the whole table.
+                let mut values = Vec::new();
+                for fragment in crate::dmn::feel::types::split_top_level_commas(text) {
+                    let fragment = fragment.trim();
+                    if fragment.is_empty() {
+                        continue;
+                    }
+                    let cache = FeelAstCache::new();
+                    let ast = cache.get_or_parse(fragment, ParseEntry::Expression);
+                    match eval::evaluate(&ast, &Scope::empty()) {
+                        Value::Null => return Ok(Vec::new()),
+                        value => values.push(value),
+                    }
+                }
+                Ok(values)
             }
             AllowedValues::Enumeration(items) => {
                 for item in items {

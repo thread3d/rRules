@@ -465,29 +465,42 @@ fn parse_context_entries(body: &str) -> Option<Vec<(String, FeelType)>> {
     Some(entries)
 }
 
-/// Split `s` on top-level commas, respecting `<` / `>` nesting depth so that
-/// commas inside a nested `list<...>` / `context<...>` are not split.
-fn split_top_level_commas(s: &str) -> Vec<String> {
+/// Split `s` on top-level commas.
+///
+/// "Top level" means outside a quoted string and outside any bracket pair, so a
+/// type reference (`list<context<a: number>>`), a list literal (`[1, 2]`) and a
+/// quoted value (`"a,b"`) survive intact. Used by the type-reference parser and
+/// by decision-table enumeration parsing, which must not split
+/// `"Approved", "Declined"` on the comma inside a value.
+pub(crate) fn split_top_level_commas(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut depth = 0i32;
+    let mut quote: Option<char> = None;
     let mut buf = String::new();
     for c in s.chars() {
-        match c {
-            '<' => {
+        match (quote, c) {
+            (Some(q), c) if c == q => {
+                quote = None;
+                buf.push(c);
+            }
+            (Some(_), c) => buf.push(c),
+            (None, '"' | '\'') => {
+                quote = Some(c);
+                buf.push(c);
+            }
+            (None, '<' | '[' | '(' | '{') => {
                 depth += 1;
                 buf.push(c);
             }
-            '>' => {
+            (None, '>' | ']' | ')' | '}') => {
                 depth -= 1;
                 buf.push(c);
             }
-            ',' if depth == 0 => {
-                out.push(std::mem::take(&mut buf));
-            }
-            other => buf.push(other),
+            (None, ',') if depth == 0 => out.push(std::mem::take(&mut buf)),
+            (None, other) => buf.push(other),
         }
     }
-    if !buf.is_empty() {
+    if !buf.trim().is_empty() {
         out.push(buf);
     }
     out
