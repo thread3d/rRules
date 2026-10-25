@@ -524,6 +524,7 @@ fn is_temporal(value: &Value) -> bool {
     matches!(
         value,
         Value::Date(_)
+            | Value::DateTime(_)
             | Value::Time(_)
             | Value::DateTimeTz(_)
             | Value::DaysTimeDuration(_)

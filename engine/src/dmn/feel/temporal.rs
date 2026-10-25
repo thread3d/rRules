@@ -59,6 +59,8 @@ pub enum TimeValue {
     Offset(chrono::DateTime<chrono::FixedOffset>),
     /// Local time, no offset.
     Local(chrono::NaiveTime),
+    /// Time with an IANA zone (`10:15:00@Australia/Melbourne`).
+    Iana(chrono::NaiveTime, chrono_tz::Tz),
 }
 
 /// FEEL `date and time` — fixed-offset, IANA-zone, or local.
@@ -201,7 +203,14 @@ pub fn parse_at_literal(s: &str) -> Option<Value> {
     }
     // Date-time? contains 'T' (only the date-time form has 'T').
     if s.contains('T') {
-        return parse_date_time(s).map(Value::DateTimeTz);
+        // A date-time without an offset is a plain date-time (`Value::DateTime`);
+        // only an offset or IANA zone needs the zoned carrier. Representing it
+        // consistently keeps `date and time` values comparable with each other
+        // and with what the test harness produces for `xsd:dateTime`.
+        return match parse_date_time(s)? {
+            DateTimeValue::Local(naive) => Some(Value::DateTime(naive)),
+            zoned => Some(Value::DateTimeTz(zoned)),
+        };
     }
     // Date or time? disambiguate by the first separator:
     //  - ':' before '-' (or '-' absent) → time (HH:mm:ss[+/-HH:mm])
@@ -416,6 +425,13 @@ fn parse_time_of_day(text: &str) -> Option<NaiveTime> {
 }
 
 fn parse_time(s: &str) -> Option<TimeValue> {
+    // `HH:MM:SS@Zone` — a time that carries an IANA zone.
+    if let Some(at) = s.find('@') {
+        let (clock, zone) = s.split_at(at);
+        let naive = parse_time_of_day(clock)?;
+        let zone: chrono_tz::Tz = zone[1..].parse().ok()?;
+        return Some(TimeValue::Iana(naive, zone));
+    }
     // `Z` is the UTC designator: `09:30:00Z` is `09:30:00+00:00`.
     if let Some(without_z) = s.strip_suffix('Z').or_else(|| s.strip_suffix('z')) {
         let naive = parse_time_of_day(without_z)?;
@@ -441,7 +457,37 @@ fn parse_time(s: &str) -> Option<TimeValue> {
 
 /// Parse a date-time literal (`YYYY-MM-DDTHH:mm:ss` + optional `@Zone/Name` or
 /// `+HH:mm` suffix) into a [`DateTimeValue`].
+/// Normalise the ISO 8601 end-of-day form `T24:00:00` to the next midnight.
+fn normalise_end_of_day(text: &str) -> Option<String> {
+    let marker = "T24:00:00";
+    let index = text.find(marker)?;
+    let (prefix, rest) = text.split_at(index);
+    // Anything after the seconds (an offset or zone) is preserved.
+    let suffix = &rest[marker.len()..];
+    let date = chrono::NaiveDate::parse_from_str(prefix, "%Y-%m-%d").ok()?;
+    let next = date.succ_opt()?;
+    Some(format!("{}T00:00:00{}", next.format("%Y-%m-%d"), suffix))
+}
+
 fn parse_date_time(s: &str) -> Option<DateTimeValue> {
+    // The UTC designator: `2021-01-02T00:00:00Z` is `+00:00`.
+    if let Some(without_z) = s.strip_suffix('Z').or_else(|| s.strip_suffix('z')) {
+        let naive = NaiveDateTime::parse_from_str(without_z, "%Y-%m-%dT%H:%M:%S")
+            .or_else(|_| NaiveDateTime::parse_from_str(without_z, "%Y-%m-%dT%H:%M:%S%.f"))
+            .ok()?;
+        let utc = chrono::FixedOffset::east_opt(0)?;
+        return utc
+            .from_local_datetime(&naive)
+            .single()
+            .map(DateTimeValue::Fixed);
+    }
+    let normalised;
+    let s = if s.contains("T24:00:00") {
+        normalised = normalise_end_of_day(s)?;
+        normalised.as_str()
+    } else {
+        s
+    };
     // IANA zone suffix? split at '@' (the FEEL @Zone/Name marker).
     if let Some(at_pos) = s.find('@') {
         let (dt_part, zone_part) = s.split_at(at_pos);
@@ -529,6 +575,7 @@ fn format_time_value(tv: &TimeValue) -> String {
         TimeValue::Offset(dt) => {
             format!("{}{}", clock(dt.time()), format_fixed_offset(dt.offset()))
         }
+        TimeValue::Iana(time, zone) => format!("{}@{}", clock(*time), zone.name()),
     }
 }
 

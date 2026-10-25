@@ -2,7 +2,7 @@
 
 ## Summary (re-measured 2026-10-25)
 
-**Layer results: 167 passed, 7 failed, 0 skipped across 51 vectors.**
+**Layer results: 168 passed, 6 failed, 0 skipped across 51 vectors.**
 
 The v8.0 close-out reported "51/51 evaluator coverage, 123 layer passes, zero
 failures". That figure was not measurable, for three independent reasons:
@@ -73,9 +73,8 @@ those constants ever disagree.
 |---|--------|-------|----------|
 | 1 | `0021-singleton-list` | evaluator | 0/1 test cases matched (1 failed): 001 / decision5: got {"decision5": Null}, expected String("BOB") |
 | 2 | `0085-decision-services` | evaluator | 15/18 test cases matched (3 failed): 002_a: expected null (errorResult) but produced {"decision_002": String("foo bar")}; 005: expected null (errorResult) but produced {"decision_005_1": String("foo")}; 007: expected null (errorResult) but produced {"decision_007_1": Bool(false)} |
-| 3 | `0100-arithmetic` | evaluator | 958/1087 test cases matched (129 failed): multiply_lhs_number_by_rhs_dtDuration_002 / multiply_lhs_number_by_rhs_dtDuration_002: got {"multiply_lhs_number_by_rhs_dtDuration_002": Null}, expected DaysTimeDuration(TimeDelta { secs: -864000, nanos: 0 }); multiply_lhs_number_by_rhs_dtDuration_003 / multiply_lhs_number_by_rhs_dtDuration_003: got {"multiply_lhs_number_by_rhs_dtDuration_003": Null}, expected DaysTimeDuration(TimeDelta { secs: 864000, nanos: 0 }); multiply_lhs_dtDuration_by_rhs_number_002 / multiply_lhs_dtDuration_by_rhs_number_002: got {"multiply_lhs_dtDuration_by_rhs_number_002": Null}, expected DaysTimeDuration(TimeDelta { secs: -864000, nanos: 0 }) |
-| 4 | `1141` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
-| 5 | `1142` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
-| 6 | `1143` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
-| 7 | `1144` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 3 | `1141` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 4 | `1142` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 5 | `1143` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 6 | `1144` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
 <!-- END GENERATED LEDGER -->

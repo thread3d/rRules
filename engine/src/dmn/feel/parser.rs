@@ -1356,7 +1356,9 @@ impl Parser {
             Token::Minus => Some((BinOpKind::Sub, 40, false)),
             Token::Star => Some((BinOpKind::Mul, 50, false)),
             Token::Slash => Some((BinOpKind::Div, 50, false)),
-            Token::DoubleStar => Some((BinOpKind::Pow, 60, true)), // right-assoc (Pitfall 2)
+            // `**` is left-associative here: the TCK evaluates `3 ** 4 ** 5` as
+            // `(3 ** 4) ** 5` (`0100-arithmetic`, `exponent_003`).
+            Token::DoubleStar => Some((BinOpKind::Pow, 60, false)),
             Token::Eq => Some((BinOpKind::Eq, 30, false)),
             Token::NotEq => Some((BinOpKind::NotEq, 30, false)),
             Token::Lt => Some((BinOpKind::Lt, 30, false)),

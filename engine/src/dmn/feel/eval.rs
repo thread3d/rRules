@@ -137,6 +137,33 @@ fn path_nav(v: Value, name: &str) -> Value {
 // unit tests (dmn12_/truth_tables) and are wired into `evaluate`'s dispatch
 // in Task 2 GREEN. The non-test build has no caller until that dispatch
 // lands, so the lint is expected and transient.
+/// True for the values that denote a calendar point: a date, a naive date-time,
+/// or a zoned date-time.
+fn is_date_like(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Date(_) | Value::DateTime(_) | Value::DateTimeTz(_)
+    )
+}
+
+/// The instant a calendar-point value denotes, normalised to UTC.
+fn date_like_instant(value: &Value) -> Option<chrono::NaiveDateTime> {
+    use crate::dmn::feel::temporal::DateTimeValue;
+    match value {
+        Value::Date(date) => Some(date.and_hms_opt(0, 0, 0)?),
+        Value::DateTime(naive) => Some(*naive),
+        Value::DateTimeTz(DateTimeValue::Fixed(zoned)) => Some(zoned.naive_utc()),
+        Value::DateTimeTz(DateTimeValue::Iana(zoned)) => Some(zoned.naive_utc()),
+        Value::DateTimeTz(DateTimeValue::Local(naive)) => Some(*naive),
+        _ => None,
+    }
+}
+
+/// Order two calendar-point values by the instant they denote.
+fn compare_date_like(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
+    Some(date_like_instant(a)?.cmp(&date_like_instant(b)?))
+}
+
 /// Equality of two ranges: same bounds, same inclusivity.
 fn ranges_equal(x: &FeelRange, y: &FeelRange) -> Option<bool> {
     // The TCK distinguishes `(=10)` from `[10..10]` (`range_010`), so the
@@ -193,6 +220,40 @@ fn date_times_equal(
     }
 }
 
+/// The difference between two times, as a days-time duration.
+///
+/// A zoned time and an offset-less one are not comparable; two zoned times
+/// compare as the instants they denote on a reference day.
+fn time_difference(
+    left: &crate::dmn::feel::temporal::TimeValue,
+    right: &crate::dmn::feel::temporal::TimeValue,
+) -> Option<Value> {
+    use crate::dmn::feel::temporal::TimeValue;
+    let seconds = |time: &TimeValue| -> Option<i64> {
+        Some(match time {
+            TimeValue::Fixed(naive) | TimeValue::Local(naive) => {
+                chrono::Timelike::num_seconds_from_midnight(naive) as i64
+            }
+            TimeValue::Offset(zoned) => zoned.timestamp(),
+            TimeValue::Iana(naive, zone) => {
+                // Resolve on a fixed reference date so the zone offset applies.
+                use chrono::TimeZone;
+                let date = chrono::NaiveDate::from_ymd_opt(1970, 1, 1)?;
+                zone.from_local_datetime(&date.and_time(*naive))
+                    .single()?
+                    .timestamp()
+            }
+        })
+    };
+    let zoned = |time: &TimeValue| matches!(time, TimeValue::Offset(_) | TimeValue::Iana(_, _));
+    if zoned(left) != zoned(right) {
+        return None;
+    }
+    Some(Value::DaysTimeDuration(chrono::TimeDelta::seconds(
+        seconds(left)? - seconds(right)?,
+    )))
+}
+
 /// Equality of two FEEL times.
 ///
 /// A time with a UTC offset denotes an instant, so `10:30:00+01:00` equals
@@ -213,6 +274,15 @@ fn times_equal(
     // `10:30:00.0002` (`0068-feel-equality`, `time_005`).
     match (left, right) {
         (TimeValue::Offset(a), TimeValue::Offset(b)) => a.timestamp() == b.timestamp(),
+        // Two zoned times are equal when the clocks and zones match.
+        (TimeValue::Iana(a, zone_a), TimeValue::Iana(b, zone_b)) => {
+            zone_a == zone_b && seconds_of_day(a) == seconds_of_day(b)
+        }
+        (TimeValue::Iana(a, _), other) | (other, TimeValue::Iana(a, _)) => match other {
+            TimeValue::Fixed(b) | TimeValue::Local(b) => seconds_of_day(a) == seconds_of_day(b),
+            TimeValue::Offset(fixed) => seconds_of_day(a) == seconds_of_day(&fixed.time()),
+            TimeValue::Iana(_, _) => false,
+        },
         (TimeValue::Fixed(a), TimeValue::Fixed(b))
         | (TimeValue::Local(a), TimeValue::Local(b))
         | (TimeValue::Fixed(a), TimeValue::Local(b))
@@ -276,6 +346,9 @@ pub(crate) mod cmp {
             (Value::DateTimeTz(x), Value::DateTimeTz(y)) => Some(super::date_times_equal(x, y)),
             // A naive date-time compares by its wall clock against an offset one.
             (Value::DateTime(x), Value::DateTime(y)) => Some(x == y),
+            (a, b) if super::is_date_like(a) && super::is_date_like(b) => {
+                Some(super::compare_date_like(a, b) == Some(std::cmp::Ordering::Equal))
+            }
             (Value::DaysTimeDuration(x), Value::DaysTimeDuration(y)) => Some(x == y),
             (Value::YearsMonthsDuration(x), Value::YearsMonthsDuration(y)) => Some(x == y),
             (Value::Range(x), Value::Range(y)) => Some(super::ranges_equal(x, y)).flatten(),
@@ -314,6 +387,11 @@ pub(crate) mod cmp {
             (Value::Date(x), Value::Date(y)) => Some(x.cmp(y)),
             (Value::Time(x), Value::Time(y)) => time_cmp(x, y),
             (Value::DateTimeTz(x), Value::DateTimeTz(y)) => datetime_cmp(x, y),
+            // The three carriers of a date-time (and a date at midnight) order
+            // by the instant they denote (`0071-feel-between`).
+            (a, b) if super::is_date_like(a) && super::is_date_like(b) => {
+                super::compare_date_like(a, b)
+            }
             (Value::DaysTimeDuration(x), Value::DaysTimeDuration(y)) => Some(x.cmp(y)),
             (Value::YearsMonthsDuration(x), Value::YearsMonthsDuration(y)) => {
                 Some(x.months.cmp(&y.months))
@@ -1069,6 +1147,44 @@ pub struct ContextCycleError {
 /// `duration("P2D") / 2`); returns `None` when neither operand is a duration, so
 /// the caller falls back to numeric arithmetic. `seconds` is set for a
 /// days-and-time duration and `months` for a years-and-months duration.
+/// `duration / duration` — the ratio of two durations of the same kind.
+///
+/// `duration("P2D") / duration("P1D")` is `2` (`0100-arithmetic`).
+fn duration_ratio(left: &Value, right: &Value) -> Option<Value> {
+    match (left, right) {
+        (Value::DaysTimeDuration(a), Value::DaysTimeDuration(b)) => {
+            let divisor = b.num_seconds();
+            if divisor == 0 {
+                return None;
+            }
+            Some(Value::Number(
+                rust_decimal::Decimal::from(a.num_seconds()) / rust_decimal::Decimal::from(divisor),
+            ))
+        }
+        (Value::YearsMonthsDuration(a), Value::YearsMonthsDuration(b)) => {
+            if b.months == 0 {
+                return None;
+            }
+            Some(Value::Number(
+                rust_decimal::Decimal::from(a.months) / rust_decimal::Decimal::from(b.months),
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// A number divided *by* a duration is undefined (`0100`, `error_when_divide_*`).
+fn divide_by_duration(left: &Value, right: &Value) -> bool {
+    let is_duration = |value: &Value| {
+        matches!(
+            value,
+            Value::DaysTimeDuration(_) | Value::YearsMonthsDuration(_)
+        )
+    };
+    let is_number = |value: &Value| matches!(value, Value::Number(_) | Value::Integer(_));
+    is_number(left) && is_duration(right)
+}
+
 fn duration_binop<F>(left: &Value, right: &Value, scale: F) -> Option<Value>
 where
     F: Fn(Option<chrono::TimeDelta>, Option<i64>, f64) -> Option<Value>,
@@ -1143,10 +1259,15 @@ fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope:
         // `2 * duration("P1D")` is `P2D`, `duration("-P1D") * 2` is `-P2D`.
         BinOpKind::Mul => duration_binop(&l, &r, |seconds, months, factor| {
             if let Some(duration) = seconds {
-                let scaled = duration.to_std().ok().map(|std| std.mul_f64(factor))?;
-                Some(Value::DaysTimeDuration(
-                    chrono::TimeDelta::from_std(scaled).ok()?,
-                ))
+                // Scale in milliseconds: `std::time::Duration` cannot hold a
+                // negative span, and the TCK multiplies by negative factors.
+                let scaled = (duration.num_milliseconds() as f64) * factor;
+                if !scaled.is_finite() {
+                    return None;
+                }
+                Some(Value::DaysTimeDuration(chrono::TimeDelta::milliseconds(
+                    scaled.round() as i64,
+                )))
             } else {
                 let months = months?;
                 let total = (months as f64 * factor).trunc();
@@ -1158,38 +1279,46 @@ fn eval_binop(op: &BinOpKind, lhs: &FeelExpression, rhs: &FeelExpression, scope:
             }
         })
         .unwrap_or_else(|| numeric_binop(l, r, |x, y| Some(x * y))),
-        BinOpKind::Div => duration_binop(&l, &r, |seconds, months, factor| {
-            if factor == 0.0 || !factor.is_finite() {
-                return None;
+        BinOpKind::Div => {
+            if divide_by_duration(&l, &r) {
+                return Value::Null;
             }
-            if let Some(duration) = seconds {
-                let scaled = duration.to_std().ok().map(|std| std.div_f64(factor))?;
-                Some(Value::DaysTimeDuration(
-                    chrono::TimeDelta::from_std(scaled).ok()?,
-                ))
-            } else {
-                let months = months?;
-                let total = (months as f64 / factor).trunc();
-                Some(Value::YearsMonthsDuration(
-                    crate::dmn::feel::temporal::YearsMonthsDuration {
-                        months: total as i64,
-                    },
-                ))
-            }
-        })
-        .unwrap_or_else(|| {
-            numeric_binop(
-                l,
-                r,
-                |x, y| {
-                    if y.is_zero() {
-                        None
-                    } else {
-                        x.checked_div(y)
-                    }
-                },
-            )
-        }),
+            duration_ratio(&l, &r)
+                .or_else(|| {
+                    duration_binop(&l, &r, |seconds, months, factor| {
+                        if factor == 0.0 || !factor.is_finite() {
+                            return None;
+                        }
+                        if let Some(duration) = seconds {
+                            let scaled = duration.to_std().ok().map(|std| std.div_f64(factor))?;
+                            Some(Value::DaysTimeDuration(
+                                chrono::TimeDelta::from_std(scaled).ok()?,
+                            ))
+                        } else {
+                            let months = months?;
+                            let total = (months as f64 / factor).trunc();
+                            Some(Value::YearsMonthsDuration(
+                                crate::dmn::feel::temporal::YearsMonthsDuration {
+                                    months: total as i64,
+                                },
+                            ))
+                        }
+                    })
+                })
+                .unwrap_or_else(|| {
+                    numeric_binop(
+                        l,
+                        r,
+                        |x, y| {
+                            if y.is_zero() {
+                                None
+                            } else {
+                                x.checked_div(y)
+                            }
+                        },
+                    )
+                })
+        }
         BinOpKind::Pow => eval_pow(l, r),
         // `in` (DMN-13/DMN-14): positive unary test membership.
         // Handles Range values and unary-test AST patterns (Or-chains, Name("?") comparisons).
@@ -1969,6 +2098,52 @@ use chrono::{Months, TimeZone};
 /// Returns `None` for any other type pair → caller emits `Value::Null`.
 fn datetime_add(l: &Value, r: &Value) -> Option<Value> {
     match (l, r) {
+        // YearsMonthsDuration + Date/DateTime -> the shifted date
+        // (addition commutes; the TCK tests both orders).
+        (Value::YearsMonthsDuration(ymd), Value::Date(d)) => {
+            add_months_to_date(*d, ymd.months).map(Value::Date)
+        }
+        (Value::YearsMonthsDuration(ymd), Value::DateTime(naive)) => {
+            add_months_to_naive_dt(*naive, ymd.months).map(Value::DateTime)
+        }
+        (Value::DaysTimeDuration(td), Value::DateTime(naive)) => {
+            naive.checked_add_signed(*td).map(Value::DateTime)
+        }
+        // The zoned carriers commute the same way.
+        (Value::YearsMonthsDuration(ymd), Value::DateTimeTz(dt)) => match dt {
+            super::temporal::DateTimeValue::Iana(zoned) => {
+                add_months_zoned(*zoned, ymd).map(super::temporal::DateTimeValue::Iana)
+            }
+            super::temporal::DateTimeValue::Fixed(zoned) => {
+                let naive = add_months_to_naive_dt(zoned.naive_local(), ymd.months)?;
+                let offset = *zoned.offset();
+                offset
+                    .from_local_datetime(&naive)
+                    .single()
+                    .map(super::temporal::DateTimeValue::Fixed)
+            }
+            super::temporal::DateTimeValue::Local(naive) => {
+                add_months_to_naive_dt(*naive, ymd.months)
+                    .map(super::temporal::DateTimeValue::Local)
+            }
+        }
+        .map(Value::DateTimeTz),
+        (Value::DaysTimeDuration(td), Value::DateTimeTz(dt)) => match dt {
+            super::temporal::DateTimeValue::Iana(zoned) => {
+                add_days_time_zoned(*zoned, *td).map(super::temporal::DateTimeValue::Iana)
+            }
+            super::temporal::DateTimeValue::Fixed(zoned) => zoned
+                .checked_add_signed(*td)
+                .map(super::temporal::DateTimeValue::Fixed),
+            super::temporal::DateTimeValue::Local(naive) => naive
+                .checked_add_signed(*td)
+                .map(super::temporal::DateTimeValue::Local),
+        }
+        .map(Value::DateTimeTz),
+        (Value::DaysTimeDuration(td), Value::Date(d)) => {
+            let ndt = d.and_hms_opt(0, 0, 0)?;
+            ndt.checked_add_signed(*td).map(|r| Value::Date(r.date()))
+        }
         // Date + YearsMonthsDuration -> Date
         (Value::Date(d), Value::YearsMonthsDuration(ymd)) => {
             add_months_to_date(*d, ymd.months).map(Value::Date)
@@ -2014,13 +2189,37 @@ fn datetime_add(l: &Value, r: &Value) -> Option<Value> {
                     .single()
                     .map(super::temporal::DateTimeValue::Fixed)
             }
+            // A date-time without an offset stays a naive date-time: wrapping it
+            // in the zoned `Local` carrier would make the same value compare
+            // unequal to itself (`0100-arithmetic`).
             super::temporal::DateTimeValue::Local(ndt) => {
-                add_months_to_naive_dt(*ndt, ymd.months).map(super::temporal::DateTimeValue::Local)
+                return add_months_to_naive_dt(*ndt, ymd.months).map(Value::DateTime)
             }
         }
         .map(Value::DateTimeTz),
+        // DaysTimeDuration + Time -> Time (addition commutes).
+        (Value::DaysTimeDuration(td), Value::Time(t)) => match t {
+            super::temporal::TimeValue::Fixed(naive) => {
+                Some(Value::Time(super::temporal::TimeValue::Fixed(*naive + *td)))
+            }
+            super::temporal::TimeValue::Local(naive) => {
+                Some(Value::Time(super::temporal::TimeValue::Local(*naive + *td)))
+            }
+            super::temporal::TimeValue::Iana(naive, zone) => Some(Value::Time(
+                super::temporal::TimeValue::Iana(*naive + *td, *zone),
+            )),
+            super::temporal::TimeValue::Offset(fixed) => fixed
+                .checked_add_signed(*td)
+                .map(|shifted| Value::Time(super::temporal::TimeValue::Offset(shifted))),
+        },
         // Time + DaysTimeDuration -> Time
         (Value::Time(t), Value::DaysTimeDuration(td)) => match t {
+            super::temporal::TimeValue::Iana(naive, zone) => {
+                let shifted = *naive + *td;
+                Some(Value::Time(super::temporal::TimeValue::Iana(
+                    shifted, *zone,
+                )))
+            }
             super::temporal::TimeValue::Fixed(nt) => {
                 Some(Value::Time(super::temporal::TimeValue::Fixed(*nt + *td)))
             }
@@ -2056,6 +2255,96 @@ fn datetime_add(l: &Value, r: &Value) -> Option<Value> {
 /// - `YearsMonthsDuration - YearsMonthsDuration -> YearsMonthsDuration`.
 fn datetime_sub(l: &Value, r: &Value) -> Option<Value> {
     match (l, r) {
+        // Time - Time -> DaysTimeDuration, in the two carriers that carry a zone.
+        (Value::Time(left), Value::Time(right)) => time_difference(left, right),
+        // Time - DaysTimeDuration -> Time (the mirror of Time + duration).
+        (Value::Time(time), Value::DaysTimeDuration(delta)) => match time {
+            super::temporal::TimeValue::Fixed(naive) => Some(Value::Time(
+                super::temporal::TimeValue::Fixed(*naive - *delta),
+            )),
+            super::temporal::TimeValue::Local(naive) => Some(Value::Time(
+                super::temporal::TimeValue::Local(*naive - *delta),
+            )),
+            super::temporal::TimeValue::Iana(naive, zone) => Some(Value::Time(
+                super::temporal::TimeValue::Iana(*naive - *delta, *zone),
+            )),
+            super::temporal::TimeValue::Offset(zoned) => zoned
+                .checked_sub_signed(*delta)
+                .map(|shifted| Value::Time(super::temporal::TimeValue::Offset(shifted))),
+        },
+
+        // Date-time subtraction across the carriers (a zoned value contributes
+        // the instant it denotes).
+        (a, b) if is_date_like(a) && is_date_like(b) => {
+            use crate::dmn::feel::temporal::DateTimeValue;
+            let zoned = |value: &Value| {
+                matches!(
+                    value,
+                    Value::DateTimeTz(DateTimeValue::Fixed(_))
+                        | Value::DateTimeTz(DateTimeValue::Iana(_))
+                )
+            };
+            // A naive date-time and a zoned one denote different kinds of value:
+            // subtracting them is an error (`0100`, `_002`), while a date
+            // promotes to UTC midnight and may be subtracted from either.
+            // A plain date denotes midnight *UTC*, so it pairs with a zoned
+            // date-time but not with an offset-less one; two naive or two zoned
+            // date-times pair with each other.
+            let comparable = |left: &Value, right: &Value| {
+                let plain_date = |value: &Value| matches!(value, Value::Date(_));
+                if plain_date(left) && plain_date(right) {
+                    return true;
+                }
+                if plain_date(left) {
+                    return zoned(right);
+                }
+                if plain_date(right) {
+                    return zoned(left);
+                }
+                zoned(left) == zoned(right)
+            };
+            if !comparable(a, b) {
+                return None;
+            }
+            let left = date_like_instant(a)?;
+            let right = date_like_instant(b)?;
+            Some(Value::DaysTimeDuration(left - right))
+        }
+        // A zoned date-time minus a duration keeps its zone.
+        (Value::DateTimeTz(dt), Value::DaysTimeDuration(td)) => match dt {
+            super::temporal::DateTimeValue::Iana(zoned) => {
+                add_days_time_zoned(*zoned, -*td).map(super::temporal::DateTimeValue::Iana)
+            }
+            super::temporal::DateTimeValue::Fixed(zoned) => zoned
+                .checked_sub_signed(*td)
+                .map(super::temporal::DateTimeValue::Fixed),
+            super::temporal::DateTimeValue::Local(naive) => naive
+                .checked_sub_signed(*td)
+                .map(super::temporal::DateTimeValue::Local),
+        }
+        .map(Value::DateTimeTz),
+        (Value::DateTimeTz(dt), Value::YearsMonthsDuration(ymd)) => match dt {
+            super::temporal::DateTimeValue::Iana(zoned) => add_months_zoned(
+                *zoned,
+                &crate::dmn::feel::temporal::YearsMonthsDuration {
+                    months: -ymd.months,
+                },
+            )
+            .map(super::temporal::DateTimeValue::Iana),
+            super::temporal::DateTimeValue::Fixed(zoned) => {
+                let naive = add_months_to_naive_dt(zoned.naive_local(), -ymd.months)?;
+                let offset = *zoned.offset();
+                offset
+                    .from_local_datetime(&naive)
+                    .single()
+                    .map(super::temporal::DateTimeValue::Fixed)
+            }
+            super::temporal::DateTimeValue::Local(naive) => {
+                add_months_to_naive_dt(*naive, -ymd.months)
+                    .map(super::temporal::DateTimeValue::Local)
+            }
+        }
+        .map(Value::DateTimeTz),
         // DateTime - DaysTimeDuration / YearsMonthsDuration -> DateTime.
         (Value::DateTime(naive), Value::DaysTimeDuration(td)) => {
             naive.checked_sub_signed(*td).map(Value::DateTime)
@@ -2084,18 +2373,6 @@ fn datetime_sub(l: &Value, r: &Value) -> Option<Value> {
             _ => None, // mixed timezone forms → type mismatch
         },
         // Time - Time -> DaysTimeDuration (within-form only)
-        (Value::Time(a), Value::Time(b)) => match (a, b) {
-            (super::temporal::TimeValue::Fixed(at), super::temporal::TimeValue::Fixed(bt)) => {
-                Some(Value::DaysTimeDuration(*at - *bt))
-            }
-            (super::temporal::TimeValue::Offset(ao), super::temporal::TimeValue::Offset(bo)) => {
-                Some(Value::DaysTimeDuration(*ao - *bo))
-            }
-            (super::temporal::TimeValue::Local(at), super::temporal::TimeValue::Local(bt)) => {
-                Some(Value::DaysTimeDuration(*at - *bt))
-            }
-            _ => None,
-        },
         // Date - YearsMonthsDuration -> Date
         (Value::Date(d), Value::YearsMonthsDuration(ymd)) => {
             add_months_to_date(*d, -ymd.months).map(Value::Date)

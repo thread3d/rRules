@@ -253,8 +253,17 @@ fn built_in_date_and_time(args: &[Value]) -> Value {
                 let naive = date.and_time(match time {
                     TimeValue::Fixed(naive) | TimeValue::Local(naive) => *naive,
                     TimeValue::Offset(fixed) => fixed.time(),
+                    TimeValue::Iana(naive, _) => *naive,
                 });
                 match time {
+                    // A zoned time contributes its zone to the date-time.
+                    TimeValue::Iana(naive, zone) => {
+                        use chrono::TimeZone;
+                        match zone.from_local_datetime(&date.and_time(*naive)).single() {
+                            Some(zoned) => Value::DateTimeTz(DateTimeValue::Iana(zoned)),
+                            None => Value::Null,
+                        }
+                    }
                     TimeValue::Offset(fixed) => {
                         let offset = *fixed.offset();
                         use chrono::TimeZone;
