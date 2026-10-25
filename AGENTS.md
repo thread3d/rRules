@@ -53,6 +53,7 @@ make tck         # DMN TCK sweep, baseline-gated, per-layer report
 make tck-ledger  # regenerate the failure ledger inside TCK-COVERAGE-GAPS.md
 make verify      # CodeWitness against specs/requirements.md (engine + api)
 make e2e         # browser smoke test of the built UI against a live server
+make image-check # check the Dockerfile's build logic without a container runtime
 ```
 
 `make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).

@@ -91,3 +91,31 @@ jobs:
             echo "rendering with $overlay"
             helm template rrules helm/rrules-server -f "$overlay" > /dev/null
           done
+
+  image-context:
+    name: Dockerfile build context
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # The image is the one artefact this pipeline cannot build (no container
+      # runtime), so its COPY set and both stages are exercised here instead: a
+      # Dockerfile that references a missing file, or misses one, fails CI rather
+      # than a deploy.
+      - name: Check the Dockerfile's stages
+        run: make image-check

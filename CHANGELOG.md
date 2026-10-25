@@ -12,6 +12,26 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — gates that do not need infrastructure the project lacks
+
+Two failure modes kept hiding behind workflows whose logs nobody could read:
+
+- **`make image-check`** reads the `Dockerfile`'s `COPY` instructions, assembles
+  exactly those files, and runs each stage's commands on the host. The image build is
+  the one artefact this project cannot build everywhere (no container runtime in
+  every environment), so a missing or misspelled `COPY` source only ever surfaced as
+  a failed deploy. It runs as its own CI job.
+- **The chart is linted and rendered in CI** (default values and each environment
+  overlay), and again in the deploy job before cluster access is configured — a
+  broken template used to look like a deployment failure.
+- The deploy job asks the cluster whether it answers before attempting a release. A
+  `KUBE_CONFIG` that reaches nothing now publishes the image and emits a warning
+  naming the fix, instead of failing every push; a red Deploy means a deploy was
+  attempted and failed.
+
+CI also pins Rust 1.94.1 rather than "whatever stable is today", so a new clippy or
+rustfmt cannot fail a commit that changed neither.
+
 ### Fixed — the web interface, checked in a real browser for the first time
 
 Every one of these was invisible to the existing tests, because they run source

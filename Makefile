@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger verify e2e docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger verify e2e image-check docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -23,6 +23,13 @@ fmt-check:
 # Build Docker image using existing Dockerfile
 docker-build:
 	docker build -t rrules-server:latest .
+
+# Check the Dockerfile's build logic without a container runtime: read its COPY
+# instructions, assemble those files, and run each stage's commands on the host.
+# The image build is the one gate that cannot run everywhere, and its failures
+# otherwise only surface in a deploy.
+image-check:
+	./scripts/image-context-check.sh
 
 # Run the application locally (dev mode)
 run:
@@ -139,4 +146,5 @@ help:
 	@echo "  frontend-build  - Build frontend for production"
 	@echo "  frontend-test   - Run frontend tests (vitest)"
 	@echo "  e2e             - Browser smoke test of the built UI against a live server"
+	@echo "  image-check     - Check the Dockerfile's build logic without Docker"
 	@echo "  ci              - Full CI pipeline (build + test + lint + fmt-check + frontend)"
