@@ -121,13 +121,21 @@ fn known_divergence_list() -> Vec<KnownDivergence> {
 
 #[test]
 fn tck_sweep() {
-    let phase_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join(".planning")
-        .join("phases")
-        .join("35")
-        .join("conformance-verification-round-trip-monitoring-close-out");
+    // The planning tree lives at the workspace root, one level above the
+    // repository (it is process documentation, not published project source).
+    // `TCK_REPORT_DIR` overrides the location for a different layout.
+    let phase_dir = std::env::var_os("TCK_REPORT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .and_then(Path::parent)
+                .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")))
+                .join(".planning")
+                .join("phases")
+                .join("35")
+                .join("conformance-verification-round-trip-monitoring-close-out")
+        });
 
     let tck_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")

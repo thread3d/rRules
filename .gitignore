@@ -11,9 +11,6 @@ frontend/.vite/
 # ── DMN runtime artifacts (document store writes these at runtime) ──
 api/dmn/
 
-# ── Planning research cache (local only) ─────────────────────
-.planning/research/.cache/
-
 # ── cargo-fuzz build output / corpus / crash artifacts ────────
 engine/fuzz/target/
 engine/fuzz/corpus/

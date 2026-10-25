@@ -65,11 +65,13 @@ make verify      # CodeWitness against specs/requirements.md (engine + api)
 | API reference / user guide | `docs/API.md`, `docs/user-guide.md` |
 | Documentation index | `docs/README.md` |
 | Historical documents (superseded) | `docs/archive/` — do not treat as current |
-| Roadmap, state, milestones, tech debt | `.planning/` |
+| Roadmap, state, milestones, tech debt | `../.planning/` (workspace level, outside this repository) |
 | Changelog | `CHANGELOG.md` |
 
-`.planning/phases/**` and `.planning/milestones/**` are the project's process history: records of
-what past phases claimed, not current documentation. Do not cite them as truth.
+`../.planning/phases/**` and `../.planning/milestones/**` are the project's process history: records
+of what past phases claimed, not current documentation. Do not cite them as truth. They live at the
+workspace root rather than in this repository: they document how the project was built, and are not
+published with it.
 
 ## Working conventions
 
@@ -124,7 +126,7 @@ Readiness → v8.0 Close TCK Evaluator Gaps. The v1.0 scope (core engine, rule-a
 API, governance, testing/monitoring, DMN compliance) is all delivered; the DMN commitment is measured
 rather than asserted, which is what `TCK-COVERAGE-GAPS.md` exists to do.
 
-**Next step:** no milestone is in flight. Scope the next one from `.planning/TECH-DEBT.md`,
+**Next step:** no milestone is in flight. Scope the next one from `../.planning/TECH-DEBT.md`,
 `TCK-COVERAGE-GAPS.md` and the `Known gaps` sections of `specs/` — candidates: DMN 1.6 / FEEL 1.6
 (COLLECT `distinct`), business-knowledge-model and decision-service evaluation, real
 `PostgresDmnStore` queries, and PostgreSQL-backed tenants. There is no git remote configured yet.

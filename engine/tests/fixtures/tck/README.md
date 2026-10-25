@@ -69,5 +69,5 @@ git sparse-checkout add \
 ```
 
 Vendored 2026-07-07 for Phase 30 (FEEL value types + type lattice + temporal
-domain). See `.planning/phases/30-feel-value-types-type-lattice-temporal-domain/30-RESEARCH.md`
+domain). See the workspace planning tree: `.planning/phases/30-feel-value-types-type-lattice-temporal-domain/30-RESEARCH.md`
 for the inspection that selected this subset.
