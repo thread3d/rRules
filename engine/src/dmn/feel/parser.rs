@@ -448,45 +448,21 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Lex a name (rule 25). The first byte is a letter, `_`, `?`, or
-    /// digit. Name-part chars extend it: letters, digits, `_`, `?`, and
-    /// the additional name symbols `.`/`/`/`-`/`'`/`+`/`*` — BUT `.`/`+`/
-    /// `*`/`-` are ambiguous with operators. Resolution by position:
-    /// after a name *start* char, these symbols are name-part chars ONLY
-    /// when they are immediately adjacent (no whitespace) and followed by
-    /// another name char. A `.` followed by a digit is a numeric `.` (not
-    /// a name-part) — handled by the caller (lex_number for leading-dot).
+    /// Lex a name (rule 25). The first byte is a letter, `_`, `?`, or digit.
+    ///
+    /// Name-part characters here are alphanumerics, `_` and `?` only. FEEL also
+    /// permits `+ - * / . '` inside a name, but whether `Date-Time2` is one name
+    /// or a subtraction is a question about the *model*, not the text: `a*b` is a
+    /// product in every real model. Those runs are re-merged after lexing against
+    /// the names the model declares (`Parser::merge_declared_name_tokens`), which
+    /// keeps the lexer context-free and its token cache model-independent.
     fn lex_name(&mut self) -> Token {
         let start = self.cursor;
-        // Consume the start char.
         self.cursor += 1;
         self.col += 1;
-        // Consume name-part chars. Be conservative: only consume `.`, `+`,
-        // `*`, `-`, `/`, `'` when they are immediately followed by a name
-        // char (letter, digit, `_`, `?`). This prevents greedy consumption
-        // of `a.b.c` as one name (we WANT `a`, `.`, `b`, `.`, `c` — Pitfall
-        // 3 / behavior test 6) — so do NOT include `.` here. The grammar
-        // rule 25 allows `.` as a name-part symbol, but the parser builds
-        // qualified names by combining Name + Dot + Name (rule 18). The
-        // lexer therefore splits on `.`.
         while self.cursor < self.src.len() {
             let c = self.src[self.cursor];
             if c.is_ascii_alphanumeric() || c == b'_' || c == b'?' {
-                self.cursor += 1;
-                self.col += 1;
-                continue;
-            }
-            // Additional name symbols `/`, `'` are always name-part (no
-            // operator ambiguity). `+`, `*`, `-` are name-part ONLY when
-            // immediately followed by a name char (no whitespace) AND we
-            // are mid-name (start != cursor). Do NOT include `.` (split on
-            // it for qualified-name handling).
-            if (c == b'/' || c == b'\'' || c == b'+' || c == b'*' || c == b'-')
-                && start != self.cursor
-                && self
-                    .peek_at(1)
-                    .is_some_and(|nc| nc.is_ascii_alphanumeric() || nc == b'_' || nc == b'?')
-            {
                 self.cursor += 1;
                 self.col += 1;
                 continue;
@@ -1054,6 +1030,101 @@ use crate::data_types::Value;
 const DEFAULT_MAX_DEPTH: u32 = 256;
 
 /// The recursive-descent + Pratt parser over `Vec<TokenSpan>`.
+/// Re-merge tokens that form a name the model declares.
+///
+/// The lexer emits `Date-Time2` as `Date`, `-`, `Time2` and `values in a list` as
+/// four name tokens. A declared name may contain spaces and the name symbols
+/// `+ - * / . '`, so this pass joins the longest declared name that starts at each
+/// position, replacing the run with a single `Name` token.
+fn merge_declared_name_tokens(tokens: Vec<TokenSpan>, known_names: &[String]) -> Vec<TokenSpan> {
+    if known_names.is_empty() {
+        return tokens;
+    }
+    let declarations: Vec<Vec<String>> = known_names
+        .iter()
+        .filter(|name| name.contains(' ') || name.chars().any(|c| "+-*/.\'".contains(c)))
+        .map(|name| name.split_whitespace().map(str::to_string).collect())
+        .collect();
+    if declarations.is_empty() {
+        return tokens;
+    }
+
+    let mut merged: Vec<TokenSpan> = Vec::with_capacity(tokens.len());
+    let mut index = 0;
+    while index < tokens.len() {
+        if !matches!(tokens[index].token, Token::Name(_)) {
+            merged.push(tokens[index].clone());
+            index += 1;
+            continue;
+        }
+        // Build the candidate text token by token, tracking the longest declared
+        // name that matches.
+        let mut best: Option<(usize, String)> = None;
+        let mut candidate = String::new();
+        let mut cursor = index;
+        let mut expect_word = true;
+        while cursor < tokens.len() {
+            match (&tokens[cursor].token, expect_word) {
+                (Token::Name(word), true) => {
+                    // Words join with a space; a symbol joins them without one
+                    // (`Date` + `-` + `Time2` is `Date-Time2`, not `Date- Time2`).
+                    if !candidate.is_empty() && !candidate.ends_with(['-', '+', '*', '/', '.']) {
+                        candidate.push(' ');
+                    }
+                    candidate.push_str(word);
+                    expect_word = false;
+                    cursor += 1;
+                }
+                // A name symbol continues the same word with no space.
+                (Token::Minus, false)
+                | (Token::Plus, false)
+                | (Token::Star, false)
+                | (Token::Slash, false)
+                | (Token::Dot, false) => {
+                    let Some(symbol) = name_symbol(&tokens[cursor].token) else {
+                        break;
+                    };
+                    candidate.push(symbol);
+                    expect_word = true;
+                    cursor += 1;
+                }
+                _ => break,
+            }
+            if declarations
+                .iter()
+                .any(|declaration| *declaration == candidate.split(' ').collect::<Vec<_>>())
+            {
+                best = Some((cursor, candidate.clone()));
+            }
+        }
+        match best {
+            Some((end, name)) => {
+                let mut span = tokens[index].clone();
+                span.token = Token::Name(name);
+                merged.push(span);
+                index = end;
+            }
+            None => {
+                merged.push(tokens[index].clone());
+                index += 1;
+            }
+        }
+    }
+    merged
+}
+
+/// The character a token contributes when it is part of a name.
+fn name_symbol(token: &Token) -> Option<char> {
+    match token {
+        Token::Minus => Some('-'),
+        Token::Plus => Some('+'),
+        Token::Star => Some('*'),
+        Token::Slash => Some('/'),
+        Token::Dot => Some('.'),
+        _ => None,
+    }
+}
+
 /// Properties whose name contains a space.
 fn is_multiword_property(name: &str) -> bool {
     matches!(name, "time offset")
@@ -1103,6 +1174,7 @@ impl Parser {
     }
 
     fn with_known_names(tokens: Vec<TokenSpan>, known_names: Vec<String>) -> Self {
+        let tokens = merge_declared_name_tokens(tokens, &known_names);
         Self {
             tokens,
             pos: 0,
@@ -1819,12 +1891,39 @@ impl Parser {
                 }
                 Token::Name(first) => {
                     self.advance();
-                    let mut words = vec![first];
-                    while let Token::Name(next) = self.peek().clone() {
-                        words.push(next.clone());
-                        self.advance();
+                    let mut key = first;
+                    loop {
+                        match self.peek().clone() {
+                            // Another word continues the key with a space.
+                            Token::Name(next) => {
+                                key.push(' ');
+                                key.push_str(&next);
+                                self.advance();
+                            }
+                            // A name symbol joins without one (`{foo+bar: 1}`).
+                            symbol
+                                if matches!(
+                                    symbol,
+                                    Token::Minus | Token::Plus | Token::Star | Token::Slash
+                                ) =>
+                            {
+                                let Some(character) = name_symbol(&symbol) else {
+                                    break;
+                                };
+                                let after =
+                                    self.tokens.get(self.pos + 1).map(|span| span.token.clone());
+                                let Some(Token::Name(next)) = after else {
+                                    break;
+                                };
+                                key.push(character);
+                                key.push_str(&next);
+                                self.advance();
+                                self.advance();
+                            }
+                            _ => break,
+                        }
                     }
-                    words.join(" ")
+                    key
                 }
                 _ => {
                     self.sync_to_boundary();

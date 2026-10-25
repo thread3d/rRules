@@ -4275,25 +4275,35 @@ mod datetime {
         assert_eq!(built_in_day_of_year(&[Value::Null]), Value::Null);
     }
 
-    /// `day of week(date("2021-01-04"))` == 1 (Monday per ISO).
+    /// `day of week(date("2021-01-04"))` == "Monday": the accessors return the
+    /// day's name (`0096-feel-day-of-week-function`).
     #[test]
     fn day_of_week_monday() {
         let d = NaiveDate::from_ymd_opt(2021, 1, 4).unwrap(); // Monday
-        assert_eq!(built_in_day_of_week(&[Value::Date(d)]), Value::Integer(1));
+        assert_eq!(
+            built_in_day_of_week(&[Value::Date(d)]),
+            Value::String("Monday".to_string())
+        );
     }
 
-    /// `day of week(date("2021-01-03"))` == 7 (Sunday per ISO).
+    /// `day of week(date("2021-01-03"))` == "Sunday".
     #[test]
     fn day_of_week_sunday() {
         let d = NaiveDate::from_ymd_opt(2021, 1, 3).unwrap(); // Sunday
-        assert_eq!(built_in_day_of_week(&[Value::Date(d)]), Value::Integer(7));
+        assert_eq!(
+            built_in_day_of_week(&[Value::Date(d)]),
+            Value::String("Sunday".to_string())
+        );
     }
 
-    /// `month of year(date("2021-03-15"))` == 3.
+    /// `month of year(date("2021-03-15"))` == "March".
     #[test]
     fn month_of_year_march() {
         let d = NaiveDate::from_ymd_opt(2021, 3, 15).unwrap();
-        assert_eq!(built_in_month_of_year(&[Value::Date(d)]), Value::Integer(3));
+        assert_eq!(
+            built_in_month_of_year(&[Value::Date(d)]),
+            Value::String("March".to_string())
+        );
     }
 
     /// `month of year(null)` → Null.

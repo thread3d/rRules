@@ -955,6 +955,8 @@ mod tests {
             allowed_answers: None,
             decision_table: None,
             literal_expression: None,
+            boxed_context: None,
+            boxed_list: None,
             required_decisions: Vec::new(),
             required_inputs: Vec::new(),
             required_knowledge: Vec::new(),
@@ -1002,6 +1004,8 @@ mod tests {
                 question: None,
                 allowed_answers: None,
                 literal_expression: None,
+                boxed_context: None,
+                boxed_list: None,
                 decision_table: Some(DecisionTable {
                     hit_policy: HitPolicy::Collect,
                     aggregation: Some(BuiltinAggregator::Sum),

@@ -108,10 +108,10 @@ struct DmndiLoss {
 /// `tck_baseline_matches_documentation` fails the suite when the two disagree —
 /// so the gate and the document cannot drift apart silently. Closing a gap means
 /// raising both, deliberately.
-const TCK_BASELINE_PASSED: usize = 164;
+const TCK_BASELINE_PASSED: usize = 165;
 
 /// Layer results that fail at the documented conformance baseline.
-const TCK_BASELINE_FAILED: usize = 10;
+const TCK_BASELINE_FAILED: usize = 9;
 
 // =========================================================================
 // Known divergences

@@ -324,8 +324,11 @@ fn years_and_months_duration_between_dates() {
 
 #[test]
 fn temporal_accessors_follow_spec() {
-    assert_ev("day of week(date(\"2020-01-06\"))", int(1));
-    assert_ev("month of year(date(\"2020-03-15\"))", int(3));
+    // `day of week` and `month of year` return names, as the TCK requires
+    // (`0096-feel-day-of-week-function`, `0097-feel-month-of-year-function`);
+    // `day of year` and `week of year` return numbers.
+    assert_ev("day of week(date(\"2020-01-06\"))", s("Monday"));
+    assert_ev("month of year(date(\"2020-03-15\"))", s("March"));
     assert_ev("day of year(date(\"2020-02-01\"))", int(32));
     assert_ev("week of year(date(\"2020-01-01\"))", int(1));
 }

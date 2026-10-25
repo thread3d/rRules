@@ -2,7 +2,7 @@
 
 ## Summary (re-measured 2026-10-25)
 
-**Layer results: 164 passed, 10 failed, 0 skipped across 51 vectors.**
+**Layer results: 165 passed, 9 failed, 0 skipped across 51 vectors.**
 
 The v8.0 close-out reported "51/51 evaluator coverage, 123 layer passes, zero
 failures". That figure was not measurable, for three independent reasons:
@@ -71,14 +71,13 @@ those constants ever disagree.
 <!-- BEGIN GENERATED LEDGER -->
 | # | Vector | Layer | Observed |
 |---|--------|-------|----------|
-| 1 | `0008-LX-arithmetic` | evaluator | 0/3 test cases matched (3 failed): 001 / payment: got {"payment": Null}, expected Number(2778.69354943277); 002 / payment: got {"payment": Null}, expected Number(562.707359373292); 003 / payment: got {"payment": Null}, expected Number(2861.03377700389) |
-| 2 | `0009-invocation-arithmetic` | evaluator | 0/3 test cases matched (3 failed): 001 / MonthlyPayment: got {"MonthlyPayment": Null}, expected Number(2878.69354943277); 002 / MonthlyPayment: got {"MonthlyPayment": Null}, expected Number(662.707359373292); 003 / MonthlyPayment: got {"MonthlyPayment": Null}, expected Number(2961.03377700389) |
-| 3 | `0021-singleton-list` | evaluator | 0/1 test cases matched (1 failed): 001 / decision5: got {"decision5": Null}, expected String("BOB") |
-| 4 | `0033-for-loops` | evaluator | 3/4 test cases matched (1 failed): 003 / check factors: got {"check factors": Array([Null, Null, Null, Null, Null])}, expected Array([Bool(false), Bool(false), Bool(true), Bool(true), Bool(false)]) |
-| 5 | `0085-decision-services` | evaluator | 6/18 test cases matched (12 failed): 002 / decision_002: got {"decision_002": String("foo bar")}, expected String("foo baz"); 002_a: expected null (errorResult) but produced {"decision_002": String("foo bar")}; 002_b: expected null (errorResult) but produced {"decision_002": String("foo bar")} |
-| 6 | `0100-arithmetic` | evaluator | 958/1087 test cases matched (129 failed): multiply_lhs_number_by_rhs_dtDuration_002 / multiply_lhs_number_by_rhs_dtDuration_002: got {"multiply_lhs_number_by_rhs_dtDuration_002": Null}, expected DaysTimeDuration(TimeDelta { secs: -864000, nanos: 0 }); multiply_lhs_number_by_rhs_dtDuration_003 / multiply_lhs_number_by_rhs_dtDuration_003: got {"multiply_lhs_number_by_rhs_dtDuration_003": Null}, expected DaysTimeDuration(TimeDelta { secs: 864000, nanos: 0 }); multiply_lhs_dtDuration_by_rhs_number_002 / multiply_lhs_dtDuration_by_rhs_number_002: got {"multiply_lhs_dtDuration_by_rhs_number_002": Null}, expected DaysTimeDuration(TimeDelta { secs: -864000, nanos: 0 }) |
-| 7 | `1141` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
-| 8 | `1142` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
-| 9 | `1143` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
-| 10 | `1144` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 1 | `0009-invocation-arithmetic` | evaluator | 0/3 test cases matched (3 failed): 001 / MonthlyPayment: got {"MonthlyPayment": Null}, expected Number(2878.69354943277); 002 / MonthlyPayment: got {"MonthlyPayment": Null}, expected Number(662.707359373292); 003 / MonthlyPayment: got {"MonthlyPayment": Null}, expected Number(2961.03377700389) |
+| 2 | `0021-singleton-list` | evaluator | 0/1 test cases matched (1 failed): 001 / decision5: got {"decision5": Null}, expected String("BOB") |
+| 3 | `0033-for-loops` | evaluator | 3/4 test cases matched (1 failed): 003 / check factors: got {"check factors": Array([Null, Null, Null, Null, Null])}, expected Array([Bool(false), Bool(false), Bool(true), Bool(true), Bool(false)]) |
+| 4 | `0085-decision-services` | evaluator | 6/18 test cases matched (12 failed): 002 / decision_002: got {"decision_002": String("foo bar")}, expected String("foo baz"); 002_a: expected null (errorResult) but produced {"decision_002": String("foo bar")}; 002_b: expected null (errorResult) but produced {"decision_002": String("foo bar")} |
+| 5 | `0100-arithmetic` | evaluator | 958/1087 test cases matched (129 failed): multiply_lhs_number_by_rhs_dtDuration_002 / multiply_lhs_number_by_rhs_dtDuration_002: got {"multiply_lhs_number_by_rhs_dtDuration_002": Null}, expected DaysTimeDuration(TimeDelta { secs: -864000, nanos: 0 }); multiply_lhs_number_by_rhs_dtDuration_003 / multiply_lhs_number_by_rhs_dtDuration_003: got {"multiply_lhs_number_by_rhs_dtDuration_003": Null}, expected DaysTimeDuration(TimeDelta { secs: 864000, nanos: 0 }); multiply_lhs_dtDuration_by_rhs_number_002 / multiply_lhs_dtDuration_by_rhs_number_002: got {"multiply_lhs_dtDuration_by_rhs_number_002": Null}, expected DaysTimeDuration(TimeDelta { secs: -864000, nanos: 0 }) |
+| 6 | `1141` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 7 | `1142` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 8 | `1143` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
+| 9 | `1144` | evaluator | 15/16 test cases matched (1 failed): 017_b: expected null (errorResult) but produced {"decision017_b": Number(5.5)} |
 <!-- END GENERATED LEDGER -->
