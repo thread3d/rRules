@@ -28,9 +28,6 @@ jobs:
         with:
           workspaces: |
             . -> target
-            engine -> target
-            api -> target
-            shared -> target
 
       - name: Check workspace build
         run: cargo check --workspace

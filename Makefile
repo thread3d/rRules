@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt docker-build run clean frontend-dev frontend-build ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck verify docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -15,6 +15,10 @@ lint:
 # Format code with rustfmt
 fmt:
 	cargo fmt --all
+
+# Fail if any file is not rustfmt-clean (CI gate)
+fmt-check:
+	cargo fmt --all -- --check
 
 # Build Docker image using existing Dockerfile
 docker-build:
@@ -37,8 +41,23 @@ frontend-dev:
 frontend-build:
 	cd frontend && npm ci && npm run build
 
-# Full CI pipeline (build + test + lint)
-ci: build test lint frontend-build
+# Run the DMN TCK sweep and print the per-layer report. Green at the documented
+# baseline (143 pass / 31 fail / 0 skip); fails on any regression.
+tck:
+	cargo test -p engine --test tck_sweep -- --nocapture
+
+# Verify the specification with CodeWitness (requires the `codewitness` CLI).
+# Reports land under engine/.codewitness/runs/ and api/.codewitness/runs/.
+verify:
+	codewitness verify engine --requirements specs/requirements.md --in-place --no-mutation
+	codewitness verify api --requirements specs/requirements.md --config api/codewitness.yaml --in-place --no-mutation
+
+# Run the frontend test suite
+frontend-test:
+	cd frontend && npx vitest run
+
+# Full CI pipeline (build + test + lint + format check + frontend)
+ci: build test lint fmt-check frontend-build frontend-test
 	@echo "CI pipeline complete"
 
 # Run DMN subsystem benchmarks (Criterion, Phase 36+)
@@ -89,6 +108,9 @@ help:
 	@echo "  test            - Run all tests (engine + api)"
 	@echo "  lint            - Run clippy linter with warnings as errors"
 	@echo "  fmt             - Format code with rustfmt"
+	@echo "  fmt-check       - Fail if any file is not rustfmt-clean"
+	@echo "  tck             - Run the DMN TCK sweep (baseline-gated)"
+	@echo "  verify          - Verify specs/requirements.md with CodeWitness"
 	@echo "  docker-build    - Build Docker image using existing Dockerfile"
 	@echo "  bench           - Run DMN subsystem benchmarks (Criterion)"
 	@echo "  memcheck        - Run memory baseline comparison against v6.0 snapshots"
@@ -96,4 +118,5 @@ help:
 	@echo "  clean           - Clean build artifacts"
 	@echo "  frontend-dev    - Run frontend dev server"
 	@echo "  frontend-build  - Build frontend for production"
-	@echo "  ci              - Full CI pipeline (build + test + lint)"
+	@echo "  frontend-test   - Run frontend tests (vitest)"
+	@echo "  ci              - Full CI pipeline (build + test + lint + fmt-check + frontend)"

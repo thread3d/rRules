@@ -7,10 +7,12 @@
 **Timeline:** 2026-07-15
 **Codebase:** Rust backend (engine + actix-web API) + React/TypeScript frontend
 
-**Delivered:** Complete FEEL built-in function coverage verified against the OMG DMN
-TCK — evaluator-layer coverage rose from 21/51 to **51/51 vectors**
-(123/123 layer passes: compliance-level-2 110/110, compliance-level-3 13/13),
-with zero regression in the 30 vectors that already parsed and round-tripped.
+**Delivered (as recorded at ship time; later corrected):** the milestone set out to raise
+evaluator-layer coverage from 21/51 to 51/51 vectors and recorded 123 layer passes with zero
+failures. Re-verification on 2026-10-25 showed that figure was not measurable — the sweep recorded
+only passing layers, 14 vectors shipped placeholder test files, and literal-expression decisions
+were never evaluated. See `milestones/v8.0-MILESTONE-AUDIT.md` for the corrections and
+`../TCK-COVERAGE-GAPS.md` for the measured state (143 pass / 31 fail / 0 skip).
 Phase 42 turned out to need no new code: the context/relational/temporal families
 shipped in v6.0 Phase 31 already satisfied their TCK vectors, so the phase is a
 verification record rather than an implementation.
