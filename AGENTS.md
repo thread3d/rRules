@@ -54,6 +54,10 @@ make verify      # CodeWitness against specs/requirements.md (engine + api)
 `make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).
 `make bench`, `make memcheck` and `make fuzz` need a nightly toolchain or a frozen baseline snapshot.
 
+**These local gates are the only gates.** The repository has no hosted CI: the GitHub Actions
+workflows were removed because they could not run (wrong branch trigger, secrets not configured, no
+remote, and they covered less than `make ci`). Nothing will check your work for you — run the gates.
+
 ## Where things live
 
 | Artifact | Location |

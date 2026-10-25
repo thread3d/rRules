@@ -42,22 +42,27 @@ The benchmarks use two sources of DMN files:
 
 The combined corpus is loaded automatically; no configuration needed.
 
-## CI Integration
+## Running the gate
 
-Benchmarks run in GitHub Actions on:
-- **Pull requests** (informational, no merge gate): `bench-pr` job
-- **Nightly at 02:00 UTC** (regression gate with 10% threshold): `bench-nightly` job
+Benchmarks and the memory-regression gate run locally; the project has no hosted CI at present
+(the GitHub Actions workflows were removed because they could not run without a configured remote,
+cluster and secrets).
 
-### Regression Thresholds
+```bash
+make bench       # Criterion DMN benchmarks, results under target/criterion/
+make memcheck    # regenerate the snapshot and compare it to the frozen v6.0 baseline
+make baseline-update   # accept new numbers as the baseline (commit the result)
+```
 
-Configure via environment variables in `.github/workflows/bench.yml`:
+`make memcheck` compares current measurements against the frozen `v6.0-baseline.json` and exits
+non-zero when RSS or allocation counts regress beyond the threshold:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BENCH_RSS_THRESHOLD_PCT` | 10 | RSS regression threshold (% above baseline) |
 | `BENCH_ALLOC_THRESHOLD_PCT` | 10 | Allocation count regression threshold (%) |
 
-Nightly runs compare current measurements against the v6.0 baseline and flag regressions exceeding these thresholds.
+It is worth running before a release, and whenever the parser or evaluator changes shape.
 
 ## Benchmark Groups
 

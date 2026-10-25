@@ -12,6 +12,16 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+- **`.github/` (four GitHub Actions workflows).** `ci.yml` (build/test/clippy/fmt/frontend),
+  `deploy.yml` (Docker build + Helm release), `bench.yml` (nightly memory-regression gate) and
+  `fuzz.yml` (nightly `cargo-fuzz`). They could not run as written — three triggered on `main` while
+  the branch is `master`, the deploy job needed a cluster and secrets it guarded with an `if:` on a
+  secret (which GitHub forbids), `bench.yml` uploaded the same artifact twice, three used the retired
+  `actions/cache@v3`, and together they covered less than `make ci`. The gates they were meant to
+  enforce run locally: `make ci`, `make tck`, `make verify`; the benchmark gate is `make memcheck`.
+  `engine/benches/README.md` now documents the local commands instead of the removed workflow.
+
 ### Changed
 - **`AGENTS.md` replaces `CLAUDE.md` as the project's instruction file.** It
   carries the same information an agent needs — what the project is, the measured
