@@ -4,6 +4,7 @@ use actix_web::{web, HttpResponse, Responder};
 use chrono::Utc;
 use uuid::Uuid;
 
+use actix_web::HttpMessage;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -69,7 +70,7 @@ pub struct AuditQuery {
 }
 
 /// Shared state for audit API
-type AuditStore = Arc<Mutex<HashMap<Uuid, StoredAuditEvent>>>;
+pub type AuditStore = Arc<Mutex<HashMap<Uuid, StoredAuditEvent>>>;
 
 /// Internal representation of an audit event
 #[derive(Debug, Clone)]
@@ -292,17 +293,64 @@ pub async fn export_audit_log(store: web::Data<AuditStore>) -> impl Responder {
 
 /// Record a new audit event
 #[allow(clippy::too_many_arguments)]
-pub fn record_audit_event(
+/// Record an event for a request that just changed something.
+///
+/// The actor comes from the `Claims` the auth middleware put in the request extensions, the
+/// address from the peer connection, the agent from the header — the three things an audit trail
+/// needs and that a handler would otherwise have to unpack at every call site.
+pub fn record_for_request(
     store: &AuditStore,
+    request: &actix_web::HttpRequest,
     action: AuditAction,
     resource_type: ResourceType,
     resource_id: String,
     resource_name: Option<String>,
     details: serde_json::Value,
-    user_id: Option<String>,
-    ip_address: Option<String>,
-    user_agent: Option<String>,
 ) {
+    // `extensions()` comes from `HttpMessage`; the auth middleware put the `Claims` there.
+    let user_id = request
+        .extensions()
+        .get::<crate::auth::Claims>()
+        .map(|claims| claims.sub.clone());
+    let ip_address = request.peer_addr().map(|addr| addr.ip().to_string());
+    let user_agent = request
+        .headers()
+        .get(actix_web::http::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+
+    record_audit_event(
+        store,
+        NewAuditEvent {
+            action,
+            resource_type,
+            resource_id,
+            resource_name,
+            details,
+            user_id,
+            ip_address,
+            user_agent,
+        },
+    );
+}
+
+pub struct NewAuditEvent {
+    pub action: AuditAction,
+    pub resource_type: ResourceType,
+    pub resource_id: String,
+    pub resource_name: Option<String>,
+    pub details: serde_json::Value,
+    pub user_id: Option<String>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+}
+
+/// Append an event to the trail.
+///
+/// Takes a struct rather than nine positional arguments: at a call site, two `Option<String>`s in a
+/// row (`user_id`, `ip_address`) are indistinguishable, and swapping them would silently write the
+/// wrong one. Callers describing a request should use [`record_for_request`].
+pub fn record_audit_event(store: &AuditStore, new: NewAuditEvent) {
     let mut store_guard = store
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -311,14 +359,14 @@ pub fn record_audit_event(
     let event = StoredAuditEvent {
         id: event_id,
         timestamp: Utc::now().to_rfc3339(),
-        user_id,
-        action,
-        resource_type,
-        resource_id,
-        resource_name,
-        details,
-        ip_address,
-        user_agent,
+        user_id: new.user_id,
+        action: new.action,
+        resource_type: new.resource_type,
+        resource_id: new.resource_id,
+        resource_name: new.resource_name,
+        details: new.details,
+        ip_address: new.ip_address,
+        user_agent: new.user_agent,
     };
 
     store_guard.insert(event_id, event);

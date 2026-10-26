@@ -7,6 +7,8 @@ use uuid::Uuid;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::v1::audit::{AuditAction, AuditStore, ResourceType};
+
 /// A rule with full metadata including tenant isolation.
 #[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct StoredRule {
@@ -316,6 +318,7 @@ pub async fn create_rule(
     req: web::Json<CreateRuleRequest>,
     headers: actix_web::HttpRequest,
     store: web::Data<RuleStore>,
+    audit: web::Data<AuditStore>,
 ) -> impl Responder {
     let tenant_id = extract_tenant_id(&headers);
     let now = Utc::now().to_rfc3339();
@@ -380,6 +383,15 @@ pub async fn create_rule(
         updated_by: None,
     };
 
+    crate::v1::audit::record_for_request(
+        &audit,
+        &headers,
+        AuditAction::Create,
+        ResourceType::Rule,
+        rule.id.to_string(),
+        Some(rule.rule_name.clone()),
+        serde_json::json!({ "tenant_id": tenant_id, "category": rule.category }),
+    );
     {
         let mut store_guard = store
             .lock()
@@ -595,6 +607,7 @@ pub async fn update_rule(
     req: web::Json<UpdateRuleRequest>,
     headers: actix_web::HttpRequest,
     store: web::Data<RuleStore>,
+    audit: web::Data<AuditStore>,
 ) -> impl Responder {
     let tenant_id = extract_tenant_id(&headers);
     let id = match Uuid::parse_str(&path.into_inner()) {
@@ -683,6 +696,15 @@ pub async fn update_rule(
             rule.updated_at = Utc::now().to_rfc3339();
             rule.updated_by = Some("system".to_string());
 
+            crate::v1::audit::record_for_request(
+                &audit,
+                &headers,
+                AuditAction::Update,
+                ResourceType::Rule,
+                rule.id.to_string(),
+                Some(rule.rule_name.clone()),
+                serde_json::json!({ "tenant_id": tenant_id }),
+            );
             HttpResponse::Ok().json(RuleResponse::from(rule))
         }
         None => HttpResponse::NotFound().json(serde_json::json!({
@@ -709,6 +731,7 @@ pub async fn delete_rule(
     path: web::Path<String>,
     headers: actix_web::HttpRequest,
     store: web::Data<RuleStore>,
+    audit: web::Data<AuditStore>,
 ) -> impl Responder {
     let tenant_id = extract_tenant_id(&headers);
     let id = match Uuid::parse_str(&path.into_inner()) {
@@ -731,6 +754,15 @@ pub async fn delete_rule(
             rule.updated_at = Utc::now().to_rfc3339();
             rule.updated_by = Some("system".to_string());
 
+            crate::v1::audit::record_for_request(
+                &audit,
+                &headers,
+                AuditAction::Delete,
+                ResourceType::Rule,
+                rule.id.to_string(),
+                Some(rule.rule_name.clone()),
+                serde_json::json!({ "tenant_id": key.0.clone(), "archived": true }),
+            );
             HttpResponse::Ok().json(serde_json::json!({
                 "id": id.to_string(),
                 "name": rule.rule_name,

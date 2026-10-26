@@ -562,7 +562,12 @@ failure.
 
 # Audit
 
-Immutable audit trail (Phase 20-04).
+The trail is written by the mutating endpoints: creating, updating and deleting (archiving) a rule,
+and approving or rejecting an approval request. Each event carries the acting user from the JWT, the
+peer address and the `User-Agent`.
+
+Not recorded yet: category, tag and tenant mutations, and executions. A deployment that needs those
+audited should not assume they are.
 
 ## GET /v1/audit
 Query audit events. **Query params** (`AuditQuery`):

@@ -143,6 +143,9 @@ async fn rules_are_isolated_per_tenant() {
     let app = test::init_service(
         App::new()
             .app_data(web::Data::new(store))
+            // Every handler's dependencies: `create_rule` now writes an audit event, and a missing
+            // extractor is a 500 rather than a compile error, so the harness has to supply it.
+            .app_data(web::Data::new(api::v1::audit::init_store()))
             .route("/v1/rules", web::get().to(get_rules))
             .route("/v1/rules", web::post().to(create_rule)),
     )

@@ -12,6 +12,33 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.27] — 2026-10-25 — The audit trail records what happens
+
+`record_audit_event` had zero callers, so `/v1/audit` and `/v1/audit/export` were permanently
+empty — an "immutable audit trail" that never saw an event. It is wired now, at the five places
+where something actually changes:
+
+| Endpoint | Action recorded |
+|---|---|
+| `POST /v1/rules` | `create` on the rule |
+| `PUT /v1/rules/{id}` | `update` on the rule |
+| `DELETE /v1/rules/{id}` | `delete` (the handler archives, so the event says so) |
+| `POST /v1/approvals/{id}/approve` | `approve` on the approval |
+| `POST /v1/approvals/{id}/reject` | `reject` on the approval |
+
+`record_for_request` builds the event from the request: the acting user comes from the `Claims` the
+auth middleware already puts in the request extensions, the address from the peer connection, the
+agent from the header. Handlers therefore call it with one line and nothing to unpack.
+
+Two things kept this honest. The first insertion landed in `get_rule` — a GET would have recorded an
+`update` — which the type checker caught because GET handlers do not carry an audit store. And
+`docs/API.md` now says what is *not* audited (category, tag and tenant mutations, executions) instead
+of leaving a reader to assume everything is.
+
+Two in-process tests read the trail back through the API a user would call: a created rule appears as
+one `create` event with its name and `User-Agent`, and archiving a rule leaves a `delete` event.
+
+
 ## [9.0.26] — 2026-10-25 — Dead code deleted rather than documented, and every DMN file loads
 
 `specs/http-api.md` listed eleven gaps. Four of them were dead code the project had written down

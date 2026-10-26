@@ -4,6 +4,7 @@ use actix_web::{web, HttpResponse, Responder};
 use uuid::Uuid;
 
 // In-memory approval storage (would be replaced with database in production)
+use crate::v1::audit::{AuditAction, AuditStore, ResourceType};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -199,7 +200,9 @@ pub async fn list_pending_approvals(store: web::Data<ApprovalStore>) -> impl Res
 pub async fn approve_request(
     path: web::Path<String>,
     req: web::Json<ApprovalActionRequest>,
+    request: actix_web::HttpRequest,
     store: web::Data<ApprovalStore>,
+    audit: web::Data<AuditStore>,
 ) -> impl Responder {
     let approval_id = match Uuid::parse_str(&path.into_inner()) {
         Ok(id) => id,
@@ -231,6 +234,15 @@ pub async fn approve_request(
                 approval.approved_by.push(reason);
             }
 
+            crate::v1::audit::record_for_request(
+                &audit,
+                &request,
+                AuditAction::Approve,
+                ResourceType::Approval,
+                approval.id.to_string(),
+                Some(approval.rule_id.to_string()),
+                serde_json::json!({ "approved_by": approval.approved_by }),
+            );
             HttpResponse::Ok().json(serde_json::json!({
                 "approval_id": approval.id.to_string(),
                 "status": "approved",
@@ -262,7 +274,9 @@ pub async fn approve_request(
 pub async fn reject_request(
     path: web::Path<String>,
     req: web::Json<ApprovalActionRequest>,
+    request: actix_web::HttpRequest,
     store: web::Data<ApprovalStore>,
+    audit: web::Data<AuditStore>,
 ) -> impl Responder {
     let approval_id = match Uuid::parse_str(&path.into_inner()) {
         Ok(id) => id,
@@ -291,6 +305,15 @@ pub async fn reject_request(
                 completed_at: chrono::Utc::now().to_rfc3339(),
             };
 
+            crate::v1::audit::record_for_request(
+                &audit,
+                &request,
+                AuditAction::Reject,
+                ResourceType::Approval,
+                approval.id.to_string(),
+                Some(approval.rule_id.to_string()),
+                serde_json::json!({ "rejected": true }),
+            );
             HttpResponse::Ok().json(serde_json::json!({
                 "approval_id": approval.id.to_string(),
                 "status": "rejected"

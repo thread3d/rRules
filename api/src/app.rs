@@ -447,3 +447,106 @@ mod tests {
         assert_eq!(body["page_size"], 50, "an absent page size means 50, not 1");
     }
 }
+
+#[cfg(test)]
+mod audit_tests {
+    //! The audit trail is a headline feature: a deployment expects `/v1/audit` to show who changed
+    //! what. These tests drive the real application in-process and read the trail back through the
+    //! API, so "it records" means the endpoint a user calls shows the event.
+
+    use super::*;
+    use actix_web::http::StatusCode;
+    use actix_web::test;
+
+    #[actix_web::test]
+    async fn a_created_rule_appears_in_the_audit_trail() {
+        let dir = std::env::temp_dir().join(format!("rrules-audit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let state = ApiState::for_testing(&dir);
+        let app = test::init_service(build_app(&state)).await;
+
+        let login = test::TestRequest::post()
+            .uri("/v1/auth/login")
+            .set_json(serde_json::json!({"email": "admin", "password": "admin"}))
+            .to_request();
+        let body: serde_json::Value = test::call_and_read_body_json(&app, login).await;
+        let token = body["token"].as_str().expect("a token").to_string();
+
+        let create = test::TestRequest::post()
+            .uri("/v1/rules")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .insert_header(("User-Agent", "rrules-test/1.0"))
+            .set_json(serde_json::json!({
+                "name": "audited-rule",
+                "dsl_body": "rule \"a\" when true then log(\"ok\")",
+            }))
+            .to_request();
+        let response = test::call_service(&app, create).await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let list = test::TestRequest::get()
+            .uri("/v1/audit")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let response = test::call_service(&app, list).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = test::read_body_json(response).await;
+
+        let events = body["events"].as_array().expect("an events array");
+        assert_eq!(events.len(), 1, "one create should leave one event: {body}");
+        let event = &events[0];
+        assert_eq!(event["action"], "create");
+        assert_eq!(event["resource_type"], "rule");
+        assert_eq!(event["resource_name"], "audited-rule");
+        assert_eq!(event["user_agent"], "rrules-test/1.0");
+    }
+
+    #[actix_web::test]
+    async fn deleting_a_rule_records_a_delete() {
+        let dir = std::env::temp_dir().join(format!("rrules-audit-delete-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let state = ApiState::for_testing(&dir);
+        let app = test::init_service(build_app(&state)).await;
+
+        let login = test::TestRequest::post()
+            .uri("/v1/auth/login")
+            .set_json(serde_json::json!({"email": "admin", "password": "admin"}))
+            .to_request();
+        let body: serde_json::Value = test::call_and_read_body_json(&app, login).await;
+        let token = body["token"].as_str().expect("a token").to_string();
+
+        let create = test::TestRequest::post()
+            .uri("/v1/rules")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .set_json(serde_json::json!({
+                "name": "short-lived",
+                "dsl_body": "rule \"s\" when true then log(\"ok\")",
+            }))
+            .to_request();
+        let created: serde_json::Value = test::call_and_read_body_json(&app, create).await;
+        let rule_id = created["id"].as_str().expect("a rule id").to_string();
+
+        let delete = test::TestRequest::delete()
+            .uri(&format!("/v1/rules/{rule_id}"))
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let response = test::call_service(&app, delete).await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let list = test::TestRequest::get()
+            .uri("/v1/audit")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let body: serde_json::Value = test::call_and_read_body_json(&app, list).await;
+        let actions: Vec<&str> = body["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .filter_map(|event| event["action"].as_str())
+            .collect();
+        assert!(
+            actions.contains(&"delete"),
+            "the archive should be audited, saw {actions:?}"
+        );
+    }
+}

@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.26` (`api/src/openapi.rs:12`).
+  version `9.0.27` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -447,7 +447,7 @@ Dead or unreachable code:
 | ~~`configure_v1_metrics` is never called, and its handlers return hard-coded zeroes~~ | **Deleted in 9.0.26**: an endpoint that fabricates its numbers is worse than a missing one; the module and its configuration function are gone. |
 | ~~`get_audit_event` (GET /v1/audit/{id}) is implemented but unregistered~~ | **Deleted in 9.0.26**: with `record_audit_event` never called, a get-by-id could only ever answer 404. |
 | ~~Startup loads only the first `.dmn` file, in arbitrary `read_dir` order~~ | **Fixed in 9.0.26**: `api::dmn_loader::load_models` reads every `.dmn` file in sorted order and merges them, so a second decision file is visible and the result is reproducible (`api/src/dmn_loader.rs`). |
-| `record_audit_event` has zero callers, so `/v1/audit` and `/v1/audit/export` are permanently empty | `api/src/v1/audit.rs:298-326` |
+| ~~`record_audit_event` has zero callers, so `/v1/audit` and `/v1/audit/export` are permanently empty~~ | **Fixed in 9.0.27**: rule create, update and delete (archive) and approval approve/reject record events, with the acting user from the JWT, the peer address and the `User-Agent` (`api/src/v1/audit.rs` `record_for_request`). Category, tag and tenant mutations and executions are still not recorded. |
 | `build_ruleset_from_dir`'s counterpart `EngineState` (+ `reload_from_directory`, `reload_engine`) is registered as `app_data` but never extracted; the git-log `from_commit` parameter is accepted and ignored | `api/src/main.rs:48,272`; `api/src/v1/execution.rs:295-378`; `branches.rs:216-251` |
 | `start_file_watcher` is a stub (one `log::info!`), so `WATCH_RULES_DIR` has no functional effect | `api/src/v1/execution.rs:1444-1446` |
 | DMN WS broadcaster drains and logs but never forwards; nothing publishes to `DmnMetricsTx` | `api/src/v1/dmn_metrics.rs:92-103` |
