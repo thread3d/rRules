@@ -2,6 +2,11 @@
 /target/
 **/*.rs.bk
 
+# The server's default local stores (it initialises a git repository inside
+# RULE_STORAGE_PATH, so an untracked run at the repository root leaves one here)
+/rules/
+/dmn/
+
 # ── Node / frontend ───────────────────────────────────────────
 frontend/node_modules/
 frontend/dist/
