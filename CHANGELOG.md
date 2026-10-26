@@ -12,6 +12,31 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.21] — 2026-10-25 — Tailwind 4, and dark mode that was never wired
+
+The last three advisories lived in Tailwind's PostCSS chain, and clearing them meant the Tailwind 4
+migration — which turns out to be a smaller change than it sounds, because v4 reads its
+configuration from CSS. `tailwind.config.ts` and then `postcss.config.js` are gone; `global.css`
+declares `@import "tailwindcss"`, the token palette in `@theme`, and Vite loads `@tailwindcss/vite`
+instead of the PostCSS chain. `autoprefixer` and `postcss` had no job left and were removed, along
+with 58 packages. **`npm audit` now reports 0 vulnerabilities**, from 56 when this loop started.
+
+The migration needed a gate to judge it: the browser gate reads *text*, and an application with no
+stylesheet at all still has text. So it now asserts that Tailwind's utilities reach the page — the
+create button carries `bg-blue-600`, and a utility that never compiled computes to
+`rgba(0, 0, 0, 0)`. That assertion failed once during the migration, correctly: Tailwind 4 emits
+`oklch(...)` where Tailwind 3 emitted `rgb(...)`, so the check was narrowed to "a colour resolved".
+
+**Dark mode never worked.** `global.css` declared a `.dark` token block and
+`darkMode: ['class']`, my own comment claimed "the `.dark` class is what the app toggles" — and
+nothing in the application ever adds that class. Eighteen files carry `dark:` utilities that could
+not match, and the token block was dead. Dark mode now follows the operating system: the tokens moved
+under `@media (prefers-color-scheme: dark)`, the class-based variant is gone, and the `dark:`
+utilities default to the same query, so the two agree. The gate proves it by asking Chromium for the
+dark preference and comparing the computed background: `rgb(255, 255, 255)` in light, `rgb(9, 9, 11)`
+in dark.
+
+
 ## [9.0.20] — 2026-10-25 — Which gates CI actually runs, stated rather than assumed
 
 `AGENTS.md` and `README.md` both claimed "CI runs exactly these gates". It does not: `make verify`

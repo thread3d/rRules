@@ -2,6 +2,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
+import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   // Phase 28 (Plan 28-02): Vitest component-test configuration.
@@ -15,7 +16,13 @@ export default defineConfig({
   },
   // tanstackRouter MUST come before react() so routeTree.gen.ts is generated
   // before the React plugin processes imports (RESEARCH § Pattern 1).
-  plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true }), react()],
+  // Tailwind 4 ships a Vite plugin that replaces the PostCSS setup (and prefixes with
+  // Lightning CSS), so `postcss.config.js` and `autoprefixer` are gone.
+  plugins: [
+    tanstackRouter({ target: 'react', autoCodeSplitting: true }),
+    react(),
+    tailwindcss(),
+  ],
 
   resolve: {
     alias: {

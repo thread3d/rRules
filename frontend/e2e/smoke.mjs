@@ -368,7 +368,62 @@ try {
       )
     }
 
-    const formWorks = await page.visit(`${BASE}/rules/new`)
+    // Text renders whether or not a stylesheet applied, so a broken CSS build passes every
+    // check above. Assert that Tailwind's utilities actually reached the page: the create
+    // button carries `bg-blue-600`, and a utility that never compiled computes to
+    // transparent.
+    const form = await page.visit(`${BASE}/rules/new`)
+    const styles = await page.evaluate(`
+      (() => {
+        const button = [...document.querySelectorAll('button')].find((b) =>
+          /create rule/i.test(b.textContent),
+        );
+        if (!button) return { error: 'no create button' };
+        const computed = getComputedStyle(button);
+        return {
+          background: computed.backgroundColor,
+          radius: computed.borderTopLeftRadius,
+          bodyFont: getComputedStyle(document.body).fontFeatureSettings,
+        };
+      })()
+    `)
+    // Tailwind 4 emits `oklch(...)` for its palette and Tailwind 3 emitted `rgb(...)`; what
+    // matters is that *a* colour resolved. A utility that never compiled computes to
+    // `rgba(0, 0, 0, 0)` in every browser.
+    const styled =
+      styles &&
+      !styles.error &&
+      Boolean(styles.background) &&
+      !/rgba\(0, 0, 0, 0\)|transparent/.test(styles.background)
+    report(
+      Boolean(styled),
+      'Tailwind utilities reach the page',
+      styles?.error ?? `background ${styles?.background}, radius ${styles?.radius}`,
+    )
+
+    // Dark mode follows the operating system. Chromium can be asked to report the dark
+    // preference, which is the only way to know the tokens and the `dark:` utilities agree
+    // rather than merely existing.
+    await page.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-color-scheme', value: 'dark' }],
+    })
+    const darkForm = await page.visit(`${BASE}/rules/new`)
+    const darkBackground = await page.evaluate(
+      'getComputedStyle(document.body).backgroundColor',
+    )
+    await page.send('Emulation.setEmulatedMedia', { features: [] })
+    const lightForm = form
+    const lightBackground = await page.evaluate(
+      'getComputedStyle(document.body).backgroundColor',
+    )
+    report(
+      darkBackground !== lightBackground && Boolean(darkBackground),
+      'dark mode follows the operating system',
+      `light ${lightBackground} vs dark ${darkBackground}`,
+    )
+
+    const formWorks = form
+
     report(
       /Name/.test(formWorks.text) && /Create rule/.test(formWorks.text),
       '/rules/new renders a working form',
