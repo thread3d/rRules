@@ -1,13 +1,17 @@
-import type { Rule, HitPolicyId, Condition, Action } from '@/types/common'
+
+import type { Rule } from '@/types/common'
 
 // API Request/Response types
 
+// Mirrors `CreateRuleRequest` in `api/src/v1/rules.rs`. The body is stored as text:
+// the API validates that it is non-empty and never parses it.
 export interface CreateRuleRequest {
   name: string
   description?: string
-  hitPolicy: HitPolicyId
-  conditions: Omit<Condition, 'id'>[]
-  actions: Omit<Action, 'id'>[]
+  dsl_body: string
+  tags?: string[]
+  salience?: number
+  status?: 'draft' | 'active'
 }
 
 export interface UpdateRuleRequest extends Partial<CreateRuleRequest> {}

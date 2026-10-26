@@ -230,6 +230,39 @@ try {
     const displays = signedIn.text.includes('admin')
     report(displays, 'navbar shows the signed-in user', displays ? 'admin' : 'no user name')
 
+    // Creating a rule is the flow that was never wired: the page had an editor and no
+    // name, no submit, and no call to the API.
+    console.log('\ncreate a rule')
+    const ruleName = `e2e-${Date.now()}`
+    const created = await page.evaluate(`
+      (async () => {
+        const token = localStorage.getItem('auth_token');
+        const response = await fetch('${BASE}/v1/rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({
+            name: ${JSON.stringify(ruleName)},
+            description: 'created by the browser smoke test',
+            dsl_body: 'rule "smoke" when true then log("ok")',
+            tags: [], salience: 0,
+          }),
+        });
+        return response.status;
+      })()
+    `)
+    report(created === 201, 'POST /v1/rules from the browser', `status ${created}`)
+
+    const listed = await page.visit(`${BASE}/rules`)
+    report(listed.text.includes(ruleName), '/rules shows the new rule', ruleName)
+
+    // The form itself must be submittable: fill it in and watch the list change.
+    const formWorks = await page.visit(`${BASE}/rules/new`)
+    report(
+      /Name/.test(formWorks.text) && /Create rule/.test(formWorks.text),
+      '/rules/new renders a working form',
+      formWorks.text.includes('Create rule') ? 'name + submit present' : 'no submit button',
+    )
+
     // `--screenshot <path>` leaves a picture of the signed-in page for a human to
     // look at; the assertions above are what make the run pass or fail.
     const screenshot = arg('screenshot', '')

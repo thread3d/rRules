@@ -34,8 +34,10 @@ function EditRulePage() {
     setSaving(true)
     setSaveError(undefined)
     try {
+      // `PUT /v1/rules/{id}` takes name, description, `dsl_body` and status: the hit
+      // policy is a property of the decision-table editor and has no server field, so
+      // sending it did nothing but fail the type check.
       await updateRule(id, {
-        hitPolicy,
         description: `Edited via edit page at ${new Date().toISOString()}`,
       })
       setSavedAt(new Date().toISOString())

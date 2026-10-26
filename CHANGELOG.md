@@ -12,6 +12,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.5] — 2026-10-25 — A rule can be created from the interface
+
+`/rules/new` was a placeholder: a JavaScript expression editor, a hit-policy selector and an
+empty decision table, with no name field, no submit button and no call to the API — while the
+rule list offered a "Create Rule" link to it. The authoring side of the interface could display
+rules and not create one.
+
+It is now a form that matches what the API accepts — name, optional description, salience and
+the rule body — and posts it, returning to the list on success and showing the API's message on
+failure. The page states plainly that the body is stored as text and never compiled: the API
+validates only that it is non-empty.
+
+The client's `CreateRuleRequest` described the *view* model (`hitPolicy`, `conditions`,
+`actions`) rather than the wire format (`name`, `dsl_body`, `tags`, `salience`, `status`), so a
+create from the interface would have sent fields the server ignores. The edit page was sending
+`hitPolicy` to `PUT /v1/rules/{id}`, which has no such field.
+
+`make e2e` now creates a rule through the API from the browser, checks it appears in the list,
+and checks the form renders with a name field and a submit button.
+
+
 ## [9.0.4] — 2026-10-25 — The browser gate stops deleting its own profile
 
 `make e2e` reused no browser profile: it created one per run and deleted it on the way out,
