@@ -300,6 +300,26 @@ try {
       )
     }
 
+    // Running the rule must say what happened: a rule created here is not in the
+    // engine's rule set, and the page has to say so rather than show "0 fired".
+    if (ruleId) {
+      await page.visit(`${BASE}/rules/${ruleId}/edit`)
+      const ran = await page.evaluate(`
+        (async () => {
+          const button = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Run');
+          if (!button) return 'no Run button';
+          button.click();
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          return document.body.innerText;
+        })()
+      `)
+      report(
+        /No engine rule matched|Rules selected by the filter/.test(ran),
+        'Run explains a zero-match execution',
+        /No engine rule matched/.test(ran) ? 'boundary explained' : 'no explanation shown',
+      )
+    }
+
     const formWorks = await page.visit(`${BASE}/rules/new`)
     report(
       /Name/.test(formWorks.text) && /Create rule/.test(formWorks.text),

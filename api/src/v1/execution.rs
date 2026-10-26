@@ -55,6 +55,11 @@ pub struct RuleFilter {
 pub struct ExecuteResponse {
     pub execution_id: String,
     pub rules_fired: usize,
+    /// Rules the request's `rule_filter` selected from the engine's rule set. Zero
+    /// means the filter matched nothing — which is what happens when the client asks
+    /// to run a rule that exists in the rule store but not in the engine's rule set.
+    #[serde(default)]
+    pub rules_matched: usize,
     #[serde(default)]
     pub rules_not_fired: Vec<String>,
     #[serde(default)]
@@ -833,6 +838,7 @@ pub async fn execute_single(
     Ok(ExecuteResponse {
         execution_id,
         rules_fired: engine_result.rules_fired,
+        rules_matched: all_rule_ids.len(),
         rules_not_fired,
         facts_after,
         inference_trace,
@@ -1083,6 +1089,7 @@ async fn execute_sessionful(
     Ok(ExecuteResponse {
         execution_id,
         rules_fired: engine_result.rules_fired,
+        rules_matched: all_rule_ids.len(),
         rules_not_fired,
         facts_after,
         inference_trace,

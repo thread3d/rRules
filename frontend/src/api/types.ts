@@ -149,6 +149,8 @@ export interface ExecuteRequest {
 
 /** Response from `POST /v1/execute` (execution.rs ExecuteResponse :47-73). */
 export interface ExecuteResponse {
+  /** Rules the filter selected from the engine's rule set; 0 means it matched none. */
+  rules_matched: number
   execution_id: string
   rules_fired: number
   rules_not_fired: string[]

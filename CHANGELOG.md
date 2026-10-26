@@ -12,6 +12,25 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.8] — 2026-10-25 — "Test this rule" says what it can and cannot run
+
+The edit page mounts a test runner whose Run button posts to `POST /v1/execute`. That endpoint
+runs the **engine's rule set**, loaded from the server's rules directory; a rule created through
+`/v1/rules` is stored as text and is not in it. The runner therefore always reported "0 fired"
+for an interface-authored rule, with nothing to say why — and a run where nothing fired looked
+exactly like a run where nothing matched.
+
+`rules_matched` is now part of the execute response: the number of rules the filter selected.
+The runner shows it, and when it is zero it says so plainly — "No engine rule matched this
+filter… rules created here are stored as text and are not part of it". `specs/http-api.md`
+records the boundary next to the endpoint.
+
+`make e2e` now presses Run and asserts the explanation appears, so the page cannot regress to a
+silent zero. It also refuses to run when its port is already in use: a stale server on the same
+port made every route render blank once, because the browser received an `index.html` from the
+old build against freshly built chunks.
+
+
 ## [9.0.7] — 2026-10-25 — Stale "mount-only" comments removed, governance checked for real
 
 Four routes carried TODOs saying their components were mounted but not wired

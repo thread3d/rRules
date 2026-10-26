@@ -259,6 +259,26 @@ export function TestRunner({ ruleId }: TestRunnerProps) {
 
       {lastResult && (
         <div className="space-y-3">
+          {/* "0 fired" and "nothing matched" are different facts, and the second is
+              the normal case for a rule created through the API: execution runs the
+              engine's rule set from its rules directory, not the rule store. */}
+          {lastResult.rules_matched === 0 && (
+            <div className="rounded-md bg-amber-50 p-3 dark:bg-amber-900/20">
+              <p className="text-sm text-amber-700 dark:text-amber-400">
+                No engine rule matched this filter, so nothing ran. Execution uses the
+                engine's rule set, which is loaded from the server's rules directory;
+                rules created here are stored as text and are not part of it.
+              </p>
+            </div>
+          )}
+
+          <section>
+            <h3 className="font-semibold">Matched</h3>
+            <p>
+              Rules selected by the filter: <span>{lastResult.rules_matched}</span>
+            </p>
+          </section>
+
           <section>
             <h3 className="font-semibold">Fired</h3>
             <p>

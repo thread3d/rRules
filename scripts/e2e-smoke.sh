@@ -15,7 +15,29 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO_ROOT=$(pwd)
 
-PORT="${E2E_PORT:-8098}"
+# Refuse to share a port: if something already listens, the server this script starts
+# dies and the browser silently talks to whatever was there — serving a stale
+# `index.html` against freshly built chunks, which reads as "the app renders blank".
+port_free() {
+    ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+}
+
+if [ -n "${E2E_PORT:-}" ]; then
+    PORT="$E2E_PORT"
+    if ! port_free "$PORT"; then
+        echo "e2e: port $PORT is already in use; stop that process or set E2E_PORT" >&2
+        exit 1
+    fi
+else
+    PORT=""
+    for candidate in $(seq 8098 8120); do
+        if port_free "$candidate"; then PORT="$candidate"; break; fi
+    done
+    if [ -z "$PORT" ]; then
+        echo "e2e: no free port in 8098-8120" >&2
+        exit 1
+    fi
+fi
 WORKDIR="$REPO_ROOT/target/e2e"
 mkdir -p "$WORKDIR/rules" "$WORKDIR/dmn"
 
