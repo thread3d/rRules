@@ -1,5 +1,6 @@
 # ── Rust / Cargo ──────────────────────────────────────────────
 /target/
+target/
 # A cargo home inside the workspace, for environments whose own registry is read-only
 .cargo-home/
 **/*.rs.bk

@@ -12,6 +12,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.14] — 2026-10-25 — A crate-local `target/` is ignored
+
+`make bench` left a 30 MB `engine/target/` that `git status` reported as untracked: `.gitignore`
+excluded `/target/`, which only covers the workspace root, and any tool that builds a member in
+place creates one beside its manifest. The pattern is now unanchored.
+
 ## [9.0.13] — 2026-10-25 — Citations must stay inside the repository
 
 CI failed the new *Spec citations* job on its first run, and the failure was a real defect rather
