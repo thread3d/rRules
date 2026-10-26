@@ -20,10 +20,15 @@ runner cannot obtain it, and the GitHub repository does not exist.
 
 Three changes, all about not overstating:
 
-- the workflow gains a `Requirement verification` job that runs `make verify` when
-  `CODEWITNESS_JAR_B64` is configured and is otherwise **skipped**. A skipped job is grey in the
-  check list; it is never a passing one, and the documentation says a skipped job means the claim did
-  not run in CI on that push.
+- the workflow gains a `Requirement verification` job that runs `make verify` when the repository
+  variable `CODEWITNESS_ENABLED` is `true` and the secret `CODEWITNESS_JAR_B64` holds the jar, and is
+  otherwise **skipped**. A skipped job is grey in the check list; it is never a passing one, and the
+  documentation says a skipped job means the claim did not run in CI on that push.
+
+  The first version of that job gated on `secrets.CODEWITNESS_JAR_B64` at job level, which GitHub
+  rejects — `secrets` is not in the context a job-level `if:` may read — so CI failed in 0 s without
+  running a single gate. A repository variable is allowed there; the jar stays a secret, read at step
+  level.
 - `make verify` checks for the tool first and explains the situation, instead of failing with
   `command not found` from inside a recipe.
 - both `AGENTS.md` files and the README now name the gates CI really runs — `make ci`, `make tck`,

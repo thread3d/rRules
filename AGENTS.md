@@ -83,7 +83,8 @@ configured.
 
 `make verify` is the exception, and the difference matters. CodeWitness is not published: it is a jar
 installed from a source checkout, so a hosted runner cannot obtain it. The workflow's
-`Requirement verification` job runs only when `CODEWITNESS_JAR_B64` is configured and is otherwise
+`Requirement verification` job runs only when the repository variable `CODEWITNESS_ENABLED` is
+`true` *and* the secret `CODEWITNESS_JAR_B64` holds the jar (base64); otherwise the job is
 **skipped** — a skipped job, never a passing one. When it is skipped the requirement verification did
 not run in CI on that push: run it locally. Run every gate yourself anyway — do not push something
 you have not seen pass.

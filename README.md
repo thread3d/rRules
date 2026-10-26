@@ -36,8 +36,8 @@ make fuzz            # bounded fuzzing of the FEEL parser and the decision-table
 
 `make verify` executes the specification with [CodeWitness](https://github.com/codewitness/codewitness),
 which is a jar installed from a source checkout rather than a published package. CI runs it only
-when the jar is supplied as a secret; otherwise that job is skipped, which is the honest state and
-not a pass.
+when the repository variable `CODEWITNESS_ENABLED` is `true` and the jar is supplied as a secret;
+otherwise that job is skipped, which is the honest state and not a pass.
 
 | | Measured |
 |---|---|

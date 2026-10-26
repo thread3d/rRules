@@ -154,7 +154,10 @@ jobs:
     # runner cannot obtain it. When the jar is supplied as a base64 secret this job runs the
     # claim; otherwise GitHub reports the job as skipped, which is the honest state — the
     # specification was not executed in CI on this run.
-    if: ${{ secrets.CODEWITNESS_JAR_B64 != '' }}
+    # A job-level `if:` may not read `secrets` — GitHub rejects the whole workflow for it, which
+    # is what happened when this job first landed: CI failed in 0 s before running anything. A
+    # repository *variable* is allowed there; the jar itself is a secret, read at step level.
+    if: vars.CODEWITNESS_ENABLED == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
