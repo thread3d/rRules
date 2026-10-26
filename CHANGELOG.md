@@ -12,6 +12,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.35] — 2026-10-25 — The maker-checker loop, walked in a browser; and a correction
+
+The governance pages turned out to be wired — the approval queue posts to
+`/v1/approvals/{id}/approve`, the branch manager creates and merges, the audit viewer filters through
+its endpoint. What had never been walked end to end was the **workflow**: a rule is submitted for
+approval, appears in the queue, and is approved there. The browser gate now does exactly that:
+
+```
+ok  a rule can be submitted for approval        status 201
+ok  the queue's Approve discharges the request  0 still pending
+ok  the approval is recorded in the audit trail approve event present
+```
+
+That third line joins the two halves of recent work: the button that discharges the request is the
+same one that writes the audit event.
+
+**A correction.** `9.0.7`'s changelog said four stale "mount-only" TODOs were removed. Three were not:
+the edit *prepended* an accurate comment and left the original TODO underneath it, and nothing checked.
+They are gone now, and `frontend/src` contains no `TODO` markers at all.
+
+
 ## [9.0.34] — 2026-10-25 — The rules list's buttons do something
 
 Two of the index page's controls were decoration. **"Create Rule" had no `onClick`** — it rendered,

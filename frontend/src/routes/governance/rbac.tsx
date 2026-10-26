@@ -3,13 +3,6 @@
 // rather than offering edits it could not save.
 import { createFileRoute } from '@tanstack/react-router'
 import { useAuth } from '@/lib/auth-context'
-
-// TODO(22-05/22-06): a full RBAC admin page (role/permission assignment UI)
-// does not yet exist in features/governance/rbac (only ProtectedRoute +
-// usePermission helpers). This route mounts a minimal admin surface that
-// surfaces the current user's role + permissions so the route resolves and
-// the auth context is exercised (D-22-09). The full management UI lands in
-// 22-05/22-06.
 function RbacAdminPage() {
   const { user } = useAuth()
 

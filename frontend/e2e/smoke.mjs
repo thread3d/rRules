@@ -366,6 +366,56 @@ try {
       )
     }
 
+    // The maker-checker workflow, driven through the interface: submit a rule for approval, find it
+    // in the approval queue, and approve it there. The API pieces exist and the queue's buttons are
+    // wired, but nothing had ever walked the whole loop in a browser.
+    if (ruleId) {
+      const submitted = await page.evaluate(`
+        (async () => {
+          const response = await fetch('${BASE}/v1/rules/${ruleId}/submit', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer ' + localStorage.getItem('auth_token'),
+            },
+            body: JSON.stringify({ maker_id: 'e2e-maker' }),
+          });
+          return response.status;
+        })()
+      `)
+      report(submitted === 201 || submitted === 200, 'a rule can be submitted for approval', `status ${submitted}`)
+
+      const queue = await page.visitMatching(`${BASE}/governance/approvals`, /Approve|pending/i)
+      const approved = await page.evaluate(`
+        (async () => {
+          const button = [...document.querySelectorAll('button')].find((b) => /^approve$/i.test(b.textContent.trim()));
+          if (!button) return { error: 'no Approve action in the queue' };
+          button.click();
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          const response = await fetch('${BASE}/v1/approvals/pending', {
+            headers: { Authorization: 'Bearer ' + localStorage.getItem('auth_token') },
+          });
+          const body = await response.json();
+          const pending = (body.approvals ?? []).length;
+          const audit = await fetch('${BASE}/v1/audit?page_size=100', {
+            headers: { Authorization: 'Bearer ' + localStorage.getItem('auth_token') },
+          });
+          const events = (await audit.json()).events ?? [];
+          return { pending, audited: events.some((event) => event.action === 'approve') };
+        })()
+      `)
+      report(
+        approved && approved.pending === 0,
+        'the queue\'s Approve discharges the request',
+        approved?.error ?? `${approved?.pending} still pending`,
+      )
+      report(
+        Boolean(approved?.audited),
+        'the approval is recorded in the audit trail',
+        approved?.audited ? 'approve event present' : 'no approve event',
+      )
+    }
+
     // Signed in, the governance pages must show their endpoint's answer — an empty
     // state from the API is fine, an auth error is not.
     console.log('\ngovernance with data')
