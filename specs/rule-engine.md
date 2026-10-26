@@ -234,7 +234,7 @@ Redefines its own `AlphaMemory` (`:25-48`), `BetaMemory` (`:51-74`), `FactId`, `
 | `assert_fact` | `464-490` | Stores, propagates, and `tms.support_fact` (`:487`). |
 | `execute_rules` | `578-600` | Delegates to `direct_execute`; **never touches the TMS** (documented `:574-577`). |
 | justifications | — | None created outside tests, so `justification_count() == 0` (asserted `:793`). |
-| `retract_fact` | `650-653` | `Ok(false)` unconditionally; `retract_fact_with_maintenance` (`:617-626`) is the same stub. |
+| ~~`retract_fact` is `Ok(false)` unconditionally~~ | **Fixed in 9.0.32**: the trait method retracts for real (working memory, alpha, beta, TMS) and the shared cross-engine suite asserts it for all four engines. The placeholder `retract_fact_with_maintenance` is deleted. |
 
 ## Fact lifecycle
 
@@ -287,6 +287,12 @@ rules against the reduced working memory.
 * Nothing in the execution path constructs an `Agenda` or `ConflictResolver`: callers are the
   modules' own tests and the test-only `deterministic_conflict_strategy`
   (`engine/src/testing/mod.rs:653-661`).
+
+The four engines are held to one functional suite in `engine/tests/cross_engine_suite.rs`: the
+engine names come from `EngineRegistry::available_engines()`, so every compiled engine is judged by
+the same scenario — firing and applying an action, retracting with idempotence, resetting, and being
+built freshly per execution. Before that suite existed each engine had its own keystone test with a
+copied fixture, so nothing failed when one engine drifted from the others.
 
 Net: salience and agenda-group locking affect execution through the evaluator's own ordering; the
 `salience::Agenda`/`ConflictResolver` types remain a tested standalone utility that the live path
@@ -458,9 +464,12 @@ HTTP endpoint forwards straight into it (`api/src/v1/simulation.rs:150-161`).
 2. **LEAPS looks alpha facts up by node id as if it were a fact type**
    (`engine/src/engine/leaps/mod.rs:338`) whereas Rete resolves the predecessor test node
    (`engine/src/engine/rete/mod.rs:326`); LEAPS beta memory therefore normally stays empty.
-3. **PHREAK retraction is a stub returning `Ok(false)` for every id**
-   (`engine/src/engine/phreak/mod.rs:650-653`, `:617-626`), leaving working memory, both
-   memories and the TMS intact — indistinguishable from "id was absent".
+3. **~~PHREAK retraction is a stub returning `Ok(false)` for every id.~~** **Corrected in 9.0.32**:
+   the trait's `retract_fact` removes the fact from working memory, alpha memory and beta memory and
+   prunes its truth-maintenance edges, and `every_engine_retracts_a_fact_and_reports_the_second_attempt_as_a_no_op`
+   holds all four engines to that. The *placeholder* the gap actually described was
+   `retract_fact_with_maintenance`, a separate public method that returned `Ok(false)` for everything
+   and had no callers; it is deleted.
 4. **PHREAK truth maintenance is dead weight:** facts are supported (`phreak/mod.rs:487`), no
    `Justification` is ever created, `justification_count()` is structurally 0 (asserted `:793`),
    and `execute_rules` ignores the TMS (`:574-577`).

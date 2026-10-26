@@ -342,7 +342,10 @@ impl ApiState {
             FeelAstCache::new(),
         ))));
 
-        let registry = EngineRegistry::new();
+        // The same registration the server performs: an empty registry would make every in-process
+        // execution test a test of the rejection path.
+        let mut registry = EngineRegistry::new();
+        registry.register_default_engines();
         let mut selector = EngineSelector::with_defaults();
         let _ = selector.select_engine("rete");
 

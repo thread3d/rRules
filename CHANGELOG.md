@@ -12,6 +12,35 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.32] — 2026-10-25 — One functional suite for all four engines
+
+`ENG-002` says the four Rete-family implementations "must pass the same functional tests regardless
+of algorithm". That was true by inspection only: each engine had its own keystone test with a
+**copied** fixture, so nothing failed when one engine drifted, and behaviour only one engine
+implemented was never compared.
+
+`engine/tests/cross_engine_suite.rs` takes the names from `EngineRegistry::available_engines()` and
+runs one scenario through every engine it reports: firing and applying an action, retracting a fact
+and reporting the second attempt as a no-op, resetting to an empty state, being constructed fresh per
+execution, exposing exactly the documented names, and rejecting an unknown one. A newly compiled
+engine joins the suite without anyone remembering to add it.
+
+**It found a defect immediately — in itself.** `EngineRegistry::new()` is empty (engines are
+registered explicitly), so the first run looped over nothing: five assertions "passed" while testing
+no engine at all. The suite now registers the defaults and panics if the list is empty, which is the
+guard that stops a loop over nothing from looking like a pass.
+
+That discovery pointed at the same mistake in `ApiState::for_testing`: it built a registry without
+registering the engines, so every in-process API test that touched `/v1/execute` or `/v1/engines` was
+exercising an engine-less server. It registers them now.
+
+**A stale gap is corrected.** `specs/rule-engine.md` claimed PHREAK's retraction "is a stub returning
+`Ok(false)` for every id". The trait's `retract_fact` does real work — working memory, alpha, beta and
+the truth-maintenance edges — which the new suite now asserts for all four engines. The placeholder
+the gap described was a *different* method, `retract_fact_with_maintenance`, which returned
+`Ok(false)` unconditionally and had no callers; it is deleted.
+
+
 ## [9.0.31] — 2026-10-25 — The OpenAPI document describes the API it serves
 
 `/api-docs/openapi.json` is what a client generator reads, and it is assembled from a hand-written

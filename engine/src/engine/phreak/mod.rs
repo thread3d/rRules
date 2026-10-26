@@ -672,17 +672,6 @@ impl PhreakEngine {
         self.network.tms().get_supported_facts()
     }
 
-    /// Retracts a fact and removes dependent justifications.
-    pub fn retract_fact_with_maintenance(&mut self, _fact_id: &str) -> Result<bool, String> {
-        // In a full implementation, this would:
-        // 1. Remove the fact from alpha memory
-        // 2. Update beta memory (remove nagrams containing this fact)
-        // 3. Invalidate justifications that depend on this fact
-        // 4. Remove derived facts that lose support
-
-        Ok(false) // Placeholder - full implementation would track and propagate changes
-    }
-
     /// Gets the count of active justifications.
     pub fn justification_count(&self) -> usize {
         self.network.tms().active_justification_count()
