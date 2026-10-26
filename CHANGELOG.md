@@ -12,6 +12,17 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.2] — 2026-10-25 — Dependency advisories: 44 to 9
+
+`npm audit` reported 44 advisories in the frontend's dependency tree (11 critical, 20 high).
+`npm audit fix` resolves 35 of them inside the declared ranges — the lockfile moves, no
+manifest changes — leaving 9 that need major upgrades: `vite` 5 → 8 and `vitest` 2 → 5, taken
+up separately rather than smuggled into a patch release.
+
+The remaining advisories are in the build and test toolchain (`vite`, `vitest`, `tinypool`),
+not in code the server or the browser runs.
+
+
 ## [9.0.1] — 2026-10-25 — Clippy 1.99 lints, and a version-bump script
 
 Ten findings that clippy 1.99 reports and 1.94.1 does not, fixed rather than deferred:
