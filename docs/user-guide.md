@@ -779,41 +779,81 @@ row with an `Archived` badge.
 
 ## Testing Your Rules
 
-The rRules engine provides testing utilities:
+A rule set is testable like any other value: build the rules, run them against facts, and assert on
+what fired. This example is compiled *and executed* by `make docs-snippets`, so it cannot drift from
+the engine it documents.
 
 ```rust
-use engine::{Value};
+use engine::data_types::Value;
+use engine::engine::registry::{EngineRegistry, ExecutionEngine};
+use engine::fact::Fact;
+use engine::rules::{Action, ComparisonOp, Condition, LogLevel, Rule, RuleSet};
 use std::collections::HashMap;
 
 #[test]
 fn test_loan_approval() {
-    // Create engine with test rules
-    let mut engine = EngineBuilder::new().build();
-    
-    // Insert facts
-    let mut applicant_payload = HashMap::new();
-    applicant_payload.insert("age".to_string(), Value::Integer(30));
-    applicant_payload.insert("credit_score".to_string(), Value::Integer(750));
-    applicant_payload.insert("annual_income".to_string(), Value::Integer(50000));
-    
-    let applicant_fact = Fact::new("applicant", applicant_payload);
-    engine.working_memory_mut().insert_fact(applicant_fact).unwrap();
-    
-    // Execute rules
-    let result = engine.execute_forward();
-    
-    // Verify results
-    assert!(result.success);
-    assert_eq!(result.rules_fired, 2);  // Eligibility + income check
+    // The rule: an applicant at least 18 is eligible.
+    let rule = Rule::builder("eligible", "Old enough to borrow")
+        .condition(Condition::Pattern {
+            fact_type: "applicant".to_string(),
+            field: "age".to_string(),
+            value: Value::Integer(18),
+            op: ComparisonOp::Ge,
+        })
+        .action(Action::LogMessage {
+            level: LogLevel::Info,
+            message: "applicant is eligible".to_string(),
+        })
+        .build();
+    let mut rules = RuleSet::new();
+    rules.add_rules(vec![rule]).expect("valid rule set");
+
+    // Any engine the registry reports runs the same rules; `rete` is the default.
+    let mut engine = EngineRegistry::new()
+        .create_engine_by_name("rete")
+        .expect("rete is a known engine")
+        .expect("rete constructs");
+    engine.load_ruleset(&rules).expect("the rule set loads");
+
+    let mut payload = HashMap::new();
+    payload.insert("age".to_string(), Value::Integer(30));
+    engine
+        .insert_fact(Fact::new("applicant", payload))
+        .expect("the fact is inserted");
+
+    let result = engine.execute();
+    assert!(result.success, "{}", result.message);
+    assert_eq!(result.rules_fired, 1, "the eligibility rule fires");
+    assert_eq!(result.fired_rule_ids, vec!["eligible".to_string()]);
 }
 ```
+
+Two habits worth keeping:
+
+- **Test the rule set, not just the rule.** A condition that never matches a fact type is invisible
+  until something puts a fact in front of it, and `rules_fired == 0` is the symptom.
+- **Assert on `fired_rule_ids`.** The count tells you something fired; the ids tell you *which*, and
+  that is what catches a rule that fires for the wrong reason.
+
+`engine/tests/cross_engine_suite.rs` is a worked example of the same idea taken further: it runs one
+scenario against every engine the registry reports, so the four implementations are held to the same
+behaviour rather than to four copied fixtures.
 
 ---
 
 ## Best Practices
 
-1. **Start with high salience for safety rules**: Validation and security checks should fire first
-2. **Use no_loop for idempotent rules**: Prevent rules from firing repeatedly on their own results
-3. **Organize by business domains**: Group related rules together logically
-4. **Document rule purpose**: Use descriptive names and comments
-5. **Test incrementally**: Start with simple rules, add complexity gradually
+1. **Start with high salience for safety rules.** Validation and security checks should be considered
+   before the rules they guard; salience orders the passes within an execution.
+2. **A rule fires at most once per execution, so you do not need `no_loop`.** The evaluator records
+   every rule it fires and skips it for the rest of that `execute()` call, which is the idempotence
+   `no_loop` was meant to provide. The flag still serialises (it is part of the rule schema) but
+   nothing read it; treat the guarantee as unconditional.
+3. **Use `lock_on_active` to sequence within an agenda group.** A rule with it set blocks the rest of
+   its `agenda_group` for the pass it fires — that one *is* honoured.
+4. **Organize by business domains.** Group related rules logically; the agenda group is the mechanism
+   the engine understands.
+5. **Document rule purpose.** Descriptive names and comments, because a rule set is read far more
+   often than it is written.
+6. **Test incrementally.** Start with simple rules, add complexity gradually, and assert on
+   `fired_rule_ids` rather than only on a count.

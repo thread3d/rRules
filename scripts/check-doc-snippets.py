@@ -105,20 +105,20 @@ def main() -> int:
     build_crate(snippets, workdir)
 
     result = subprocess.run(
-        ["cargo", "build", "--quiet"],
+        ["cargo", "test", "--quiet"],
         cwd=workdir,
         capture_output=True,
         text=True,
         env={**__import__("os").environ, "CCACHE_DISABLE": "1"},
     )
     if result.returncode != 0:
-        print(f"doc-snippets: {len(snippets)} blocks from {args.doc.name}, compilation failed\n")
+        print(f"doc-snippets: {len(snippets)} blocks from {args.doc.name}, build or test failed\n")
         print(result.stderr.strip())
         if not args.keep:
             shutil.rmtree(workdir, ignore_errors=True)
         return 1
 
-    print(f"doc-snippets: {len(snippets)} blocks from {args.doc.name} compile")
+    print(f"doc-snippets: {len(snippets)} blocks from {args.doc.name} compile, and the ones that assert pass")
     if not args.keep:
         shutil.rmtree(workdir, ignore_errors=True)
     return 0

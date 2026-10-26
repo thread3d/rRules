@@ -270,7 +270,10 @@ rules against the reduced working memory.
   (`engine/src/engine/rete/mod.rs:404-406`) build a stable salience-descending firing order, so
   higher salience fires first and ties keep load order. Values outside -1000…=1000 are rejected by
   `Rule::validate`.
-* `no_loop` is satisfied by the once-per-rule fixpoint (a rule never fires twice in one execution).
+* `no_loop` is satisfied by the once-per-rule fixpoint (a rule never fires twice in one execution),
+  which is why the field is inert: no execution path reads it (`direct_eval.rs` reads `salience`,
+  `agenda_group` and `lock_on_active`, never `no_loop`). The guarantee it names is unconditional, so
+  the flag changes nothing — recorded here because the user guide used to advise setting it.
   `lock_on_active` closes the rule's `agenda_group` for the rest of the pass
   (`direct_eval.rs:171-178`), so the group's other rules wait for the next pass.
 * `Agenda` (`engine/src/salience/agenda.rs:45-111`) implements salience-desc/timestamp-asc

@@ -12,6 +12,28 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.37] — 2026-10-25 — The guide's examples now run, and two of its claims were wrong
+
+The documentation check compiled the guide's Rust and never ran it. Compiling is half a claim: a block
+that contains `#[test]` states an expected outcome, and `cargo build` does not even type-check the body
+of a `#[test]` function. The checker now runs `cargo test` in the crate it generates, so an example that
+asserts something has to be right.
+
+**The first run found the guide's testing example using an API that does not work.** It built an engine
+with `EngineBuilder::new().build()` and called `execute_forward()`, which the specification records as
+"not yet implemented", and it referred to `EngineBuilder` and `Fact` without importing them — invisible
+until the block was actually compiled as a test. The section is rewritten against the API that runs:
+build a `RuleSet`, take an engine from the registry, load, insert a fact, execute, and assert on
+`fired_rule_ids`. It compiles **and passes**, and the guidance it gives is the kind a reader can follow.
+
+**Best Practice 2 was false advice.** It recommended `no_loop` "to prevent rules from firing repeatedly
+on their own results" — but no execution path reads `no_loop`: the evaluator reads `salience`,
+`agenda_group` and `lock_on_active`, never the flag. The property it promises is already unconditional,
+because a rule fires at most once per `execute()` call, so setting it changes nothing. The guide says
+that now, recommends `lock_on_active` for sequencing (which *is* honoured), and `specs/rule-engine.md`
+records the flag as inert.
+
+
 ## [9.0.36] — 2026-10-25 — The guide covers DMN and governance
 
 `docs/user-guide.md` was titled "Writing Rules" and stopped there. A reader of the guide alone could
