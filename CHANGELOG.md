@@ -12,6 +12,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.25] — 2026-10-25 — The browser gate waits for the data, not just the chrome
+
+CI failed the gates job on `/governance/approvals` while every neighbouring check passed, and the
+failure detail said "rendered its data" — because that string was constant and the assertion had
+quietly gone false. The cause was the same race as 9.0.19 in a different place: `visit` waits until
+the page has *any* text, and the navbar provides that long before a page's fetch resolves, so an
+assertion about fetched data was racing the fetch.
+
+`visitMatching` navigates and polls until the page matches the marker it is being asserted on. The
+four governance checks use it, so they assert the settled state rather than whatever the first frame
+happened to hold. Three consecutive local runs are green.
+
+The failure detail is also no longer a constant: a failed check prints what the page actually
+contained.
+
+
 ## [9.0.24] — 2026-10-25 — The deployment configures the server it runs
 
 A manifest is a claim about the program it starts. Both deployment paths were making false ones.

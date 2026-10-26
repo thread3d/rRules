@@ -120,6 +120,22 @@ class Page {
     return result.result?.value
   }
 
+  /// Visit and wait until the page matches `marker`, so an assertion about data a page fetches
+  /// is not racing the fetch. The navbar alone satisfies `visit`, which is what made the
+  /// governance checks intermittently report "rendered its data" as a failure.
+  async visitMatching(url, marker, timeoutMs = SETTLE_MS) {
+    this.errors = []
+    await this.send('Page.navigate', { url })
+    const deadline = Date.now() + timeoutMs
+    let text = ''
+    while (Date.now() < deadline) {
+      text = await this.evaluate('document.body ? document.body.innerText : ""')
+      if (text && marker.test(text)) break
+      await sleep(50)
+    }
+    return { text: (text ?? '').replace(/\s+/g, ' ').trim(), errors: [...this.errors] }
+  }
+
   async visit(url) {
     this.errors = []
     await this.send('Page.navigate', { url })
@@ -310,11 +326,12 @@ try {
       ['/governance/branches', /main|master|Branch/],
       ['/governance/rbac', /Permissions|role/i],
     ]) {
-      const seen = await page.visit(`${BASE}${route}`)
+      const seen = await page.visitMatching(`${BASE}${route}`, marker)
+      const matched = marker.test(seen.text) && !/status code 401/.test(seen.text)
       report(
-        marker.test(seen.text) && !/status code 401/.test(seen.text),
+        matched,
         route,
-        /status code 401/.test(seen.text) ? 'reported 401' : 'rendered its data',
+        matched ? 'rendered its data' : `text began: ${seen.text.slice(0, 100)}`,
       )
     }
 
