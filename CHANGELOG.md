@@ -12,6 +12,34 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.24] — 2026-10-25 — The deployment configures the server it runs
+
+A manifest is a claim about the program it starts. Both deployment paths were making false ones.
+
+`scripts/check-deploy-env.py` compares what the deployment sets against what `api/src` reads, and
+judges each path separately — chart-plus-image and manifests-plus-image. It found:
+
+| Claim | Reality |
+|---|---|
+| `k8s/configmap.yaml` sets `SERVER_HOST`, `SERVER_PORT` | the server reads `RRULES_BIND_ADDRESS` and `PORT`; neither was set by the manifests, so a container picked its own defaults |
+| `APP_ENV`, `RULE_STORAGE_TYPE`, `RELOAD_INTERVAL_MS` | read nowhere in `api/src` — configuration that does nothing and misleads the next debugger |
+| the chart sets three variables and no signing key | `API_SECRET_KEY` absent means the server runs on `rrules-dev-secret-change-me`, a **public** string: every token forgeable |
+| overlays set `database.url`; a `secret.yaml.template` wired it | no template read it, the server has no database code, and the template was never rendered — it also referenced `.Values.api.secretKey`, which did not exist |
+
+Now:
+
+- the ConfigMap sets the variables the server reads and nothing else;
+- the chart passes its whole `config` block through, so a key it declares is a key the container
+  gets, and the signing key comes from a Secret the chart creates — `auth.apiSecretKey` if given,
+  else the value already in the cluster, else a generated 48-character key. The middle case is what
+  stops `helm upgrade` from invalidating every issued token;
+- `k8s/` gains a `Secret` the deployment reads via `secretRef`; the unrendered template and the
+  unused `database` blocks are deleted.
+
+`make deploy-env` runs the check, is part of `make ci`, and fails on dead configuration or on a
+deployment path that leaves `API_SECRET_KEY` unset.
+
+
 ## [9.0.23] — 2026-10-25 — The user guide's examples are compiled
 
 `docs/user-guide.md` shows fifteen Rust snippets — the whole documented way to write a rule. Nobody

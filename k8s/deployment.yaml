@@ -28,6 +28,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: rrules-config
+            # The signing key is a Secret: the server's built-in default is a public string.
+            - secretRef:
+                name: rrules-secrets
           resources:
             requests:
               memory: "128Mi"

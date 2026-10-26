@@ -26,12 +26,20 @@ spec:
             - containerPort: {{ .Values.service.port }}
               protocol: TCP
           env:
+            # The signing key comes from this release's Secret; the server's default is public.
+            - name: API_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rrules-server.fullname" . }}
+                  key: API_SECRET_KEY
             - name: RUST_LOG
               value: {{ .Values.config.RUST_LOG | quote }}
             - name: RULE_STORAGE_PATH
               value: {{ .Values.config.RULE_STORAGE_PATH | quote }}
-            - name: WATCH_RULES_DIR
-              value: {{ .Values.config.WATCH_RULES_DIR | quote }}
+            {{- range $name, $value := .Values.config }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           livenessProbe:

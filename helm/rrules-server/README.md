@@ -63,9 +63,26 @@ helm install rrules ./helm/rrules-server -f helm/rrules-server/values-prod.yaml
 ```
 
 `values.yaml` is the default (ingress off, two replicas). The overlays set their
-own replica count, image tag, resources, database URL and ingress host, and they
-turn the ingress on. `secret.yaml.template` is a starting point for the
-credentials the deployment expects; it is not rendered by Helm.
+own replica count, image tag, resources and ingress host, and they turn the
+ingress on.
+
+## Secrets
+
+The chart creates the `API_SECRET_KEY` Secret itself (`templates/secret.yaml`).
+Precedence: `auth.apiSecretKey` if you set it, else the value already in the
+cluster, else a generated 48-character key. The middle case is what keeps an
+`helm upgrade` from rotating the key and invalidating every issued token.
+
+Set `auth.apiSecretKey` explicitly in a real deployment:
+
+```bash
+helm install rrules ./helm/rrules-server \
+  --set auth.apiSecretKey="$(openssl rand -base64 32)"
+```
+
+The server's own fallback for an absent key is a public development string, so a
+deployment that reaches it can have its tokens forged. `make deploy-env` fails if
+any deployment path stops setting it.
 
 `k8s/` holds the equivalent raw manifests for `kubectl apply -k k8s/` when Helm is
 not available.

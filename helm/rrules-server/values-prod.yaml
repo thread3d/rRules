@@ -22,5 +22,3 @@ ingress:
         - path: /
           pathType: Prefix
 
-database:
-  url: postgresql://rrules:prod@db.prod.svc.cluster.local:5432/rrules_prod

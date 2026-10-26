@@ -19,5 +19,3 @@ ingress:
         - path: /
           pathType: Prefix
 
-database:
-  url: postgresql://rrules:dev@localhost:5432/rrules_dev
