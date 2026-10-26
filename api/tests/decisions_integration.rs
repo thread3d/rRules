@@ -43,38 +43,6 @@ const MINIMAL_DMN_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
   </decision>
 </definitions>"#;
 
-/// DMN fixture with two decisions where D2 requires D1 (DRD edge).
-const TWO_DECISIONS_DMN: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<definitions xmlns="https://www.omg.org/spec/DMN/20200524/MODEL/"
-             id="two-decisions" name="Two Decisions"
-             namespace="http://test.example.com"
-             typeLanguage="https://www.omg.org/spec/DMN/20200524/FEEL/"
-             expressionLanguage="https://www.omg.org/spec/DMN/20200524/FEEL/">
-  <decision id="d1" name="Credit Check">
-    <variable name="credit_score" typeRef="feel:number"/>
-    <decisionTable id="dt1" hitPolicy="UNIQUE">
-      <input id="ic1" label="Income"><inputExpression><text>income</text></inputExpression></input>
-      <output id="oc1" name="credit_score" typeRef="feel:number"/>
-      <rule id="r1">
-        <inputEntry><text>&gt; 50000</text></inputEntry>
-        <outputEntry><text>750</text></outputEntry>
-      </rule>
-    </decisionTable>
-  </decision>
-  <decision id="d2" name="Loan Decision">
-    <variable name="loan_approved" typeRef="feel:string"/>
-    <informationRequirement><requiredDecision ref="d1"/></informationRequirement>
-    <decisionTable id="dt2" hitPolicy="UNIQUE">
-      <input id="ic2" label="Credit Score"><inputExpression><text>${credit_score}</text></inputExpression></input>
-      <output id="oc2" name="loan_approved" typeRef="feel:string"/>
-      <rule id="r2">
-        <inputEntry><text>&gt; 700</text></inputEntry>
-        <outputEntry><text>"yes"</text></outputEntry>
-      </rule>
-    </decisionTable>
-  </decision>
-</definitions>"#;
-
 /// Build a DecisionEvaluator with the given DMN XML loaded.
 fn build_evaluator(xml: &str) -> Arc<DecisionEvaluator> {
     let (model, ast_cache) =

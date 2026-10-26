@@ -5,9 +5,7 @@
 //! Filter: `cargo test -p engine --test hit_policy_advanced`
 
 use engine::data_types::Value;
-use engine::dmn::decision_table::{
-    validate_decision_table, DecisionTableError, DecisionTableEvaluator,
-};
+use engine::dmn::decision_table::{validate_decision_table, DecisionTableEvaluator};
 use engine::dmn::feel::eval::Scope;
 use engine::dmn::model::{DefinitionsChild, DmnModel};
 use engine::dmn::parser::parse_dmn_with_cache;
@@ -172,7 +170,7 @@ fn test_collect_count_empty_returns_zero() {
 /// Test 8: Multi-output COLLECT rejected at load time.
 #[test]
 fn test_collect_multi_output_rejected_at_load() {
-    let (model, cache) = parse_dmn_with_cache(DMN_HIT_POLICY_TEST).expect("fixture parses");
+    let (model, _cache) = parse_dmn_with_cache(DMN_HIT_POLICY_TEST).expect("fixture parses");
 
     if let Some(dt) = extract_table(&model, "_dec_collect_multi") {
         // Validation should reject this table.
@@ -189,7 +187,7 @@ fn test_collect_multi_output_rejected_at_load() {
 /// Test 9: PRIORITY without allowedValues rejected at load time.
 #[test]
 fn test_priority_no_allowed_values_rejected_at_load() {
-    let (model, cache) = parse_dmn_with_cache(DMN_HIT_POLICY_TEST).expect("fixture parses");
+    let (model, _cache) = parse_dmn_with_cache(DMN_HIT_POLICY_TEST).expect("fixture parses");
 
     if let Some(dt) = extract_table(&model, "_dec_priority_no_allowed") {
         // Validation should reject this table.

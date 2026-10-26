@@ -58,7 +58,7 @@ fn collect_dmn_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
             let p = e.path();
             if p.is_dir() {
                 walk(&p, out);
-            } else if p.extension().map_or(false, |ext| ext == "dmn") {
+            } else if p.extension().is_some_and(|ext| ext == "dmn") {
                 out.push(p);
             }
         }
@@ -238,7 +238,7 @@ fn build_synthetic_table(n_rules: usize, n_inputs: usize) -> DecisionTable {
     for i in 0..n_inputs {
         inputs.push(InputClause {
             id: Some(format!("input_{}", i)),
-            label: Some(format!("input_{}", i).into()),
+            label: Some(format!("input_{}", i)),
             input_expression: format!("{}", i),
             input_values: None,
             description: None,

@@ -3,10 +3,10 @@
 //! # SCAFFOLD — full OMG DMN TCK passage deferred to Phase 35.
 //!
 //! This file loads a small vendored subset of FEEL expression test vectors from
-//! `engine/tests/fixtures/tck/feel/` and exercises them against the real parser
-//! + evaluator (`parse_expression` → `evaluate`). The harness is structured so
-//! Phase 35 only needs to expand the vendored vector set (add more JSON files or
-//! cases to existing ones).
+//! `engine/tests/fixtures/tck/feel/` and exercises them against the real parser and
+//! evaluator (`parse_expression` → `evaluate`). The harness is structured so Phase 35
+//! only needs to expand the vendored vector set (add more JSON files or cases to
+//! existing ones).
 //!
 //! ## Provenance
 //!
@@ -54,7 +54,7 @@ const TCK_ROOT: &str = "tests/fixtures/tck/feel";
 
 /// A parsed TCK FEEL test case.
 #[derive(Debug, Clone)]
-struct TckFeelCase {
+pub struct TckFeelCase {
     id: String,
     category: String,
     expression: String,
@@ -90,7 +90,7 @@ pub fn load_tck_subset() -> Vec<TckFeelCase> {
 
     for entry in fs::read_dir(root).expect("read TCK feel dir").flatten() {
         let path = entry.path();
-        if path.extension().map_or(false, |ext| ext == "json") {
+        if path.extension().is_some_and(|ext| ext == "json") {
             cases.extend(load_tck_from_file(&path));
         }
     }
@@ -206,7 +206,7 @@ fn run_one_case(case: &TckFeelCase) -> Result<(), String> {
             Value::Number(actual) => {
                 let expected_dec = Decimal::from_str(expected_str)
                     .map_err(|e| format!("expected value parse error: {e}"))?;
-                if feel_numeric_eq(&Value::Number(actual.clone()), &Value::Number(expected_dec))
+                if feel_numeric_eq(&Value::Number(*actual), &Value::Number(expected_dec))
                     == Some(true)
                 {
                     Ok(())

@@ -2735,11 +2735,11 @@ fn truth_tables_compare() {
 ///   - `use …PartialEq` / `use …PartialOrd` imports,
 ///   - `impl …PartialEq/PartialOrd for …` blocks,
 ///   - `.partial_cmp(` method calls.
-/// It ALLOWS: doc comments (`//`, `//!`, `///`) that mention the
-/// prohibition by name, and `#[derive(…, PartialEq, …)]` on `Scope`
-/// (a structural derive required by the `FeelFunction` carrier's serde
-/// + equality bound — NOT FEEL value equality; the plan explicitly keeps
-/// `Value`'s derives untouched, and `Scope`'s derive is the same kind).
+///
+/// It allows doc comments (`//`, `//!`, `///`) that mention the prohibition by name, and
+/// `#[derive(…, PartialEq, …)]` on `Scope`: a structural derive the `FeelFunction`
+/// carrier's serde and equality bound needs, which is NOT FEEL value equality. The plan
+/// keeps `Value`'s derives untouched, and `Scope`'s derive is the same kind.
 #[cfg(test)]
 #[test]
 fn no_rust_eq() {
@@ -2839,7 +2839,6 @@ fn no_rust_eq() {
 #[cfg(test)]
 mod control {
     use super::*;
-    use crate::dmn::feel::ast::{FeelExpression, QuantKind};
 
     /// Helper: parse + evaluate with empty scope.
     #[cfg(test)]
@@ -4280,9 +4279,9 @@ mod boxed {
 
     // ----- Proptest: DAG-order invariance (seeded) -----
 
-    /// Property: a random DAG of context entries evaluates to the same result
-    /// regardless of source order. This verifies that topological evaluation is
-    /// canonical (not dependent on declaration order).
+    // Property: a random DAG of context entries evaluates to the same result regardless
+    // of source order. This verifies that topological evaluation is canonical (not
+    // dependent on declaration order).
     #[cfg(test)]
     proptest::proptest! {
         #![proptest_config(proptest::test_runner::Config {
@@ -4572,7 +4571,7 @@ mod lambdas {
 #[cfg(test)]
 mod external_rejected {
     use super::*;
-    use crate::dmn::feel::ast::{BinOpKind, FeelExpression};
+    use crate::dmn::feel::ast::FeelExpression;
 
     /// Test: external function invocation returns Null + warning logged.
     #[test]
@@ -4624,7 +4623,7 @@ mod external_rejected {
         match result {
             Value::Object(map) => {
                 let f_val = map.get("f").unwrap();
-                if let Value::Function(f) = f_val {
+                if let Value::Function(_f) = f_val {
                     // Invoke the function with arg 5.
                     let invocation = FeelExpression::FunctionInvocation {
                         callee: Box::new(FE::Literal(f_val.clone())),
@@ -4707,7 +4706,7 @@ mod external_rejected {
         match result1 {
             Value::Object(map) => {
                 let f_val = map.get("f").unwrap();
-                if let Value::Function(f) = f_val {
+                if let Value::Function(_f) = f_val {
                     // Invoke from a scope where x=99.
                     let invocation = FeelExpression::FunctionInvocation {
                         callee: Box::new(FE::Literal(f_val.clone())),

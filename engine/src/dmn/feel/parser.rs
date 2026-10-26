@@ -999,7 +999,7 @@ mod lexer_cache_tests {
         assert_eq!(cache.len(), 1);
 
         cache.clear();
-        assert_eq!(cache.is_empty(), true, "clear empties the cache");
+        assert!(cache.is_empty(), "clear empties the cache");
     }
 }
 

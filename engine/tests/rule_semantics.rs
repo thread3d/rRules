@@ -158,7 +158,7 @@ fn eng_004_conditions_compare_all_numeric_carriers() {
             fact_type: "customer".to_string(),
             field: field.to_string(),
             value,
-            op: op.clone(),
+            op,
         };
         assert_eq!(
             condition.evaluate(&facts),

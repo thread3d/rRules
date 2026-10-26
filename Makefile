@@ -9,8 +9,11 @@ test:
 	cargo test --workspace
 
 # Run clippy linter with warnings as errors
+# `--all-targets` covers test and bench code too: without it, unit tests inside modules,
+# integration tests and benchmarks were never linted, and 60 findings had accumulated there
+# — including a test that asserted nothing (`x >= 0 || y >= 0` on unsigned counters).
 lint:
-	cargo clippy --workspace -- -D warnings
+	cargo clippy --workspace --all-targets -- -D warnings
 
 # Format code with rustfmt
 fmt:

@@ -283,7 +283,7 @@ fn significant_digits(lit: &str) -> usize {
     // Strip leading sign.
     let s = lit.trim_start_matches('-').trim_start_matches('+');
     // Split mantissa / exponent.
-    let (mant, exp) = match s.find(|c| c == 'e' || c == 'E') {
+    let (mant, exp) = match s.find(['e', 'E']) {
         Some(idx) => (&s[..idx], Some(&s[idx + 1..])),
         None => (s, None),
     };

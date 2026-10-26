@@ -11,9 +11,9 @@ with the code, the code wins and the drift is recorded in
 - **Base URL:** `http://127.0.0.1:8080` by default, from `RRULES_BIND_ADDRESS` and `PORT`
   (`api/src/main.rs:45-52`). The default is loopback because that is right for a laptop and
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
-- **Versioning:** one `web::scope("/v1")` (`api/src/main.rs:334`). No `/v2`, no
+- **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.16` (`api/src/openapi.rs:12`).
+  version `9.0.17` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -29,7 +29,7 @@ with the code, the code wins and the drift is recorded in
 
 ## Server composition
 
-### Startup sequence (`api/src/main.rs:42-441`)
+### Startup sequence (`api/src/main.rs:42-283`, then `api/src/app.rs:60-322`)
 
 1. Build `EngineRegistry` + `register_default_engines()` (`:56-58`); build
    `EngineSelector::with_defaults()` and select `RRULES_DEFAULT_ENGINE` or
@@ -60,7 +60,7 @@ with the code, the code wins and the drift is recorded in
 | Order | Layer | Scope | Source |
 |---|---|---|---|
 | 1 | `actix_cors::Cors` | whole app (outermost) | `api/src/main.rs:260-271` |
-| 2 | `middleware::from_fn(middleware::auth::requires_auth)` | `/v1` scope only | `api/src/main.rs:321-323` |
+| 2 | `middleware::from_fn(middleware::auth::requires_auth)` | `/v1` scope only | `api/src/app.rs:144-146` |
 | — | `CorrelationId` | **never installed** — file is orphaned (see gaps) | `api/src/middleware/correlation.rs:14` |
 
 No logging middleware, no compression, no default headers, no rate limiting.
@@ -97,7 +97,7 @@ Twenty `app_data` entries; all are per-worker clones of process-shared Arcs.
   origin `http://localhost:5173` (`:247-252`).
 - No `allow_credentials(true)` and no `expose_headers`.
 
-### Static frontend (`api/src/main.rs:430-434`)
+### Static frontend (`api/src/app.rs:305-322`)
 
 `actix_files::Files::new("/", &frontend_dist).index_file("index.html").show_files_listing()`
 is mounted **last**, so any path not matched by a registered route reaches the
@@ -173,9 +173,9 @@ Auth column: **yes** = requires a valid Bearer JWT (inside the `/v1` wrap);
 | GET | `/health/ready`, `/ready` | — | `200`, empty body | — | no | No dependency checks: the stores are in-memory (`health.rs`). The flat `/health` and `/ready` are aliases, because the Kubernetes manifests and the Helm chart probe those paths. |
 | POST | `/v1/execute` | `ExecuteRequest{facts, rule_filter?, engine?, trace?}` | `200 {execution_id, rules_fired, rules_matched, rules_not_fired[], facts_after, …}` | `400` on a malformed body | yes | Runs the engine's rule set, which is loaded from `RULE_STORAGE_PATH`; rules created through `/v1/rules` are stored as text and are **not** part of it. `rules_matched` reports how many rules the filter selected, so a filter that matches nothing is distinguishable from a run where nothing fired. |
 | GET | `/metrics` | — | `200` HTML / JSON / Prometheus text | — | no | Content-negotiated on `Accept` (`api/src/metrics.rs:330-383`); see drift note. |
-| GET | `/api-docs/openapi.json` | — | `200` OpenAPI 3 JSON | — | no | `api/src/main.rs:307-310` |
+| GET | `/api-docs/openapi.json` | — | `200` OpenAPI 3 JSON | — | no | `api/src/app.rs:129-132` |
 | GET | `/swagger-ui/{_:.*}` | — | `200` HTML | — | no | Same registration. |
-| GET | `/` (and all unmatched paths) | — | `200` static file | 404 file-not-found | no | `actix_files` mount, `show_files_listing()` (`main.rs:430-434`) |
+| GET | `/` (and all unmatched paths) | — | `200` static file | 404 file-not-found | no | `actix_files` mount, `show_files_listing()` (`app.rs:305-322`) |
 
 `GET /metrics` arm selection (`api/src/metrics.rs:330-382`): `Accept`
 containing `text/html` **or `*/*`** → HTML; containing `application/json` →
@@ -216,7 +216,7 @@ JSON; otherwise Prometheus text. Because `*/*` wins before JSON, a plain
 | POST | `/v1/rules` | `CreateRuleRequest{name,description?,category?,dsl_body,tags,salience,status?}` | `201 RuleResponse` | `400 {"error":"Rule name is required"}` / `"DSL body is required"`, `409 {"error":"A rule with this name already exists in the category"}` | yes | Duplicate check compares against `category.unwrap_or_default()` (empty string) while the stored rule uses `"default"` (`rules.rs:346-349,364`) — duplicates for uncategorised rules are never detected. |
 | GET | `/v1/rules/{id}` | — | `200 RuleResponse` | `400 {"error":"Invalid rule ID format"}`, `404 {"error":"Rule not found"}` | yes | `rules.rs:514-537` |
 | PUT | `/v1/rules/{id}` | `UpdateRuleRequest` | `200 RuleResponse` | `400` (bad uuid / bad status), `404`, `409` | yes | `rules.rs:555-646` |
-| PATCH | `/v1/rules/{id}` | same | same | same | yes | Same handler as `PUT` (`main.rs:358-359`). |
+| PATCH | `/v1/rules/{id}` | same | same | same | yes | Same handler as `PUT` (`app.rs:185`). |
 | DELETE | `/v1/rules/{id}` | — | `200 {id,name,status:"archived",message}` | `400`, `404` | yes | Soft delete only (`rules.rs:662-697`). |
 | POST | `/v1/rules/{id}/undelete` | — | `200 {id,name,status:"draft",message}` | `400 {"error":"Rule is not archived, cannot restore"}`, `404` | yes | `rules.rs:713-751` |
 | POST | `/v1/rules/{id}/tags` | `CreateTagRequest{name,…}` | `201 {rule_id,tag_name,action:"assigned"}` | `400` (bad uuid) | yes | **Not tenant-scoped**; creates the tag if absent (`tags.rs:264-305`). |
@@ -244,7 +244,7 @@ No tenant scoping; `required_approvals` is fixed at 1 and never enforced.
 | POST | `/v1/categories` | `CreateCategoryRequest{name,description?,parent_id?}` | `201 CategoryResponse` | `409 {"error":"Category with this name already exists"}` | yes | Case-insensitive name uniqueness (`categories.rs:97-101`). |
 | GET | `/v1/categories/{id}` | — | `200 CategoryResponse` | `400`,`404` | yes | `categories.rs:143-164` |
 | PUT | `/v1/categories/{id}` | `CreateCategoryRequest` | `200 CategoryResponse` | `400`,`404`,`409` | yes | Also overwrites `created_at` with "now" (`categories.rs:215`). |
-| PATCH | `/v1/categories/{id}` | same | same | same | yes | Same handler (`main.rs:375-376`). |
+| PATCH | `/v1/categories/{id}` | same | same | same | yes | Same handler (`app.rs:231`). |
 | DELETE | `/v1/categories/{id}` | — | **`204` no body** | `400`,`404`,`409 {"error":"Cannot delete category with child categories"}` | yes | `categories.rs:240-268` |
 
 `CategoryResponse` = `{id,name,description?,parent_id?,created_at}`. No tenant scoping.
@@ -478,7 +478,7 @@ Doc/code drift in `docs/API.md` (each item verified against the handlers):
 | Prometheus samples named `engine_rules_fired`, `engine_memory_bytes` (`docs/API.md:84-90`) | Only `rrules_execute_requests_total`, `rrules_execute_rules_fired_total`, `rrules_execute_duration_seconds`, `rrules_sessions_active` exist (`api/src/metrics.rs:100-137`) |
 | `GET /v1/metrics/dmn` returns `DmnMetricsSnapshot` JSON (`docs/API.md:142-144`) | Returns Prometheus text (`api/src/v1/dmn_metrics.rs:115-126`) |
 | `GET /v1/metrics/dmn/ws` needs no auth (`docs/API.md:148`) | Not in `PUBLIC_PREFIXES`; the `/v1` wrap 401s the upgrade (`api/src/middleware/auth.rs:53-60`) |
-| `batch-execute`, `rules/reload`, `simulation` "Auth: none" (`docs/API.md:340,363,651`) | All three sit inside the `/v1` auth wrap and require a JWT (`api/src/main.rs:313-323,354,356,417`) |
+| `batch-execute`, `rules/reload`, `simulation` "Auth: none" (`docs/API.md:340,363,651`) | All three sit inside the `/v1` auth wrap and require a JWT (`api/src/app.rs:154-168`) |
 | Async reload returns `status:"running"` (`docs/API.md:369`) | Returns `"pending"` (`api/src/v1/execution.rs:1372-1375`) |
 | Batch `results` preserve submission order (`docs/API.md:357`) | Completion order (`execution.rs:1240-1268`) |
 | Decisions `per_page` default 50 (`docs/API.md:391`) | 20 (`api/src/v1/decisions.rs:107`) |

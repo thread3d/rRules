@@ -1,30 +1,14 @@
 //! Main entry point for rRules REST API server
 
-use actix_files as fs;
-use actix_web::{web, App, HttpServer};
-use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
+use actix_web::{web, HttpServer};
 
-use crate::openapi::ApiDoc;
-
-mod health;
-mod metrics;
-mod openapi;
-mod spa;
-
-// Phase 22 modules
-mod auth;
-mod middleware;
-mod websocket;
-
-// Phase 20 modules
-pub mod v1;
+// The modules live in the library (`lib.rs`); the binary is only process wiring.
+use api::{auth, metrics, v1};
 
 // Import execution endpoints for hot reload job tracking
-use crate::v1::execution::{get_job_status, list_jobs, SharedRuleSet};
-use crate::v1::routes::monitoring::configure_monitoring;
+use api::v1::execution::SharedRuleSet;
 // Phase 27 (SESS-01): stateful session manager + background sweep task.
-use crate::v1::sessions::{read_session_config, run_session_sweep, SessionManager};
+use api::v1::sessions::{read_session_config, run_session_sweep, SessionManager};
 
 // Phase 23 (D-03 / L-07): real engine registry + selector + shared ruleset
 // wired into the execute path. `EngineRegistry` carries all four factories
@@ -51,7 +35,7 @@ async fn main() -> std::io::Result<()> {
         format!("{host}:{port}")
     };
 
-    println!("rRules REST API Server v9.0.16");
+    println!("rRules REST API Server v9.0.17");
     println!("Starting on http://{bind_address}");
 
     // Create engine state for hot reload functionality
@@ -272,252 +256,30 @@ async fn main() -> std::io::Result<()> {
         .collect();
     println!("CORS allowed origins: {:?}", cors_allowed_origins);
 
-    let server = HttpServer::new(move || {
-        // Build the CORS middleware per worker from the configured origins.
-        // Origins are pinned (not wildcard), so the Bearer-token auth flow
-        // works without `allow_credentials(true)` — credentials (cookies) are
-        // not used by the JWT auth scheme.
-        let cors = {
-            let mut c = actix_cors::Cors::default()
-                .allowed_methods(["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
-                // `X-Tenant-ID` is the only tenancy key the API trusts, so a
-                // browser client must be allowed to send it; without it here
-                // every cross-origin request silently lands in the default
-                // tenant.
-                .allowed_headers(["Authorization", "Content-Type", "Accept", "X-Tenant-ID"])
-                .max_age(3600);
-            for origin in &cors_allowed_origins {
-                c = c.allowed_origin(origin.as_str());
-            }
-            c
-        };
-        App::new()
-            .wrap(cors)
-            .app_data(engine_state.clone())
-            // Phase 23 (D-03 / L-07): real engine wiring for POST /v1/execute.
-            .app_data(registry.clone())
-            .app_data(selector.clone())
-            .app_data(ruleset.clone())
-            .app_data(web::Data::new(metrics_tx.clone()))
-            // Phase 24 (Plan 24-02): inject ExecutionCounters as web::Data
-            // alongside metrics_tx. Inert until Plan 24-03 wires the handlers.
-            .app_data(counters.clone())
-            // Phase 27 (D-12): inject the shared SessionManager as web::Data
-            // so execute_rules / dispose_session / reset_session can extract it.
-            .app_data(web::Data::new(session_manager.clone()))
-            // Phase 33 (Plan 33-01): inject the DecisionEvaluator as web::Data so
-            // handlers can evaluate decisions and hot-reload the shared model.
-            .app_data(web::Data::new(dmn_evaluator.clone()))
-            // Phase 33 (Task 3): inject the DMN metrics broadcast sender so handlers
-            // can push DmnMetricsSnapshot events after each evaluation (WS delivery).
-            .app_data(web::Data::new(dmn_metrics_tx.clone()))
-            // Phase 33 (Task 5): inject the FileSystemDmnStore for decision CRUD.
-            .app_data(web::Data::new(engine_state::FileSystemDmnStore::default()))
-            .app_data(web::Data::new(rule_store.clone()))
-            .app_data(web::Data::new(category_store.clone()))
-            .app_data(web::Data::new(tag_store.clone()))
-            .app_data(web::Data::new(rule_tag_store.clone()))
-            .app_data(web::Data::new(tenant_store.clone()))
-            .app_data(web::Data::new(approval_store.clone()))
-            .app_data(web::Data::new(audit_store.clone()))
-            .app_data(branch_store.clone())
-            .app_data(web::Data::new(job_store.clone()))
-            .app_data(web::Data::new(user_store.clone()))
-            // Health check endpoints (must be before /v1 to avoid prefix conflict)
-            .configure(health::configure_health)
-            // OpenAPI spec + Swagger UI (served at root level, outside /v1)
-            .service(
-                SwaggerUi::new("/swagger-ui/{_:.*}")
-                    .url("/api-docs/openapi.json", ApiDoc::openapi()),
-            )
-            // API v1 endpoints
-            .service(
-                web::scope("/v1")
-                    // Phase 22 (Task 2): wrap all `/v1/*` routes with JWT
-                    // validation. The public allowlist (login, /health,
-                    // /swagger-ui, /api-docs, /metrics) is bypassed INSIDE the
-                    // middleware (D-22-02: authenticated-vs-public for v4.0;
-                    // per-route role enforcement deferred to v5.0). T-22-01:
-                    // algorithm pinned to HS256 in `decode_token`, so
-                    // `alg:none`/wrong-secret tokens are rejected.
-                    .wrap(actix_web::middleware::from_fn(
-                        middleware::auth::requires_auth,
-                    ))
-                    // Phase 22 auth endpoints (D-22-01). `/v1/auth/login` is
-                    // public (allowlist bypass); `/me` and `/refresh` require a
-                    // valid Bearer token (enforced by the middleware wrap).
-                    .route("/auth/login", web::post().to(auth::login))
-                    .route("/auth/me", web::get().to(auth::me))
-                    .route("/auth/refresh", web::post().to(auth::refresh))
-                    // Execution endpoint
-                    .route("/execute", web::post().to(v1::execution::execute_rules))
-                    // Phase 28 (D-03 / FRONTEND-04): engine-selector dropdown
-                    // data source. Reuses shared web::Data<EngineRegistry> +
-                    // web::Data<EngineSelector>. Behind requires_auth on /v1.
-                    .route("/engines", web::get().to(v1::execution::list_engines))
-                    // Phase 27 (D-05): sessionful lifecycle routes — dispose
-                    // and reset. Registered before any wildcard /execute/{...}
-                    // route (none currently exists, but the discipline holds
-                    // per PATTERNS.md line 372).
-                    .route(
-                        "/execute/session/{id}",
-                        web::delete().to(v1::sessions::dispose_session),
-                    )
-                    .route(
-                        "/execute/session/{id}/reset",
-                        web::post().to(v1::sessions::reset_session),
-                    )
-                    // Rules CRUD endpoints (Phase 20-01)
-                    .route("/rules", web::get().to(v1::rules::get_rules))
-                    .route("/rules", web::post().to(v1::rules::create_rule))
-                    // Static rule sub-paths MUST be registered before /rules/{id}
-                    // so actix matches the literal segment instead of binding it
-                    // to the {id} wildcard.
-                    .route(
-                        "/rules/batch-execute",
-                        web::post().to(v1::execution::batch_execute_rules),
-                    )
-                    // Hot reload endpoint for updating rules without restart
-                    .route("/rules/reload", web::post().to(v1::execution::reload_rules))
-                    .route("/rules/{id}", web::get().to(v1::rules::get_rule))
-                    .route("/rules/{id}", web::put().to(v1::rules::update_rule))
-                    .route("/rules/{id}", web::patch().to(v1::rules::update_rule))
-                    .route(
-                        "/rules/{id}/undelete",
-                        web::post().to(v1::rules::undelete_rule),
-                    )
-                    // Soft delete (marks as archived)
-                    .route("/rules/{id}", web::delete().to(v1::rules::delete_rule))
-                    // Reload job status endpoints (Phase 21)
-                    .route("/jobs/{job_id}", web::get().to(get_job_status))
-                    .route("/jobs", web::get().to(list_jobs))
-                    // Approval workflow endpoints (Phase 20-03)
-                    .route(
-                        "/rules/{id}/submit",
-                        web::post().to(v1::approvals::submit_for_approval),
-                    )
-                    .route(
-                        "/approvals/pending",
-                        web::get().to(v1::approvals::list_pending_approvals),
-                    )
-                    .route(
-                        "/approvals/{id}/approve",
-                        web::post().to(v1::approvals::approve_request),
-                    )
-                    .route(
-                        "/approvals/{id}/reject",
-                        web::post().to(v1::approvals::reject_request),
-                    )
-                    // Category endpoints (Phase 20-02)
-                    .route(
-                        "/categories",
-                        web::get().to(v1::categories::list_categories),
-                    )
-                    .route(
-                        "/categories",
-                        web::post().to(v1::categories::create_category),
-                    )
-                    .route(
-                        "/categories/{id}",
-                        web::get().to(v1::categories::get_category),
-                    )
-                    .route(
-                        "/categories/{id}",
-                        web::put().to(v1::categories::update_category),
-                    )
-                    .route(
-                        "/categories/{id}",
-                        web::patch().to(v1::categories::update_category),
-                    )
-                    .route(
-                        "/categories/{id}",
-                        web::delete().to(v1::categories::delete_category),
-                    )
-                    // Tag endpoints (Phase 20-02)
-                    .route("/tags", web::get().to(v1::tags::list_tags))
-                    .route("/tags", web::post().to(v1::tags::create_tag))
-                    .route("/tags/{name}", web::get().to(v1::tags::get_tag))
-                    .route("/tags/{name}", web::put().to(v1::tags::update_tag))
-                    .route("/tags/{name}", web::delete().to(v1::tags::delete_tag))
-                    // Tenant (organisation/workspace) management.
-                    .route("/tenants", web::get().to(v1::tenants::list_tenants))
-                    .route("/tenants", web::post().to(v1::tenants::create_tenant))
-                    .route("/tenants/{id}", web::get().to(v1::tenants::get_tenant))
-                    .route(
-                        "/tenants/{id}",
-                        web::delete().to(v1::tenants::delete_tenant),
-                    )
-                    .route(
-                        "/rules/{id}/tags",
-                        web::post().to(v1::tags::assign_tag_to_rule),
-                    )
-                    .route(
-                        "/rules/{id}/tags/{tag_name}",
-                        web::delete().to(v1::tags::remove_tag_from_rule),
-                    )
-                    // Branch endpoints (Phase 20-05)
-                    .route("/branches", web::get().to(v1::branches::list_branches))
-                    .route("/branches", web::post().to(v1::branches::create_branch))
-                    .route("/branches/{name}", web::get().to(v1::branches::get_branch))
-                    .route(
-                        "/branches/{name}",
-                        web::delete().to(v1::branches::delete_branch),
-                    )
-                    .route(
-                        "/branches/{name}/merge",
-                        web::post().to(v1::branches::merge_branch),
-                    )
-                    // Git log endpoint (Phase 20-05)
-                    .route(
-                        "/rules/{id}/git-log",
-                        web::get().to(v1::branches::get_git_log),
-                    )
-                    // Audit trail endpoints (Phase 20-04)
-                    .route("/audit", web::get().to(v1::audit::query_audit_events))
-                    .route("/audit/export", web::get().to(v1::audit::export_audit_log))
-                    // Monitoring endpoints (Phase 19)
-                    .configure(configure_monitoring)
-                    // Dashboard metric routes (MON-03/MON-04) — registered inside
-                    // /v1 so they resolve to /v1/metrics/dead-rules and
-                    // /v1/metrics/coverage. The Prometheus /metrics endpoint
-                    // stays at root (configured below).
-                    .configure(metrics::configure_metrics_dashboards)
-                    // Real-time metrics WebSocket (MON-02, Plan 22-04). A real
-                    // WS upgrade at /v1/metrics/ws broadcasting MetricsSnapshot from
-                    // `metrics_tx` (replaces the prior JSON stub — RESEARCH §
-                    // Pitfall 6). Public via the auth allowlist so a browser
-                    // `new WebSocket()` (which cannot send a Bearer token)
-                    // can connect; the stream is read-only (threat model).
-                    .configure(websocket::configure_metrics_ws)
-                    // Simulation / What-If analysis endpoints (Phase 5)
-                    .configure(v1::configure_v1_simulation)
-                    // Phase 33 (Plan 33-01): decision evaluation + reload routes.
-                    // Registered after simulation but before metrics so that the
-                    // `/v1/decisions/*` paths resolve without conflict with any
-                    // existing wildcard segments.
-                    .configure(v1::configure_v1_decisions)
-                    // Phase 33 (Task 3): DMN Prometheus text endpoint + WS broadcast.
-                    // Registered after decisions so the full path is /v1/metrics/dmn
-                    // and /v1/metrics/dmn/ws without conflicts with the root /metrics scope.
-                    .configure(v1::configure_dmn_metrics),
-            )
-            .app_data(web::Data::new(spa::load(&frontend_dist)))
-            .configure(metrics::configure_metrics)
-            // Serve the frontend's real files (JS, CSS, images) from the build
-            // directory, last so every API route takes precedence.
-            .service(
-                fs::Files::new("/", &frontend_dist)
-                    .index_file("index.html")
-                    .show_files_listing(),
-            )
-            // Anything that is not a file and not an API route is a client-side
-            // route: serve the application shell and let the router decide. The
-            // interface is a single-page app, so without this every page except
-            // the landing page answered 404 on a reload or a bookmark, before the
-            // router had a chance to run.
-            .default_service(web::get().to(spa::serve_index))
-    })
-    .bind(&bind_address)?;
+    let state = api::app::ApiState {
+        engine_state,
+        registry,
+        selector,
+        ruleset,
+        metrics_tx,
+        counters,
+        session_manager,
+        dmn_evaluator,
+        dmn_metrics_tx,
+        rule_store,
+        category_store,
+        tag_store,
+        rule_tag_store,
+        tenant_store,
+        approval_store,
+        audit_store,
+        branch_store,
+        job_store,
+        user_store,
+        frontend_dist,
+        cors_allowed_origins,
+    };
+    let server = HttpServer::new(move || api::app::build_app(&state)).bind(&bind_address)?;
 
     println!("Server running at http://{bind_address}");
     println!("Metrics endpoint available at /metrics");

@@ -2354,7 +2354,7 @@ async fn rule_filter_no_match_loads_empty_ruleset() {
     assert!(
         body["rules_not_fired"]
             .as_array()
-            .map_or(true, |a| a.is_empty()),
+            .is_none_or(|a| a.is_empty()),
         "rules_not_fired should be empty; body: {body}"
     );
 }

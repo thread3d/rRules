@@ -1,0 +1,447 @@
+//! The HTTP application, assembled from [\`ApiState\`].
+//!
+//! Keeping this out of \`main\` is what makes the routes testable in-process: a test builds
+//! the same \`App\` the server serves and drives it with \`actix_web::test\`, with no socket,
+//! no port to collide with, and no separate process to wait for.
+
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, RwLock};
+
+use actix_files as fs;
+use actix_web::dev::{ServiceFactory, ServiceRequest, ServiceResponse};
+use actix_web::{web, App};
+use engine::dmn::evaluator::DecisionEvaluator;
+use engine::engine::{EngineRegistry, EngineSelector};
+use engine::governance::versioning::VersionControlRepo;
+use tokio::sync::Mutex as AsyncMutex;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
+use uuid::Uuid;
+
+use crate::auth::store::UserStore;
+use crate::metrics::{self, ExecutionCounters, MetricsTx};
+use crate::openapi::ApiDoc;
+use crate::v1;
+use crate::v1::approvals::StoredApproval;
+use crate::v1::audit::StoredAuditEvent;
+use crate::v1::categories::StoredCategory;
+use crate::v1::dmn_metrics::DmnMetricsTx;
+use crate::v1::execution::{get_job_status, list_jobs, EngineState, JobStore, SharedRuleSet};
+use crate::v1::routes::monitoring::configure_monitoring;
+use crate::v1::rules::StoredRule;
+use crate::v1::sessions::SessionManager;
+use crate::v1::tags::StoredTag;
+use crate::v1::tenants::TenantStore;
+use crate::{auth, health, middleware, spa, websocket};
+
+/// Everything the application needs, cloned into each worker.
+#[derive(Clone)]
+pub struct ApiState {
+    pub engine_state: web::Data<EngineState>,
+    pub registry: web::Data<EngineRegistry>,
+    pub selector: web::Data<EngineSelector>,
+    pub ruleset: web::Data<Arc<RwLock<SharedRuleSet>>>,
+    pub metrics_tx: MetricsTx,
+    pub counters: web::Data<ExecutionCounters>,
+    pub session_manager: Arc<SessionManager>,
+    pub dmn_evaluator: Arc<DecisionEvaluator>,
+    pub dmn_metrics_tx: DmnMetricsTx,
+    pub rule_store: Arc<Mutex<HashMap<(String, Uuid), StoredRule>>>,
+    pub category_store: Arc<Mutex<HashMap<Uuid, StoredCategory>>>,
+    pub tag_store: Arc<Mutex<HashMap<String, StoredTag>>>,
+    pub rule_tag_store: Arc<Mutex<HashSet<(Uuid, String)>>>,
+    pub tenant_store: TenantStore,
+    pub approval_store: Arc<Mutex<HashMap<Uuid, StoredApproval>>>,
+    pub audit_store: Arc<Mutex<HashMap<Uuid, StoredAuditEvent>>>,
+    pub branch_store: web::Data<AsyncMutex<VersionControlRepo>>,
+    pub job_store: JobStore,
+    pub user_store: UserStore,
+    /// Where the built interface lives; served for every client-side route.
+    pub frontend_dist: String,
+    /// Origins the browser may call from. Pinned, never a wildcard.
+    pub cors_allowed_origins: Vec<String>,
+}
+
+/// Build the application. Called once per worker by the server, and directly by tests.
+pub fn build_app(
+    state: &ApiState,
+) -> App<
+    impl ServiceFactory<
+        ServiceRequest,
+        Config = (),
+        Response = ServiceResponse<actix_web::body::EitherBody<actix_web::body::BoxBody>>,
+        Error = actix_web::Error,
+        InitError = (),
+    >,
+> {
+    // Build the CORS middleware per worker from the configured origins.
+    // Origins are pinned (not wildcard), so the Bearer-token auth flow
+    // works without `allow_credentials(true)` — credentials (cookies) are
+    // not used by the JWT auth scheme.
+    let cors = {
+        let mut c = actix_cors::Cors::default()
+            .allowed_methods(["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+            // `X-Tenant-ID` is the only tenancy key the API trusts, so a
+            // browser client must be allowed to send it; without it here
+            // every cross-origin request silently lands in the default
+            // tenant.
+            .allowed_headers(["Authorization", "Content-Type", "Accept", "X-Tenant-ID"])
+            .max_age(3600);
+        for origin in &state.cors_allowed_origins {
+            c = c.allowed_origin(origin.as_str());
+        }
+        c
+    };
+    App::new()
+        .wrap(cors)
+        .app_data(state.engine_state.clone())
+        // Phase 23 (D-03 / L-07): real engine wiring for POST /v1/execute.
+        .app_data(state.registry.clone())
+        .app_data(state.selector.clone())
+        .app_data(state.ruleset.clone())
+        .app_data(web::Data::new(state.metrics_tx.clone()))
+        // Phase 24 (Plan 24-02): inject ExecutionCounters as web::Data
+        // alongside metrics_tx. Inert until Plan 24-03 wires the handlers.
+        .app_data(state.counters.clone())
+        // Phase 27 (D-12): inject the shared SessionManager as web::Data
+        // so execute_rules / dispose_session / reset_session can extract it.
+        .app_data(web::Data::new(state.session_manager.clone()))
+        // Phase 33 (Plan 33-01): inject the DecisionEvaluator as web::Data so
+        // handlers can evaluate decisions and hot-reload the shared model.
+        .app_data(web::Data::new(state.dmn_evaluator.clone()))
+        // Phase 33 (Task 3): inject the DMN metrics broadcast sender so handlers
+        // can push DmnMetricsSnapshot events after each evaluation (WS delivery).
+        .app_data(web::Data::new(state.dmn_metrics_tx.clone()))
+        // Phase 33 (Task 5): inject the FileSystemDmnStore for decision CRUD.
+        .app_data(web::Data::new(engine_state::FileSystemDmnStore::default()))
+        .app_data(web::Data::new(state.rule_store.clone()))
+        .app_data(web::Data::new(state.category_store.clone()))
+        .app_data(web::Data::new(state.tag_store.clone()))
+        .app_data(web::Data::new(state.rule_tag_store.clone()))
+        .app_data(web::Data::new(state.tenant_store.clone()))
+        .app_data(web::Data::new(state.approval_store.clone()))
+        .app_data(web::Data::new(state.audit_store.clone()))
+        .app_data(state.branch_store.clone())
+        .app_data(web::Data::new(state.job_store.clone()))
+        .app_data(web::Data::new(state.user_store.clone()))
+        // Health check endpoints (must be before /v1 to avoid prefix conflict)
+        .configure(health::configure_health)
+        // OpenAPI spec + Swagger UI (served at root level, outside /v1)
+        .service(
+            SwaggerUi::new("/swagger-ui/{_:.*}").url("/api-docs/openapi.json", ApiDoc::openapi()),
+        )
+        // API v1 endpoints
+        .service(
+            web::scope("/v1")
+                // Phase 22 (Task 2): wrap all `/v1/*` routes with JWT
+                // validation. The public allowlist (login, /health,
+                // /swagger-ui, /api-docs, /metrics) is bypassed INSIDE the
+                // middleware (D-22-02: authenticated-vs-public for v4.0;
+                // per-route role enforcement deferred to v5.0). T-22-01:
+                // algorithm pinned to HS256 in `decode_token`, so
+                // `alg:none`/wrong-secret tokens are rejected.
+                .wrap(actix_web::middleware::from_fn(
+                    middleware::auth::requires_auth,
+                ))
+                // Phase 22 auth endpoints (D-22-01). `/v1/auth/login` is
+                // public (allowlist bypass); `/me` and `/refresh` require a
+                // valid Bearer token (enforced by the middleware wrap).
+                .route("/auth/login", web::post().to(auth::login))
+                .route("/auth/me", web::get().to(auth::me))
+                .route("/auth/refresh", web::post().to(auth::refresh))
+                // Execution endpoint
+                .route("/execute", web::post().to(v1::execution::execute_rules))
+                // Phase 28 (D-03 / FRONTEND-04): engine-selector dropdown
+                // data source. Reuses shared web::Data<EngineRegistry> +
+                // web::Data<EngineSelector>. Behind requires_auth on /v1.
+                .route("/engines", web::get().to(v1::execution::list_engines))
+                // Phase 27 (D-05): sessionful lifecycle routes — dispose
+                // and reset. Registered before any wildcard /execute/{...}
+                // route (none currently exists, but the discipline holds
+                // per PATTERNS.md line 372).
+                .route(
+                    "/execute/session/{id}",
+                    web::delete().to(v1::sessions::dispose_session),
+                )
+                .route(
+                    "/execute/session/{id}/reset",
+                    web::post().to(v1::sessions::reset_session),
+                )
+                // Rules CRUD endpoints (Phase 20-01)
+                .route("/rules", web::get().to(v1::rules::get_rules))
+                .route("/rules", web::post().to(v1::rules::create_rule))
+                // Static rule sub-paths MUST be registered before /rules/{id}
+                // so actix matches the literal segment instead of binding it
+                // to the {id} wildcard.
+                .route(
+                    "/rules/batch-execute",
+                    web::post().to(v1::execution::batch_execute_rules),
+                )
+                // Hot reload endpoint for updating rules without restart
+                .route("/rules/reload", web::post().to(v1::execution::reload_rules))
+                .route("/rules/{id}", web::get().to(v1::rules::get_rule))
+                .route("/rules/{id}", web::put().to(v1::rules::update_rule))
+                .route("/rules/{id}", web::patch().to(v1::rules::update_rule))
+                .route(
+                    "/rules/{id}/undelete",
+                    web::post().to(v1::rules::undelete_rule),
+                )
+                // Soft delete (marks as archived)
+                .route("/rules/{id}", web::delete().to(v1::rules::delete_rule))
+                // Reload job status endpoints (Phase 21)
+                .route("/jobs/{job_id}", web::get().to(get_job_status))
+                .route("/jobs", web::get().to(list_jobs))
+                // Approval workflow endpoints (Phase 20-03)
+                .route(
+                    "/rules/{id}/submit",
+                    web::post().to(v1::approvals::submit_for_approval),
+                )
+                .route(
+                    "/approvals/pending",
+                    web::get().to(v1::approvals::list_pending_approvals),
+                )
+                .route(
+                    "/approvals/{id}/approve",
+                    web::post().to(v1::approvals::approve_request),
+                )
+                .route(
+                    "/approvals/{id}/reject",
+                    web::post().to(v1::approvals::reject_request),
+                )
+                // Category endpoints (Phase 20-02)
+                .route(
+                    "/categories",
+                    web::get().to(v1::categories::list_categories),
+                )
+                .route(
+                    "/categories",
+                    web::post().to(v1::categories::create_category),
+                )
+                .route(
+                    "/categories/{id}",
+                    web::get().to(v1::categories::get_category),
+                )
+                .route(
+                    "/categories/{id}",
+                    web::put().to(v1::categories::update_category),
+                )
+                .route(
+                    "/categories/{id}",
+                    web::patch().to(v1::categories::update_category),
+                )
+                .route(
+                    "/categories/{id}",
+                    web::delete().to(v1::categories::delete_category),
+                )
+                // Tag endpoints (Phase 20-02)
+                .route("/tags", web::get().to(v1::tags::list_tags))
+                .route("/tags", web::post().to(v1::tags::create_tag))
+                .route("/tags/{name}", web::get().to(v1::tags::get_tag))
+                .route("/tags/{name}", web::put().to(v1::tags::update_tag))
+                .route("/tags/{name}", web::delete().to(v1::tags::delete_tag))
+                // Tenant (organisation/workspace) management.
+                .route("/tenants", web::get().to(v1::tenants::list_tenants))
+                .route("/tenants", web::post().to(v1::tenants::create_tenant))
+                .route("/tenants/{id}", web::get().to(v1::tenants::get_tenant))
+                .route(
+                    "/tenants/{id}",
+                    web::delete().to(v1::tenants::delete_tenant),
+                )
+                .route(
+                    "/rules/{id}/tags",
+                    web::post().to(v1::tags::assign_tag_to_rule),
+                )
+                .route(
+                    "/rules/{id}/tags/{tag_name}",
+                    web::delete().to(v1::tags::remove_tag_from_rule),
+                )
+                // Branch endpoints (Phase 20-05)
+                .route("/branches", web::get().to(v1::branches::list_branches))
+                .route("/branches", web::post().to(v1::branches::create_branch))
+                .route("/branches/{name}", web::get().to(v1::branches::get_branch))
+                .route(
+                    "/branches/{name}",
+                    web::delete().to(v1::branches::delete_branch),
+                )
+                .route(
+                    "/branches/{name}/merge",
+                    web::post().to(v1::branches::merge_branch),
+                )
+                // Git log endpoint (Phase 20-05)
+                .route(
+                    "/rules/{id}/git-log",
+                    web::get().to(v1::branches::get_git_log),
+                )
+                // Audit trail endpoints (Phase 20-04)
+                .route("/audit", web::get().to(v1::audit::query_audit_events))
+                .route("/audit/export", web::get().to(v1::audit::export_audit_log))
+                // Monitoring endpoints (Phase 19)
+                .configure(configure_monitoring)
+                // Dashboard metric routes (MON-03/MON-04) — registered inside
+                // /v1 so they resolve to /v1/metrics/dead-rules and
+                // /v1/metrics/coverage. The Prometheus /metrics endpoint
+                // stays at root (configured below).
+                .configure(metrics::configure_metrics_dashboards)
+                // Real-time metrics WebSocket (MON-02, Plan 22-04). A real
+                // WS upgrade at /v1/metrics/ws broadcasting MetricsSnapshot from
+                // `metrics_tx` (replaces the prior JSON stub — RESEARCH §
+                // Pitfall 6). Public via the auth allowlist so a browser
+                // `new WebSocket()` (which cannot send a Bearer token)
+                // can connect; the stream is read-only (threat model).
+                .configure(websocket::configure_metrics_ws)
+                // Simulation / What-If analysis endpoints (Phase 5)
+                .configure(v1::configure_v1_simulation)
+                // Phase 33 (Plan 33-01): decision evaluation + reload routes.
+                // Registered after simulation but before metrics so that the
+                // `/v1/decisions/*` paths resolve without conflict with any
+                // existing wildcard segments.
+                .configure(v1::configure_v1_decisions)
+                // Phase 33 (Task 3): DMN Prometheus text endpoint + WS broadcast.
+                // Registered after decisions so the full path is /v1/metrics/dmn
+                // and /v1/metrics/dmn/ws without conflicts with the root /metrics scope.
+                .configure(v1::configure_dmn_metrics),
+        )
+        .app_data(web::Data::new(spa::load(&state.frontend_dist)))
+        .configure(metrics::configure_metrics)
+        // Serve the frontend's real files (JS, CSS, images) from the build
+        // directory, last so every API route takes precedence.
+        .service(
+            fs::Files::new("/", &state.frontend_dist)
+                .index_file("index.html")
+                .show_files_listing(),
+        )
+        // Anything that is not a file and not an API route is a client-side
+        // route: serve the application shell and let the router decide. The
+        // interface is a single-page app, so without this every page except
+        // the landing page answered 404 on a reload or a bookmark, before the
+        // router had a chance to run.
+        .default_service(web::get().to(spa::serve_index))
+}
+
+#[cfg(test)]
+impl ApiState {
+    /// A fully wired application state that needs no files on disk, for tests.
+    ///
+    /// The stores are the same `init_store` constructors the server uses; only the two
+    /// paths differ (`frontend_dist` and the repository), and both are pointed at a
+    /// temporary directory so a test cannot read or write anything real.
+    pub(crate) fn for_test(root: &std::path::Path) -> Self {
+        use engine::dmn::evaluator::SharedDmnModel;
+        use engine::dmn::feel::cache::FeelAstCache;
+
+        let (metrics_tx, _metrics_rx) = metrics::create_metrics_channel(16);
+        let (dmn_metrics_tx, _dmn_rx) = v1::dmn_metrics::create_dmn_metrics_channel(16);
+        let counters = web::Data::new(metrics::ExecutionCounters::new());
+        let session_config = v1::sessions::read_session_config();
+        let (tag_store, rule_tag_store) = v1::tags::init_stores();
+
+        let evaluator = DecisionEvaluator::new(Arc::new(RwLock::new(SharedDmnModel::new(
+            engine::dmn::model::DmnModel::default(),
+            FeelAstCache::new(),
+        ))));
+
+        let registry = EngineRegistry::new();
+        let mut selector = EngineSelector::with_defaults();
+        let _ = selector.select_engine("rete");
+
+        let repo_path = root.join("vcs.git").display().to_string();
+        let vcs_config =
+            engine::governance::versioning::VcsConfig::new(&format!("{repo_path}/.git"));
+        let repo = VersionControlRepo::open_or_init(&repo_path, vcs_config)
+            .expect("version control repository in a temporary directory");
+        let sessions_active =
+            prometheus::IntGauge::new("rrules_sessions_active_test", "Active sessions")
+                .expect("construct the session gauge");
+
+        Self {
+            engine_state: web::Data::new(v1::execution::EngineState::new()),
+            registry: web::Data::new(registry),
+            selector: web::Data::new(selector),
+            ruleset: web::Data::new(Arc::new(RwLock::new(SharedRuleSet::new(
+                engine::RuleSet::new(),
+            )))),
+            metrics_tx,
+            counters,
+            session_manager: Arc::new(SessionManager::new(session_config, sessions_active)),
+            dmn_evaluator: Arc::new(evaluator),
+            dmn_metrics_tx,
+            rule_store: v1::rules::init_store(),
+            category_store: v1::categories::init_store(),
+            tag_store,
+            rule_tag_store,
+            tenant_store: v1::tenants::init_store(),
+            approval_store: v1::approvals::init_store(),
+            audit_store: v1::audit::init_store(),
+            branch_store: web::Data::new(AsyncMutex::new(repo)),
+            job_store: v1::execution::init_job_store(),
+            user_store: auth::init_store(),
+            frontend_dist: root.join("dist").display().to_string(),
+            cors_allowed_origins: Vec::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::http::StatusCode;
+    use actix_web::test;
+
+    /// The application can be built and driven without a socket: the same `App` the
+    /// server serves, exercised with `actix_web::test`. This is what the integration
+    /// suites could not do — they had to bind a port and race whatever else was running.
+    #[actix_web::test]
+    async fn serves_health_without_a_socket() {
+        let dir = std::env::temp_dir().join(format!("rrules-app-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let state = ApiState::for_test(&dir);
+        let app = test::init_service(build_app(&state)).await;
+
+        let request = test::TestRequest::get().uri("/health").to_request();
+        let response = test::call_service(&app, request).await;
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    /// An unauthenticated call to a protected route is refused by the middleware, and the
+    /// refusal comes from the same stack the server runs — not from a mock.
+    #[actix_web::test]
+    async fn refuses_rules_without_a_token() {
+        let dir = std::env::temp_dir().join(format!("rrules-app-test-auth-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let state = ApiState::for_test(&dir);
+        let app = test::init_service(build_app(&state)).await;
+
+        let request = test::TestRequest::get().uri("/v1/rules").to_request();
+        let response = test::call_service(&app, request).await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// Logging in and then listing rules works end to end inside one process.
+    #[actix_web::test]
+    async fn login_then_list_rules() {
+        let dir =
+            std::env::temp_dir().join(format!("rrules-app-test-login-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let state = ApiState::for_test(&dir);
+        let app = test::init_service(build_app(&state)).await;
+
+        let login = test::TestRequest::post()
+            .uri("/v1/auth/login")
+            .set_json(serde_json::json!({"email": "admin", "password": "admin"}))
+            .to_request();
+        let response = test::call_service(&app, login).await;
+        assert_eq!(response.status(), StatusCode::OK, "login should succeed");
+        let body: serde_json::Value = test::read_body_json(response).await;
+        let token = body["token"].as_str().expect("a token").to_string();
+
+        let list = test::TestRequest::get()
+            .uri("/v1/rules")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let response = test::call_service(&app, list).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: serde_json::Value = test::read_body_json(response).await;
+        assert_eq!(body["total_count"], 0);
+        assert_eq!(body["page_size"], 50, "an absent page size means 50, not 1");
+    }
+}

@@ -250,9 +250,7 @@ fn tck_sweep() {
 /// the repository is produced by the harness rather than typed by hand.
 fn write_ledger(results: &SweepResults, path: &Path) {
     let mut out = String::new();
-    out.push_str(&format!(
-        "| # | Vector | Layer | Observed |\n|---|--------|-------|----------|\n"
-    ));
+    out.push_str("| # | Vector | Layer | Observed |\n|---|--------|-------|----------|\n");
     for (index, (vector, layer, reason)) in results.failures.iter().enumerate() {
         let observed = reason.replace('|', "\\|").replace('\n', " ");
         out.push_str(&format!(

@@ -12,6 +12,36 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.17] — 2026-10-25 — The HTTP application can be built without a socket
+
+The crate compiled the same sources twice: `main.rs` declared every module *and* `lib.rs` declared
+most of them, so the binary and the library were separate crates with distinct types — the
+binary's `metrics::ExecutionCounters` was not the library's. That is how a test can pass against one
+and the server run the other, and it meant the unit tests of the shared modules ran twice.
+
+The library owns the modules now and the binary is process wiring only. The application itself
+moved to `api/src/app.rs`: `ApiState` holds what the router needs and `build_app` assembles the same
+`App` the server serves. `main.rs` reads the environment, starts the session sweeper and binds the
+port.
+
+That makes the routes testable in-process, which they never were — the integration suites had to
+bind a port and race whatever else was listening. Three tests drive the real stack with
+`actix_web::test` in about 10 ms each:
+
+- `/health` answers `200`;
+- `/v1/rules` without a token is refused by the auth middleware;
+- logging in and listing rules works, and an absent `page_size` means 50 — the bug fixed in 9.0.6,
+  now pinned by a test that runs in-process.
+
+**The lint gate covers test and bench code.** `make lint` passes `--all-targets`; without it, unit
+tests inside modules, integration tests and benchmarks were never linted and about sixty findings
+had accumulated there. Among them, `test_cache_statistics` asserted `cache_hits >= 0 ||
+cache_misses >= 0` — always true on unsigned counters, so it asserted nothing (the vacuous
+assertion `AGENTS.md` names as a past sin). It now asserts what the engine does: three inserted
+facts are counted, and no rule is installed so propagation never consults the cache. A dead fixture
+constant in an api test was deleted, 31 lines that nothing referenced.
+
+
 ## [9.0.16] — 2026-10-25 — The browser gate presses "Reload then Run"
 
 The reload → poll → execute chain had only ever run against mocks: a unit test resolves the three

@@ -2720,7 +2720,7 @@ pub fn builtin_registry() -> HashMap<&'static str, BuiltinFn> {
 #[cfg(test)]
 mod conversion {
     use super::*;
-    use crate::dmn::feel::temporal::{DateTimeValue, YearsMonthsDuration};
+    use crate::dmn::feel::temporal::DateTimeValue;
     use chrono::NaiveDate;
     use rust_decimal::dec;
 
@@ -3196,7 +3196,6 @@ mod numeric {
 #[cfg(test)]
 mod registry_dispatch {
     use super::*;
-    use crate::dmn::feel::ast::{BinOpKind, FeelExpression};
 
     /// Helper: parse + evaluate with empty scope.
     fn ev(src: &str) -> Value {
@@ -3315,7 +3314,7 @@ mod proptests {
     fn prop_abs_symmetry() {
         for d in -100i64..100 {
             let dec_val = rust_decimal::Decimal::from(d);
-            let neg = built_in_abs(&[Value::Number(dec_val.clone())]);
+            let neg = built_in_abs(&[Value::Number(dec_val)]);
             let pos = built_in_abs(&[Value::Number(-dec_val)]);
             match (&neg, &pos) {
                 (Value::Number(a), Value::Number(b)) => {
@@ -3336,8 +3335,8 @@ mod proptests {
                     rust_decimal::Decimal::from(frac as i64) / rust_decimal::Decimal::from(10i64);
                 let val = whole + fract;
 
-                let floored = built_in_floor(&[Value::Number(val.clone())]);
-                let ceiled = built_in_ceiling(&[Value::Number(val.clone())]);
+                let floored = built_in_floor(&[Value::Number(val)]);
+                let ceiled = built_in_ceiling(&[Value::Number(val)]);
 
                 match (&floored, &ceiled) {
                     (Value::Number(floor_v), Value::Number(ceil_v)) => {
@@ -3355,8 +3354,8 @@ mod proptests {
     fn prop_odd_even_complementary() {
         for i in -100i64..100 {
             let v = Value::Integer(i);
-            let o = built_in_odd(&[v.clone()]);
-            let e = built_in_even(&[v.clone()]);
+            let o = built_in_odd(std::slice::from_ref(&v));
+            let e = built_in_even(std::slice::from_ref(&v));
             match (o, e) {
                 (Value::Bool(ob), Value::Bool(eb)) => {
                     assert_eq!(
@@ -3376,8 +3375,8 @@ mod proptests {
         for d in -100i64..100 {
             let dec_val = rust_decimal::Decimal::from(d);
             if dec_val.fract() == Decimal::ZERO {
-                let ru = built_in_round_up(&[Value::Number(dec_val.clone())]);
-                let rd = built_in_round_down(&[Value::Number(dec_val.clone())]);
+                let ru = built_in_round_up(&[Value::Number(dec_val)]);
+                let rd = built_in_round_down(&[Value::Number(dec_val)]);
                 assert_eq!(ru, rd, "round up and round down agree on integers");
             }
         }
@@ -3388,10 +3387,7 @@ mod proptests {
     fn prop_sqrt_square_is_abs() {
         for x in 1i64..100 {
             let dec_x = rust_decimal::Decimal::from(x);
-            let squared = built_in_mul(vec![
-                Value::Number(dec_x.clone()),
-                Value::Number(dec_x.clone()),
-            ]);
+            let squared = built_in_mul(vec![Value::Number(dec_x), Value::Number(dec_x)]);
             // sqrt(squared) should equal abs(x).
             let result = built_in_sqrt(&[squared]);
             match (result, dec_x.abs()) {
@@ -4208,7 +4204,7 @@ mod list {
             Value::Integer(2),
             Value::Integer(3),
         ]);
-        let result = built_in_reverse(&[built_in_reverse(&[original.clone()])]);
+        let result = built_in_reverse(&[built_in_reverse(std::slice::from_ref(&original))]);
         assert_eq!(result, original, "reverse(reverse(x)) should equal x");
     }
 
@@ -4242,7 +4238,7 @@ mod list {
 #[cfg(test)]
 mod datetime {
     use super::*;
-    use chrono::{Datelike, NaiveDate};
+    use chrono::NaiveDate;
 
     /// `now()` returns a DateTimeTz with Fixed offset.
     #[test]

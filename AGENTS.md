@@ -86,6 +86,7 @@ you have not seen pass.
 |----------|----------|
 | Specification (start here) | `specs/README.md` |
 | Normative requirements | `specs/requirements.md` |
+| HTTP application | `api/src/app.rs` — state and the builder `main` and the tests share |
 | Verification config | `engine/codewitness.yaml`, `api/codewitness.yaml` |
 | DMN TCK conformance | `TCK-COVERAGE-GAPS.md` |
 | API reference / user guide | `docs/API.md`, `docs/user-guide.md` |

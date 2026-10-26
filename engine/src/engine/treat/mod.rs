@@ -603,7 +603,16 @@ mod tests {
             engine.assert_fact(fact);
         }
 
+        // The cache is consulted during propagation, and this engine has no rules, so
+        // nothing propagates. The old assertion here was `cache_hits >= 0 || cache_misses
+        // >= 0` on unsigned counters — always true, asserting nothing. These are the
+        // numbers the engine really produces, and they fail if either changes silently.
         let metrics = engine.get_metrics();
-        assert!(metrics.cache_hits >= 0 || metrics.cache_misses >= 0); // At least one of them
+        assert_eq!(metrics.facts_inserted, 3, "each assert is counted");
+        assert_eq!(
+            (metrics.cache_hits, metrics.cache_misses),
+            (0, 0),
+            "no rule is installed, so propagation never consults the cache"
+        );
     }
 }

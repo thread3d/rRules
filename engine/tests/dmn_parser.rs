@@ -145,7 +145,7 @@ fn test_cdata_description_preserved() {
     let cdata_rule = dt
         .rules
         .iter()
-        .find(|r| r.description.as_ref().map_or(false, |d| d.is_cdata))
+        .find(|r| r.description.as_ref().is_some_and(|d| d.is_cdata))
         .expect("at least one rule must have a CDATA description");
     let rdesc = cdata_rule.description.as_ref().unwrap();
     assert!(

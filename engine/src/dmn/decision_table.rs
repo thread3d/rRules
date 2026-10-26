@@ -630,7 +630,7 @@ pub fn validate_decision_table(table: &DecisionTable) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dmn::model::{Decision, DecisionTable as DtModel, InputClause, OutputClause};
+    use crate::dmn::model::{DecisionTable as DtModel, InputClause, OutputClause};
     use crate::dmn::parser::parse_dmn_with_cache;
     use std::fs;
 
@@ -694,8 +694,10 @@ mod tests {
     #[test]
     fn unique_multi_match_returns_violation() {
         // Build a synthetic UNIQUE table where two rules overlap.
-        let mut dt = DtModel::default();
-        dt.hit_policy = HitPolicy::Unique;
+        let mut dt = DtModel {
+            hit_policy: HitPolicy::Unique,
+            ..DtModel::default()
+        };
         dt.input_clauses.push(InputClause {
             id: None,
             label: None,
@@ -758,8 +760,10 @@ mod tests {
     #[test]
     fn first_returns_first_match() {
         // Build a synthetic FIRST table with two overlapping rules.
-        let mut dt = DtModel::default();
-        dt.hit_policy = HitPolicy::First;
+        let mut dt = DtModel {
+            hit_policy: HitPolicy::First,
+            ..DtModel::default()
+        };
         dt.input_clauses.push(InputClause {
             id: None,
             label: None,
@@ -815,8 +819,10 @@ mod tests {
     #[test]
     fn any_agreeing_returns_value() {
         // Build a synthetic ANY table with two rules that both match and agree.
-        let mut dt = DtModel::default();
-        dt.hit_policy = HitPolicy::Any;
+        let mut dt = DtModel {
+            hit_policy: HitPolicy::Any,
+            ..DtModel::default()
+        };
         dt.input_clauses.push(InputClause {
             id: None,
             label: None,
@@ -872,8 +878,10 @@ mod tests {
     #[test]
     fn any_conflicting_raises_error() {
         // Build a synthetic ANY table with two rules that both match but disagree.
-        let mut dt = DtModel::default();
-        dt.hit_policy = HitPolicy::Any;
+        let mut dt = DtModel {
+            hit_policy: HitPolicy::Any,
+            ..DtModel::default()
+        };
         dt.input_clauses.push(InputClause {
             id: None,
             label: None,
@@ -936,8 +944,10 @@ mod tests {
     fn unimplemented_policy_returns_other_error() {
         // All policies are now implemented — this test no longer applies.
         // Previously tested that COLLECT/OUTPUT_ORDER/RULE_ORDER returned Other error.
-        let mut dt = DtModel::default();
-        dt.hit_policy = HitPolicy::Collect;
+        let dt = DtModel {
+            hit_policy: HitPolicy::Collect,
+            ..DtModel::default()
+        };
         // No rules → returns empty list (no aggregation).
         let cache = FeelAstCache::new();
         let scope = Scope::empty();

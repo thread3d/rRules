@@ -1486,7 +1486,7 @@ pub enum DecisionEvalError {
 #[cfg(test)]
 mod drd_cache_tests {
     use super::*;
-    use crate::dmn::feel::cache::{FeelAstCache, ParseEntry};
+    use crate::dmn::feel::cache::FeelAstCache;
     use crate::dmn::model::{Decision, Definitions, DefinitionsChild, DmnModel};
 
     /// Build a minimal 2-decision DRD: `d2` requires `d1`. No decision tables —
@@ -1573,7 +1573,7 @@ mod drd_cache_tests {
 mod parallel_eval_tests {
     use super::*;
     use crate::data_types::Value;
-    use crate::dmn::feel::cache::{FeelAstCache, ParseEntry};
+    use crate::dmn::feel::cache::FeelAstCache;
     use crate::dmn::model::{
         Decision, DecisionTable, Definitions, DefinitionsChild, DmnModel, DmnRule, HitPolicy,
         InformationItem, InputClause, OutputClause, RuleEntry, TextContent,

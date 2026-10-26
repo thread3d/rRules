@@ -158,7 +158,7 @@ fn test_list_access() {
     let expr = parse_expression("[1, 2, 3][0]");
 
     let scope = Scope::empty();
-    let result = evaluate(&expr, &scope);
+    let _result = evaluate(&expr, &scope);
 
     // Array access may not be fully implemented - skip this test for now
 }
@@ -183,7 +183,7 @@ fn test_conditional_if() {
 #[test]
 fn test_context_lookup() {
     // a.b should access nested context
-    let expr = parse_expression("a.b");
+    let _expr = parse_expression("a.b");
 
     let mut scope = Scope::empty();
     let inner = engine::data_types::Value::Object(
