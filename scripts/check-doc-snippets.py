@@ -10,10 +10,13 @@ This script extracts every ```rust block, wraps each in a function, writes a thr
 is the assertion — the snippets describe how to *construct* rules, so building them is what they
 promise.
 
+It also checks the document's internal links: the table of contents is a set of `#anchor` targets, and a
+section that is renamed or removed leaves a link that scrolls nowhere.
+
 Usage:
   scripts/check-doc-snippets.py [--doc docs/user-guide.md]
 
-Exit codes: 0 every snippet compiles, 1 something does not (the compiler's message is shown).
+Exit codes: 0 every snippet compiles and every anchor resolves, 1 something does not.
 """
 
 from __future__ import annotations
@@ -27,6 +30,23 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SNIPPET = re.compile(r"```rust\n(.*?)```", re.DOTALL)
+
+
+def heading_anchor(heading: str) -> str:
+    """GitHub's anchor for a heading: lower-cased, punctuation dropped, spaces hyphenated."""
+    text = heading.strip().lower()
+    text = "".join(character for character in text if character.isalnum() or character in " -_")
+    return text.replace(" ", "-")
+
+
+def broken_anchors(doc: pathlib.Path) -> list[str]:
+    text = doc.read_text(encoding="utf-8")
+    headings = {heading_anchor(line.lstrip("#").strip()) for line in text.splitlines() if line.startswith("#")}
+    missing = []
+    for target in re.findall(r"\]\(#([^)]+)\)", text):
+        if target not in headings:
+            missing.append(target)
+    return missing
 
 
 def blocks(doc: pathlib.Path) -> list[str]:
@@ -68,6 +88,13 @@ def main() -> int:
     parser.add_argument("--doc", type=pathlib.Path, default=REPO / "docs" / "user-guide.md")
     parser.add_argument("--keep", action="store_true", help="leave the generated crate in place")
     args = parser.parse_args()
+
+    anchors = broken_anchors(args.doc)
+    if anchors:
+        print(f"doc-snippets: {args.doc.name} links to anchors that do not exist:")
+        for anchor in anchors:
+            print(f"  #{anchor}")
+        return 1
 
     snippets = blocks(args.doc)
     if not snippets:

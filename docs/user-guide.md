@@ -10,6 +10,10 @@ This guide shows you how to write rules for the rRules Business Rules Management
 4. [Actions and Effects](#actions-and-effects)
 5. [Rule Priority (Salience)](#rule-priority-salience)
 6. [Complex Scenarios](#complex-scenarios)
+7. [DMN decisions](#dmn-decisions)
+8. [Governance: approval before a rule goes live](#governance-approval-before-a-rule-goes-live)
+9. [Testing Your Rules](#testing-your-rules)
+10. [Best Practices](#best-practices)
 
 ---
 
@@ -660,6 +664,116 @@ let low_risk = Rule::builder("fraud-low-risk", "Low Risk Fraud")
     })
     .build();
 ```
+
+---
+
+## DMN decisions
+
+Rules and DMN are two ways to express the same thing. A decision model is a `.dmn` file — the OMG
+standard XML that any DMN editor produces — and rRules evaluates it without translating it.
+
+### Evaluating a decision in Rust
+
+The engine parses the document, evaluates a decision by id, and returns its outputs. The decisions a
+model declares are the ids in its `<decision>` elements.
+
+```rust
+use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest};
+use engine::dmn::parser::parse_dmn_with_cache;
+use std::sync::{Arc, RwLock};
+
+let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20180913/MODEL/" id="demo" name="Demo"
+             namespace="http://example.com/demo">
+  <decision id="discount" name="Discount">
+    <decisionTable id="discount_table" hitPolicy="UNIQUE">
+      <input id="in_customer"><inputExpression><text>customer</text></inputExpression></input>
+      <output id="out_rate" name="rate" typeRef="number"/>
+      <rule id="r1">
+        <inputEntry><text>"premium"</text></inputEntry>
+        <outputEntry><text>20</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+</definitions>"#;
+
+let (model, cache) = parse_dmn_with_cache(xml).expect("a valid DMN document");
+let shared = engine::dmn::evaluator::SharedDmnModel::new(model, cache);
+let evaluator = DecisionEvaluator::new(Arc::new(RwLock::new(shared)));
+
+let mut inputs = std::collections::HashMap::new();
+inputs.insert(
+    "customer".to_string(),
+    engine::data_types::Value::String("premium".to_string()),
+);
+let result = evaluator
+    .evaluate("discount", EvaluateRequest { inputs, trace: false })
+    .expect("the decision exists and its table has a matching rule");
+
+// The output names come from the `<output>` elements of the decision table.
+assert_eq!(
+    result.outputs.get("rate"),
+    Some(&engine::data_types::Value::Number(engine::Decimal::from(20))),
+);
+```
+
+Two things are worth knowing before writing a model:
+
+- **Hit policy decides what multiple matching rules mean.** `UNIQUE` refuses to evaluate when two
+  rules match, and the API answers `400` with `DMN_HIT_POLICY_VIOLATION`; `FIRST`, `PRIORITY`,
+  `COLLECT` and the rest each define their own answer. The full set is in
+  [`specs/dmn-feel.md`](../specs/dmn-feel.md).
+- **A decision that depends on another is evaluated first.** The order comes from the decision
+  requirements graph, not from the order of the elements in the file, and independent branches are
+  evaluated in parallel.
+
+### Managing decisions over HTTP
+
+`POST /v1/decisions/import` stores a model, `GET /v1/decisions` lists what is stored, and
+`POST /v1/decisions/{id}/evaluate` runs one:
+
+```bash
+# Store a model. The body is the DMN XML itself.
+curl -X POST "$HOST/v1/decisions/import" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/xml' \
+  --data-binary @discount.dmn
+
+# Evaluate it with inputs named after your input expressions.
+curl -X POST "$HOST/v1/decisions/discount/evaluate" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"inputs": {"customer": "premium"}, "trace": false}'
+```
+
+The response carries `outputs`, `rules_fired` and `duration_ms`, and with `"trace": true` an
+evaluation trace as well. Every endpoint is documented in [`API.md`](API.md).
+
+## Governance: approval before a rule goes live
+
+A rule is not published by the person who writes it. Submitting a rule creates an approval request,
+and another user approves or rejects it; both actions are recorded in the audit trail with the acting
+user.
+
+```bash
+# The maker submits their change.
+curl -X POST "$HOST/v1/rules/$RULE_ID/submit" \
+  -H "Authorization: Bearer $MAKER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"maker_id": "alice"}'
+
+# The checker sees what is waiting, then decides.
+curl "$HOST/v1/approvals/pending" -H "Authorization: Bearer $CHECKER_TOKEN"
+curl -X POST "$HOST/v1/approvals/$APPROVAL_ID/approve" \
+  -H "Authorization: Bearer $CHECKER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"approver_id": "bob"}'
+```
+
+The same flow is in the interface under **Governance → Approval Queue**, and the trail it leaves is
+under **Governance → Audit Log**. `DELETE /v1/rules/{id}` **archives** a rule rather than erasing it —
+an audit trail would mean little if the thing it names could vanish — and archived rules keep their
+row with an `Archived` badge.
 
 ---
 

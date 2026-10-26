@@ -12,6 +12,28 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.36] — 2026-10-25 — The guide covers DMN and governance
+
+`docs/user-guide.md` was titled "Writing Rules" and stopped there. A reader of the guide alone could
+not use the DMN side or the approval workflow at all; they would have had to find `docs/API.md` and
+work out which of its endpoints mattered.
+
+Two sections now cover them:
+
+- **DMN decisions** — a complete Rust example that parses a decision table, evaluates it by id and
+  reads its outputs, plus what hit policy and the dependency graph do to the answer, and the three HTTP
+  calls that import, list and evaluate a model. The Rust block is compiled by `make docs-snippets`
+  like the other fifteen, so it cannot drift from the API it documents. It failed on the first attempt
+  — the example reached for `rust_decimal` directly — which is the check doing its job.
+- **Governance** — the maker-checker flow as it actually is: submit, see what is pending, approve or
+  reject, and where the trail appears. It also states that `DELETE /v1/rules/{id}` **archives** rather
+  than erases, and why.
+
+The table of contents listed six of the eleven sections; it lists them all now, and the documentation
+check verifies that every `#anchor` in the file resolves to a heading — a renamed section leaves a link
+that scrolls nowhere, and nothing was checking.
+
+
 ## [9.0.35] — 2026-10-25 — The maker-checker loop, walked in a browser; and a correction
 
 The governance pages turned out to be wired — the approval queue posts to
