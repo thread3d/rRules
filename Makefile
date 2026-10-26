@@ -32,8 +32,10 @@ bump-version:
 	python3 scripts/version-bump.py "$(VERSION)"
 	@# The workspace crates are path dependencies, so their versions live in
 	@# Cargo.lock too. Regenerating it here keeps `--locked` builds working; a bump
-	@# that skips this breaks every gate that builds with `--locked`.
-	cargo check --workspace --offline --quiet
+	@# that skips this breaks every gate that builds with `--locked`. Deliberately
+	@# not `--offline`: resolving a lock that needs a crate this machine has never
+	@# fetched fails offline, and the failure is easy to miss.
+	cargo check --workspace --quiet
 	@echo "Cargo.lock refreshed for $(VERSION)"
 
 # Check the Dockerfile's build logic without a container runtime: read its COPY
