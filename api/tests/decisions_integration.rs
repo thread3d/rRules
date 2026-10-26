@@ -71,6 +71,7 @@ async fn evaluate_returns_outputs() {
     let app = test::init_service(
         ActixApp::new()
             .app_data(web::Data::new(evaluator))
+            .app_data(web::Data::new(api::v1::dmn_metrics::test_channel()))
             .route(
                 "/decisions/{id}/evaluate",
                 web::post().to(api::v1::decisions::evaluate_decision),
@@ -98,10 +99,15 @@ async fn evaluate_returns_outputs() {
 #[actix_web::test]
 async fn evaluate_not_found_returns_404() {
     let evaluator = build_evaluator(MINIMAL_DMN_XML);
-    let app = test::init_service(ActixApp::new().app_data(web::Data::new(evaluator)).route(
-        "/decisions/{id}/evaluate",
-        web::post().to(api::v1::decisions::evaluate_decision),
-    ))
+    let app = test::init_service(
+        ActixApp::new()
+            .app_data(web::Data::new(evaluator))
+            .app_data(web::Data::new(api::v1::dmn_metrics::test_channel()))
+            .route(
+                "/decisions/{id}/evaluate",
+                web::post().to(api::v1::decisions::evaluate_decision),
+            ),
+    )
     .await;
 
     let req = test::TestRequest::post()
@@ -181,6 +187,7 @@ async fn hot_reload_swaps_model() {
     let app = test::init_service(
         ActixApp::new()
             .app_data(web::Data::new(evaluator))
+            .app_data(web::Data::new(api::v1::dmn_metrics::test_channel()))
             .app_data(store.clone())
             .route(
                 "/decisions/reload",
@@ -227,10 +234,15 @@ async fn metrics_increment_on_evaluate() {
     use prometheus::{Encoder, TextEncoder};
 
     let evaluator = build_evaluator(MINIMAL_DMN_XML);
-    let app = test::init_service(ActixApp::new().app_data(web::Data::new(evaluator)).route(
-        "/decisions/{id}/evaluate",
-        web::post().to(api::v1::decisions::evaluate_decision),
-    ))
+    let app = test::init_service(
+        ActixApp::new()
+            .app_data(web::Data::new(evaluator))
+            .app_data(web::Data::new(api::v1::dmn_metrics::test_channel()))
+            .route(
+                "/decisions/{id}/evaluate",
+                web::post().to(api::v1::decisions::evaluate_decision),
+            ),
+    )
     .await;
 
     // Make an evaluate call.
@@ -260,6 +272,7 @@ async fn dmn_metrics_exposed_at_v1_metrics_dmn() {
     let app = test::init_service(
         ActixApp::new()
             .app_data(web::Data::new(evaluator))
+            .app_data(web::Data::new(api::v1::dmn_metrics::test_channel()))
             .route(
                 "/decisions/{id}/evaluate",
                 web::post().to(api::v1::decisions::evaluate_decision),
@@ -285,5 +298,43 @@ async fn dmn_metrics_exposed_at_v1_metrics_dmn() {
     assert!(
         body.contains("rrules_dmn_evaluations_total"),
         "metrics text: {body}"
+    );
+}
+
+/// The evaluate path publishes to the DMN metrics broadcast, which is what the WebSocket at
+/// `/v1/metrics/dmn/ws` forwards. Nothing published, so that socket streamed nothing.
+#[actix_web::test]
+async fn evaluation_publishes_a_metrics_snapshot() {
+    let evaluator = build_evaluator(MINIMAL_DMN_XML);
+    let channel = api::v1::dmn_metrics::test_channel();
+    // Subscribe before the request: a broadcast channel delivers only to receivers that existed
+    // when the message was sent.
+    let mut receiver = channel.subscribe();
+
+    let app = test::init_service(
+        ActixApp::new()
+            .app_data(web::Data::new(evaluator))
+            .app_data(web::Data::new(channel))
+            .route(
+                "/decisions/{id}/evaluate",
+                web::post().to(api::v1::decisions::evaluate_decision),
+            ),
+    )
+    .await;
+
+    let req = test::TestRequest::post()
+        .uri("/decisions/d1/evaluate")
+        .set_json(json!({ "inputs": {} }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200, "the decision should evaluate");
+
+    let snapshot = receiver
+        .try_recv()
+        .expect("the evaluate path should publish a DMN metrics snapshot");
+    assert_eq!(snapshot.decision_id, "d1");
+    assert!(
+        !snapshot.timestamp.is_empty(),
+        "the snapshot carries a timestamp"
     );
 }

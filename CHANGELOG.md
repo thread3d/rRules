@@ -12,6 +12,28 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.29] — 2026-10-25 — The DMN metrics socket streams
+
+`/v1/metrics/dmn/ws` forwarded what the evaluate path published, and the evaluate path published
+nothing: `DmnMetricsTx` had no senders anywhere in the crate, so the socket was a well-built pipe
+connected to nothing. A background task did drain the receiver, but only to log — it competed with
+no subscriber and delivered to none.
+
+`evaluate_decision` now publishes a `DmnMetricsSnapshot` (decision id, rules fired, duration,
+timestamp) on every successful evaluation, and each WebSocket client subscribes to the channel
+itself. The drain-and-log task is deleted.
+
+A failed evaluation is counted in the Prometheus metrics but publishes no snapshot, because the
+snapshot describes a completed evaluation — `docs/API.md` now says so rather than leaving a reader to
+guess.
+
+The test that proves it lives in `decisions_integration.rs`, beside a real DMN model, because a
+broadcast channel only delivers to receivers that existed when the message was sent: it subscribes
+first, evaluates `d1`, and asserts the snapshot arrives. Two hand-rolled harnesses there needed the
+sender added — the same runtime-500-not-compile-error failure as `tenants.rs` last round, which is now
+a `test_channel()` helper so the next one is a one-liner.
+
+
 ## [9.0.28] — 2026-10-25 — `WATCH_RULES_DIR` watches
 
 The option promised hot reload and its consumer was one `log::info!`: a deployment could set

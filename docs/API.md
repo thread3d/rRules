@@ -115,7 +115,10 @@ DMN evaluation metrics (per-output counters, DRD chain depth, dead decisions).
 **Response:** `200` `DmnMetricsSnapshot` JSON.
 
 ## GET /v1/metrics/dmn/ws — WebSocket
-Live `DmnMetricsSnapshot` broadcast after each decision evaluation.
+Live `DmnMetricsSnapshot` broadcast after each successful decision evaluation
+(`decision_id`, `rules_fired`, `duration_ms`, `timestamp`). A failed evaluation is counted in the
+Prometheus metrics but does not publish a snapshot, because a snapshot describes a completed
+evaluation.
 **Auth:** none (read-only stream, same rationale as `/v1/metrics/ws`).
 
 ## GET /v1/metrics/ws — WebSocket

@@ -136,6 +136,7 @@ pub async fn evaluate_decision(
     evaluator: web::Data<Arc<DecisionEvaluator>>,
     path: web::Path<String>,
     body: web::Json<EvaluateDecisionRequest>,
+    dmn_metrics_tx: web::Data<crate::v1::dmn_metrics::DmnMetricsTx>,
 ) -> HttpResponse {
     let decision_id = path.into_inner();
 
@@ -164,6 +165,15 @@ pub async fn evaluate_decision(
             crate::v1::dmn_metrics::METRIC_DECISION_DURATION_SECONDS
                 .with_label_values(&[&decision_id, hit_policy_str])
                 .observe(result.duration_ms / 1000.0);
+
+            // Publish to the WebSocket channel. `send` fails only when no client is subscribed,
+            // which is the ordinary case for a headless deployment and not an error.
+            let _ = dmn_metrics_tx.send(crate::v1::dmn_metrics::DmnMetricsSnapshot {
+                decision_id: decision_id.clone(),
+                rules_fired: result.rules_fired,
+                duration_ms: result.duration_ms,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            });
 
             let trace_response = result.trace.as_ref().map(|t| TraceResponse {
                 decision_id: t.decision_id.clone(),

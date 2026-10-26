@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::time::Duration;
 
 use actix_web::{HttpResponse, Responder};
 use prometheus::{Encoder, Registry, TextEncoder};
@@ -85,6 +84,14 @@ pub struct DmnMetricsSnapshot {
     pub timestamp: String,
 }
 
+/// A broadcaster with no subscribers, for tests that mount a handler directly.
+///
+/// The evaluate handler publishes a snapshot; a test that builds its own `App` must supply the
+/// sender, exactly as the real application does.
+pub fn test_channel() -> DmnMetricsTx {
+    create_dmn_metrics_channel(16).0
+}
+
 /// Broadcast channel type alias for DMN metrics snapshots.
 pub type DmnMetricsTx = Arc<tokio::sync::broadcast::Sender<DmnMetricsSnapshot>>;
 
@@ -97,23 +104,6 @@ pub fn create_dmn_metrics_channel(
 ) {
     let (tx, rx) = tokio::sync::broadcast::channel(capacity);
     (Arc::new(tx), rx)
-}
-
-/// Spawn the background task that forwards DmnMetricsSnapshot events from the
-/// broadcast receiver to connected WebSocket clients. The receiver is polled on
-/// a 50 ms cadence; each buffered snapshot is JSON-serialized and sent as a WS
-/// text frame (mirrors `api::metrics`'s `create_metrics_channel` pattern).
-pub fn spawn_dmn_metrics_broadcaster(mut rx: tokio::sync::broadcast::Receiver<DmnMetricsSnapshot>) {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(50));
-        loop {
-            interval.tick().await;
-            // Drain all buffered snapshots from the receiver.
-            while let Ok(snapshot) = rx.try_recv() {
-                tracing::debug!(decision_id = %snapshot.decision_id, "DMN metrics snapshot broadcast");
-            }
-        }
-    });
 }
 
 // =========================================================================

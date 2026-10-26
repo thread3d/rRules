@@ -34,7 +34,7 @@ async fn main() -> std::io::Result<()> {
         format!("{host}:{port}")
     };
 
-    println!("rRules REST API Server v9.0.28");
+    println!("rRules REST API Server v9.0.29");
     println!("Starting on http://{bind_address}");
 
     // Create engine state for hot reload functionality
@@ -121,8 +121,8 @@ async fn main() -> std::io::Result<()> {
     // matches the existing engine metrics channel pattern. The receiver is moved
     // into a background broadcaster task; the sender is cloned and injected as
     // `web::Data` so handlers can push snapshots after each evaluation.
-    let (dmn_metrics_tx, dmn_metrics_rx) = v1::dmn_metrics::create_dmn_metrics_channel(16);
-    v1::dmn_metrics::spawn_dmn_metrics_broadcaster(dmn_metrics_rx);
+    // One sender is enough: WebSocket clients subscribe to it, so nothing needs to drain here.
+    let (dmn_metrics_tx, _) = v1::dmn_metrics::create_dmn_metrics_channel(16);
 
     // Create metrics broadcast channel for real-time updates (for future WebSocket use)
     let (metrics_tx, _) = metrics::create_metrics_channel(16);

@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.28` (`api/src/openapi.rs:12`).
+  version `9.0.29` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -451,7 +451,7 @@ Dead or unreachable code:
 | ~~`record_audit_event` has zero callers, so `/v1/audit` and `/v1/audit/export` are permanently empty~~ | **Fixed in 9.0.27**: rule create, update and delete (archive) and approval approve/reject record events, with the acting user from the JWT, the peer address and the `User-Agent` (`api/src/v1/audit.rs` `record_for_request`). Category, tag and tenant mutations and executions are still not recorded. |
 | `build_ruleset_from_dir`'s counterpart `EngineState` (+ `reload_from_directory`, `reload_engine`) is registered as `app_data` but never extracted; the git-log `from_commit` parameter is accepted and ignored | `api/src/main.rs:48,272`; `api/src/v1/execution.rs:295-378`; `branches.rs:216-251` |
 | ~~`start_file_watcher` is a stub, so `WATCH_RULES_DIR` has no functional effect~~ | **Fixed in 9.0.28**: the watcher polls the rules directory (`RRULES_WATCH_INTERVAL_SECS`, default 2 s) and calls `reload_and_swap` on any change, so an edit on disk swaps in a new rule set atomically. Polling rather than filesystem notifications keeps the dependency list unchanged; mtime-and-size catches adds, removes, edits and truncations, which is what a rules directory does. |
-| DMN WS broadcaster drains and logs but never forwards; nothing publishes to `DmnMetricsTx` | `api/src/v1/dmn_metrics.rs:92-103` |
+| ~~DMN WS broadcaster drains and logs but never forwards; nothing publishes to `DmnMetricsTx`~~ | **Fixed in 9.0.29**: the evaluate path publishes a `DmnMetricsSnapshot` on success, and the WebSocket at `/v1/metrics/dmn/ws` forwards it (each client subscribes to the channel itself). The task that drained and logged the receiver is deleted — it competed with nothing and delivered nothing. |
 
 Stub / hard-coded responses: `GET /v1/monitoring/engine-state` returns all
 zeros (`routes/monitoring.rs:31-42`); `GET /metrics` HTML/JSON arms report
