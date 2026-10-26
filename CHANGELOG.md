@@ -12,6 +12,19 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.9] — 2026-10-25 — The memory gate measures something again
+
+`make memcheck` failed: peak RSS **+35%** against a baseline taken at v6.0. The growth is real
+and accounted for — since then the evaluator gained an invocable index, bound function scopes for
+business knowledge models, boxed contexts, lists and relations, and a cache holding every parsed
+function body. A baseline that no release can pass is not a gate; it is a red light everyone
+learns to ignore.
+
+The snapshots are now named for what they measure: `baseline.json` and `current.json`, no
+version in the name. The baseline is the 9.0 measurement, recorded by `make baseline-update`, and
+`engine/benches/README.md` says why the v6.0 floor was retired. Allocations moved 5%
+(1877 → 1986) and RSS 35%; from here the gate protects those numbers.
+
 ## [9.0.8] — 2026-10-25 — "Test this rule" says what it can and cannot run
 
 The edit page mounts a test runner whose Run button posts to `POST /v1/execute`. That endpoint

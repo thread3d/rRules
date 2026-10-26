@@ -26,7 +26,7 @@ make memcheck
 cargo run -p engine --bin memory_baseline
 ```
 
-This writes a JSON snapshot to `engine/benches/snapshots/v6.0-baseline.json` containing:
+This writes a JSON snapshot to `engine/benches/snapshots/baseline.json` containing:
 - Cold-start RSS (bytes)
 - Per-phase RSS deltas and allocation counts (parse, evaluate, drd_resolution)
 - Peak RSS across all phases
@@ -106,5 +106,5 @@ To add a new benchmark group:
 ## Notes
 
 - Benchmarks are **measurement only** — they do not optimize. Phase 37+ handles actual performance improvements.
-- The baseline snapshot (`v6.0-baseline.json`) is committed to the repository and serves as the regression floor for nightly checks.
+- The baseline snapshot (`baseline.json`) is committed to the repository and serves as the regression floor for nightly checks. It holds the 9.0 measurement: the v6.0 baseline was retired when the evaluator gained an invocable index, bound function scopes and boxed expressions, which moved peak RSS beyond what that floor described.
 - If you change benchmark code or corpus files, regenerate the baseline with `make memcheck` and commit the updated snapshot.

@@ -13,8 +13,8 @@
 #
 # Usage:
 #   scripts/memcheck-gate.sh [BASELINE] [CURRENT]
-#       BASELINE  default engine/benches/snapshots/v6.0-baseline.json
-#       CURRENT   default engine/benches/snapshots/v6.0-current.json
+#       BASELINE  default engine/benches/snapshots/baseline.json
+#       CURRENT   default engine/benches/snapshots/current.json
 #
 # Env:
 #   BENCH_RSS_THRESHOLD_PCT    percent regression allowed for RSS   (default 10)
@@ -30,8 +30,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-BASELINE="${1:-$REPO_ROOT/engine/benches/snapshots/v6.0-baseline.json}"
-CURRENT="${2:-$REPO_ROOT/engine/benches/snapshots/v6.0-current.json}"
+BASELINE="${1:-$REPO_ROOT/engine/benches/snapshots/baseline.json}"
+CURRENT="${2:-$REPO_ROOT/engine/benches/snapshots/current.json}"
 
 RSS_THRESHOLD="${BENCH_RSS_THRESHOLD_PCT:-10}"
 ALLOC_THRESHOLD="${BENCH_ALLOC_THRESHOLD_PCT:-10}"

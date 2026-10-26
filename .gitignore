@@ -22,8 +22,8 @@ engine/fuzz/corpus/
 engine/fuzz/artifacts/
 
 # ── Memory regression-gate current snapshot (run artifact; only the
-#    frozen v6.0-baseline.json is committed) ────────────────────
-engine/benches/snapshots/v6.0-current.json
+#    frozen baseline.json is committed) ─────────────────────────
+engine/benches/snapshots/current.json
 
 # ── Logs ──────────────────────────────────────────────────────
 *.log

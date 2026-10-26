@@ -1,0 +1,24 @@
+{
+  "corpus_name": "v6.0-tck",
+  "file_count": 114,
+  "cold_start_rss_bytes": 7389184,
+  "phases": [
+    {
+      "phase": "parse",
+      "rss_delta_bytes": 4153344,
+      "allocation_count": 114
+    },
+    {
+      "phase": "evaluate",
+      "rss_delta_bytes": 10285056,
+      "allocation_count": 1872
+    },
+    {
+      "phase": "drd_resolution",
+      "rss_delta_bytes": 0,
+      "allocation_count": 0
+    }
+  ],
+  "peak_rss_bytes": 22077440,
+  "total_duration_ns": 14379040600
+}

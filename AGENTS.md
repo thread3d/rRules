@@ -123,7 +123,7 @@ rewrite on 2026-10-25 in which every commit SHA and every tag changed. The repos
 
 - Do not weaken `.gitignore`, and never `git add -f` a path it ignores. It covers `target/`,
   `frontend/node_modules/`, `frontend/dist/`, `engine/fuzz/target/`,
-  `engine/benches/snapshots/v6.0-current.json`, `.codewitness/`, `.codebase-memory/` and the DMN
+  `engine/benches/snapshots/current.json`, `.codewitness/`, `.codebase-memory/` and the DMN
   runtime store `api/dmn/`.
 - **Ignore rules never untrack what is already tracked.** Check what you stage:
   `git status --short`, then `git diff --cached --stat`. A surprising file count is a red flag.

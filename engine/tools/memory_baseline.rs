@@ -1,7 +1,7 @@
 //! Memory baseline benchmark — Phase 36.
 //!
 //! Measures RSS peak, allocation counts, and per-phase breakdown for the DMN subsystem.
-//! Runs against the v6.0 import corpus and saves results as JSON in `engine/benches/snapshots/`.
+//! Runs against the import corpus and saves results as JSON in `engine/benches/snapshots/`.
 
 use engine::dmn::bench_util::{
     load_corpus_files, tck_root, write_baseline_snapshot, MemoryBaseline, PhaseBreakdown,
@@ -147,14 +147,15 @@ fn main() {
     };
 
     // PERF-04: by default write a CURRENT snapshot to a separate file so the
-    // frozen `v6.0-baseline.json` (committed to the repo) is never overwritten
-    // by a regression-gate run. Pass `--update-baseline` to intentionally
-    // refresh the frozen baseline (used by `make baseline-update` when
-    // accepting new numbers).
+    // frozen `baseline.json` (committed to the repo) is never overwritten by a
+    // regression-gate run. Pass `--update-baseline` to intentionally refresh it (used
+    // by `make baseline-update` when accepting new numbers). The files are named for
+    // what they measure, not for the release that first wrote them: the v6.0 baseline
+    // was retired when the evaluator grew an invocable index and bound function scopes.
     let snapshot_name = if std::env::args().any(|a| a == "--update-baseline") {
-        "v6.0-baseline"
+        "baseline"
     } else {
-        "v6.0-current"
+        "current"
     };
     let snapshot_path =
         write_baseline_snapshot(&baseline, snapshot_name).expect("write baseline snapshot");

@@ -97,13 +97,15 @@ bench:
 	cargo bench --bench dmn_benchmarks -p engine
 
 # Run memory baseline comparison against the frozen v6.0 snapshot (regression
-# gate, PERF-04). Writes a CURRENT snapshot (engine/benches/snapshots/v6.0-current.json)
-# and compares it against the committed v6.0-baseline.json via the gate script.
+# gate, PERF-04). Writes a CURRENT snapshot (engine/benches/snapshots/current.json)
+# and compares it against the committed baseline.json via the gate script. The baselines
+# are named by release: baseline.json is the 9.0 measurement, taken when the evaluator
+# grew an invocable index and bound function scopes and no longer matched the v6.0 one.
 # Exits non-zero on RSS/allocation regression beyond threshold.
 memcheck:
 	@echo "Running memory baseline check..."
-	@if [ ! -f engine/benches/snapshots/v6.0-baseline.json ]; then \
-		echo "ERROR: frozen v6.0 baseline snapshot not found at engine/benches/snapshots/v6.0-baseline.json"; \
+	@if [ ! -f engine/benches/snapshots/baseline.json ]; then \
+		echo "ERROR: frozen v6.0 baseline snapshot not found at engine/benches/snapshots/baseline.json"; \
 		echo "Run 'make baseline-update' to capture a baseline, then commit it."; \
 		exit 1; \
 	fi
@@ -112,11 +114,11 @@ memcheck:
 
 # Refresh the FROZEN v6.0 baseline snapshot (PERF-04). Use only when intentionally
 # accepting new memory numbers (e.g. after an optimization that legitimately
-# changes the baseline). Commit the resulting v6.0-baseline.json.
+# changes the baseline). Commit the resulting baseline.json.
 baseline-update:
 	@echo "Refreshing frozen v6.0 baseline snapshot..."
 	cargo run -p engine --bin memory_baseline -- --update-baseline
-	@echo "Frozen baseline refreshed. Commit engine/benches/snapshots/v6.0-baseline.json."
+	@echo "Frozen baseline refreshed. Commit engine/benches/snapshots/baseline.json."
 
 # Build cargo-fuzz targets (Phase 38+; requires nightly toolchain)
 fuzz-build:
