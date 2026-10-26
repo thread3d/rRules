@@ -12,6 +12,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.10] — 2026-10-25 — A fuzzer finds a memory-exhaustion bug in the FEEL parser
+
+`make fuzz` had never been run against this tree. It found, within a minute, that
+`parse_expression` could be driven out of memory: `= value` builds a singleton range by parsing a
+bound, and the bound parser re-enters the same rule, so **every additional `=` cloned the subtree
+into both `start` and `end`**. Twenty equals signs produced a 2^20-node tree (≈170 MB of debug
+output) and ran for 170 ms; twenty-four exhausted multi-gigabyte memory, and libFuzzer aborted at
+its 2 GB limit. Any endpoint that parses a FEEL expression — decision tables, rule bodies,
+`POST /v1/execute` — could be taken down by a 24-character string.
+
+A range bound can no longer itself be a singleton range. `= 5` still parses as a point range;
+`= = 5` is an error. `=`×10 000 now parses in 0.8 ms with a 5 MB footprint, and `singleton_range_
+does_not_nest` plus the fuzz artifact itself are regression tests. `specs/dmn-feel.md` lists the
+guard with the others.
+
+The fuzz gate itself was broken in two ways and is fixed: libFuzzer's `-max_total_time=60` let a
+60-second run spin at 99% CPU for 29 minutes, so `timeout` now holds the clock and a budget that
+is reached is a pass rather than a failure. Both targets then ran to their budget with no crash,
+no timeout and no leak.
+
+
 ## [9.0.9] — 2026-10-25 — The memory gate measures something again
 
 `make memcheck` failed: peak RSS **+35%** against a baseline taken at v6.0. The growth is real

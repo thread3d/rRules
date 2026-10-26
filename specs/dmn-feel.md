@@ -315,11 +315,19 @@ failing the table load.
 | Lexer token cap | `max_tokens = 10_000` | emits one `Token::LexError("max_tokens (N) exceeded")` and stops tokenising | `parser.rs:176-196`, `204-218` |
 | Parser recursion depth | `max_depth = 256` | `FeelExpression::Err(span, "max recursion depth exceeded")` | `parser.rs:1011-1012`, `1090-1098`, `1121-1123` |
 | Range materialisation (evaluator) | `MAX_RANGE_ITERATIONS = 1_000_000` | iteration source yields no elements | `engine/src/dmn/feel/eval.rs:1105-1160` |
+| Singleton range nesting | a bound may not be `= value` | `FeelExpression::Err("a range bound cannot be a singleton range")` | `parser.rs`, `parse_primary` `Token::Eq` branch |
 
 Limits worth noting: the depth cap is a `u32` counter incremented in `parse_expr` only, so
 postfix chains (`a.b.c…`) and argument lists do not consume depth; the token cap counts
 tokens, not bytes, and a `LexError` token is not a hard failure — `parse_primary` converts it
 into an `Err` node and evaluation yields `Null` (`parser.rs:1431-1434`, `eval.rs:417`).
+
+The singleton-range guard is a correctness guard as much as a DoS guard. `= value` builds a
+point range by parsing a bound, and the bound parser re-enters the same rule, so before the guard
+each additional `=` cloned the subtree into both `start` and `end`: twenty equals signs produced a
+2^20-node tree (~170 MB of debug output), and twenty-four exhausted multi-gigabyte memory. A run
+of `make fuzz` found it as a libFuzzer out-of-memory abort on `feel_parser`; `parse_expression`
+now rejects a nested singleton range and `singleton_range_does_not_nest` holds the line.
 
 ### 4.6 Multi-word built-in name rule
 

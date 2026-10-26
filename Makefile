@@ -36,7 +36,10 @@ bump-version:
 	@# not `--offline`: resolving a lock that needs a crate this machine has never
 	@# fetched fails offline, and the failure is easy to miss.
 	cargo check --workspace --quiet
-	@echo "Cargo.lock refreshed for $(VERSION)"
+	@# `engine/fuzz` is a separate workspace with its own tracked lockfile, so it has to
+	@# be resolved too — otherwise it drifts until someone runs the fuzzer.
+	cargo metadata --manifest-path engine/fuzz/Cargo.toml --format-version 1 > /dev/null
+	@echo "Cargo.lock files refreshed for $(VERSION)"
 
 # Check the Dockerfile's build logic without a container runtime: read its COPY
 # instructions, assemble those files, and run each stage's commands on the host.
@@ -127,14 +130,27 @@ fuzz-build:
 # Run DMN fuzz targets (Phase 38+; requires nightly + cargo-fuzz).
 # Usage: make fuzz TARGET=decision_table FUZZ_MAX_TOTAL_TIME=300
 #        (no TARGET runs every target; defaults bound each run to 60 s)
+#
+# The budget is enforced with `timeout`, not only with libFuzzer's `-max_total_time`:
+# that flag's own accounting let a 60-second run spin at full CPU for 29 minutes, so
+# the OS now holds the clock. Exit 124/130 means the budget was reached, which is how
+# a bounded run is supposed to end; any other status is a crash or a build failure.
 FUZZ_MAX_TOTAL_TIME ?= 60
 FUZZ_RUNS ?= 600000
 fuzz:
 	@set -e; \
 	run() { \
 		echo "Fuzzing $$1 ($(FUZZ_RUNS) runs, max $(FUZZ_MAX_TOTAL_TIME) s)..."; \
-		cd engine && cargo +nightly fuzz run $$1 -- \
-			-runs=$(FUZZ_RUNS) -max_total_time=$(FUZZ_MAX_TOTAL_TIME); \
+		status=0; \
+		(cd engine && timeout --signal=INT --kill-after=30 $(FUZZ_MAX_TOTAL_TIME) \
+			cargo +nightly fuzz run $$1 -- \
+				-runs=$(FUZZ_RUNS) -max_total_time=$(FUZZ_MAX_TOTAL_TIME)) || status=$$?; \
+		if [ $$status -eq 124 ] || [ $$status -eq 130 ]; then \
+			echo "  $$1: reached its $(FUZZ_MAX_TOTAL_TIME)s budget"; \
+		elif [ $$status -ne 0 ]; then \
+			echo "  $$1: FAILED (exit $$status)"; \
+			exit $$status; \
+		fi; \
 	}; \
 	if [ -z "$(TARGET)" ]; then \
 		run feel_parser; \

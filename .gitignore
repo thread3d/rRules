@@ -1,5 +1,7 @@
 # ── Rust / Cargo ──────────────────────────────────────────────
 /target/
+# A cargo home inside the workspace, for environments whose own registry is read-only
+.cargo-home/
 **/*.rs.bk
 
 # The server's default local stores (it initialises a git repository inside

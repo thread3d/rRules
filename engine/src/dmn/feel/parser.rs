@@ -1628,6 +1628,17 @@ impl Parser {
                 }
             }
             // `= value` — a singleton range (the same as `[value..value]`).
+            //
+            // A bound may not itself be a singleton range. `parse_range_bound` re-enters
+            // this rule, so without the guard `= = = = ...` recursed once per `=` and
+            // CLONED the subtree into both `start` and `end` at every level: twenty
+            // equals signs parsed into an AST of 2^20 nodes and about 170 MB, and
+            // twenty-four exhausted multi-gigabyte memory. A fuzz target found it as an
+            // out-of-memory abort; `feels_dos_...` tests hold the line.
+            Token::Eq if self.in_range_bound => {
+                self.sync_to_boundary();
+                self.err_here("a range bound cannot be a singleton range")
+            }
             Token::Eq => {
                 self.advance();
                 let value = self.parse_range_bound();
@@ -2330,6 +2341,59 @@ mod parser_tests {
         match expr {
             FeelExpression::Literal(Value::Number(d)) => assert_eq!(*d, Decimal::from(n)),
             other => panic!("expected Literal(Number({})), got {:?}", n, other),
+        }
+    }
+
+    /// A run of `=` used to be exponential: every `=` built a singleton range whose
+    /// bound re-entered the same rule and cloned the subtree into `start` and `end`.
+    /// Twenty-four equals signs exhausted the memory of a fuzzer run; these cases pin
+    /// the behaviour at "an error, quickly, with a small tree".
+    #[test]
+    fn singleton_range_does_not_nest() {
+        for n in [2usize, 8, 24, 64, 1_000] {
+            let src = "=".repeat(n);
+            let started = std::time::Instant::now();
+            let expr = parse_expression(&src);
+            let elapsed = started.elapsed();
+            assert!(
+                elapsed < std::time::Duration::from_millis(500),
+                "{} equals signs took {:?}",
+                n,
+                elapsed
+            );
+            let rendered = format!("{expr:?}");
+            assert!(
+                rendered.len() < 2_000,
+                "{} equals signs produced a {} byte tree",
+                n,
+                rendered.len()
+            );
+        }
+    }
+
+    /// The exact input a fuzz target reduced the blow-up to (an out-of-memory abort at
+    /// 2 GB). It parses to an error without a large allocation.
+    #[test]
+    fn fuzz_artifact_singleton_range_oom() {
+        let src = "[==============\u{0b}=====[=A]==";
+        let started = std::time::Instant::now();
+        let expr = parse_expression(src);
+        assert!(started.elapsed() < std::time::Duration::from_millis(500));
+        assert!(format!("{expr:?}").len() < 4_000);
+    }
+
+    /// A single `= value` is still a singleton range (the behaviour the nesting guard
+    /// must not remove).
+    #[test]
+    fn singleton_range_still_parses() {
+        match parse_expression("= 5") {
+            FeelExpression::Range {
+                start, end, point, ..
+            } => {
+                assert!(point, "expected a point range");
+                assert_eq!(format!("{start:?}"), format!("{end:?}"));
+            }
+            other => panic!("expected a singleton range, got {other:?}"),
         }
     }
 
