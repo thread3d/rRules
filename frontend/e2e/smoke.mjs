@@ -63,7 +63,7 @@ const ROUTES = [
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function waitForDevtools(chrome, timeoutMs = 20_000) {
+async function waitForDevtools(chrome, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
@@ -76,9 +76,10 @@ async function waitForDevtools(chrome, timeoutMs = 20_000) {
     }
     await sleep(200)
   }
-  const detail = chrome?.lastError ? ` (${chrome.lastError})` : ''
-  const exited = chrome?.exitCode !== null && chrome?.exitCode !== undefined ? ` exit ${chrome.exitCode}` : ''
-  throw new Error(`Chromium did not expose DevTools on port ${PORT}${exited}${detail}`)
+  const exited =
+    chrome?.exitCode !== null && chrome?.exitCode !== undefined ? ` (exit ${chrome.exitCode})` : ''
+  const said = chrome?.output ? `\n${chrome.output.trim().split('\n').slice(-12).join('\n')}` : ''
+  throw new Error(`Chromium did not expose DevTools on port ${PORT}${exited}${said}`)
 }
 
 /** A minimal DevTools client: one page target, request/response by id. */
@@ -195,9 +196,9 @@ function launchChromium(profile) {
     { stdio: ['ignore', 'pipe', 'pipe'], detached: false },
   )
   // Keep the browser's own output: "did not expose DevTools" is unhelpful when Chromium said why.
+  child.output = ''
   child.stderr?.on('data', (chunk) => {
-    const text = chunk.toString().trim()
-    if (text) child.lastError = text.split('\n').slice(-3).join(' | ')
+    child.output = `${child.output}${chunk.toString()}`.slice(-4000)
   })
   child.on('error', (error) => {
     console.error(`could not launch ${CHROME}: ${error.message}`)
@@ -223,11 +224,21 @@ mkdirSync(profileRoot, { recursive: true })
 // tidy-up into a failed step once already.
 const profile = join(profileRoot, 'profile')
 rmSync(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
-const chromium = launchChromium(profile)
+let chromium = launchChromium(profile)
 let page
 
 try {
-  const socketUrl = await waitForDevtools(chromium)
+  let socketUrl
+  try {
+    socketUrl = await waitForDevtools(chromium)
+  } catch (firstAttempt) {
+    // One retry: a browser that never opened its endpoint is usually a slow or wedged start, and a
+    // gate that fails on that teaches people to re-run rather than to read it.
+    console.warn(`first launch did not come up: ${firstAttempt.message}`)
+    await stopChromium(chromium)
+    chromium = launchChromium(`${profile}-retry`)
+    socketUrl = await waitForDevtools(chromium)
+  }
   const socket = new WebSocket(socketUrl)
   await new Promise((resolve, reject) => {
     socket.addEventListener('open', resolve, { once: true })
