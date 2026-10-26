@@ -25,7 +25,22 @@ const arg = (name, fallback) => {
 
 const BASE = arg('base', 'http://127.0.0.1:8098')
 const CHROME = arg('chrome', 'chromium-browser')
-const PORT = Number(arg('port', '9222'))
+const PORT_ARG = arg('port', '')
+
+/** A port nothing is listening on, asked of the operating system rather than guessed. */
+async function freePort() {
+  const { createServer } = await import('node:net')
+  return new Promise((resolve, reject) => {
+    const server = createServer()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address()
+      server.close(() => resolve(port))
+    })
+  })
+}
+
+const PORT = PORT_ARG ? Number(PORT_ARG) : await freePort()
 // Now a timeout rather than a fixed wait: `visit` polls until the page has content.
 const SETTLE_MS = Number(arg('settle', '5000'))
 
@@ -48,7 +63,7 @@ const ROUTES = [
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-async function waitForDevtools(timeoutMs = 20_000) {
+async function waitForDevtools(chrome, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
@@ -61,7 +76,9 @@ async function waitForDevtools(timeoutMs = 20_000) {
     }
     await sleep(200)
   }
-  throw new Error(`Chromium did not expose DevTools on port ${PORT}`)
+  const detail = chrome?.lastError ? ` (${chrome.lastError})` : ''
+  const exited = chrome?.exitCode !== null && chrome?.exitCode !== undefined ? ` exit ${chrome.exitCode}` : ''
+  throw new Error(`Chromium did not expose DevTools on port ${PORT}${exited}${detail}`)
 }
 
 /** A minimal DevTools client: one page target, request/response by id. */
@@ -175,8 +192,13 @@ function launchChromium(profile) {
       '--window-size=1200,800',
       'about:blank',
     ],
-    { stdio: 'ignore', detached: false },
+    { stdio: ['ignore', 'pipe', 'pipe'], detached: false },
   )
+  // Keep the browser's own output: "did not expose DevTools" is unhelpful when Chromium said why.
+  child.stderr?.on('data', (chunk) => {
+    const text = chunk.toString().trim()
+    if (text) child.lastError = text.split('\n').slice(-3).join(' | ')
+  })
   child.on('error', (error) => {
     console.error(`could not launch ${CHROME}: ${error.message}`)
   })
@@ -205,7 +227,7 @@ const chromium = launchChromium(profile)
 let page
 
 try {
-  const socketUrl = await waitForDevtools()
+  const socketUrl = await waitForDevtools(chromium)
   const socket = new WebSocket(socketUrl)
   await new Promise((resolve, reject) => {
     socket.addEventListener('open', resolve, { once: true })

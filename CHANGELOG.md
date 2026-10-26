@@ -33,6 +33,12 @@ The table of contents listed six of the eleven sections; it lists them all now, 
 check verifies that every `#anchor` in the file resolves to a heading — a renamed section leaves a link
 that scrolls nowhere, and nothing was checking.
 
+**The browser gate stopped guessing its port.** CI failed the gates job with "Chromium did not expose
+DevTools on port 9222" — a fixed port, the same hazard as the fixed server port that made every route
+render blank in 9.0.19. The harness now asks the operating system for a free port, waits for DevTools
+on that one, and reports the browser's own last words and exit status when it fails, instead of a
+message that says only what it was waiting for.
+
 
 ## [9.0.35] — 2026-10-25 — The maker-checker loop, walked in a browser; and a correction
 
