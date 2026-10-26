@@ -12,7 +12,7 @@ with the code, the code wins and the drift is recorded in
   host/port are **not** configurable by env var.
 - **Versioning:** one `web::scope("/v1")` (`api/src/main.rs:313`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.5` (`api/src/openapi.rs:12`).
+  version `9.0.6` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -210,7 +210,7 @@ JSON; otherwise Prometheus text. Because `*/*` wins before JSON, a plain
 
 | Method | Path | Request | Success response | Errors | Auth | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/rules` | query `RuleListRequest` | `200 {total_count,rules[],page,page_size,total_pages}` | `400 {"error":"Invalid status filter"}` | yes | `page_size` is `#[serde(default)]` → absent means `0` → clamped to **1** (`rules.rs:240-241,409`). `X-Tenant-ID` scoped. |
+| GET | `/v1/rules` | query `RuleListRequest` | `200 {total_count,rules[],page,page_size,total_pages}` | `400 {"error":"Invalid status filter"}` | yes | `page_size` defaults to **50** when absent (an omitted value deserialises to `0`, which used to clamp to 1 and return a single row); capped at 100 (`rules.rs`). `X-Tenant-ID` scoped. |
 | POST | `/v1/rules` | `CreateRuleRequest{name,description?,category?,dsl_body,tags,salience,status?}` | `201 RuleResponse` | `400 {"error":"Rule name is required"}` / `"DSL body is required"`, `409 {"error":"A rule with this name already exists in the category"}` | yes | Duplicate check compares against `category.unwrap_or_default()` (empty string) while the stored rule uses `"default"` (`rules.rs:346-349,364`) — duplicates for uncategorised rules are never detected. |
 | GET | `/v1/rules/{id}` | — | `200 RuleResponse` | `400 {"error":"Invalid rule ID format"}`, `404 {"error":"Rule not found"}` | yes | `rules.rs:514-537` |
 | PUT | `/v1/rules/{id}` | `UpdateRuleRequest` | `200 RuleResponse` | `400` (bad uuid / bad status), `404`, `409` | yes | `rules.rs:555-646` |

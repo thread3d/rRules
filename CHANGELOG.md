@@ -12,6 +12,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.6] — 2026-10-25 — The rule list shows every rule, and the edit page edits the rule
+
+Two defects the browser gate found once it started creating rules.
+
+`GET /v1/rules` returned exactly **one** rule however many existed: an omitted
+`page_size` deserialises to `0`, and `clamp(1, 100)` turned that into a page of one. The field
+documents a default of 50, and now gets it — capped at 100, named in constants rather than
+inline. `specs/http-api.md` recorded the truncation as intended behaviour and is corrected.
+
+`/rules/{id}/edit` invented its content: a hard-coded expression with the id spliced in, a
+hit-policy selector, an empty decision table, and a Save that wrote a description containing a
+timestamp. It never read the rule it claimed to edit. It now loads the rule by id — the name,
+description and status it shows are the rule's own — saves the fields the API stores, and
+reports a rule that cannot be loaded instead of rendering a stub. The expression editor, hit
+policy and decision table are gone from it: they were scaffolding with no server counterpart,
+and leaving them made the page look like an editor that worked.
+
+`make e2e` now walks the whole cycle: create a rule, see it listed, open it, and find its name
+in the edit form.
+
+
 ## [9.0.5] — 2026-10-25 — A rule can be created from the interface
 
 `/rules/new` was a placeholder: a JavaScript expression editor, a hit-policy selector and an

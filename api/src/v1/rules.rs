@@ -397,6 +397,11 @@ pub async fn create_rule(
 }
 
 /// Get paginated list of rules - GET /v1/rules
+/// Rows returned when the caller does not ask for a page size.
+const DEFAULT_PAGE_SIZE: u32 = 50;
+/// Ceiling on `page_size`, so one request cannot ask for everything.
+const MAX_PAGE_SIZE: u32 = 100;
+
 #[utoipa::path(
     get,
     path = "/v1/rules",
@@ -422,7 +427,13 @@ pub async fn get_rules(
 ) -> impl Responder {
     let tenant_id = extract_tenant_id(&headers);
     let page = query.page.max(1);
-    let page_size = query.page_size.clamp(1, 100); // Max 100 per page
+    // An omitted `page_size` deserialises to 0, and clamping that to a minimum returns
+    // exactly one rule — so the list showed a single row no matter how many existed.
+    // The field documents a default of 50; apply it.
+    let page_size = match query.page_size {
+        0 => DEFAULT_PAGE_SIZE,
+        requested => requested.min(MAX_PAGE_SIZE),
+    };
 
     let store_guard = store
         .lock()

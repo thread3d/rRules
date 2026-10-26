@@ -256,6 +256,33 @@ try {
     report(listed.text.includes(ruleName), '/rules shows the new rule', ruleName)
 
     // The form itself must be submittable: fill it in and watch the list change.
+    // The edit page must show the rule it was asked to edit, not a stub.
+    const ruleId = await page.evaluate(`
+      (async () => {
+        const response = await fetch('${BASE}/v1/rules?page_size=50', {
+          headers: { Authorization: 'Bearer ' + localStorage.getItem('auth_token') },
+        });
+        const body = await response.json();
+        const match = (body.rules ?? []).find((rule) => rule.name === ${JSON.stringify(ruleName)});
+        return match ? match.id : null;
+      })()
+    `)
+    if (ruleId) {
+      // The name is an `<input value>`, which `innerText` does not contain: read the
+      // control, not the text, or the check reports a stub for a working page.
+      await page.visit(`${BASE}/rules/${ruleId}/edit`)
+      const loadedName = await page.evaluate(
+        `document.querySelector('input[name="name"]')?.value ?? ''`,
+      )
+      report(
+        loadedName === ruleName,
+        '/rules/{id}/edit loads the rule it edits',
+        loadedName === ruleName ? ruleName : `name field held ${JSON.stringify(loadedName)}`,
+      )
+    } else {
+      report(false, '/rules/{id}/edit shows the rule it edits', 'could not resolve the new rule id')
+    }
+
     const formWorks = await page.visit(`${BASE}/rules/new`)
     report(
       /Name/.test(formWorks.text) && /Create rule/.test(formWorks.text),
