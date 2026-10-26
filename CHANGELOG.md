@@ -12,6 +12,20 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.16] — 2026-10-25 — The browser gate presses "Reload then Run"
+
+The reload → poll → execute chain had only ever run against mocks: a unit test resolves the three
+calls, and nothing had driven the button in a browser against a real server. It does now, and it
+terminates in a result or a reported error — the assertion is that the chain finishes, because the
+failure mode worth catching is a spinner that never resolves.
+
+Adding it exposed a defect in the harness itself: when an evaluated expression threw, the gate
+reported the word `"Uncaught"` and nothing else. It now reports the thrown value and the first
+frame, which turned "Uncaught" into `SyntaxError: Invalid regular expression: missing /` in one run
+— mine, an unescaped `\n` inside a template literal, but the difference between a message that
+names the fault and one that hides it.
+
+
 ## [9.0.15] — 2026-10-25 — The README states what the gates measure
 
 The public entry point had drifted the way specifications drift: it opened with `**9.0.0**`

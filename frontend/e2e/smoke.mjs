@@ -106,7 +106,15 @@ class Page {
       awaitPromise: true,
     })
     if (result.exceptionDetails) {
-      throw new Error(result.exceptionDetails.text ?? 'evaluation failed')
+      // `text` alone is the word "Uncaught", which tells nobody anything: take the
+      // thrown value's description, and the first stack line, when they exist.
+      const details = result.exceptionDetails
+      const thrown = details.exception?.description ?? details.exception?.value
+      const where = (details.stackTrace?.callFrames ?? [])
+        .slice(0, 1)
+        .map((frame) => ` (${frame.functionName || 'anonymous'} at line ${frame.lineNumber})`)
+        .join('')
+      throw new Error(`${thrown ?? details.text ?? 'evaluation failed'}${where}`)
     }
     return result.result?.value
   }
@@ -317,6 +325,36 @@ try {
         /No engine rule matched|Rules selected by the filter/.test(ran),
         'Run explains a zero-match execution',
         /No engine rule matched/.test(ran) ? 'boundary explained' : 'no explanation shown',
+      )
+    }
+
+    // The reload → poll → execute chain has only ever run against mocks. Press it
+    // against the real server: it must terminate in a result or a reported error, not
+    // in a spinner that never resolves.
+    if (ruleId) {
+      await page.visit(`${BASE}/rules/${ruleId}/edit`)
+      const reloaded = await page.evaluate(`
+        (async () => {
+          try {
+          const button = [...document.querySelectorAll('button')].find((b) =>
+            /reload then run/i.test(b.textContent),
+          );
+          if (!button) return 'no Reload then Run button';
+          button.click();
+          await new Promise((resolve) => setTimeout(resolve, 4000));
+          const text = document.body.innerText;
+          if (/Rules selected by the filter/.test(text)) return 'result';
+          if (/role="alert"|error|failed/i.test(text) || /Could not|failed/i.test(text)) return 'reported';
+          return 'still pending: ' + text.slice(0, 120).replace(/\\s+/g, ' ');
+          } catch (error) {
+            return 'threw: ' + (error && error.message ? error.message : String(error));
+          }
+        })()
+      `)
+      report(
+        reloaded === 'result' || reloaded === 'reported',
+        'Reload then Run terminates against the live server',
+        reloaded,
       )
     }
 
