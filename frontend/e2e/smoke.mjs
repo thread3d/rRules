@@ -26,7 +26,8 @@ const arg = (name, fallback) => {
 const BASE = arg('base', 'http://127.0.0.1:8098')
 const CHROME = arg('chrome', 'chromium-browser')
 const PORT = Number(arg('port', '9222'))
-const SETTLE_MS = Number(arg('settle', '700'))
+// Now a timeout rather than a fixed wait: `visit` polls until the page has content.
+const SETTLE_MS = Number(arg('settle', '5000'))
 
 // Routes the interface publishes. Each must render something a person can see.
 const ROUTES = [
@@ -122,8 +123,17 @@ class Page {
   async visit(url) {
     this.errors = []
     await this.send('Page.navigate', { url })
-    await sleep(SETTLE_MS)
-    const text = await this.evaluate('document.body ? document.body.innerText : ""')
+    // Wait for content rather than for a fixed delay. A cold server — the first load after
+    // `make e2e` starts it on a runner — can take longer than any delay that keeps the
+    // whole gate quick, and the result was a route reported as "rendered nothing" while
+    // every later route passed: a flake that looks exactly like a broken app.
+    const deadline = Date.now() + SETTLE_MS
+    let text = ''
+    while (Date.now() < deadline) {
+      text = await this.evaluate('document.body ? document.body.innerText : ""')
+      if (text && text.trim().length > 0) break
+      await sleep(50)
+    }
     return { text: (text ?? '').replace(/\s+/g, ' ').trim(), errors: [...this.errors] }
   }
 }

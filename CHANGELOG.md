@@ -12,6 +12,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.19] — 2026-10-25 — The browser gate waits for content, not for a stopwatch
+
+CI failed the gates job with `/` rendering nothing while all thirteen other routes passed. The cause
+was the harness, not the application: `visit` slept a fixed 700 ms and then read the page, and the
+first load after the server starts is the slow one — on a runner it can exceed any delay short enough
+to keep the gate quick. A route reported as blank while its neighbours pass is a flake that reads
+exactly like a broken app, which is the worst way for a gate to fail.
+
+`visit` now polls until the page has text, with a five-second ceiling. Three consecutive local runs
+are green.
+
+
 ## [9.0.18] — 2026-10-25 — Every requirement is verified: 35, not 28
 
 The `api` half of the verification said `UNVERIFIED` for all 35 requirements, and the project had

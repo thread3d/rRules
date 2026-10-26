@@ -418,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "engine"
-version = "9.0.18"
+version = "9.0.19"
 dependencies = [
  "anyhow",
  "chrono",
@@ -440,7 +440,7 @@ dependencies = [
 
 [[package]]
 name = "engine-fuzz"
-version = "9.0.18"
+version = "9.0.19"
 dependencies = [
  "engine",
  "libfuzzer-sys",

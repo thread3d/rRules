@@ -1,6 +1,6 @@
 {
   "name": "rrules-frontend",
-  "version": "9.0.18",
+  "version": "9.0.19",
   "description": "Production frontend for rRules Business Rules Management System",
   "type": "module",
   "scripts": {
