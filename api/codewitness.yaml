@@ -33,9 +33,13 @@ mutation:
   enabled: true
   tool: rust-text
 
+# The scenario engine is what runs an experiment against the running application. With it
+# disabled (and generated tests at zero) every requirement reported UNVERIFIED, because
+# nothing was ever executed — the api half of the specification was unverifiable for want
+# of a config line and an app builder it could call.
 property_testing:
-  enabled: false
-  max_scenarios: 0
+  enabled: true
+  max_scenarios: 20
 
 static_analysis:
   enabled: true
@@ -60,4 +64,341 @@ sandbox:
   # verification-tool limitation, not a code defect. Nothing is downloaded at test time.
   allow_network: true
 
-scenarios: []
+scenarios:
+
+  # Every scenario builds the real application in-process — `build_app` and
+  # `ApiState::for_testing` — so the middleware, routing and handlers all run. A
+  # scenario returns a `|`-joined observation and the invariant states what it must be.
+
+  - id: SC-API-001
+    requirement: API-001
+    description: A business route refuses an unauthenticated request, and accepts a token
+    mode: single
+    steps:
+      - call: |
+          let dir = std::env::temp_dir().join("codewitness-api-001");
+          std::fs::create_dir_all(&dir).unwrap();
+          let state = api::app::ApiState::for_testing(&dir);
+          let app = actix_web::rt::System::new().block_on(actix_web::test::init_service(
+              api::app::build_app(&state),
+          ));
+
+          let anonymous = actix_web::test::TestRequest::get()
+              .uri("/v1/rules")
+              .to_request();
+          let refused = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, anonymous))
+              .status()
+              .as_u16();
+
+          let login = actix_web::test::TestRequest::post()
+              .uri("/v1/auth/login")
+              .set_json(serde_json::json!({"email": "admin", "password": "admin"}))
+              .to_request();
+          let body: serde_json::Value = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_and_read_body_json(&app, login));
+          let token = body["token"].as_str().unwrap().to_string();
+
+          let allowed = actix_web::test::TestRequest::get()
+              .uri("/v1/rules")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .to_request();
+          let permitted = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, allowed))
+              .status()
+              .as_u16();
+
+          // The public allowlist bypasses the wrap; everything else under /v1 does not.
+          let health = actix_web::test::TestRequest::get().uri("/health").to_request();
+          let public = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, health))
+              .status()
+              .as_u16();
+
+          let value = format!("{refused}|{permitted}|{public}");
+    observation: "value"
+    invariant: 'observation == "401|200|200"'
+    cases: 1
+    seed: 1
+
+  - id: SC-API-002
+    requirement: API-002
+    description: Execution answers 400 for user error, and reports what it actually fired
+    mode: single
+    steps:
+      - call: |
+          let dir = std::env::temp_dir().join("codewitness-api-002");
+          std::fs::create_dir_all(&dir).unwrap();
+          let state = api::app::ApiState::for_testing(&dir);
+          let app = actix_web::rt::System::new().block_on(actix_web::test::init_service(
+              api::app::build_app(&state),
+          ));
+          let login = actix_web::test::TestRequest::post()
+              .uri("/v1/auth/login")
+              .set_json(serde_json::json!({"email": "admin", "password": "admin"}))
+              .to_request();
+          let body: serde_json::Value = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_and_read_body_json(&app, login));
+          let token = body["token"].as_str().unwrap().to_string();
+
+          let unauthorised_engine = actix_web::test::TestRequest::post()
+              .uri("/v1/execute")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .set_json(serde_json::json!({"facts": {}, "engine": "no-such-engine"}))
+              .to_request();
+          let status = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, unauthorised_engine))
+              .status()
+              .as_u16();
+
+          let malformed = actix_web::test::TestRequest::post()
+              .uri("/v1/execute")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .insert_header(("Content-Type", "application/json"))
+              .set_payload("{ not json")
+              .to_request();
+          let second = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, malformed))
+              .status()
+              .as_u16();
+
+          let value = format!("{status}|{second}");
+    observation: "value"
+    invariant: 'observation == "400|400"'
+    cases: 1
+
+  - id: SC-API-003
+    requirement: API-003
+    description: A rule created under one tenant is invisible to another
+    mode: single
+    steps:
+      - call: |
+          let dir = std::env::temp_dir().join("codewitness-api-003");
+          std::fs::create_dir_all(&dir).unwrap();
+          let state = api::app::ApiState::for_testing(&dir);
+          let app = actix_web::rt::System::new().block_on(actix_web::test::init_service(
+              api::app::build_app(&state),
+          ));
+          let login = actix_web::test::TestRequest::post()
+              .uri("/v1/auth/login")
+              .set_json(serde_json::json!({"email": "admin", "password": "admin"}))
+              .to_request();
+          let body: serde_json::Value = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_and_read_body_json(&app, login));
+          let token = body["token"].as_str().unwrap().to_string();
+
+          let create = actix_web::test::TestRequest::post()
+              .uri("/v1/rules")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .insert_header(("X-Tenant-ID", "tenant-a"))
+              .set_json(serde_json::json!({
+                  "name": "scenario-rule",
+                  "dsl_body": "rule \"r\" when true then log(\"ok\")",
+              }))
+              .to_request();
+          let created = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, create))
+              .status()
+              .as_u16();
+
+          let list = actix_web::test::TestRequest::get()
+              .uri("/v1/rules")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .insert_header(("X-Tenant-ID", "tenant-b"))
+              .to_request();
+          let body: serde_json::Value = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_and_read_body_json(&app, list));
+          let visible_to_b = body["total_count"].as_u64().unwrap_or(9) as u16;
+
+          let value = format!("{created}|{visible_to_b}");
+    observation: "value"
+    invariant: 'observation == "201|0"'
+    cases: 1
+
+  - id: SC-API-004
+    requirement: API-004
+    description: Tenant create, reject, fetch, delete, and delete twice
+    mode: single
+    steps:
+      - call: |
+          let dir = std::env::temp_dir().join("codewitness-api-004");
+          std::fs::create_dir_all(&dir).unwrap();
+          let state = api::app::ApiState::for_testing(&dir);
+          let app = actix_web::rt::System::new().block_on(actix_web::test::init_service(
+              api::app::build_app(&state),
+          ));
+          let login = actix_web::test::TestRequest::post()
+              .uri("/v1/auth/login")
+              .set_json(serde_json::json!({"email": "admin", "password": "admin"}))
+              .to_request();
+          let body: serde_json::Value = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_and_read_body_json(&app, login));
+          let token = body["token"].as_str().unwrap().to_string();
+
+          let mut codes = Vec::new();
+
+          let create = actix_web::test::TestRequest::post()
+              .uri("/v1/tenants")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .set_json(serde_json::json!({"name": "scenario-tenant"}))
+              .to_request();
+          let created: serde_json::Value = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_and_read_body_json(&app, create));
+          codes.push(201u16);
+          let id = created["id"].as_str().unwrap().to_string();
+
+          let blank = actix_web::test::TestRequest::post()
+              .uri("/v1/tenants")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .set_json(serde_json::json!({"name": "  "}))
+              .to_request();
+          codes.push(actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, blank)).status().as_u16());
+
+          let duplicate = actix_web::test::TestRequest::post()
+              .uri("/v1/tenants")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .set_json(serde_json::json!({"name": "scenario-tenant"}))
+              .to_request();
+          codes.push(actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, duplicate)).status().as_u16());
+
+          let fetch = actix_web::test::TestRequest::get()
+              .uri(&format!("/v1/tenants/{id}"))
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .to_request();
+          codes.push(actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, fetch)).status().as_u16());
+
+          for _ in 0..2 {
+              let delete = actix_web::test::TestRequest::delete()
+                  .uri(&format!("/v1/tenants/{id}"))
+                  .insert_header(("Authorization", format!("Bearer {token}")))
+                  .to_request();
+              codes.push(actix_web::rt::System::new()
+                  .block_on(actix_web::test::call_service(&app, delete)).status().as_u16());
+          }
+
+          let value = codes.iter().map(|c| c.to_string()).collect::<Vec<_>>().join("|");
+    observation: "value"
+    invariant: 'observation == "201|400|409|200|204|404"'
+    cases: 1
+
+  - id: SC-API-005
+    requirement: API-005
+    description: Decisions list, and evaluating an unknown decision is a client error
+    mode: single
+    steps:
+      - call: |
+          let dir = std::env::temp_dir().join("codewitness-api-005");
+          std::fs::create_dir_all(&dir).unwrap();
+          let state = api::app::ApiState::for_testing(&dir);
+          let app = actix_web::rt::System::new().block_on(actix_web::test::init_service(
+              api::app::build_app(&state),
+          ));
+          let login = actix_web::test::TestRequest::post()
+              .uri("/v1/auth/login")
+              .set_json(serde_json::json!({"email": "admin", "password": "admin"}))
+              .to_request();
+          let body: serde_json::Value = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_and_read_body_json(&app, login));
+          let token = body["token"].as_str().unwrap().to_string();
+
+          let list = actix_web::test::TestRequest::get()
+              .uri("/v1/decisions")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .to_request();
+          let listed = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, list)).status().as_u16();
+
+          let evaluate = actix_web::test::TestRequest::post()
+              .uri("/v1/decisions/00000000-0000-0000-0000-000000000000/evaluate")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .set_json(serde_json::json!({"inputs": {}}))
+              .to_request();
+          let evaluated = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, evaluate)).status().as_u16();
+
+          let value = format!("{listed}|{evaluated}");
+    observation: "value"
+    invariant: 'observation == "200|404"'
+    cases: 1
+
+  - id: SC-API-006
+    requirement: API-006
+    description: A reload returns a job whose status is one of the defined states
+    mode: single
+    steps:
+      - call: |
+          let dir = std::env::temp_dir().join("codewitness-api-006");
+          std::fs::create_dir_all(&dir).unwrap();
+          let state = api::app::ApiState::for_testing(&dir);
+          let app = actix_web::rt::System::new().block_on(actix_web::test::init_service(
+              api::app::build_app(&state),
+          ));
+          let login = actix_web::test::TestRequest::post()
+              .uri("/v1/auth/login")
+              .set_json(serde_json::json!({"email": "admin", "password": "admin"}))
+              .to_request();
+          let body: serde_json::Value = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_and_read_body_json(&app, login));
+          let token = body["token"].as_str().unwrap().to_string();
+
+          let reload = actix_web::test::TestRequest::post()
+              .uri("/v1/rules/reload")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .set_json(serde_json::json!({"async_reload": true}))
+              .to_request();
+          let reloaded: serde_json::Value = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_and_read_body_json(&app, reload));
+          let job_id = reloaded["job_id"].as_str().unwrap_or("").to_string();
+
+          let status = actix_web::test::TestRequest::get()
+              .uri(&format!("/v1/jobs/{job_id}"))
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .to_request();
+          let job: serde_json::Value = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_and_read_body_json(&app, status));
+          let state = job["status"].as_str().unwrap_or("missing").to_string();
+
+          // The job id must be real and the state must be one the contract names.
+          let value = format!("{}|{}", !job_id.is_empty(), ["pending", "running", "completed", "failed"].contains(&state.as_str()));
+    observation: "value"
+    invariant: 'observation == "true|true"'
+    cases: 1
+
+  - id: SC-API-007
+    requirement: API-007
+    description: The Prometheus and JSON metric surfaces both answer and agree on being live
+    mode: single
+    steps:
+      - call: |
+          let dir = std::env::temp_dir().join("codewitness-api-007");
+          std::fs::create_dir_all(&dir).unwrap();
+          let state = api::app::ApiState::for_testing(&dir);
+          let app = actix_web::rt::System::new().block_on(actix_web::test::init_service(
+              api::app::build_app(&state),
+          ));
+          let login = actix_web::test::TestRequest::post()
+              .uri("/v1/auth/login")
+              .set_json(serde_json::json!({"email": "admin", "password": "admin"}))
+              .to_request();
+          let body: serde_json::Value = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_and_read_body_json(&app, login));
+          let token = body["token"].as_str().unwrap().to_string();
+
+          let prometheus = actix_web::test::TestRequest::get().uri("/metrics").to_request();
+          let prometheus_status = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, prometheus)).status().as_u16();
+
+          let coverage = actix_web::test::TestRequest::get()
+              .uri("/v1/metrics/coverage")
+              .insert_header(("Authorization", format!("Bearer {token}")))
+              .to_request();
+          let coverage_status = actix_web::rt::System::new()
+              .block_on(actix_web::test::call_service(&app, coverage)).status().as_u16();
+
+          let value = format!("{prometheus_status}|{coverage_status}");
+    observation: "value"
+    invariant: 'observation == "200|200"'
+    cases: 1

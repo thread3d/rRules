@@ -318,14 +318,16 @@ pub fn build_app(
         .default_service(web::get().to(spa::serve_index))
 }
 
-#[cfg(test)]
 impl ApiState {
-    /// A fully wired application state that needs no files on disk, for tests.
+    /// A fully wired application state rooted in `root`, for tests and generated
+    /// verification.
     ///
     /// The stores are the same `init_store` constructors the server uses; only the two
-    /// paths differ (`frontend_dist` and the repository), and both are pointed at a
-    /// temporary directory so a test cannot read or write anything real.
-    pub(crate) fn for_test(root: &std::path::Path) -> Self {
+    /// paths differ (`frontend_dist` and the version-control repository), and both live
+    /// under `root` so nothing real is read or written. This is deliberately not
+    /// `#[cfg(test)]`: integration tests and the verification harness link against the
+    /// ordinary build, where a test-only constructor would not exist.
+    pub fn for_testing(root: &std::path::Path) -> Self {
         use engine::dmn::evaluator::SharedDmnModel;
         use engine::dmn::feel::cache::FeelAstCache;
 
@@ -394,7 +396,7 @@ mod tests {
     async fn serves_health_without_a_socket() {
         let dir = std::env::temp_dir().join(format!("rrules-app-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
-        let state = ApiState::for_test(&dir);
+        let state = ApiState::for_testing(&dir);
         let app = test::init_service(build_app(&state)).await;
 
         let request = test::TestRequest::get().uri("/health").to_request();
@@ -408,7 +410,7 @@ mod tests {
     async fn refuses_rules_without_a_token() {
         let dir = std::env::temp_dir().join(format!("rrules-app-test-auth-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
-        let state = ApiState::for_test(&dir);
+        let state = ApiState::for_testing(&dir);
         let app = test::init_service(build_app(&state)).await;
 
         let request = test::TestRequest::get().uri("/v1/rules").to_request();
@@ -422,7 +424,7 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("rrules-app-test-login-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
-        let state = ApiState::for_test(&dir);
+        let state = ApiState::for_testing(&dir);
         let app = test::init_service(build_app(&state)).await;
 
         let login = test::TestRequest::post()

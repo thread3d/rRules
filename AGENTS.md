@@ -31,8 +31,10 @@ verification, and the measured state below is the only state worth quoting.
   `dmn-feel.md` and `http-api.md` are implementation-derived, cite `path:line`, and each ends with a
   `Known gaps` section stating what the code does **not** do.
 - **Verification:** [CodeWitness](https://github.com/codewitness/codewitness) executes the
-  requirements — **28 VERIFIED, 0 FAILED, 7 UNVERIFIED** for `engine`; the 7 are the HTTP API
-  requirements, covered from `api` where their integration suites pass.
+  requirements — **35 VERIFIED, 0 FAILED, 0 UNVERIFIED**, unioned over the two crates: `engine`
+  executes the 28 engine/DMN/FEEL requirements and `api` the 7 HTTP ones, each through scenarios
+  that run the real code (`api` builds the application in-process). `make verify` runs both and
+  prints the union; a requirement neither half executes is treated as a gap and fails the gate.
 - **DMN conformance:** **170 layer results pass, 0 fail, 4 skipped** across 51 vectors — every
   evaluator layer in the vendored corpus, with the four skips being one recorded divergence
   (`round up(5.5, 6177)`, a reference implementation's scale limit that the specification does not

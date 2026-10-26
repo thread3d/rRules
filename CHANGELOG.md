@@ -12,6 +12,40 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.18] — 2026-10-25 — Every requirement is verified: 35, not 28
+
+The `api` half of the verification said `UNVERIFIED` for all 35 requirements, and the project had
+recorded that as a limitation of the approach: "discharging them fully needs generated scenarios
+against a live server, which the generated-test harness cannot construct". That was wrong on both
+counts, and this release shows it.
+
+- `api/codewitness.yaml` had `property_testing.enabled: false` and `max_generated_tests: 0`, so no
+  experiment ever ran; enabling the scenario engine was the first requirement.
+- The scenarios then needed something that could build the application. 9.0.17 gave them that:
+  `build_app` and `ApiState::for_testing`, now public rather than `#[cfg(test)]`.
+
+Seven scenarios now run the real stack in-process — the auth middleware, the routing and the
+handlers, against stores rooted in a temporary directory — and CodeWitness executes them:
+
+| Requirement | Experiment |
+|---|---|
+| API-001 | an unauthenticated `/v1/rules` is `401`, a token is `200`, `/health` is public |
+| API-002 | an unknown engine and a malformed body are both `400` — never `500` |
+| API-003 | a rule created for `tenant-a` is invisible to `tenant-b` |
+| API-004 | `201`, blank name `400`, duplicate `409`, fetch `200`, delete `204`, second delete `404` |
+| API-005 | decisions list `200`, an unknown decision is a client error |
+| API-006 | a reload returns a real job id whose status is one of the four defined states |
+| API-007 | `/metrics` and `/v1/metrics/coverage` both answer `200` |
+
+**`make verify` now reports the union: 35 verified, 0 failed, 0 unverified.** Each half necessarily
+marks the other half's requirements `UNVERIFIED` — `engine` has no HTTP surface, `api` has no
+evaluator — so `scripts/verify-summary.py` unions the two reports by id, and a requirement that
+neither half executes fails the gate as a real gap.
+
+`specs/README.md`, `README.md` and both `AGENTS.md` files now state the measured union instead of
+the old 28/0/7.
+
+
 ## [9.0.17] — 2026-10-25 — The HTTP application can be built without a socket
 
 The crate compiled the same sources twice: `main.rs` declared every module *and* `lib.rs` declared

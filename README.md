@@ -3,7 +3,7 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.17** — released from a verified tree: everything in the table below was measured by a gate,
+**9.0.18** — released from a verified tree: everything in the table below was measured by a gate,
 not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
@@ -37,7 +37,7 @@ make fuzz            # bounded fuzzing of the FEEL parser and the decision-table
 |---|---|
 | Tests | 1005 Rust tests across 38 targets, plus 28 frontend tests — all green |
 | DMN TCK | **170 layer results pass, 0 fail, 4 skipped** across 51 vectors |
-| Requirements | **28 verified, 0 failed** (CodeWitness); 7 more covered from the API crate |
+| Requirements | **35 verified, 0 failed, 0 unverified** (CodeWitness, over the engine and API crates) |
 | Lints | `cargo clippy --workspace -- -D warnings` clean, rustfmt clean |
 
 The four TCK skips are one recorded divergence — a vector asserting a `round up` scale limit that

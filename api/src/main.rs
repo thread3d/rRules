@@ -35,7 +35,7 @@ async fn main() -> std::io::Result<()> {
         format!("{host}:{port}")
     };
 
-    println!("rRules REST API Server v9.0.17");
+    println!("rRules REST API Server v9.0.18");
     println!("Starting on http://{bind_address}");
 
     // Create engine state for hot reload functionality

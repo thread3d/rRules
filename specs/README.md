@@ -69,22 +69,32 @@ them:
 
 ## Current state (measured, not asserted)
 
-Last run of `codewitness verify engine --requirements specs/requirements.md --in-place`:
+`make verify` runs CodeWitness over both crates and prints the union:
 
 | Verdict | Count | Requirements |
 |---------|-------|--------------|
-| VERIFIED | 28 | ENG-001…007, DMN-001…006, FEEL-001…012, SYS-001…003 |
+| VERIFIED | 35 | ENG-001…007, DMN-001…006, FEEL-001…012, API-001…007, SYS-001…003 |
 | FAILED | 0 | — |
-| UNVERIFIED | 7 | API-001…007 (verified against the `api` crate instead; see below) |
+| UNVERIFIED | 0 | — |
 
-`codewitness verify api --requirements specs/requirements.md --config api/codewitness.yaml --in-place`
-maps API-001…007 to their integration suites (auth protection, execute, tenants,
-decisions, batch/reload, metrics). Those suites pass, which makes each obligation
-`PARTIALLY_VERIFIED`; CodeWitness does not mark a requirement `VERIFIED` from an
-existing test alone, because a passing test class is evidence of coverage, not of
-the specific claim. Discharging them fully needs generated scenarios against a
-live server, which the generated-test harness cannot construct — that is a
-limitation of this verification approach, recorded rather than hidden.
+Neither crate can execute the other's requirements: `engine` has no HTTP surface and
+`api` has no evaluator. Each half therefore reports the other's requirements as
+UNVERIFIED, and `scripts/verify-summary.py` unions the two reports by id. A requirement
+that *neither* half executes is a gap in the verification, not a division of labour, and
+it fails the gate.
+
+The `api` half needs no live server. `api/src/app.rs` exposes `build_app`, so a scenario
+constructs the same `App` the server serves and drives it with `actix_web::test` — the
+auth middleware, the routing and the handlers all run, in-process, against stores rooted
+in a temporary directory (`ApiState::for_testing`). Seven scenarios cover the seven API
+requirements: an unauthenticated request is refused and a token is accepted, invalid
+execution input is a `400`, rules are isolated per tenant, the tenant CRUD contract holds
+including the second delete, decisions list and an unknown decision is a client error, a
+reload returns a job in a defined state, and both metric surfaces answer.
+
+This is what the earlier state of this document called impossible. It was not: the
+obstacle was that the crate had no library target and the application was assembled
+inside `main`, so nothing could build it but the server itself.
 
 The DMN conformance numbers are maintained separately in
 [`../TCK-COVERAGE-GAPS.md`](../TCK-COVERAGE-GAPS.md), which records the measured

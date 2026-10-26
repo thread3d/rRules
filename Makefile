@@ -92,6 +92,10 @@ verify:
 	@# a tooling limit, not a code defect. `CARGO_NET_OFFLINE=false` lets the index refresh.
 	CARGO_NET_OFFLINE=false codewitness verify engine --requirements specs/requirements.md --in-place --no-mutation
 	CARGO_NET_OFFLINE=false codewitness verify api --requirements specs/requirements.md --config api/codewitness.yaml --in-place --no-mutation
+	@# Neither crate can execute the other's requirements, so each reports the other half
+	@# as UNVERIFIED. The union is the result a reader wants, and a requirement that
+	@# neither half verifies is a gap rather than a division of labour.
+	@./scripts/verify-summary.py
 
 # Run the frontend test suite
 frontend-test:
