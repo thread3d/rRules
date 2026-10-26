@@ -20,8 +20,7 @@ use api::v1::sessions::{read_session_config, run_session_sweep, SessionManager};
 // `api::v1::execution` as a pub fn and is the single source of truth for
 // both startup (here) and reload (`reload_and_swap`) — it parses `.rules`
 // / `.drl` JSON files into `Rule` objects via `serde_json`.
-use engine::dmn::evaluator::{DecisionEvaluator, SharedDmnModel};
-use engine::dmn::feel::cache::FeelAstCache;
+use engine::dmn::evaluator::DecisionEvaluator;
 use engine::engine::{EngineRegistry, EngineSelector};
 
 #[actix_web::main]
@@ -35,7 +34,7 @@ async fn main() -> std::io::Result<()> {
         format!("{host}:{port}")
     };
 
-    println!("rRules REST API Server v9.0.25");
+    println!("rRules REST API Server v9.0.26");
     println!("Starting on http://{bind_address}");
 
     // Create engine state for hot reload functionality
@@ -94,49 +93,17 @@ async fn main() -> std::io::Result<()> {
     // later via hot-reload). This mirrors Phase 25's SharedRuleSet pattern.
     let dmn_storage_path =
         std::env::var("DMN_STORAGE_PATH").unwrap_or_else(|_| "./dmn".to_string());
-    let shared_dmn_model = if std::path::Path::new(&dmn_storage_path).is_dir() {
-        let entries: Vec<_> = match std::fs::read_dir(&dmn_storage_path) {
-            Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
-            Err(_) => vec![],
-        };
-        let dmn_files: Vec<_> = entries
-            .iter()
-            .filter(|e| e.path().extension().is_some_and(|ext| ext == "dmn"))
-            .collect();
-        if !dmn_files.is_empty() {
-            tracing::info!(path = %dmn_storage_path, files = dmn_files.len(), "Loading DMN model from storage");
-            let first_dmn = &dmn_files[0];
-            match std::fs::read_to_string(first_dmn.path()) {
-                Ok(content) => match engine::dmn::parser::parse_dmn_with_cache(&content) {
-                    Ok((model, ast_cache)) => SharedDmnModel::new(model, ast_cache),
-                    Err(e) => {
-                        tracing::warn!(error = %e, "Failed to parse first .dmn file, using empty model");
-                        SharedDmnModel::new(
-                            engine::dmn::model::DmnModel::default(),
-                            FeelAstCache::default(),
-                        )
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to read first .dmn file, using empty model");
-                    SharedDmnModel::new(
-                        engine::dmn::model::DmnModel::default(),
-                        FeelAstCache::default(),
-                    )
-                }
-            }
-        } else {
-            tracing::info!(path = %dmn_storage_path, "No .dmn files found in storage path; using empty DMN model");
-            SharedDmnModel::new(
-                engine::dmn::model::DmnModel::default(),
-                FeelAstCache::default(),
-            )
-        }
+    // Every `.dmn` file in the directory, in sorted order, merged into one model. The old code
+    // parsed `read_dir`'s first entry, so a deployment with two decision files evaluated against
+    // an arbitrary one of them and a restart could switch.
+    let dmn_models = std::path::Path::new(&dmn_storage_path).is_dir();
+    let shared_dmn_model = if dmn_models {
+        api::dmn_loader::load_models(std::path::Path::new(&dmn_storage_path))
     } else {
-        tracing::info!(path = %dmn_storage_path, "DMN storage path does not exist; using empty DMN model");
-        SharedDmnModel::new(
+        tracing::info!(path = %dmn_storage_path, "no DMN storage directory; using an empty DMN model");
+        engine::dmn::evaluator::SharedDmnModel::new(
             engine::dmn::model::DmnModel::default(),
-            FeelAstCache::default(),
+            engine::dmn::feel::cache::FeelAstCache::default(),
         )
     };
 

@@ -22,3 +22,5 @@ pub mod spa;
 
 /// The application itself: state, and the builder `main` and the tests both call.
 pub mod app;
+/// Loading the DMN models a deployment ships (`DMN_STORAGE_PATH`).
+pub mod dmn_loader;

@@ -228,32 +228,6 @@ pub async fn query_audit_events(
     })
 }
 
-/// Get audit event by ID - GET /v1/audit/{id}
-pub async fn get_audit_event(
-    path: web::Path<String>,
-    store: web::Data<AuditStore>,
-) -> impl Responder {
-    let id = match Uuid::parse_str(&path.into_inner()) {
-        Ok(id) => id,
-        Err(_) => {
-            return HttpResponse::BadRequest().json(serde_json::json!({
-                "error": "Invalid audit event ID format"
-            }));
-        }
-    };
-
-    let store_guard = store
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-    match store_guard.get(&id) {
-        Some(event) => HttpResponse::Ok().json(AuditEvent::from(event)),
-        None => HttpResponse::NotFound().json(serde_json::json!({
-            "error": "Audit event not found"
-        })),
-    }
-}
-
 /// Export audit log to CSV - GET /v1/audit/export
 #[utoipa::path(
     get,

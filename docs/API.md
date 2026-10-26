@@ -32,11 +32,11 @@ prose. For the live spec, see Swagger UI at `/swagger-ui`.
 
 ## Status: registered vs. unregistered
 
-Everything documented below is registered in `api/src/main.rs`. The
-`api/src/v1/metrics.rs` handlers behind `configure_v1_metrics`
-(`/v1/metrics/engine`, `/v1/metrics/coverage/reset`) are **not** registered and
-return placeholder data; use `/v1/metrics/dead-rules`, `/v1/metrics/coverage`,
-`/v1/metrics/dmn` and the root `/metrics` instead. The two dashboard endpoints carry a
+Everything documented below is registered in `api/src/app.rs`. The metric surfaces are
+`/v1/metrics/dead-rules`, `/v1/metrics/coverage`, `/v1/metrics/dmn` and `/v1/metrics/ws`,
+plus the root `/metrics`. (`/v1/metrics/engine` and `/v1/metrics/coverage/reset` used to be
+listed here as unregistered placeholders; their module returned hard-coded zeroes and has been
+deleted rather than registered.) The two dashboard endpoints carry a
 `/v1` prefix and require a token like every other business route: they are documented
 once, under **Metrics under /v1**.
 

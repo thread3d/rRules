@@ -12,7 +12,6 @@ pub mod decisions;
 pub mod dmn_metrics;
 pub mod dmn_metrics_ws;
 pub mod execution;
-pub mod metrics;
 pub mod rules;
 pub mod sessions;
 pub mod simulation;
@@ -29,16 +28,6 @@ pub use execution::{ReloadRequest, ReloadResponse};
 #[allow(unused)]
 pub mod routes {
     pub mod monitoring;
-}
-
-/// Configure v1/metrics routes inside the /v1 scope.
-pub fn configure_v1_metrics(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::scope("/metrics")
-            .route("", web::get().to(metrics::get_engine_metrics))
-            .route("/", web::get().to(metrics::get_engine_metrics))
-            .route("/coverage/reset", web::post().to(metrics::reset_coverage)),
-    );
 }
 
 /// Configure v1/simulation routes inside the /v1 scope.

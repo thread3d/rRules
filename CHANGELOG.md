@@ -12,6 +12,32 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.26] — 2026-10-25 — Dead code deleted rather than documented, and every DMN file loads
+
+`specs/http-api.md` listed eleven gaps. Four of them were dead code the project had written down
+instead of removing, which is the accretion `AGENTS.md` warns about — and one was a real bug.
+
+**Deleted** (gaps closed by removal, not by prose):
+
+- `api/src/error.rs`, `api/src/v1/auth.rs`, `api/src/middleware/correlation.rs` — three files no
+  module declared. The compiler never saw them, so nothing kept them honest; the `v1/auth.rs` even
+  imported symbols from `middleware::auth` that do not exist there.
+- `configure_v1_metrics` with its two handlers. They answered with **hard-coded zeroes** — an
+  endpoint that fabricates its numbers is worse than a missing one, so the module went rather than
+  being registered.
+- `get_audit_event`: with `record_audit_event` never called, a get-by-id could only ever 404.
+
+**Fixed:** startup loaded `read_dir`'s first `.dmn` file — arbitrary among several, and a restart
+could pick a different one. `api::dmn_loader::load_models` now reads every `.dmn` file in sorted
+order and merges their definitions, so a second decision file is visible and the result is
+reproducible. A file that cannot be read or parsed is reported and skipped rather than hiding the
+rest. Four tests cover it: both models load, a broken model does not hide a good one, an empty
+directory yields an empty model, and merging concatenates.
+
+`specs/http-api.md` strikes the four rows with what replaced them, and `docs/API.md` no longer
+describes the placeholder endpoints as if they existed.
+
+
 ## [9.0.25] — 2026-10-25 — The browser gate waits for the data, not just the chrome
 
 CI failed the gates job on `/governance/approvals` while every neighbouring check passed, and the

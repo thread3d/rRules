@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.25` (`api/src/openapi.rs:12`).
+  version `9.0.26` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -29,7 +29,7 @@ with the code, the code wins and the drift is recorded in
 
 ## Server composition
 
-### Startup sequence (`api/src/main.rs:42-283`, then `api/src/app.rs:60-322`)
+### Startup sequence (`api/src/main.rs:42-254`, then `api/src/app.rs:60-322`)
 
 1. Build `EngineRegistry` + `register_default_engines()` (`:56-58`); build
    `EngineSelector::with_defaults()` and select `RRULES_DEFAULT_ENGINE` or
@@ -59,9 +59,9 @@ with the code, the code wins and the drift is recorded in
 
 | Order | Layer | Scope | Source |
 |---|---|---|---|
-| 1 | `actix_cors::Cors` | whole app (outermost) | `api/src/main.rs:260-271` |
+| 1 | `actix_cors::Cors` | whole app (outermost) | `api/src/app.rs:81-95` |
 | 2 | `middleware::from_fn(middleware::auth::requires_auth)` | `/v1` scope only | `api/src/app.rs:144-146` |
-| — | `CorrelationId` | **never installed** — file is orphaned (see gaps) | `api/src/middleware/correlation.rs:14` |
+| — | ~~`CorrelationId`~~ | **deleted in 9.0.26** — the file was orphaned and no `wrap` installed it | — |
 
 No logging middleware, no compression, no default headers, no rate limiting.
 
@@ -87,7 +87,7 @@ Twenty `app_data` entries; all are per-worker clones of process-shared Arcs.
 | `JobStore` | reload jobs | `:302` |
 | `UserStore` | 4 seeded demo users | `:303` |
 
-### CORS rules (`api/src/main.rs:260-269`)
+### CORS rules (`api/src/app.rs:80-92`)
 
 - Methods: `GET, POST, PUT, PATCH, DELETE, OPTIONS`.
 - Headers: `Authorization, Content-Type, Accept` — **`X-Tenant-ID` is not
@@ -339,7 +339,6 @@ defaults and one unreachable fifth shape:
 | `{"message": "<msg>"}` | auth handlers and the auth middleware only | 401/500 | `api/src/middleware/auth.rs:76-81`, `api/src/auth/mod.rs:148-158` |
 | `{"error": msg, "status_code": n}` | branches, simulation only | 400/404/409/500 | `api/src/v1/branches.rs:95-99`, `api/src/v1/simulation.rs:138-141` |
 | `{"error_code": …, "message"/"policy": …}` | decisions conflict / hit-policy violation | 400/409 | `api/src/v1/decisions.rs:189-193,288-293` |
-| `ApiError` variant of the above | **unreachable** — `api/src/error.rs` is not part of any module tree | — | `api/src/error.rs:39-78` |
 
 Conventions actually observed: `400` malformed ids/validation, `404` unknown
 ids, `409` duplicates and merge conflicts, `500` lock/engine/IO failures, `503`
@@ -375,7 +374,7 @@ decisions/categories/tags/tenants/branches. Inconsistencies:
 - **Consequence:** the header is the only isolation mechanism and it is
   spoofable — any authenticated caller reads another tenant's rules by sending a
   different value. Cross-origin browser callers cannot send it at all (CORS
-  header list, `main.rs:263`), and no frontend module sets it.
+  header list, `app.rs:76`), and no frontend module sets it.
 
 ## Persistence
 
@@ -444,16 +443,14 @@ Dead or unreachable code:
 
 | Item | Evidence |
 |---|---|
-| `api/src/error.rs` (`ApiError`, `map_to_not_found`) is compiled by nothing — no `mod error` exists in `api/src/lib.rs` or `api/src/main.rs` | `api/src/error.rs:8-90` |
-| `api/src/v1/auth.rs` is orphaned: `v1/mod.rs` never declares `pub mod auth`, and the file imports `JwtClaims`/`encode_token` from `middleware::auth`, which do not exist there | `api/src/v1/auth.rs:14,92,116`; `api/src/v1/mod.rs:5-23` |
-| `api/src/middleware/correlation.rs` is orphaned — `middleware/mod.rs` declares only `auth`, and no `wrap(CorrelationId)` exists | `api/src/middleware/mod.rs:3`; `api/src/middleware/correlation.rs:14` |
-| `configure_v1_metrics` is defined but never called, so `GET /v1/metrics` (engine summary) and `POST /v1/metrics/coverage/reset` do not exist despite the module being compiled | `api/src/v1/mod.rs:35-42`; `api/src/v1/metrics.rs:6-23` |
-| `get_audit_event` (GET /v1/audit/{id}) is implemented but unregistered | `api/src/v1/audit.rs:220-241` |
+| ~~`api/src/error.rs`, `api/src/v1/auth.rs`, `api/src/middleware/correlation.rs` are orphaned — compiled by nothing~~ | **Deleted in 9.0.26**: three files that no module declared, carrying a `ApiError`, an unreachable `v1/auth`, and an unwired correlation middleware. Deleting them removes the gap instead of documenting it. |
+| ~~`configure_v1_metrics` is never called, and its handlers return hard-coded zeroes~~ | **Deleted in 9.0.26**: an endpoint that fabricates its numbers is worse than a missing one; the module and its configuration function are gone. |
+| ~~`get_audit_event` (GET /v1/audit/{id}) is implemented but unregistered~~ | **Deleted in 9.0.26**: with `record_audit_event` never called, a get-by-id could only ever answer 404. |
+| ~~Startup loads only the first `.dmn` file, in arbitrary `read_dir` order~~ | **Fixed in 9.0.26**: `api::dmn_loader::load_models` reads every `.dmn` file in sorted order and merges them, so a second decision file is visible and the result is reproducible (`api/src/dmn_loader.rs`). |
 | `record_audit_event` has zero callers, so `/v1/audit` and `/v1/audit/export` are permanently empty | `api/src/v1/audit.rs:298-326` |
 | `build_ruleset_from_dir`'s counterpart `EngineState` (+ `reload_from_directory`, `reload_engine`) is registered as `app_data` but never extracted; the git-log `from_commit` parameter is accepted and ignored | `api/src/main.rs:48,272`; `api/src/v1/execution.rs:295-378`; `branches.rs:216-251` |
 | `start_file_watcher` is a stub (one `log::info!`), so `WATCH_RULES_DIR` has no functional effect | `api/src/v1/execution.rs:1444-1446` |
 | DMN WS broadcaster drains and logs but never forwards; nothing publishes to `DmnMetricsTx` | `api/src/v1/dmn_metrics.rs:92-103` |
-| Startup loads only the first `.dmn` file in the directory (arbitrary `read_dir` order), so a second decision file is invisible to `/evaluate` | `api/src/main.rs:109-118` |
 
 Stub / hard-coded responses: `GET /v1/monitoring/engine-state` returns all
 zeros (`routes/monitoring.rs:31-42`); `GET /metrics` HTML/JSON arms report
