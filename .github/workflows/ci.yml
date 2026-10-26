@@ -131,3 +131,17 @@ jobs:
       # than a deploy.
       - name: Check the Dockerfile's stages
         run: make image-check
+
+  spec-citations:
+    name: Spec citations
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # The specification is evidence only while its `path:line` references point at the
+      # code they name. An edit that moves code and leaves a citation behind is a claim
+      # that quietly stops being true.
+      - name: Check that every spec citation resolves
+        run: make spec-citations

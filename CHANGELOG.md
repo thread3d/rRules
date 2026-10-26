@@ -12,6 +12,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.12] — 2026-10-25 — The specification's citations are checked, and two had drifted
+
+`specs/` cites code 1162 times (`path:line`), which is what makes it evidence rather than
+description. Nothing verified those citations, and the parser work in 9.0.10 moved line numbers.
+
+`scripts/check-spec-citations.py` resolves every citation: the file must exist (by path, by
+unique basename, or by the full paths the same document uses elsewhere) and the cited range must
+fall inside it. Two were wrong — `rule-engine.md` pointed at `rete/mod.rs:750-768` in a 739-line
+file, and `dmn-feel.md` at `TCK-COVERAGE-GAPS.md:118-120` in a 74-line file. Both now cite the
+lines that hold the claim: the idempotent re-retract assertion, and the accepted-divergence
+section.
+
+`make spec-citations` runs it strictly and is part of `make ci`; CI runs it as its own job. A
+citation that no longer resolves now fails the build instead of quietly looking like evidence.
+
+
 ## [9.0.11] — 2026-10-25 — The verification gate builds again
 
 `make verify` reported every requirement **BLOCKED**: CodeWitness compiles the crate itself and

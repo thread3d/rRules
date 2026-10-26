@@ -885,7 +885,7 @@ outputs, exact structural equality) but its outcome is invisible to the pass/fai
 | Divergence | Stated reason | Reflected in code |
 |---|---|---|
 | `DMN15-31` COLLECT with `distinct` + SUM (`0114-collect-aggregators`) | DMN 1.6 / FEEL 1.6 feature, out of Level 3 scope | Yes at the model level — `BuiltinAggregator` has no `distinct` (`engine/src/dmn/model.rs:436-445`) |
-| `sum([])` returning `Decimal(0)` (`0100-arithmetic`) | `rust_decimal` empty-iterator default | No longer reproduces — `sum([])` is `Null` (`builtins.rs:858-860`); the divergence entry is stale (`tck_sweep.rs:85-92`, `TCK-COVERAGE-GAPS.md:118-120`) |
+| `sum([])` returning `Decimal(0)` (`0100-arithmetic`) | `rust_decimal` empty-iterator default | No longer reproduces — `sum([])` is `Null` (`builtins.rs:858-860`); the divergence entry is stale (`tck_sweep.rs:85-92`, `TCK-COVERAGE-GAPS.md:47-57`) |
 | DMNDI round-trip 21/50 | non-standard fixture directory naming | Not a code divergence; the layer counts losses explicitly (`tck_sweep.rs:467-505`) |
 | Multi-word names, `sort` comparator, `round *` scale, `get entries` shape | previously-fixed defects | Confirmed fixed at `parser.rs:1455-1484`, `builtins.rs:1365-1402`, `builtins.rs:306-331`, `builtins.rs:1662-1689` |
 | Internal phase-39 doc reports `Parser 51/51, Round-trip 51/51, **Evaluator 21/51**` and says the sweep fails only on parser/DMNDI layers | conflicts with the root doc's "51/51 evaluator"; its 21 equals the DMNDI pass count | `../.planning/phases/39-drd-parallelization-topological-sort/TCK-COVERAGE-GAPS.md:10-30` |

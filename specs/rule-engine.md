@@ -252,7 +252,7 @@ only caller-supplied `Fact::with_id` (`:37-40`) can, and then insert silently ov
 
 Idempotency (Rete/TREAT/LEAPS): retracting an absent id returns `Ok(false)` and mutates
 nothing, so a second retract is a no-op
-(test: `engine/src/engine/rete/mod.rs:750-768`). No engine calls
+(test: `engine/src/engine/rete/mod.rs:635-636`). No engine calls
 `record_fact_retracted` (`engine/src/engine/metrics.rs:77`, `engine/src/metrics/mod.rs:57`), so
 `facts_retracted` stays `0` after successful retracts. Retraction does not touch the
 coverage/tracker singletons; `fired_set` is per-call, so a later `execute()` re-evaluates all
