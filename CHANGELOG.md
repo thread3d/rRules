@@ -12,6 +12,16 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.40] — 2026-10-25 — The published numbers match the tree
+
+The README claimed **1005 Rust tests across 38 targets**; the tree runs **996 across 40**, 6 ignored.
+It also listed six gates when eleven run. Both are what this loop started by complaining about — a
+number nobody re-measured — so the final release measures again and writes down what it found.
+
+`README.md` also names the gates added since it was last written: `docs-snippets`, `readme` and
+`deploy-env`, and says that all of them are part of `make ci`.
+
+
 ## [9.0.39] — 2026-10-25 — The curl examples are executed too
 
 The documentation's commands were the last claims nothing ran. `docs/user-guide.md` shows five `curl`

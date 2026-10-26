@@ -3,7 +3,7 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.39** — released from a verified tree: everything in the table below was measured by a gate,
+**9.0.40** — released from a verified tree: everything in the table below was measured by a gate,
 not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
@@ -29,10 +29,16 @@ make ci              # build, test, clippy -D warnings, fmt --check, frontend bu
 make tck             # OMG DMN TCK conformance sweep, baseline-gated
 make verify          # CodeWitness: execute specs/requirements.md
 make spec-citations  # every `path:line` in specs/ still resolves to the code it names
+make docs-snippets   # every Rust example in the user guide compiles and its assertions pass
+make readme          # every command the README tells you to run resolves
+make deploy-env      # every variable the chart and manifests set is one the server reads
 make image-check     # the Dockerfile's stages build from its COPY set, without a container
 make memcheck        # memory-regression gate against a committed baseline
 make fuzz            # bounded fuzzing of the FEEL parser and the decision-table loader
 ```
+
+The browser gate, the citation check, the guide's examples, the README's commands and the deployment
+variables are all part of `make ci`, which is what CI runs on every push.
 
 `make verify` executes the specification with [CodeWitness](https://github.com/codewitness/codewitness),
 which is a jar installed from a source checkout rather than a published package. CI runs it only
@@ -41,7 +47,7 @@ otherwise that job is skipped, which is the honest state and not a pass.
 
 | | Measured |
 |---|---|
-| Tests | 1005 Rust tests across 38 targets, plus 28 frontend tests — all green |
+| Tests | **996 Rust tests across 40 targets**, 6 ignored, plus 28 frontend tests — all green |
 | DMN TCK | **170 layer results pass, 0 fail, 4 skipped** across 51 vectors |
 | Requirements | **35 verified, 0 failed, 0 unverified** (CodeWitness, over the engine and API crates) |
 | Lints | `cargo clippy --workspace -- -D warnings` clean, rustfmt clean |
