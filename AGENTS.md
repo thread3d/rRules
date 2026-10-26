@@ -64,6 +64,10 @@ make image-check # check the Dockerfile's build logic without a container runtim
 `make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).
 `make bench`, `make memcheck` and `make fuzz` need a nightly toolchain or a frozen baseline snapshot.
 
+CodeWitness compiles the crate itself and passes `--offline` to cargo, so `make verify` runs with
+`CARGO_NET_OFFLINE=false`: a lockfile pinning a version newer than its index snapshot otherwise fails
+to resolve and every requirement is reported BLOCKED.
+
 `make ci` includes the browser check, which drives the real bundle in headless
 Chromium: every route must render, a deep link must load, and the app must work once
 signed in. Unit tests in jsdom cannot see a bundle that throws at load or a route the

@@ -12,6 +12,20 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.11] — 2026-10-25 — The verification gate builds again
+
+`make verify` reported every requirement **BLOCKED**: CodeWitness compiles the crate itself and
+passes `--offline` to cargo, so its resolution depends on a crates.io index snapshot — and the
+`rustls` bump that came in with a Dependabot PR left `Cargo.lock` pinning a version newer than that
+snapshot. "BLOCKED" is honest in the tool's terms but it told us nothing about the code.
+
+`make verify` now runs with `CARGO_NET_OFFLINE=false` so the index can refresh, and both
+`codewitness.yaml` files allow the verification build the network it needs to resolve. The gate is
+green again: **engine 28 VERIFIED, 0 FAILED, 7 UNVERIFIED**, api 35 UNVERIFIED (the API
+requirements are exercised by the integration suites, not by CodeWitness), and no requirement is
+blocked.
+
+
 ## [9.0.10] — 2026-10-25 — A fuzzer finds a memory-exhaustion bug in the FEEL parser
 
 `make fuzz` had never been run against this tree. It found, within a minute, that

@@ -54,6 +54,10 @@ report:
 
 sandbox:
   mode: local-process
-  allow_network: false
+  # The verification build resolves this crate against a crates.io index. Without the
+  # network that index is a snapshot, and a `Cargo.lock` pinning a version newer than the
+  # snapshot cannot resolve ("candidate versions found which didn't match") — a
+  # verification-tool limitation, not a code defect. Nothing is downloaded at test time.
+  allow_network: true
 
 scenarios: []

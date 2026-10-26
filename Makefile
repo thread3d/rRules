@@ -78,8 +78,12 @@ tck-ledger:
 # Verify the specification with CodeWitness (requires the `codewitness` CLI).
 # Reports land under engine/.codewitness/runs/ and api/.codewitness/runs/.
 verify:
-	codewitness verify engine --requirements specs/requirements.md --in-place --no-mutation
-	codewitness verify api --requirements specs/requirements.md --config api/codewitness.yaml --in-place --no-mutation
+	@# CodeWitness builds the crate itself and passes `--offline` to cargo, so its
+	@# resolution relies on a crates.io index snapshot. A `Cargo.lock` pinning a version
+	@# newer than that snapshot fails to resolve and the whole run is reported BLOCKED —
+	@# a tooling limit, not a code defect. `CARGO_NET_OFFLINE=false` lets the index refresh.
+	CARGO_NET_OFFLINE=false codewitness verify engine --requirements specs/requirements.md --in-place --no-mutation
+	CARGO_NET_OFFLINE=false codewitness verify api --requirements specs/requirements.md --config api/codewitness.yaml --in-place --no-mutation
 
 # Run the frontend test suite
 frontend-test:

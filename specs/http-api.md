@@ -12,7 +12,7 @@ with the code, the code wins and the drift is recorded in
   host/port are **not** configurable by env var.
 - **Versioning:** one `web::scope("/v1")` (`api/src/main.rs:313`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.10` (`api/src/openapi.rs:12`).
+  version `9.0.11` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
