@@ -12,8 +12,12 @@ citation — it looks like evidence and is not. This script resolves each one:
   - `path:120` inside a code block or prose that is not a file (`Cargo.toml:9`) is
     checked the same way.
 
-Usage:
-  scripts/check-spec-citations.py [--strict] [--verbose]
+This is a bounds check, and only a bounds check. A citation can also be wrong *inside* the file —
+a sentence naming `web::scope("/v1")` can cite a line that has since become a comment about
+something else — and no mechanical rule tried here separated that from a table row's prose: a
+heuristic comparing the named symbol with the cited text flagged 646 of 1162 citations, almost all
+of them ordinary loose wording. A checker that cries wolf that often is worse than none, so it was
+removed rather than shipped. Citations that resolve but mislead are found by reading.
 
 Exit codes: 0 all citations resolve (or drift under the tolerated count), 1 when
 `--strict` and something does not resolve.
@@ -39,6 +43,7 @@ CITATION = re.compile(
 )
 
 SKIP_DIRS = {".git", "target", "node_modules", "dist", ".codewitness", "corpus", "artifacts"}
+
 
 
 def repo_files() -> list[Path]:
@@ -68,6 +73,9 @@ def line_count(path: Path) -> int:
 def resolve(
     cited: str, index: dict[str, list[Path]], doc_hint: list[Path], last: int = 0
 ) -> tuple[Path | None, str]:
+    resolved = (REPO / cited).resolve()
+    if not str(resolved).startswith(str(REPO)):
+        return None, "outside the repository (readers cannot open it)"
     direct = REPO / cited
     if direct.is_file():
         return direct, "path"
@@ -137,7 +145,7 @@ def main() -> int:
                     problems.append(
                         (doc.name, lineno, match.group(0), f"line {last} beyond end of file ({count} lines)")
                     )
-                elif args.verbose:
+                if args.verbose:
                     print(f"  ok  {doc.name}:{lineno} → {target.relative_to(REPO)} [{how}]")
 
     print(f"spec citations: {total} checked, {len(problems)} unresolved")

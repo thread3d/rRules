@@ -806,9 +806,10 @@ Two corpus facts bear on the numbers below, both verifiable with `cmp`/`grep` ov
   splits the corpus into **45 level-2** and **6 level-3** vectors (`0100-arithmetic`,
   `1100-feel-decimal-function`, `1141`–`1144`) — not the 110/13 the documentation reports.
 - The published totals live in a **generated artifact**, not in the test: `write_results_report`
-  rewrites
-  `../.planning/phases/35/conformance-verification-round-trip-monitoring-close-out/TCK_RESULTS.md`
-  on every run (`tck_sweep.rs:597-649`), which is why running the suite dirties the tree.
+  rewrites a `TCK_RESULTS.md` under the workspace-level `.planning/` tree — which is not part of
+  this repository, so the file is a build artefact of the sweep rather than something a reader of
+  the repository can open (`tck_sweep.rs:597-649`). Running the suite writes outside the tree it
+  is testing.
 
 Parser and round-trip layers are the **same computation**: `execute_parser_layer`
 (`tck_sweep.rs:208-238`) and `execute_round_trip_layer` (`tck_sweep.rs:409-439`) differ only in
@@ -888,7 +889,7 @@ outputs, exact structural equality) but its outcome is invisible to the pass/fai
 | `sum([])` returning `Decimal(0)` (`0100-arithmetic`) | `rust_decimal` empty-iterator default | No longer reproduces — `sum([])` is `Null` (`builtins.rs:858-860`); the divergence entry is stale (`tck_sweep.rs:85-92`, `TCK-COVERAGE-GAPS.md:47-57`) |
 | DMNDI round-trip 21/50 | non-standard fixture directory naming | Not a code divergence; the layer counts losses explicitly (`tck_sweep.rs:467-505`) |
 | Multi-word names, `sort` comparator, `round *` scale, `get entries` shape | previously-fixed defects | Confirmed fixed at `parser.rs:1455-1484`, `builtins.rs:1365-1402`, `builtins.rs:306-331`, `builtins.rs:1662-1689` |
-| Internal phase-39 doc reports `Parser 51/51, Round-trip 51/51, **Evaluator 21/51**` and says the sweep fails only on parser/DMNDI layers | conflicts with the root doc's "51/51 evaluator"; its 21 equals the DMNDI pass count | `../.planning/phases/39-drd-parallelization-topological-sort/TCK-COVERAGE-GAPS.md:10-30` |
+| An internal phase document reported `Parser 51/51, Round-trip 51/51, **Evaluator 21/51**` and said the sweep failed only on parser/DMNDI layers | conflicts with the root doc's "51/51 evaluator"; its 21 equals the DMNDI pass count. That document lives in the workspace-level `.planning/` tree, which this repository does not publish — the measured state is `TCK-COVERAGE-GAPS.md` | `TCK-COVERAGE-GAPS.md:1-20`, `tck_sweep.rs:467-505` |
 
 ## 10. Known gaps
 

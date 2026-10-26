@@ -8,11 +8,12 @@ with the code, the code wins and the drift is recorded in
 - **Purpose:** REST surface over the engine crate (`/v1/execute`, sessions,
   DMN decisions), the governance stores (rules, categories, tags, approvals,
   audit, branches, tenants), and the monitoring surfaces (Prometheus, WS).
-- **Base URL:** `http://127.0.0.1:8080` — hard-coded at `api/src/main.rs:436`;
-  host/port are **not** configurable by env var.
-- **Versioning:** one `web::scope("/v1")` (`api/src/main.rs:313`). No `/v2`, no
+- **Base URL:** `http://127.0.0.1:8080` by default, from `RRULES_BIND_ADDRESS` and `PORT`
+  (`api/src/main.rs:45-52`). The default is loopback because that is right for a laptop and
+  wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
+- **Versioning:** one `web::scope("/v1")` (`api/src/main.rs:334`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.12` (`api/src/openapi.rs:12`).
+  version `9.0.13` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 

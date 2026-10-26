@@ -12,6 +12,25 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.13] — 2026-10-25 — Citations must stay inside the repository
+
+CI failed the new *Spec citations* job on its first run, and the failure was a real defect rather
+than a checker bug: `dmn-feel.md` cited `../.planning/phases/39/…/TCK-COVERAGE-GAPS.md:10-30`. The
+workspace-level `.planning/` tree is deliberately not published with this repository, so that
+reference was unopenable for every reader of it — it resolved on the machine that wrote it and
+nowhere else. The claim now cites `TCK-COVERAGE-GAPS.md` and the sweep code, both of which ship.
+
+The checker treats any citation that leaves the repository as unresolved, with that reason in the
+message, so the class cannot come back.
+
+The same pass corrected two claims that resolved but misled: `http-api.md` said host and port were
+"not configurable by env var" (they come from `RRULES_BIND_ADDRESS` and `PORT`), and it cited
+`main.rs:313` for the `/v1` scope, a line that is now a comment — the scope is at 334.
+
+A semantic check was written and then removed: comparing the symbol a sentence names with the text
+at the cited lines flagged 646 of 1162 citations, nearly all of them ordinary loose wording. A
+checker that cries wolf that often is worse than none.
+
 ## [9.0.12] — 2026-10-25 — The specification's citations are checked, and two had drifted
 
 `specs/` cites code 1162 times (`path:line`), which is what makes it evidence rather than
