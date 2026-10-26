@@ -12,6 +12,29 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.23] — 2026-10-25 — The user guide's examples are compiled
+
+`docs/user-guide.md` shows fifteen Rust snippets — the whole documented way to write a rule. Nobody
+had ever compiled them, and they had drifted in every way a snippet can: the import path
+`engine::ComparisonOp` did not exist, thirteen blocks used types they never imported, thirty-one
+`Condition::Pattern` literals predated the `op` field that the pattern now requires, the
+`Action::UpdateFact` example showed `Value` where the API takes an `Expression`, one identifier was
+mangled (`let优惠_rule`), and three blocks named facts they never defined.
+
+`scripts/check-doc-snippets.py` extracts every ```rust block, wraps each in a function, and compiles
+them in a throwaway crate under `target/` that depends on the engine by path. Compilation is the
+assertion; nothing in the repository is generated or committed.
+
+**All fifteen now compile**, and the guide is copy-pasteable — which it was not. Two API gaps fell out
+of it: `ComparisonOp`, `Expression` and `LogLevel` were not re-exported from the crate root, though
+`Condition` and `Action` were and every rule needs them. They are now, so
+`use engine::{Rule, Condition, ComparisonOp, Action, LogLevel};` is enough. `specs/rule-engine.md`
+documents the operator-in-pattern and expression model, which it had omitted.
+
+`make docs-snippets` runs the check, is part of `make ci`, and CI runs it in a new `Documentation`
+job beside the citation check — both read the documentation and fail when it stops being true.
+
+
 ## [9.0.22] — 2026-10-25 — The API reference is checked against the router
 
 `docs/API.md` is prose, and prose rots the same way `specs/` did: it can promise an endpoint that

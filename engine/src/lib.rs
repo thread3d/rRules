@@ -68,7 +68,12 @@ pub use data_types::{FactType, Value};
 // leaving consumers to depend on `rust_decimal` themselves.
 pub use environment::EngineBuilder;
 pub use fact::{Fact, WorkingMemory};
-pub use rules::{Action, Condition, Rule, RuleSet};
+// `ComparisonOp` and `LogLevel` are as much part of constructing a rule as `Condition`
+// and `Action` are: every `Condition::Pattern` carries an operator and every
+// `Action::LogMessage` a level. Re-exporting them means a reader can write
+// `use engine::{Rule, Condition, ComparisonOp, Action, LogLevel};` and stop guessing
+// at module paths — which the user guide was doing, incorrectly.
+pub use rules::{Action, ComparisonOp, Condition, Expression, LogLevel, Rule, RuleSet};
 pub use rust_decimal::Decimal;
 
 // Re-export chaining entry points

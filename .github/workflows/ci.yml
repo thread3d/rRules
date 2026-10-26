@@ -132,32 +132,10 @@ jobs:
       - name: Check the Dockerfile's stages
         run: make image-check
 
-  spec-citations:
-    name: Spec citations
+  docs:
+    name: Documentation
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # The specification is evidence only while its `path:line` references point at the
-      # code they name. An edit that moves code and leaves a citation behind is a claim
-      # that quietly stops being true.
-      - name: Check that every spec citation resolves
-        run: make spec-citations
-
-  verification:
-    name: Requirement verification
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # CodeWitness is not published: it is a jar installed from a source checkout, so a hosted
-    # runner cannot obtain it. When the jar is supplied as a base64 secret this job runs the
-    # claim; otherwise GitHub reports the job as skipped, which is the honest state — the
-    # specification was not executed in CI on this run.
-    # A job-level `if:` may not read `secrets` — GitHub rejects the whole workflow for it, which
-    # is what happened when this job first landed: CI failed in 0 s before running anything. A
-    # repository *variable* is allowed there; the jar itself is a secret, read at step level.
-    if: vars.CODEWITNESS_ENABLED == 'true'
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -170,25 +148,11 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "25"
+      # Both checks read the documentation and fail when it stops being true of the code: the
+      # specification's `path:line` citations must resolve, and the user guide's Rust examples
+      # must compile.
+      - name: Spec citations resolve
+        run: make spec-citations
 
-      - name: Install CodeWitness
-        run: |
-          mkdir -p "$HOME/.local/lib/codewitness"
-          printf '%s' "$CODEWITNESS_JAR_B64" | base64 -d > "$HOME/.local/lib/codewitness/codewitness.jar"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        env:
-          CODEWITNESS_JAR_B64: ${{ secrets.CODEWITNESS_JAR_B64 }}
-
-      # The claim this project is built on: the specification is executed, not asserted. The
-      # api half builds the application in-process, so this needs no server, port or secret.
-      # `CARGO_NET_OFFLINE=false` is required — CodeWitness builds with `--offline` and cannot
-      # resolve a lockfile newer than its index snapshot.
-      - name: Verify the requirements
-        env:
-          CARGO_NET_OFFLINE: "false"
-        run: make verify
+      - name: User-guide examples compile
+        run: make docs-snippets

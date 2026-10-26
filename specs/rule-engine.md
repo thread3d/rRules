@@ -37,9 +37,14 @@ The evaluator is a **direct interpreter**: every pass re-evaluates every loaded 
 5. **Evaluate** against `working_facts.values()`; the id enters `evaluated_set` *before*
    evaluation, so "evaluated" means "condition was computed"
    (`engine/src/engine/direct_eval.rs:106-108`).
-6. **Fired test**: `rule.condition.evaluate(&facts)` (`engine/src/rules.rs:168-212`).
-   `Pattern` with no fact of that type is `false` (`engine/src/rules.rs:196-211`), so only
-   `Condition::True` (`:170`) fires on empty working memory.
+6. **Fired test**: `rule.condition.evaluate(&facts)` (`engine/src/rules.rs:168-229`).
+   `Pattern { fact_type, field, value, op }` scans the facts of that type and is true when any
+   one of them carries a field satisfying `op` against `value` — the operator is part of the
+   pattern, so `amount > 100` and `amount = 100` are the same shape (`engine/src/rules.rs:196-212`).
+   A pattern whose fact type is absent, or whose field is missing, is `false` (the missing field
+   compares as `Null` through `compare_values`), so only `Condition::True` (`:170`) fires on empty
+   working memory. Actions that compute values take an `Expression` rather than a `Value`
+   (`engine/src/rules.rs:241-260`), which is what makes `score := score + 10` representable.
 7. **Trace, if enabled**: push `TraceEvent{event_type:"rule_fired", timestamp: now}` and add
    `facts.len()` to `facts_matched` (`engine/src/engine/direct_eval.rs:115-122`) — the sum of
    working-memory size per firing, not a match count.

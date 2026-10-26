@@ -22,6 +22,20 @@ A rule has two parts:
 ### Syntax
 
 ```rust
+use engine::{Action, ComparisonOp, Condition, LogLevel, Rule, Value};
+
+// What the sketch below stands for: one condition, one action.
+let condition = Condition::Pattern {
+    fact_type: "customer".to_string(),
+    field: "status".to_string(),
+    value: Value::String("premium".to_string()),
+    op: ComparisonOp::Eq,
+};
+let action = Action::LogMessage {
+    level: LogLevel::Info,
+    message: "rule fired".to_string(),
+};
+
 Rule::builder("rule-id", "Human Readable Name")
     .salience(10)           // Optional: priority (-1000 to 1000)
     .no_loop(false)         // Optional: prevent re-firing
@@ -51,7 +65,7 @@ Rule::builder("rule-id", "Human Readable Name")
 
 **Rule**:
 ```rust
-use engine::{Rule, Condition};
+use engine::{Action, ComparisonOp, Condition, LogLevel, Rule, Value};
 
 let rule = Rule::builder("high-status-customer", "High Status Customer")
     .salience(10)
@@ -59,6 +73,7 @@ let rule = Rule::builder("high-status-customer", "High Status Customer")
         fact_type: "customer".to_string(),
         field: "status".to_string(),
         value: Value::String("premium".to_string()),
+        op: ComparisonOp::Eq,
     })
     .action(Action::LogMessage {
         level: LogLevel::Info,
@@ -72,7 +87,7 @@ let rule = Rule::builder("high-status-customer", "High Status Customer")
 **Scenario**: Flag transactions over $10,000 for review.
 
 ```rust
-use engine::{Rule, Condition, Value, ComparisonOp};
+use engine::{Action, ComparisonOp, Condition, LogLevel, Rule, Value};
 
 let rule = Rule::builder("large-transaction", "Large Transaction")
     .salience(20)
@@ -81,6 +96,7 @@ let rule = Rule::builder("large-transaction", "Large Transaction")
             fact_type: "transaction".to_string(),
             field: "amount".to_string(),
             value: Value::Integer(10000),
+            op: ComparisonOp::Eq,
         }),
         op: ComparisonOp::Gt,
         right: Box::new(Condition::True),  // Compare against literal
@@ -101,7 +117,7 @@ let rule = Rule::builder("large-transaction", "Large Transaction")
 Multiple conditions that must ALL be true:
 
 ```rust
-use engine::{Rule, Condition};
+use engine::{Action, ComparisonOp, Condition, LogLevel, Rule, Value};
 
 let rule = Rule::builder("vip-discount", "VIP Discount")
     .salience(15)
@@ -111,6 +127,7 @@ let rule = Rule::builder("vip-discount", "VIP Discount")
             fact_type: "customer".to_string(),
             field: "status".to_string(),
             value: Value::String("premium".to_string()),
+            op: ComparisonOp::Eq,
         },
         // Order amount is over $100
         Condition::Compare {
@@ -118,6 +135,7 @@ let rule = Rule::builder("vip-discount", "VIP Discount")
                 fact_type: "order".to_string(),
                 field: "amount".to_string(),
                 value: Value::Integer(100),
+                op: ComparisonOp::Eq,
             }),
             op: ComparisonOp::Gt,
             right: Box::new(Condition::True),
@@ -135,7 +153,7 @@ let rule = Rule::builder("vip-discount", "VIP Discount")
 At least ONE condition must be true:
 
 ```rust
-use engine::{Rule, Condition};
+use engine::{Action, ComparisonOp, Condition, LogLevel, Rule, Value};
 
 let rule = Rule::builder("rush-hour-fee", "Rush Hour Surcharge")
     .salience(5)
@@ -145,12 +163,14 @@ let rule = Rule::builder("rush-hour-fee", "Rush Hour Surcharge")
             fact_type: "time".to_string(),
             field: "hour".to_string(),
             value: Value::Integer(8),  // Simplified
+            op: ComparisonOp::Eq,
         },
         // Hour is 5-7 PM
         Condition::Pattern {
             fact_type: "time".to_string(),
             field: "hour".to_string(),
             value: Value::Integer(18),  // Simplified
+            op: ComparisonOp::Eq,
         },
     ]))
     .action(Action::LogMessage {
@@ -165,7 +185,7 @@ let rule = Rule::builder("rush-hour-fee", "Rush Hour Surcharge")
 Negate a condition:
 
 ```rust
-use engine::{Rule, Condition};
+use engine::{Action, ComparisonOp, Condition, LogLevel, Rule, Value};
 
 let rule = Rule::builder("non-member-price", "Non-Member Price")
     .salience(8)
@@ -174,6 +194,7 @@ let rule = Rule::builder("non-member-price", "Non-Member Price")
             fact_type: "customer".to_string(),
             field: "member".to_string(),
             value: Value::Bool(true),
+            op: ComparisonOp::Eq,
         },
     )))
     .action(Action::LogMessage {
@@ -192,7 +213,7 @@ let rule = Rule::builder("non-member-price", "Non-Member Price")
 Create new facts during rule execution:
 
 ```rust
-use engine::{Rule, Condition, Action};
+use engine::{Action, ComparisonOp, Condition, Rule, Value};
 
 let rule = Rule::builder("detect-high-risk", "Detect High Risk")
     .salience(30)
@@ -200,6 +221,7 @@ let rule = Rule::builder("detect-high-risk", "Detect High Risk")
         fact_type: "transaction".to_string(),
         field: "amount".to_string(),
         value: Value::Integer(50000),  // $50,000
+        op: ComparisonOp::Eq,
     })
     .action(Action::InsertFact {
         fact_type: "risk_alert".to_string(),
@@ -216,8 +238,10 @@ let rule = Rule::builder("detect-high-risk", "Detect High Risk")
 Modify existing facts:
 
 ```rust
-use engine::{Rule, Condition, Action};
+use engine::{Action, ComparisonOp, Condition, Expression, Rule, Value};
 use uuid::Uuid;
+
+let fact_id = uuid::Uuid::new_v4().to_string();  // the fact this rule updates
 
 let rule = Rule::builder("update-score", "Update Customer Score")
     .salience(12)
@@ -225,11 +249,14 @@ let rule = Rule::builder("update-score", "Update Customer Score")
         fact_type: "customer".to_string(),
         field: "status".to_string(),
         value: Value::String("premium".to_string()),
+        op: ComparisonOp::Eq,
     })
+    // `UpdateFact` takes expressions, so a field can be computed from working memory
+    // (`score := score + 10`) as well as set to a literal.
     .action(Action::UpdateFact {
-        id: some_uuid,  // The fact to update
+        id: fact_id.clone(),  // the fact to update
         fields: [
-            ("score".to_string(), Value::Integer(100)),
+            ("score".to_string(), Expression::Literal(Value::Integer(100))),
         ].into_iter().collect(),
     })
     .build();
@@ -240,7 +267,7 @@ let rule = Rule::builder("update-score", "Update Customer Score")
 Remove facts from working memory:
 
 ```rust
-use engine::{Rule, Condition, Action};
+use engine::{Action, ComparisonOp, Condition, Rule, Value};
 
 let rule = Rule::builder("cancel-invalid", "Cancel Invalid Order")
     .salience(25)
@@ -248,9 +275,10 @@ let rule = Rule::builder("cancel-invalid", "Cancel Invalid Order")
         fact_type: "order".to_string(),
         field: "status".to_string(),
         value: Value::String("invalid".to_string()),
+        op: ComparisonOp::Eq,
     })
     .action(Action::RetractFact {
-        id: some_uuid,  // The fact to remove
+        id: "order-to-retract".to_string(),  // the fact to remove
     })
     .build();
 ```
@@ -260,7 +288,7 @@ let rule = Rule::builder("cancel-invalid", "Cancel Invalid Order")
 Execute registered functions:
 
 ```rust
-use engine::{Rule, Condition, Action};
+use engine::{Action, ComparisonOp, Condition, Rule, Value};
 
 let rule = Rule::builder("send-notification", "Send Notification")
     .salience(5)
@@ -268,6 +296,7 @@ let rule = Rule::builder("send-notification", "Send Notification")
         fact_type: "order".to_string(),
         field: "status".to_string(),
         value: Value::String("shipped".to_string()),
+        op: ComparisonOp::Eq,
     })
     .action(Action::CallFunction {
         name: "send_email_notification".to_string(),
@@ -288,7 +317,7 @@ Rules with higher salience fire first. Default is 0.
 ### Example: Layered Processing
 
 ```rust
-use engine::{Rule, Condition};
+use engine::{Action, ComparisonOp, Condition, LogLevel, Rule, Value};
 
 // High priority: Safety checks (fire first)
 let safety_rule = Rule::builder("safety-check", "Safety Check")
@@ -297,6 +326,7 @@ let safety_rule = Rule::builder("safety-check", "Safety Check")
         fact_type: "transaction".to_string(),
         field: "amount".to_string(),
         value: Value::Integer(100000),  // $100,000
+        op: ComparisonOp::Eq,
     })
     .action(Action::LogMessage {
         level: LogLevel::Warning,
@@ -311,6 +341,7 @@ let compliance_rule = Rule::builder("compliance-check", "Compliance Check")
         fact_type: "transaction".to_string(),
         field: "amount".to_string(),
         value: Value::Integer(10000),  // $10,000
+        op: ComparisonOp::Eq,
     })
     .action(Action::LogMessage {
         level: LogLevel::Info,
@@ -319,12 +350,13 @@ let compliance_rule = Rule::builder("compliance-check", "Compliance Check")
     .build();
 
 // Low priority: Customer experience optimizations
-let优惠_rule = Rule::builder("customer-offer", "Customer Offer")
+let offer_rule = Rule::builder("customer-offer", "Customer Offer")
     .salience(10)
     .condition(Condition::Pattern {
         fact_type: "order".to_string(),
         field: "amount".to_string(),
         value: Value::Integer(50),  // $50
+        op: ComparisonOp::Eq,
     })
     .action(Action::LogMessage {
         level: LogLevel::Info,
@@ -342,7 +374,7 @@ let优惠_rule = Rule::builder("customer-offer", "Customer Offer")
 ### Scenario 1: Loan Approval System
 
 ```rust
-use engine::{Rule, Condition, Value, ComparisonOp};
+use engine::{Action, ComparisonOp, Condition, Rule, Value};
 
 // Rule 1: Basic eligibility check
 let basic_eligibility = Rule::builder("loan-basic-eligibility", "Basic Eligibility")
@@ -352,12 +384,14 @@ let basic_eligibility = Rule::builder("loan-basic-eligibility", "Basic Eligibili
             fact_type: "applicant".to_string(),
             field: "age".to_string(),
             value: Value::Integer(18),
+            op: ComparisonOp::Eq,
         },
         Condition::Compare {
             left: Box::new(Condition::Pattern {
                 fact_type: "applicant".to_string(),
                 field: "credit_score".to_string(),
                 value: Value::Integer(600),
+                op: ComparisonOp::Eq,
             }),
             op: ComparisonOp::Ge,
             right: Box::new(Condition::True),
@@ -379,12 +413,14 @@ let income_check = Rule::builder("loan-income-check", "Income Verification")
             fact_type: "eligibility_status".to_string(),
             field: "status".to_string(),
             value: Value::String("basic_eligible".to_string()),
+            op: ComparisonOp::Eq,
         },
         Condition::Compare {
             left: Box::new(Condition::Pattern {
                 fact_type: "applicant".to_string(),
                 field: "annual_income".to_string(),
                 value: Value::Integer(30000),  // $30k
+                op: ComparisonOp::Eq,
             }),
             op: ComparisonOp::Ge,
             right: Box::new(Condition::True),
@@ -406,6 +442,7 @@ let debt_check = Rule::builder("loan-debt-check", "Debt Verification")
             fact_type: "applicant".to_string(),
             field: "debt_to_income_ratio".to_string(),
             value: Value::Float(0.43),  // 43%
+            op: ComparisonOp::Eq,
         }),
         op: ComparisonOp::Gt,
         right: Box::new(Condition::True),
@@ -427,12 +464,14 @@ let final_approval = Rule::builder("loan-approval", "Loan Approval")
             fact_type: "eligibility_status".to_string(),
             field: "status".to_string(),
             value: Value::String("income_verified".to_string()),
+            op: ComparisonOp::Eq,
         },
         Condition::Not(Box::new(
             Condition::Pattern {
                 fact_type: "eligibility_status".to_string(),
                 field: "status".to_string(),
                 value: Value::String("rejected".to_string()),
+                op: ComparisonOp::Eq,
             },
         )),
     ]))
@@ -448,7 +487,7 @@ let final_approval = Rule::builder("loan-approval", "Loan Approval")
 ### Scenario 2: E-commerce Discount System
 
 ```rust
-use engine::{Rule, Condition, Action};
+use engine::{Action, ComparisonOp, Condition, Rule, Value};
 
 // Rule 1: VIP customers get automatic discount
 let vip_discount = Rule::builder("vip-auto-discount", "VIP Auto Discount")
@@ -458,12 +497,14 @@ let vip_discount = Rule::builder("vip-auto-discount", "VIP Auto Discount")
             fact_type: "customer".to_string(),
             field: "tier".to_string(),
             value: Value::String("gold".to_string()),
+            op: ComparisonOp::Eq,
         },
         Condition::Compare {
             left: Box::new(Condition::Pattern {
                 fact_type: "cart".to_string(),
                 field: "total".to_string(),
                 value: Value::Integer(50),  // $50 minimum
+                op: ComparisonOp::Eq,
             }),
             op: ComparisonOp::Ge,
             right: Box::new(Condition::True),
@@ -487,12 +528,14 @@ let holiday_promo = Rule::builder("holiday-promo", "Holiday Promotion")
             fact_type: "season".to_string(),
             field: "event".to_string(),
             value: Value::String("holiday_sale".to_string()),
+            op: ComparisonOp::Eq,
         },
         Condition::Compare {
             left: Box::new(Condition::Pattern {
                 fact_type: "cart".to_string(),
                 field: "total".to_string(),
                 value: Value::Integer(100),  // $100 minimum
+                op: ComparisonOp::Eq,
             }),
             op: ComparisonOp::Ge,
             right: Box::new(Condition::True),
@@ -516,10 +559,11 @@ let clear_empty_cart = Rule::builder("clear-empty-cart", "Clear Empty Cart")
             fact_type: "cart".to_string(),
             field: "item_count".to_string(),
             value: Value::Integer(0),
+            op: ComparisonOp::Eq,
         },
     ]))
     .action(Action::RetractFact {
-        id: cart_uuid,  // The empty cart to remove
+        id: "cart-to-retract".to_string(),  // the empty cart to remove
     })
     .build();
 ```
@@ -527,7 +571,7 @@ let clear_empty_cart = Rule::builder("clear-empty-cart", "Clear Empty Cart")
 ### Scenario 3: Fraud Detection System
 
 ```rust
-use engine::{Rule, Condition, Action};
+use engine::{Action, ComparisonOp, Condition, Rule, Value};
 
 // Rule 1: Detect unusual amount
 let unusual_amount = Rule::builder("fraud-unusual-amount", "Unusual Amount")
@@ -537,6 +581,7 @@ let unusual_amount = Rule::builder("fraud-unusual-amount", "Unusual Amount")
             fact_type: "transaction".to_string(),
             field: "amount".to_string(),
             value: Value::Integer(5000),  // $5,000
+            op: ComparisonOp::Eq,
         }),
         op: ComparisonOp::Gt,
         right: Box::new(Condition::True),
@@ -557,6 +602,7 @@ let unusual_location = Rule::builder("fraud-unusual-location", "Unusual Location
         fact_type: "transaction".to_string(),
         field: "is_foreign".to_string(),
         value: Value::Bool(true),
+        op: ComparisonOp::Eq,
     })
     .action(Action::InsertFact {
         fact_type: "fraud_flag".to_string(),
@@ -575,12 +621,14 @@ let high_risk = Rule::builder("fraud-high-risk", "High Risk Fraud")
             fact_type: "fraud_flag".to_string(),
             field: "flag".to_string(),
             value: Value::String("unusual_amount".to_string()),
+            op: ComparisonOp::Eq,
         },
         // Check if another fraud flag exists
         Condition::Pattern {
             fact_type: "fraud_flag".to_string(),
             field: "risk_score".to_string(),
             value: Value::Integer(20),  // Some other flag
+            op: ComparisonOp::Eq,
         },
     ]))
     .action(Action::InsertFact {
@@ -600,6 +648,7 @@ let low_risk = Rule::builder("fraud-low-risk", "Low Risk Fraud")
             fact_type: "fraud_flag".to_string(),
             field: "risk_score".to_string(),
             value: Value::Integer(30),  // Only one flag
+            op: ComparisonOp::Eq,
         },
     ]))
     .action(Action::InsertFact {
@@ -619,7 +668,7 @@ let low_risk = Rule::builder("fraud-low-risk", "Low Risk Fraud")
 The rRules engine provides testing utilities:
 
 ```rust
-use engine::{Rule, Condition, EngineBuilder, Fact};
+use engine::{Value};
 use std::collections::HashMap;
 
 #[test]
