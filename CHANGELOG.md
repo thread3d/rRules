@@ -12,6 +12,31 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.38] — 2026-10-25 — The quick start runs, and says what storage actually is
+
+`make run` was **broken**: it ran `cargo run --bin api`, and the crate builds a binary called
+`rRules-server`. A reader's first command failed with `no bin target named \`api\``, and nothing
+noticed, because nothing has ever run the README.
+
+The quick start also **misdescribed the storage**. It said "Git for rule versioning, PostgreSQL for
+runtime metadata (`migrations/`)" — but no crate depends on a database driver, `PostgresDmnStore` is a
+`todo!()`, and every runtime store is in memory, so a restart starts empty. The README now says that
+plainly, names what *is* on disk (rule and decision documents, and a git repository for versioning),
+and points at the known-gaps table rather than implying a database that is not wired. The missing first
+step — `npm --prefix frontend install` before `make frontend-dev` — is there too.
+
+**The commands are checked now.** `scripts/check-readme.py` reads every `bash` block in the README and
+resolves what it names: every `make <target>` against the Makefile, every `cargo run --bin <name>`
+against the binaries the crates declare, every `-p <crate>` against the workspace, every
+`npm --prefix <dir>` against a `package.json`. `make readme` runs it, `make ci` includes it, and CI runs
+it in the documentation job beside the citation and snippet checks.
+
+It catches the exact bug it was written for — reintroducing `cargo run --bin api` reports
+`no crate declares that binary (declared: … rRules-server)` — because the first version of the script
+had a bug that made it accept anything, and testing the checker against the defect was the only way to
+find that.
+
+
 ## [9.0.37] — 2026-10-25 — The guide's examples now run, and two of its claims were wrong
 
 The documentation check compiled the guide's Rust and never ran it. Compiling is half a claim: a block

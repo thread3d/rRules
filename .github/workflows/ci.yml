@@ -156,3 +156,6 @@ jobs:
 
       - name: User-guide examples compile
         run: make docs-snippets
+
+      - name: README commands resolve
+        run: make readme

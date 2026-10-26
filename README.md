@@ -3,7 +3,7 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.37** — released from a verified tree: everything in the table below was measured by a gate,
+**9.0.38** — released from a verified tree: everything in the table below was measured by a gate,
 not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
@@ -70,12 +70,18 @@ names them.
 
 ```bash
 cargo build --workspace          # engine, api, engine_state
-make run                         # API on :8080
-make frontend-dev                # IDE on :5173
-make tck && make verify          # the conformance and spec gates
+make run                         # API on :8080 (RRULES_BIND_ADDRESS / PORT)
+npm --prefix frontend install    # once, before the interface
+make frontend-dev                # IDE on :5173, proxying the API
+make tck && make verify          # the conformance and specification gates
 ```
 
-Storage is hybrid: Git for rule versioning, PostgreSQL for runtime metadata (`migrations/`).
+Storage today: rule and decision *documents* live on disk, and rule versioning is a git repository
+(`<RULE_STORAGE_PATH>/.git`, libgit2). Everything the API manages at runtime — rules, categories,
+tags, tenants, approvals, audit events, sessions — is in memory, so a restart starts empty. `migrations/`
+holds schemas for a PostgreSQL-backed store that is not wired: `PostgresDmnStore` is a `todo!()`, and no
+crate depends on a database driver. `specs/http-api.md` records this under its known gaps rather than
+implying otherwise.
 
 ## Licence
 

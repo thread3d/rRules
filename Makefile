@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets deploy-env verify e2e image-check bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme deploy-env verify e2e image-check bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -37,6 +37,10 @@ spec-citations:
 deploy-env:
 	./scripts/check-deploy-env.py
 
+# The commands the README tells a reader to run must exist: a target, a binary, a crate, a directory.
+readme:
+	./scripts/check-readme.py
+
 # Every Rust block in the user guide must compile: a guide that shows code is making a claim
 # about the public API, and a snippet the reader copies should build.
 docs-snippets:
@@ -68,7 +72,7 @@ image-check:
 
 # Run the application locally (dev mode)
 run:
-	cargo run --bin api
+	cargo run --bin rRules-server
 
 # Clean build artifacts
 clean:
@@ -125,7 +129,7 @@ e2e:
 	./scripts/e2e-smoke.sh
 
 # Full CI pipeline (build + test + lint + format check + frontend)
-ci: build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets deploy-env e2e
+ci: build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets readme deploy-env e2e
 	@echo "CI pipeline complete"
 
 # Run DMN subsystem benchmarks (Criterion, Phase 36+)
@@ -214,6 +218,7 @@ help:
 	@echo "  image-check     - Check the Dockerfile's build logic without Docker"
 	@echo "  spec-citations  - Check that spec citations still resolve to code"
 	@echo "  docs-snippets   - Compile every Rust example in docs/user-guide.md"
+	@echo "  readme          - Check the README's commands against the Makefile and crates"
 	@echo "  deploy-env      - Check chart/manifest variables against the server's"
 	@echo "  bump-version    - Write VERSION to every file that carries it"
 	@echo "  ci              - Full CI pipeline (build + test + lint + fmt-check + frontend)"

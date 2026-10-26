@@ -2,8 +2,8 @@ apiVersion: v2
 name: rrules-server
 description: A Helm chart for deploying rRules Server to Kubernetes
 type: application
-version: 9.0.37
-appVersion: "9.0.37"
+version: 9.0.38
+appVersion: "9.0.38"
 kubeVersion: ">=1.24.0"
 maintainers:
   - name: rRules Team
