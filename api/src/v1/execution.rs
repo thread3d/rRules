@@ -105,6 +105,9 @@ pub struct SharedRuleSet {
     pub generation: u64,
 }
 
+/// The handle the execute path and the reload endpoint share.
+pub type SharedRuleSetHandle = std::sync::Arc<std::sync::RwLock<SharedRuleSet>>;
+
 impl SharedRuleSet {
     /// Construct a new shared payload with generation 0 (pre-reload baseline).
     pub fn new(ruleset: RuleSet) -> Self {
@@ -1465,9 +1468,83 @@ pub async fn list_jobs(store: web::Data<JobStore>) -> impl Responder {
     HttpResponse::Ok().json(job_list)
 }
 
-/// Start file watcher for automatic hot reload on rule changes
-pub async fn start_file_watcher(rules_dir: String) {
-    log::info!("File watcher started for: {}", rules_dir);
+/// What the rules directory looked like at one instant: each rule file with its modification time
+/// and size.
+///
+/// Polling this is deliberate. A filesystem-notification crate would add a dependency (and a
+/// platform behaviour matrix) for a directory that is normally small and changes rarely; comparing
+/// mtime and length catches adds, removes, edits and truncations, which is everything a rules
+/// directory does.
+pub fn rules_snapshot(dir: &str) -> std::collections::BTreeMap<std::path::PathBuf, (u64, u64)> {
+    let mut snapshot = std::collections::BTreeMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return snapshot;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_rule_file = path.extension().is_some_and(|extension| {
+            extension == "json" || extension == "rules" || extension == "drl"
+        });
+        if !is_rule_file {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|since| since.as_secs() * 1_000 + u64::from(since.subsec_millis()))
+            .unwrap_or(0);
+        snapshot.insert(path, (modified, metadata.len()));
+    }
+    snapshot
+}
+
+/// How often the watcher looks for changes, from `RRULES_WATCH_INTERVAL_SECS` (default 2 s).
+fn watch_interval() -> std::time::Duration {
+    let seconds = std::env::var("RRULES_WATCH_INTERVAL_SECS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+        .unwrap_or(2);
+    std::time::Duration::from_secs(seconds)
+}
+
+/// Reload the shared rule set whenever the rules directory changes.
+///
+/// Runs for the life of the process. A change is swapped in atomically by
+/// [`reload_and_swap`], so a concurrent execution sees either the old set or the new one and never
+/// a half-loaded one. A directory that does not exist, or a file that fails to parse, is reported
+/// and skipped rather than killing the task.
+pub async fn start_file_watcher(shared: SharedRuleSetHandle, rules_dir: String) {
+    let interval = watch_interval();
+    tracing::info!(rules_dir = %rules_dir, interval_ms = interval.as_millis(), "watching the rules directory");
+
+    let mut previous = rules_snapshot(&rules_dir);
+    loop {
+        tokio::time::sleep(interval).await;
+        let current = rules_snapshot(&rules_dir);
+        if current == previous {
+            continue;
+        }
+        previous = current;
+        match reload_and_swap(&shared, &rules_dir).await {
+            Ok(result) => {
+                let generation = shared.read().map(|guard| guard.generation).unwrap_or(0);
+                tracing::info!(
+                    generation,
+                    rules = result.rule_count,
+                    reload_id = %result.reload_id,
+                    "rules changed on disk; swapped in a new rule set"
+                )
+            }
+            Err(error) => {
+                tracing::warn!(%error, "rules changed on disk but the reload failed; keeping the current rule set")
+            }
+        }
+    }
 }
 
 fn json_to_engine_value(value: serde_json::Value) -> engine::Value {
@@ -1533,5 +1610,96 @@ fn engine_value_to_json(value: engine::Value) -> serde_json::Value {
         engine::Value::YearsMonthsDuration(ymd) => serde_json::Value::String(format!("{:?}", ymd)),
         engine::Value::Range(r) => serde_json::Value::String(format!("{:?}", r)),
         engine::Value::Function(f) => serde_json::Value::String(format!("{:?}", f)),
+    }
+}
+
+#[cfg(test)]
+mod watcher_tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("rrules-watch-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    #[test]
+    fn a_snapshot_lists_only_rule_files() {
+        let dir = temp_dir("snapshot");
+        std::fs::write(dir.join("a.json"), "{}").expect("write");
+        std::fs::write(dir.join("notes.txt"), "ignore me").expect("write");
+
+        let snapshot = rules_snapshot(dir.to_str().expect("utf-8"));
+        assert_eq!(snapshot.len(), 1, "only rule files count: {snapshot:?}");
+        assert!(snapshot
+            .keys()
+            .next()
+            .expect("one entry")
+            .ends_with("a.json"));
+    }
+
+    #[test]
+    fn a_new_file_changes_the_snapshot() {
+        let dir = temp_dir("new-file");
+        let path = dir.to_str().expect("utf-8");
+        let before = rules_snapshot(path);
+        std::fs::write(dir.join("rules.json"), "[]").expect("write");
+        let after = rules_snapshot(path);
+        assert_ne!(before, after, "adding a rule file must be visible");
+    }
+
+    #[test]
+    fn a_resized_file_changes_the_snapshot() {
+        let dir = temp_dir("resize");
+        let path = dir.to_str().expect("utf-8");
+        std::fs::write(dir.join("rules.json"), "[]").expect("write");
+        let before = rules_snapshot(path);
+        std::fs::write(dir.join("rules.json"), "[{\"id\": \"r1\"}]").expect("write");
+        let after = rules_snapshot(path);
+        assert_ne!(before, after, "an edited rule file must be visible");
+    }
+
+    #[test]
+    fn a_missing_directory_is_an_empty_snapshot() {
+        assert!(rules_snapshot("/nonexistent/rrules/rules").is_empty());
+    }
+
+    #[actix_web::test]
+    async fn the_watcher_swaps_in_changed_rules() {
+        let dir = temp_dir("reload");
+        let rules_dir = dir.to_str().expect("utf-8").to_string();
+
+        let shared: SharedRuleSetHandle = std::sync::Arc::new(std::sync::RwLock::new(
+            SharedRuleSet::new(build_ruleset_from_dir(&rules_dir)),
+        ));
+        // The watcher reads its interval from the environment once, at start.
+        std::env::set_var("RRULES_WATCH_INTERVAL_SECS", "1");
+        tokio::spawn(start_file_watcher(shared.clone(), rules_dir.clone()));
+
+        // The watcher takes its baseline snapshot when the task first runs. Writing before that
+        // would make the file part of the baseline and no change would ever be seen.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // A rule file the loader understands (`build_ruleset_from_dir` parses JSON rules).
+        std::fs::write(
+            dir.join("rules.json"),
+            r#"[{"id":"watched-rule","name":"Watched","condition":{"pattern":{"fact_type":"customer","field":"status","value":"premium","op":"eq"}},"actions":[]}]"#,
+        )
+        .expect("write rule file");
+
+        // The generation moves when a reload lands; poll rather than sleep a fixed time.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let mut generation = 0;
+        while std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            generation = shared.read().expect("guard").generation;
+            if generation > 0 {
+                break;
+            }
+        }
+        assert!(
+            generation > 0,
+            "the watcher should have swapped in the new rule set"
+        );
     }
 }

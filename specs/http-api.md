@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.27` (`api/src/openapi.rs:12`).
+  version `9.0.28` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -112,7 +112,8 @@ file service (it also enables directory listing). `FRONTEND_DIST` defaults to
 | `RULE_STORAGE_PATH` | `./rules` | rules dir + `<dir>/.git` repo; read again per reload | `main.rs:92-93,198`, `v1/execution.rs:1295` |
 | `DMN_STORAGE_PATH` | `./dmn` | startup model load; also read by the store | `main.rs:102-103`, `engine_state/src/lib.rs:104` |
 | `FRONTEND_DIST` | `../frontend/dist` | static mount | `main.rs:217-218` |
-| `WATCH_RULES_DIR` | `true` (`"true"`/`"1"` truthy) | spawns the watcher task — **which is a no-op stub** | `main.rs:223-230`, `v1/execution.rs:1444-1446` |
+| `WATCH_RULES_DIR` | `true` (`"true"`/`"1"` truthy) | spawns the rules-directory watcher: it snapshots the directory and calls `reload_and_swap` when a rule file is added, removed, resized or modified | `main.rs:194-197`, `v1/execution.rs` `start_file_watcher` |
+| `RRULES_WATCH_INTERVAL_SECS` | `2` | how often the watcher looks for changes | `v1/execution.rs` `watch_interval` |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | comma-separated allowed origins | `main.rs:247-252` |
 | `RRULES_DEFAULT_ENGINE` | `rete` | validated at startup; re-read per request | `main.rs:61-69`, `v1/execution.rs:600-603,1148`, `v1/sessions.rs:200-202` |
 | `RRULES_MAX_CHAIN_ITERATIONS` | `1000` (engine-side) | main.rs only **warns** if unparseable; engine reads it per execution | `main.rs:76-83`, `engine/src/engine/rete/mod.rs:378` |
@@ -123,10 +124,10 @@ file service (it also enables directory listing). `FRONTEND_DIST` defaults to
 | `RRULES_SESSION_SWEEP_INTERVAL_SECS` | `60` | sweep cadence | `v1/sessions.rs:465-469` |
 | `VITE_API_URL` | `/v1` | **build-time, frontend only** | `frontend/src/api/client.ts:12`, `frontend/src/lib/auth-context.tsx:12` |
 
-Read but effectively inert: **`WATCH_RULES_DIR`** — its only consumer spawns
-`start_file_watcher`, whose body is a single `log::info!`
-(`v1/execution.rs:1444-1446`), so no file watching happens. `DATABASE_URL` is
-mentioned in `engine_state` docs but never read (`engine_state/src/lib.rs:338`).
+Read and effective: **`WATCH_RULES_DIR`** — its consumer spawns `start_file_watcher`, which
+snapshots the rules directory and swaps in a new rule set on any change. `DATABASE_URL` is mentioned
+in `engine_state` docs but never read (`engine_state/src/lib.rs:338`), because the persistence layer
+is in memory.
 
 ## Authentication and authorisation
 
@@ -449,7 +450,7 @@ Dead or unreachable code:
 | ~~Startup loads only the first `.dmn` file, in arbitrary `read_dir` order~~ | **Fixed in 9.0.26**: `api::dmn_loader::load_models` reads every `.dmn` file in sorted order and merges them, so a second decision file is visible and the result is reproducible (`api/src/dmn_loader.rs`). |
 | ~~`record_audit_event` has zero callers, so `/v1/audit` and `/v1/audit/export` are permanently empty~~ | **Fixed in 9.0.27**: rule create, update and delete (archive) and approval approve/reject record events, with the acting user from the JWT, the peer address and the `User-Agent` (`api/src/v1/audit.rs` `record_for_request`). Category, tag and tenant mutations and executions are still not recorded. |
 | `build_ruleset_from_dir`'s counterpart `EngineState` (+ `reload_from_directory`, `reload_engine`) is registered as `app_data` but never extracted; the git-log `from_commit` parameter is accepted and ignored | `api/src/main.rs:48,272`; `api/src/v1/execution.rs:295-378`; `branches.rs:216-251` |
-| `start_file_watcher` is a stub (one `log::info!`), so `WATCH_RULES_DIR` has no functional effect | `api/src/v1/execution.rs:1444-1446` |
+| ~~`start_file_watcher` is a stub, so `WATCH_RULES_DIR` has no functional effect~~ | **Fixed in 9.0.28**: the watcher polls the rules directory (`RRULES_WATCH_INTERVAL_SECS`, default 2 s) and calls `reload_and_swap` on any change, so an edit on disk swaps in a new rule set atomically. Polling rather than filesystem notifications keeps the dependency list unchanged; mtime-and-size catches adds, removes, edits and truncations, which is what a rules directory does. |
 | DMN WS broadcaster drains and logs but never forwards; nothing publishes to `DmnMetricsTx` | `api/src/v1/dmn_metrics.rs:92-103` |
 
 Stub / hard-coded responses: `GET /v1/monitoring/engine-state` returns all

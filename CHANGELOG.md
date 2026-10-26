@@ -12,6 +12,29 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.28] — 2026-10-25 — `WATCH_RULES_DIR` watches
+
+The option promised hot reload and its consumer was one `log::info!`: a deployment could set
+`WATCH_RULES_DIR=true` and edit rules on disk all day without the server noticing.
+
+`start_file_watcher` now snapshots the rules directory — each rule file with its modification time
+and length — every `RRULES_WATCH_INTERVAL_SECS` (default 2 s) and calls `reload_and_swap` when the
+snapshot differs, which swaps the whole set atomically so a concurrent execution sees either the old
+rules or the new ones. Polling rather than a filesystem-notification crate keeps the dependency list
+unchanged, and mtime-and-size catches additions, removals, edits and truncations, which is what a
+rules directory does. A change that fails to parse is reported and the previous rule set stays in
+service.
+
+`main` now hands the watcher the same `Arc<RwLock<SharedRuleSet>>` the execute path reads, so the two
+cannot drift apart.
+
+Five tests: a snapshot lists rule files and ignores others, adding a file changes it, resizing one
+changes it, a missing directory is an empty snapshot, and an end-to-end test spawns the watcher, writes
+a rule file, and polls until the generation moves. That last one failed first time — the test wrote the
+file before the watcher's task had taken its baseline, so the file was part of it — which is exactly
+the race the test exists to notice once, in a test, rather than in production.
+
+
 ## [9.0.27] — 2026-10-25 — The audit trail records what happens
 
 `record_audit_event` had zero callers, so `/v1/audit` and `/v1/audit/export` were permanently

@@ -34,7 +34,7 @@ async fn main() -> std::io::Result<()> {
         format!("{host}:{port}")
     };
 
-    println!("rRules REST API Server v9.0.27");
+    println!("rRules REST API Server v9.0.28");
     println!("Starting on http://{bind_address}");
 
     // Create engine state for hot reload functionality
@@ -84,7 +84,9 @@ async fn main() -> std::io::Result<()> {
     // `ArcSwap` (L-01).
     let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
     let ruleset = SharedRuleSet::new(v1::execution::build_ruleset_from_dir(&rules_dir));
-    let ruleset = web::Data::new(std::sync::Arc::new(std::sync::RwLock::new(ruleset)));
+    // One handle for both consumers: the app reads it, the watcher swaps it.
+    let ruleset_inner = std::sync::Arc::new(std::sync::RwLock::new(ruleset));
+    let ruleset = web::Data::new(ruleset_inner.clone());
 
     // Phase 33 (Plan 33-01 / D-33-01): shared DMN model snapshot built once at
     // startup. Read `DMN_STORAGE_PATH` with fallback `"./dmn"`. If the directory
@@ -193,7 +195,11 @@ async fn main() -> std::io::Result<()> {
 
     if watch_rules {
         println!("Starting file watcher for rules directory: {}", rules_dir);
-        tokio::spawn(v1::execution::start_file_watcher(rules_dir));
+        // The watcher reloads the same shared set the execute path reads.
+        tokio::spawn(v1::execution::start_file_watcher(
+            ruleset_inner.clone(),
+            rules_dir,
+        ));
     }
 
     // Phase 27 (D-10): spawn the background session sweep task alongside
