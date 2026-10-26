@@ -36,7 +36,9 @@ Everything documented below is registered in `api/src/main.rs`. The
 `api/src/v1/metrics.rs` handlers behind `configure_v1_metrics`
 (`/v1/metrics/engine`, `/v1/metrics/coverage/reset`) are **not** registered and
 return placeholder data; use `/v1/metrics/dead-rules`, `/v1/metrics/coverage`,
-`/v1/metrics/dmn` and the root `/metrics` instead.
+`/v1/metrics/dmn` and the root `/metrics` instead. The two dashboard endpoints carry a
+`/v1` prefix and require a token like every other business route: they are documented
+once, under **Metrics under /v1**.
 
 ---
 
@@ -88,37 +90,6 @@ engine_rules_fired 0
 # TYPE engine_memory_bytes gauge
 engine_memory_bytes 0
 ```
-
-## GET /metrics/dead-rules
-Rules that were evaluated but never fired (dead code candidates).
-
-**Auth:** none. **Response:** `200` JSON array of rule IDs.
-```json
-[]
-```
-> Reads the process-wide `RuleExecutionTracker` singleton, which is populated by
-> the evaluator on every execution (`record_evaluation` / `record_fire`), so this
-> reflects live behaviour: a rule that was evaluated but never fired is reported
-> here.
-
-## GET /metrics/coverage
-Rule coverage data from the global `CoverageTracking` singleton. Rules
-recorded via the engine (e.g. `CoverageTracking::record_rule_eval`) surface
-here.
-
-**Auth:** none. **Response:** `200` `application/json`
-```json
-{
-  "rules": [
-    { "rule_id": "discount-rule", "evaluated": true, "fired": false,
-      "evaluation_count": 3, "fire_count": 0, "skipped_reason": null }
-  ],
-  "summary": { "total_rules": 1, "evaluated_count": 1, "fired_count": 0,
-    "coverage_percent": 0.0 }
-}
-```
-
----
 
 # Metrics under /v1
 
@@ -694,8 +665,21 @@ Run a simulation. (Also accepts `/v1/simulation/`.)
 
 ## Environment variables
 
+Every variable the server reads, with the default that applies when it is unset.
+
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `RULE_STORAGE_PATH` | `./rules` | rules directory; also the git repo (`<path>/.git`) |
-| `FRONTEND_DIST` | `../frontend/dist` | static frontend served at `/` |
-| `WATCH_RULES_DIR` | `true` | start the rules file watcher |
+| `API_SECRET_KEY` | `rrules-dev-secret-change-me` | HS256 signing key. The default is a known string; a warning is logged and **it must be set in any deployment** (the chart reads it from a Secret). |
+| `RRULES_BIND_ADDRESS` | `127.0.0.1` | listening host. The default is loopback; the container image sets `0.0.0.0` so the port is reachable. |
+| `PORT` | `8080` | listening port. |
+| `CORS_ALLOWED_ORIGINS` | none (no cross-origin origin allowed) | comma-separated list of browser origins allowed to call the API. Origins are pinned, never a wildcard, so the Bearer-token flow works without allowing credentials. |
+| `RULE_STORAGE_PATH` | `./rules` | rules directory; also the git repository the version control uses (`<path>/.git`). |
+| `DMN_STORAGE_PATH` | `./dmn` | DMN decision model directory. |
+| `FRONTEND_DIST` | `../frontend/dist` | built interface served at `/` and for every client-side route. |
+| `WATCH_RULES_DIR` | `true` | watch the rules directory and reload on change. Set `false` to disable. |
+| `RRULES_DEFAULT_ENGINE` | `rete` | engine used when a request does not name one. |
+| `RRULES_MAX_CHAIN_ITERATIONS` | engine default | bound on forward-chaining iterations for one execution. |
+| `RRULES_SESSION_IDLE_TTL_SECS` | `900` | idle lifetime of a stateful session before it is swept. |
+| `RRULES_SESSION_MAX_LIFETIME_SECS` | `86400` | absolute lifetime of a stateful session. |
+| `RRULES_MAX_SESSIONS` | `1024` | cap on concurrent stateful sessions. |
+| `RRULES_SESSION_SWEEP_INTERVAL_SECS` | `60` | how often the session sweeper runs. |

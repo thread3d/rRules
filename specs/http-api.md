@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.21` (`api/src/openapi.rs:12`).
+  version `9.0.22` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -487,5 +487,5 @@ Doc/code drift in `docs/API.md` (each item verified against the handlers):
 | `GET /v1/tags` returns `[TagResponse]` (`docs/API.md:509`) | Returns `{total_count,tags}` (`tags.rs:124-127`) |
 | Pending approvals are an array of objects with `reviewers`/`required_approvals` (`docs/API.md:539-541`) | `{total_count,approvals[{id,rule_id,maker_id,state,created_at}]}` (`approvals.rs:153-162`) |
 | `POST /v1/branches` body has only `source_branch`/`from_commit` (`docs/API.md:575`) | `name` is required and 400s when missing (`branches.rs:23-25,40-46`) |
-| env table lists 3 variables (`docs/API.md:695-701`) | 13 are read by the server (see the env table above) |
+| the environment table listed 3 variables and omitted 11 the server reads, including the signing key and the bind address (`docs/API.md:666-685`) | **Fixed in 9.0.22**: the table now lists all 14 (see the env table above) |
 | `SqlxTenantStore` is "a placeholder" for tenants (`docs/API.md:469-471`) | The API uses `MemoryTenantStore`; no SQL tenant code is referenced from `api/` (`tenants.rs:18-23`) |

@@ -12,6 +12,37 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.22] — 2026-10-25 — The API reference is checked against the router
+
+`docs/API.md` is prose, and prose rots the same way `specs/` did: it can promise an endpoint that
+was renamed, moved, or never registered. A new integration test (`api/tests/documented_routes.rs`)
+reads the document, drives each of its 67 documented endpoints against the real application built
+in-process, and fails when the router does not know one. Two signals identify a route that does not
+exist: under `/v1` the SPA answers `{"error":"no such endpoint: …"}`, and at the root an unknown path
+falls through to the application shell.
+
+It found the reference documenting **two endpoints that are not registered**, at paths that were
+not merely stale but contradicted the document's own opening note:
+
+| Documented | Reality |
+|---|---|
+| `GET /metrics/dead-rules` | `/v1/metrics/dead-rules`, requires a token |
+| `GET /metrics/coverage` | `/v1/metrics/coverage`, requires a token |
+
+Both were duplicates of the correctly-documented `/v1/metrics/*` sections further down, so the file
+described the same two handlers twice — once at a path that 404s. The duplicates are gone and the
+opening note says which of the two is real.
+
+The test runs as part of `make ci` (`cargo test --workspace`), so a documented endpoint that stops
+existing now fails the build.
+
+The same pass fixed the reference's environment table, which listed **3** variables while the server
+reads **14** — among the missing: `API_SECRET_KEY` (whose default is a known development string that
+any deployment must override), `RRULES_BIND_ADDRESS`, `CORS_ALLOWED_ORIGINS`, `DMN_STORAGE_PATH`,
+`RRULES_DEFAULT_ENGINE` and the four session limits. `specs/http-api.md` had recorded the gap; it now
+records the fix.
+
+
 ## [9.0.21] — 2026-10-25 — Tailwind 4, and dark mode that was never wired
 
 The last three advisories lived in Tailwind's PostCSS chain, and clearing them meant the Tailwind 4
