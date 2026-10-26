@@ -12,6 +12,29 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.31] — 2026-10-25 — The OpenAPI document describes the API it serves
+
+`/api-docs/openapi.json` is what a client generator reads, and it is assembled from a hand-written
+list in `api/src/openapi.rs` — a list that falls behind the router exactly like prose does. A new test
+compares it against `docs/API.md`, which the existing test already proves matches the router, and it
+found **21 documented routes missing from the document**, including:
+
+- all three authentication endpoints — a generated client could not log in;
+- all ten decision endpoints, so evaluation and the DMN lifecycle were invisible to it;
+- both session endpoints, the DMN Prometheus endpoint, and the `/live` and `/ready` aliases.
+
+The ten decision handlers had no `#[utoipa::path]` annotations at all, and neither did the session
+handlers or the DMN metrics endpoint; they are annotated now, their request and response types carry
+`ToSchema`, and everything is registered. The document grew from describing roughly half the API to
+describing all of it.
+
+Five routes remain deliberately outside it, and the test says why rather than quietly skipping them:
+`/live` and `/ready` are aliases of `/health/live` and `/health/ready` (one operation, one path),
+`PATCH /v1/rules/{id}` aliases `PUT`, and the two WebSockets are upgrades that OpenAPI 3.0's operation
+model cannot describe. A second test asserts each exemption still names a route the guide documents,
+so an exemption cannot outlive its reason.
+
+
 ## [9.0.30] — 2026-10-25 — A test suite that never compiled, and a copied module nobody ran
 
 Two more pieces of code that existed without ever being executed, both already recorded in

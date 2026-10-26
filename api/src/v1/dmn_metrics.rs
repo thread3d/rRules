@@ -116,6 +116,12 @@ pub fn create_dmn_metrics_channel(
 /// Pitfall 24-A duplicate metric name panics. The output contains `# HELP` and
 /// `# TYPE` lines for every registered metric family, matching the Prometheus
 /// exposition format that scrapers expect.
+#[utoipa::path(
+    get,
+    path = "/v1/metrics/dmn",
+    responses((status = 200, description = "DMN metrics in Prometheus exposition format", body = String, content_type = "text/plain")),
+    tag = "metrics",
+)]
 pub async fn dmn_metrics_endpoint() -> impl Responder {
     let metric_families = DMN_METRICS_REGISTRY.gather();
     let mut buffer = Vec::new();

@@ -109,3 +109,85 @@ async fn documented_endpoints_are_registered() {
         missing.join("\n  ")
     );
 }
+
+/// Routes the OpenAPI document cannot express, each with the reason. An exemption is a statement
+/// about the formats, not a way to silence the check: the user guide still documents all of them.
+const OPENAPI_EXEMPT: &[(&str, &str)] = &[
+    (
+        "GET /live",
+        "the same handler serves /health/live; one operation, one path",
+    ),
+    (
+        "GET /ready",
+        "the same handler serves /health/ready; one operation, one path",
+    ),
+    (
+        "PATCH /v1/rules/{id}",
+        "an alias of PUT /v1/rules/{id}; OpenAPI has one operation per path and method",
+    ),
+    (
+        "GET /v1/metrics/ws",
+        "a WebSocket upgrade, which OpenAPI 3.0's operation model cannot describe",
+    ),
+    (
+        "GET /v1/metrics/dmn/ws",
+        "a WebSocket upgrade, which OpenAPI 3.0's operation model cannot describe",
+    ),
+];
+
+/// The generated OpenAPI document must describe the routes the server actually serves.
+///
+/// `/api-docs/openapi.json` is what a client generator reads, and it is assembled from a hand-written
+/// list in `api/src/openapi.rs` — a list that can fall behind the router exactly like prose can. This
+/// compares it against `docs/API.md`, which the test above already proves matches the router.
+#[actix_web::test]
+async fn the_openapi_document_describes_the_documented_routes() {
+    let root = std::env::temp_dir().join("rrules-openapi-routes");
+    std::fs::create_dir_all(&root).expect("temp dir");
+    let state = api::app::ApiState::for_testing(&root);
+    let app = test::init_service(api::app::build_app(&state)).await;
+
+    let request = test::TestRequest::get()
+        .uri("/api-docs/openapi.json")
+        .to_request();
+    let document: serde_json::Value = test::call_and_read_body_json(&app, request).await;
+    let paths = document["paths"]
+        .as_object()
+        .expect("the document has a paths object");
+
+    // The document speaks OpenAPI's `{parameter}` syntax; the user guide uses the same shape.
+    let mut missing = Vec::new();
+    for (method, uri) in documented_endpoints() {
+        let path = uri.split('?').next().unwrap_or(&uri).to_string();
+        let described = paths
+            .get(&path)
+            .map(|entry| entry.get(method.as_str().to_lowercase()).is_some())
+            .unwrap_or(false);
+        let key = format!("{method} {path}");
+        if !described && !OPENAPI_EXEMPT.iter().any(|(exempt, _)| *exempt == key) {
+            missing.push(key);
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "docs/API.md documents routes the OpenAPI document does not describe:\n  {}",
+        missing.join("\n  ")
+    );
+}
+
+/// Every exemption must still be a route the server serves, or the list is stale.
+#[actix_web::test]
+async fn the_openapi_exemptions_are_real_routes() {
+    let documented: Vec<String> = documented_endpoints()
+        .into_iter()
+        .map(|(method, uri)| format!("{method} {uri}"))
+        .collect();
+
+    for (exempt, reason) in OPENAPI_EXEMPT {
+        assert!(
+            documented.iter().any(|documented| documented == exempt),
+            "exemption `{exempt}` ({reason}) does not name a route docs/API.md documents"
+        );
+    }
+}

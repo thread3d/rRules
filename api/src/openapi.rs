@@ -9,7 +9,7 @@ use utoipa::OpenApi;
 #[openapi(
     info(
         title = "rRules API",
-        version = "9.0.30",
+        version = "9.0.31",
         description = "Production-grade Business Rules Management System REST API",
     ),
     paths(
@@ -27,6 +27,28 @@ use utoipa::OpenApi;
         crate::v1::rules::update_rule,
         crate::v1::rules::delete_rule,
         crate::v1::rules::undelete_rule,
+        // Decisions
+        crate::v1::decisions::evaluate_decision,
+        crate::v1::decisions::list_decisions,
+        crate::v1::decisions::get_decision,
+        crate::v1::decisions::create_decision,
+        crate::v1::decisions::update_decision,
+        crate::v1::decisions::delete_decision,
+        crate::v1::decisions::import_dmn,
+        crate::v1::decisions::export_dmn,
+        crate::v1::decisions::get_decision_ir,
+        crate::v1::decisions::reload_dmn,
+        // Authentication
+        crate::auth::login,
+        crate::auth::me,
+        crate::auth::refresh,
+        // Sessions
+        crate::v1::sessions::dispose_session,
+        crate::v1::sessions::reset_session,
+        // DMN metrics + health aliases
+        crate::v1::dmn_metrics::dmn_metrics_endpoint,
+        crate::health::live,
+        crate::health::ready,
         // Categories
         crate::v1::categories::create_category,
         crate::v1::categories::list_categories,

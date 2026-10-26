@@ -511,6 +511,13 @@ pub async fn run_session_sweep(manager: Arc<SessionManager>) {
 /// String)>` because `(StatusCode, String)` does not implement
 /// `actix_web::ResponseError` and cannot be used directly as a handler
 /// return type.
+#[utoipa::path(
+    delete,
+    path = "/v1/execute/session/{id}",
+    params(("id" = String, Path, description = "Session id")),
+    responses((status = 204, description = "The session was disposed"), (status = 404, description = "Unknown session")),
+    tag = "execution",
+)]
 pub async fn dispose_session(
     id: web::Path<String>,
     manager: web::Data<Arc<SessionManager>>,
@@ -537,6 +544,13 @@ pub async fn dispose_session(
 /// a fresh engine (Open Q#1 — ReteEngine::reset() clears rules too).
 ///
 /// Returns `impl Responder` — see `dispose_session` doc comment for rationale.
+#[utoipa::path(
+    post,
+    path = "/v1/execute/session/{id}/reset",
+    params(("id" = String, Path, description = "Session id")),
+    responses((status = 204, description = "The session state was reset"), (status = 404, description = "Unknown session")),
+    tag = "execution",
+)]
 pub async fn reset_session(
     id: web::Path<String>,
     manager: web::Data<Arc<SessionManager>>,

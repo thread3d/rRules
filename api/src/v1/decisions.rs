@@ -29,7 +29,7 @@ pub use crate::v1::dmn_metrics::DmnMetricsSnapshot;
 // =========================================================================
 
 /// Request body for decision evaluation.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct EvaluateDecisionRequest {
     /// Input values (keyed by input name).
     pub inputs: HashMap<String, Value>,
@@ -39,7 +39,7 @@ pub struct EvaluateDecisionRequest {
 }
 
 /// Response body for decision evaluation.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct EvaluateDecisionResponse {
     /// Decision ID that was evaluated.
     pub decision_id: String,
@@ -132,6 +132,18 @@ fn extract_decisions(definitions: &DmnModel) -> Vec<&Decision> {
 // =========================================================================
 
 /// Evaluate a decision — `POST /v1/decisions/{id}/evaluate`.
+#[utoipa::path(
+    post,
+    path = "/v1/decisions/{id}/evaluate",
+    params(("id" = String, Path, description = "Decision id")),
+    request_body = EvaluateDecisionRequest,
+    responses(
+        (status = 200, description = "Decision outputs, fired-rule count and optional trace", body = EvaluateDecisionResponse),
+        (status = 400, description = "Hit-policy violation"),
+        (status = 404, description = "Unknown decision"),
+    ),
+    tag = "decisions",
+)]
 pub async fn evaluate_decision(
     evaluator: web::Data<Arc<DecisionEvaluator>>,
     path: web::Path<String>,
@@ -216,6 +228,12 @@ pub async fn evaluate_decision(
 }
 
 /// List decisions — `GET /v1/decisions`.
+#[utoipa::path(
+    get,
+    path = "/v1/decisions",
+    responses((status = 200, description = "The decision models in storage")),
+    tag = "decisions",
+)]
 pub async fn list_decisions(
     persistence: web::Data<FileSystemDmnStore>,
     query: web::Query<ListQuery>,
@@ -246,6 +264,13 @@ pub async fn list_decisions(
 }
 
 /// Get a specific decision — `GET /v1/decisions/{id}`.
+#[utoipa::path(
+    get,
+    path = "/v1/decisions/{id}",
+    params(("id" = String, Path, description = "Decision id")),
+    responses((status = 200, description = "The decision document"), (status = 404, description = "Unknown decision")),
+    tag = "decisions",
+)]
 pub async fn get_decision(
     persistence: web::Data<FileSystemDmnStore>,
     path: web::Path<String>,
@@ -273,6 +298,13 @@ pub async fn get_decision(
 }
 
 /// Create a new decision — `POST /v1/decisions`.
+#[utoipa::path(
+    post,
+    path = "/v1/decisions",
+    request_body = String,
+    responses((status = 201, description = "The decision was stored")),
+    tag = "decisions",
+)]
 pub async fn create_decision(
     persistence: web::Data<FileSystemDmnStore>,
     body: web::Json<CreateDecisionRequest>,
@@ -314,6 +346,14 @@ pub async fn create_decision(
 }
 
 /// Update an existing decision — `PUT /v1/decisions/{id}`.
+#[utoipa::path(
+    put,
+    path = "/v1/decisions/{id}",
+    params(("id" = String, Path, description = "Decision id")),
+    request_body = String,
+    responses((status = 200, description = "The decision was replaced"), (status = 404, description = "Unknown decision")),
+    tag = "decisions",
+)]
 pub async fn update_decision(
     persistence: web::Data<FileSystemDmnStore>,
     path: web::Path<String>,
@@ -361,6 +401,13 @@ pub async fn update_decision(
 }
 
 /// Delete a decision — `DELETE /v1/decisions/{id}`.
+#[utoipa::path(
+    delete,
+    path = "/v1/decisions/{id}",
+    params(("id" = String, Path, description = "Decision id")),
+    responses((status = 200, description = "The decision was deleted"), (status = 404, description = "Unknown decision")),
+    tag = "decisions",
+)]
 pub async fn delete_decision(
     persistence: web::Data<FileSystemDmnStore>,
     path: web::Path<String>,
@@ -381,6 +428,13 @@ pub async fn delete_decision(
 }
 
 /// Import a DMN file — `POST /v1/decisions/import`.
+#[utoipa::path(
+    post,
+    path = "/v1/decisions/import",
+    request_body = String,
+    responses((status = 201, description = "The imported model and the decisions it contains")),
+    tag = "decisions",
+)]
 pub async fn import_dmn(
     persistence: web::Data<FileSystemDmnStore>,
     body: web::Json<ImportDmnRequest>,
@@ -419,6 +473,13 @@ pub async fn import_dmn(
 
 /// Export a DMN decision — `GET /v1/decisions/{id}/export`.
 #[allow(deprecated)]
+#[utoipa::path(
+    get,
+    path = "/v1/decisions/{id}/export",
+    params(("id" = String, Path, description = "Decision id")),
+    responses((status = 200, description = "The model as DMN XML"), (status = 404, description = "Unknown decision")),
+    tag = "decisions",
+)]
 pub async fn export_dmn(
     persistence: web::Data<FileSystemDmnStore>,
     path: web::Path<String>,
@@ -451,6 +512,13 @@ pub async fn export_dmn(
 /// DecisionTable IR as JSON. This is what the frontend uses to load a saved
 /// decision for editing — without it, the frontend has no way to get
 /// input_expression names from the backend.
+#[utoipa::path(
+    get,
+    path = "/v1/decisions/{id}/ir",
+    params(("id" = String, Path, description = "Decision id")),
+    responses((status = 200, description = "The canonical IR for the decision"), (status = 404, description = "Unknown decision")),
+    tag = "decisions",
+)]
 pub async fn get_decision_ir(
     persistence: web::Data<FileSystemDmnStore>,
     path: web::Path<String>,
@@ -509,6 +577,12 @@ pub async fn get_decision_ir(
 }
 
 /// Reload a DMN model — `POST /v1/decisions/reload`.
+#[utoipa::path(
+    post,
+    path = "/v1/decisions/reload",
+    responses((status = 200, description = "The shared model was reloaded from storage")),
+    tag = "decisions",
+)]
 pub async fn reload_dmn(
     evaluator: web::Data<Arc<DecisionEvaluator>>,
     body: web::Json<ReloadDmnRequest>,
