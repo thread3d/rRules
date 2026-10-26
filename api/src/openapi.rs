@@ -9,7 +9,7 @@ use utoipa::OpenApi;
 #[openapi(
     info(
         title = "rRules API",
-        version = "9.0.38",
+        version = "9.0.39",
         description = "Production-grade Business Rules Management System REST API",
     ),
     paths(

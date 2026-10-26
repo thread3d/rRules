@@ -110,6 +110,60 @@ async fn documented_endpoints_are_registered() {
     );
 }
 
+/// Paths named inside `curl` examples across the documentation, with `$VARS` left as they are.
+///
+/// The prose headings say which routes exist; the `curl` examples say how to call them, and a command
+/// that names a path the router does not serve is worse than no example — it fails in the reader's
+/// terminal. Only lines that begin a `curl` invocation are considered, so prose that mentions a route
+/// is not mistaken for a command.
+fn curl_paths() -> Vec<(Method, String)> {
+    let mut paths = Vec::new();
+    let mut files: Vec<std::path::PathBuf> = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("README.md")];
+    files.extend(
+        std::fs::read_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("docs"),
+        )
+        .expect("docs directory")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "md")),
+    );
+
+    for file in files {
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        for line in text.lines() {
+            let line = line.trim();
+            if !line.starts_with("curl ") {
+                continue;
+            }
+            // `-X POST` sets the method; without it curl sends GET.
+            let method = line
+                .split_whitespace()
+                .skip_while(|token| *token != "-X")
+                .nth(1)
+                .and_then(|name| Method::from_bytes(name.as_bytes()).ok())
+                .unwrap_or(Method::GET);
+            // The first token that looks like a path is the request target.
+            if let Some(target) = line
+                .split_whitespace()
+                .find(|token| token.contains('/') && !token.starts_with('-'))
+            {
+                let target = target.trim_matches('"').trim_matches('\'');
+                if let Some(path) = target.split("$HOST").nth(1) {
+                    paths.push((method.clone(), path.trim_end_matches('\\').to_string()));
+                }
+            }
+        }
+    }
+    paths
+}
+
 /// Routes the OpenAPI document cannot express, each with the reason. An exemption is a statement
 /// about the formats, not a way to silence the check: the user guide still documents all of them.
 const OPENAPI_EXEMPT: &[(&str, &str)] = &[
@@ -134,6 +188,66 @@ const OPENAPI_EXEMPT: &[(&str, &str)] = &[
         "a WebSocket upgrade, which OpenAPI 3.0's operation model cannot describe",
     ),
 ];
+
+/// Every `curl` example in the documentation must name a route the server serves.
+#[actix_web::test]
+async fn curl_examples_name_registered_routes() {
+    let root = std::env::temp_dir().join("rrules-curl-routes");
+    std::fs::create_dir_all(&root).expect("temp dir");
+    let state = api::app::ApiState::for_testing(&root);
+    let app = test::init_service(api::app::build_app(&state)).await;
+
+    let login = test::TestRequest::post()
+        .uri("/v1/auth/login")
+        .set_json(serde_json::json!({"email": "admin", "password": "admin"}))
+        .to_request();
+    let token: serde_json::Value = test::call_and_read_body_json(&app, login).await;
+    let token = token["token"].as_str().expect("a token").to_string();
+
+    let paths = curl_paths();
+    assert!(
+        !paths.is_empty(),
+        "no curl examples were found; the scan itself would be vacuous"
+    );
+
+    let mut broken = Vec::new();
+    for (method, path) in paths {
+        // `$RULE_ID` and friends are placeholders the reader substitutes.
+        let concrete = path
+            .split('/')
+            .map(|segment| {
+                if segment.starts_with('$') {
+                    "00000000-0000-0000-0000-000000000000"
+                } else {
+                    segment
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/");
+        let uri = if concrete.starts_with('/') {
+            concrete
+        } else {
+            format!("/{concrete}")
+        };
+        let request = test::TestRequest::default()
+            .method(method)
+            .uri(&uri)
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .set_json(serde_json::json!({}))
+            .to_request();
+        let response = test::call_service(&app, request).await;
+        let body = String::from_utf8_lossy(&test::read_body(response).await).to_string();
+        if body.contains("no such endpoint") {
+            broken.push(path);
+        }
+    }
+
+    assert!(
+        broken.is_empty(),
+        "curl examples name endpoints the router does not serve:\n  {}",
+        broken.join("\n  ")
+    );
+}
 
 /// The generated OpenAPI document must describe the routes the server actually serves.
 ///

@@ -12,6 +12,24 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.39] — 2026-10-25 — The curl examples are executed too
+
+The documentation's commands were the last claims nothing ran. `docs/user-guide.md` shows five `curl`
+invocations — import a model, evaluate it, submit a rule, list pending approvals, approve one — and each
+names a path. A command that 404s fails in the reader's terminal, which is worse than a missing example.
+
+`api/tests/documented_routes.rs` now scans every `bash` block in the README and `docs/` for lines that
+begin a `curl` invocation, takes the method from `-X` (GET otherwise) and the path after `$HOST`,
+substitutes its `$VARIABLES`, and asks the real application whether the route exists. It is proved by
+changing one path to `/v1/approvals/waiting`, watching it fail, and putting it back.
+
+The check needed two corrections before it was trustworthy, and both were its own bugs: it first sent
+`POST` to a `GET` route, and actix's method-mismatch 404 fell through to the single-page shell, which
+reported a perfectly good endpoint as missing; and one copy of the parser kept the old code after the
+first fix. Reintroducing a defect to watch the check catch it is now the routine, because checks that
+have never failed have never been tested.
+
+
 ## [9.0.38] — 2026-10-25 — The quick start runs, and says what storage actually is
 
 `make run` was **broken**: it ran `cargo run --bin api`, and the crate builds a binary called
