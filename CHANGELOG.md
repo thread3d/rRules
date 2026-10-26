@@ -12,6 +12,21 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.15] — 2026-10-25 — The README states what the gates measure
+
+The public entry point had drifted the way specifications drift: it opened with `**9.0.0**`
+(fourteen releases behind), listed three gates when six now run in CI, and claimed "1,000+ tests"
+without a number anyone could check.
+
+It now names the release it documents, lists every gate CI runs — including the browser gate, the
+citation check, the Dockerfile check, the memory gate and the fuzzer — and states the measured
+counts: **1005 Rust tests across 38 targets, 28 frontend tests, 170 TCK layer results, 28 verified
+requirements**.
+
+`make bump-version` updates the README's release line too, so the first thing a visitor reads is
+the release they are looking at.
+
+
 ## [9.0.14] — 2026-10-25 — A crate-local `target/` is ignored
 
 `make bench` left a 30 MB `engine/target/` that `git status` reported as untracked: `.gitignore`

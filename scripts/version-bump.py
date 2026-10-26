@@ -43,7 +43,10 @@ s = re.sub(r'(?m)^appVersion: .*$', f'appVersion: "{new}"', s)
 p.write_text(s)
 touched.append(str(p))
 
+# The README opens with the release it documents; a bump that leaves it behind is the
+# first thing a visitor reads.
 for path, pattern, replacement in [
+    ('README.md', r'\*\*[0-9]+\.[0-9]+\.[0-9]+\*\* — ', f'**{new}** — '),
     ('api/src/openapi.rs', r'version = "[^"]+"', f'version = "{new}"'),
     ('api/src/main.rs', r'rRules REST API Server v[0-9.]+', f'rRules REST API Server v{new}'),
     ('api/src/metrics.rs', r'rRules v[0-9.]+', f'rRules v{new}'),

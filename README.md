@@ -3,8 +3,8 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.0** — the release where the project's claims became measurable. See
-[`CHANGELOG.md`](CHANGELOG.md) for what shipped, and the numbers below for what is verified.
+**9.0.15** — released from a verified tree: everything in the table below was measured by a gate,
+not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
 
@@ -20,18 +20,22 @@ them without rebuilding, and watch their impact.
 
 ## What is verified
 
-Claims in this repository come with a gate attached. All three run locally, and CI runs the first
-two on every push:
+Claims in this repository come with a gate attached, and every one of these runs in CI:
 
 ```bash
-make ci      # build, test, clippy -D warnings, fmt --check, frontend build + tests
-make tck     # OMG DMN TCK conformance sweep, baseline-gated
-make verify  # CodeWitness: execute specs/requirements.md
+make ci              # build, test, clippy -D warnings, fmt --check, frontend build + tests
+                     # … plus the browser gate: every route, a deep link, and a signed-in flow
+make tck             # OMG DMN TCK conformance sweep, baseline-gated
+make verify          # CodeWitness: execute specs/requirements.md
+make spec-citations  # every `path:line` in specs/ still resolves to the code it names
+make image-check     # the Dockerfile's stages build from its COPY set, without a container
+make memcheck        # memory-regression gate against a committed baseline
+make fuzz            # bounded fuzzing of the FEEL parser and the decision-table loader
 ```
 
 | | Measured |
 |---|---|
-| Tests | 38 targets, 1,000+ tests, all green |
+| Tests | 1005 Rust tests across 38 targets, plus 28 frontend tests — all green |
 | DMN TCK | **170 layer results pass, 0 fail, 4 skipped** across 51 vectors |
 | Requirements | **28 verified, 0 failed** (CodeWitness); 7 more covered from the API crate |
 | Lints | `cargo clippy --workspace -- -D warnings` clean, rustfmt clean |

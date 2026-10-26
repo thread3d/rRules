@@ -51,7 +51,7 @@ async fn main() -> std::io::Result<()> {
         format!("{host}:{port}")
     };
 
-    println!("rRules REST API Server v9.0.14");
+    println!("rRules REST API Server v9.0.15");
     println!("Starting on http://{bind_address}");
 
     // Create engine state for hot reload functionality
@@ -263,6 +263,7 @@ async fn main() -> std::io::Result<()> {
     // is same-origin and does not need CORS, but D-22-05 keeps VITE_API_URL
     // configurable-absolute — CORS makes that mode real (RESEARCH Pitfall 2).
     // NEVER combine `allow_any_origin()` with `allow_credentials(true)` (T-22-05).
+
     let cors_allowed_origins: Vec<String> = std::env::var("CORS_ALLOWED_ORIGINS")
         .unwrap_or_else(|_| "http://localhost:5173".to_string())
         .split(',')
