@@ -1,3 +1,5 @@
+// The manager fetches the branching API itself (features/governance), so this route
+// only mounts it.
 import { createFileRoute } from '@tanstack/react-router'
 import { BranchManager } from '@/features/versioning/BranchManager'
 

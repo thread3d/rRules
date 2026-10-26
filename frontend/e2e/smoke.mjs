@@ -283,6 +283,23 @@ try {
       report(false, '/rules/{id}/edit shows the rule it edits', 'could not resolve the new rule id')
     }
 
+    // Signed in, the governance pages must show their endpoint's answer — an empty
+    // state from the API is fine, an auth error is not.
+    console.log('\ngovernance with data')
+    for (const [route, marker] of [
+      ['/governance/approvals', /No Pending Approvals|Approve|Reject/],
+      ['/governance/audit', /No audit events found|Event Type|Apply Filters/],
+      ['/governance/branches', /main|master|Branch/],
+      ['/governance/rbac', /Permissions|role/i],
+    ]) {
+      const seen = await page.visit(`${BASE}${route}`)
+      report(
+        marker.test(seen.text) && !/status code 401/.test(seen.text),
+        route,
+        /status code 401/.test(seen.text) ? 'reported 401' : 'rendered its data',
+      )
+    }
+
     const formWorks = await page.visit(`${BASE}/rules/new`)
     report(
       /Name/.test(formWorks.text) && /Create rule/.test(formWorks.text),

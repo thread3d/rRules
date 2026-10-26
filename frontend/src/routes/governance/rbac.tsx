@@ -1,3 +1,6 @@
+// RBAC overview: the signed-in user's role and permissions. There is no
+// role-assignment endpoint in the API, so this page reports what the session holds
+// rather than offering edits it could not save.
 import { createFileRoute } from '@tanstack/react-router'
 import { useAuth } from '@/lib/auth-context'
 

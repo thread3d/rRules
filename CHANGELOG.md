@@ -12,6 +12,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.7] — 2026-10-25 — Stale "mount-only" comments removed, governance checked for real
+
+Four routes carried TODOs saying their components were mounted but not wired
+(`TODO(22-05): wire ApprovalQueue fetch to /v1/approvals/*`). They had been wired since: driven
+in a browser while signed in, approvals lists `GET /v1/approvals/pending`, audit lists
+`GET /v1/audit` with its filters, branches lists the repository's branches, and rbac shows the
+signed-in user's role and permissions. The comments described a state that no longer existed and
+are replaced with what the code does.
+
+`rbac` also now states its limit: the API has no role-assignment endpoint, so the page reports
+the session's role and permissions rather than offering edits it could not save.
+
+`make e2e` asserts all four against their endpoints while signed in — an empty state from the
+API passes, a 401 does not.
+
+
 ## [9.0.6] — 2026-10-25 — The rule list shows every rule, and the edit page edits the rule
 
 Two defects the browser gate found once it started creating rules.
