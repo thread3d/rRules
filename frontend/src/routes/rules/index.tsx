@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { RulesList, useRules } from '@/features/rules'
 
 function RulesPage() {
-  const { rules, isLoading, error } = useRules()
+  const { rules, isLoading, error, onRefresh } = useRules()
 
   return (
     <div className="p-6">
@@ -12,7 +12,7 @@ function RulesPage() {
           <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
         </div>
       )}
-      <RulesList rules={rules} isLoading={isLoading} />
+      <RulesList rules={rules} isLoading={isLoading} onRefresh={onRefresh} />
     </div>
   )
 }

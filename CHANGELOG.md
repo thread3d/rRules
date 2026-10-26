@@ -12,6 +12,26 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.34] — 2026-10-25 — The rules list's buttons do something
+
+Two of the index page's controls were decoration. **"Create Rule" had no `onClick`** — it rendered,
+it had the primary-button styling, and pressing it did nothing. The rows were not clickable either,
+and there was no way to remove a rule from the interface at all, though the API has supported it since
+the beginning.
+
+The list now works: **Create Rule** opens the form, a rule's name is a link to its editor, and each
+row has an **Archive** action that calls the API and asks the hook to reload.
+
+That last one is where the round's real lesson was. The action was first labelled *Delete* and the
+browser gate asserted the rule disappeared — and it did not, because `DELETE /v1/rules/{id}` **archives**
+the rule rather than removing it, which is what keeps the audit trail meaningful. The interface was
+lying about what its own button did. It says **Archive** now, archived rules get a status badge, and
+the gate asserts the status actually becomes `archived`.
+
+The browser gate covers both actions: the create button must arrive at the form, and archiving must
+change the rule's status as the API reports it.
+
+
 ## [9.0.33] — 2026-10-25 — One assembly, so a test cannot run a different server
 
 `main.rs` built the application state across ~150 lines and `ApiState::for_testing` built it again in

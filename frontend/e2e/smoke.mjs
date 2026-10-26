@@ -317,6 +317,55 @@ try {
       report(false, '/rules/{id}/edit shows the rule it edits', 'could not resolve the new rule id')
     }
 
+    // The list's own actions: the create button has to go somewhere, and a row's delete has to
+    // remove the rule through the API.
+    const listActions = await page.visit(`${BASE}/rules`)
+    const createAction = await page.evaluate(`
+      (async () => {
+        const button = [...document.querySelectorAll('button')].find((b) =>
+          /create rule/i.test(b.textContent),
+        );
+        if (!button) return { error: 'no Create Rule button' };
+        button.click();
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        return { navigated: document.body.innerText.includes('New Rule') };
+      })()
+    `)
+    report(
+      Boolean(createAction?.navigated),
+      "the list's Create Rule button opens the form",
+      createAction?.error ??
+        (createAction?.navigated ? 'navigated' : `stayed on ${listActions.text.slice(0, 40)}`),
+    )
+
+    if (ruleId) {
+      await page.visit(`${BASE}/rules`)
+      const removed = await page.evaluate(`
+        (async () => {
+          const row = [...document.querySelectorAll('tr')].find((tr) =>
+            tr.textContent.includes(${JSON.stringify(ruleName)}),
+          );
+          if (!row) return { error: 'the rule is not in the table' };
+          const button = [...row.querySelectorAll('button')].find((b) => /archive/i.test(b.textContent));
+          if (!button) return { error: 'no Archive action on the row' };
+          button.click();
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          const response = await fetch('${BASE}/v1/rules?page_size=100', {
+            headers: { Authorization: 'Bearer ' + localStorage.getItem('auth_token') },
+          });
+          const body = await response.json();
+          // DELETE /v1/rules/{id} archives: the row stays and its status changes.
+          const rule = (body.rules ?? []).find((r) => r.name === ${JSON.stringify(ruleName)});
+          return { status: rule ? rule.status : 'gone' };
+        })()
+      `)
+      report(
+        removed?.status === 'archived',
+        "a row's Archive archives the rule",
+        removed?.error ?? `status ${removed?.status}`,
+      )
+    }
+
     // Signed in, the governance pages must show their endpoint's answer — an empty
     // state from the API is fine, an auth error is not.
     console.log('\ngovernance with data')

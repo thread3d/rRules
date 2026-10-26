@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react'
+import { Link, useNavigate } from '@tanstack/react-router'
+import { deleteRule } from '@/api/rules'
 
 // Import types
 import type { RulesListProps, RulesStats, FilterState } from './types'
@@ -10,9 +12,13 @@ const STATUS_BADGE_COLORS: Record<string, string> = {
   inactive: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
   'pending-approval': 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
   deprecated: 'bg-gray-500 text-white',
+  archived: 'bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 }
 
-export function RulesList({ rules, isLoading }: RulesListProps) {
+export function RulesList({ rules, isLoading, onRefresh }: RulesListProps) {
+  const navigate = useNavigate()
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [filter, setFilter] = useState<FilterState>({
     category: 'all',
     status: 'all',
@@ -117,11 +123,22 @@ export function RulesList({ rules, isLoading }: RulesListProps) {
         </button>
 
         {canCreateRule && (
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+          <button
+            onClick={() => navigate({ to: '/rules/new' })}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
             Create Rule
           </button>
         )}
       </div>
+
+      {actionError && (
+        <div className="mb-4 rounded-md bg-red-50 p-3 dark:bg-red-900/20">
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            {actionError}
+          </p>
+        </div>
+      )}
 
       {/* Rules Table */}
       <table className="w-full border-collapse border">
@@ -130,25 +147,34 @@ export function RulesList({ rules, isLoading }: RulesListProps) {
             <th className="p-2 text-left">Name</th>
             <th className="p-2 text-left">Status</th>
             <th className="p-2 text-left hidden md:table-cell">Conditions</th>
+            <th className="p-2 text-right">Actions</th>
           </tr>
         </thead>
         <tbody>
           {isLoading ? (
             <tr>
-              <td colSpan={3} className="p-8 text-center">
+              <td colSpan={4} className="p-8 text-center">
                 Loading rules...
               </td>
             </tr>
           ) : filteredRules.length === 0 ? (
             <tr>
-              <td colSpan={3} className="p-8 text-center">
+              <td colSpan={4} className="p-8 text-center">
                 No rules found. {canCreateRule && 'Click "Create Rule" to add one.'}
               </td>
             </tr>
           ) : (
             filteredRules.map((rule) => (
               <tr key={rule.id} className="border-t hover:bg-gray-50 dark:hover:bg-gray-700">
-                <td className="p-2 font-medium">{rule.name}</td>
+                <td className="p-2 font-medium">
+                  <Link
+                    to="/rules/$id/edit"
+                    params={{ id: rule.id }}
+                    className="text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    {rule.name}
+                  </Link>
+                </td>
                 <td className="p-2">
                   <span
                     className={`px-2 py-1 rounded text-sm ${
@@ -160,6 +186,30 @@ export function RulesList({ rules, isLoading }: RulesListProps) {
                 </td>
                 <td className="p-2 text-sm text-gray-500 hidden md:table-cell">
                   {rule.conditions.length} conditions
+                </td>
+                <td className="p-2 text-right">
+                  <button
+                    disabled={busyId === rule.id}
+                    onClick={async () => {
+                      setActionError(null)
+                      setBusyId(rule.id)
+                      try {
+                        await deleteRule(rule.id)
+                        // The list is owned by the route; ask it to reload rather than guessing
+                        // the filtered view after an archive.
+                        onRefresh?.()
+                      } catch (error) {
+                        setActionError(
+                          error instanceof Error ? error.message : 'the rule could not be archived',
+                        )
+                      } finally {
+                        setBusyId(null)
+                      }
+                    }}
+                    className="text-sm text-red-600 hover:underline disabled:opacity-50 dark:text-red-400"
+                  >
+                    {busyId === rule.id ? 'Archiving…' : 'Archive'}
+                  </button>
                 </td>
               </tr>
             ))
