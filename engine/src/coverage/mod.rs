@@ -324,7 +324,3 @@ mod tests {
         assert_eq!(report.fired_rules, 1);
     }
 }
-
-// Include history sub-module if it exists
-#[cfg(feature = "history")]
-pub mod history;

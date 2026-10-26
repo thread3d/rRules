@@ -112,6 +112,12 @@ published with it.
 
 ## Working conventions
 
+- **A handler that gains a dependency breaks every hand-rolled test app at runtime, not at
+  compile time.** Ten integration tests in `api/tests/` mount handlers on a bare `App` to bypass
+  auth; when a handler starts extracting `web::Data<T>`, those apps answer **500** instead of
+  failing to build. Adding a dependency to a handler means grepping `api/tests/*.rs` for
+  `to(<handler>)` in the same commit, and the stores carry `test_channel()`/`init_store()` helpers so
+  the fix is a one-liner.
 - **Verify before claiming.** Run the gate, paste the evidence, then report. Prefer a smaller change
   with a passing test over a larger one with a plausible story.
 - **Keep the specification true.** If you change behaviour, update the matching `specs/` document in

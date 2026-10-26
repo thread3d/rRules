@@ -1,6 +1,6 @@
 [package]
 name = "engine"
-version = "9.0.29"
+version = "9.0.30"
 edition = "2021"
 
 [dependencies]
@@ -66,7 +66,6 @@ engine-rete = []
 engine-treat = ["engine-rete"]
 engine-leaps = ["engine-rete"]
 engine-phreak = ["engine-rete"]
-history = []
 
 # Benchmark target for the DMN subsystem (Phase 36+).
 # `harness = false` is REQUIRED for criterion: the bench file defines its own

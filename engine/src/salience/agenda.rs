@@ -4,7 +4,6 @@
 //! and returns them in salience-based priority order.
 
 use crate::rules::Rule;
-use std::cmp::Reverse;
 use std::time::SystemTime;
 
 /// A single rule activation on the agenda.
@@ -110,104 +109,11 @@ impl Agenda {
     }
 }
 
-/// Conflict resolution strategies for ordering rule firings when salience is equal.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum ConflictStrategy {
-    /// Higher salience fires first (default)
-    #[default]
-    Salience,
-    /// Fewer matched facts first
-    DepthFirst,
-    /// More matched facts first
-    BreadthFirst,
-    /// Most recent activation wins
-    Recency,
-    /// Alphabetical rule name
-    Lexicographic,
-}
-
-/// Conflict resolver that applies different ordering strategies.
-#[derive(Debug, Clone)]
-pub struct ConflictResolver {
-    strategy: ConflictStrategy,
-}
-
-impl ConflictResolver {
-    /// Creates a new conflict resolver with the specified strategy.
-    pub fn new(strategy: ConflictStrategy) -> Self {
-        Self { strategy }
-    }
-
-    /// Sorts activations according to the configured strategy.
-    pub fn sort<'a>(&self, activations: &'a [Activation]) -> Vec<&'a Activation> {
-        let mut result: Vec<_> = activations.iter().collect();
-
-        match self.strategy {
-            ConflictStrategy::Salience => {
-                // Higher salience first; timestamp for ties
-                result.sort_by(|a, b| {
-                    b.salience
-                        .cmp(&a.salience)
-                        .then_with(|| a.timestamp.cmp(&b.timestamp))
-                });
-            }
-            ConflictStrategy::DepthFirst => {
-                // Fewer matched facts (deeper in inference tree) first
-                result.sort_by_key(|a| a.fact_matches.len());
-            }
-            ConflictStrategy::BreadthFirst => {
-                // More matched facts first (wider propagation)
-                result.sort_by_key(|a| Reverse(a.fact_matches.len()));
-            }
-            ConflictStrategy::Recency => {
-                // Most recent activation wins
-                result.sort_by_key(|activation| std::cmp::Reverse(activation.timestamp));
-            }
-            ConflictStrategy::Lexicographic => {
-                // Alphabetical rule name for determinism
-                result.sort_by(|a, b| a.rule.name.cmp(&b.rule.name));
-            }
-        }
-
-        result
-    }
-
-    /// Applies the strategy to sort activations in-place.
-    pub fn sort_in_place(&self, activations: &mut [Activation]) {
-        match self.strategy {
-            ConflictStrategy::Salience => {
-                activations.sort_by(|a, b| {
-                    b.salience
-                        .cmp(&a.salience)
-                        .then_with(|| a.timestamp.cmp(&b.timestamp))
-                });
-            }
-            ConflictStrategy::DepthFirst => {
-                activations.sort_by_key(|a| a.fact_matches.len());
-            }
-            ConflictStrategy::BreadthFirst => {
-                activations.sort_by_key(|a| Reverse(a.fact_matches.len()));
-            }
-            ConflictStrategy::Recency => {
-                activations.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-            }
-            ConflictStrategy::Lexicographic => {
-                activations.sort_by(|a, b| a.rule.name.cmp(&b.rule.name));
-            }
-        }
-    }
-}
-
-impl Default for ConflictResolver {
-    fn default() -> Self {
-        Self::new(ConflictStrategy::default())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::rules::RuleBuilder;
+    use crate::salience::conflict_resolution::{ConflictResolver, ConflictStrategy};
 
     #[test]
     fn test_agenda_priority_ordering() {

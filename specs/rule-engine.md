@@ -280,12 +280,13 @@ rules against the reduced working memory.
   (`agenda.rs:113-128`) is applied by `ConflictResolver::sort`/`sort_in_place`
   (`:144-200`). Depth/breadth order by `fact_matches.len()`; `Recency` is newest-first;
   `Lexicographic` sorts on `rule.name`.
-* The enum and resolver are **duplicated verbatim** in `engine/src/salience/agenda.rs:113-207`
-  and `engine/src/salience/conflict_resolution.rs:9-116`; `salience/mod.rs:11-12` re-exports
-  the latter pair while `engine/src/tests/mod.rs:14-15` imports both.
-* Nothing in the execution path constructs an `Agenda` or `ConflictResolver`: callers are tests
-  (`engine/src/tests/mod.rs:282-400`, `engine/src/salience/**` tests) and the test-only
-  `deterministic_conflict_strategy` (`engine/src/testing/mod.rs:653-661`).
+* The enum and resolver used to be duplicated verbatim in `engine/src/salience/agenda.rs` and
+  `engine/src/salience/conflict_resolution.rs`. **Closed in 9.0.30**: `agenda.rs` no longer defines
+  its own copies, so there is one `ConflictStrategy` and one `ConflictResolver`
+  (`salience/conflict_resolution.rs:9-116`), which `salience/mod.rs:12` re-exports.
+* Nothing in the execution path constructs an `Agenda` or `ConflictResolver`: callers are the
+  modules' own tests and the test-only `deterministic_conflict_strategy`
+  (`engine/src/testing/mod.rs:653-661`).
 
 Net: salience and agenda-group locking affect execution through the evaluator's own ordering; the
 `salience::Agenda`/`ConflictResolver` types remain a tested standalone utility that the live path
@@ -473,9 +474,9 @@ HTTP endpoint forwards straight into it (`api/src/v1/simulation.rs:150-161`).
 7. **~~Salience/conflict resolution unwired~~** (partly closed 2026-10-25): both evaluators now
    order passes by `salience` and honour `lock_on_active` within an agenda group, and
    `Rule::validate` rejects an out-of-range salience. Still open: `Agenda`/`ConflictResolver` have
-   no production callers, and `ConflictStrategy`/`ConflictResolver` remain duplicated
-   (`salience/agenda.rs:113-207` vs `salience/conflict_resolution.rs:9-116`), so the exported
-   conflict-resolution API and the live ordering can drift.
+   no production callers — the execute path has its own salience sort (`direct_eval.rs:124`). The
+   duplication is closed (9.0.30): `agenda.rs` no longer defines a second `ConflictStrategy` and
+   `ConflictResolver`, so the exported API cannot drift from itself.
 8. **Chaining does not run:** `execute_forward` returns a default result
    (`engine/src/forward_chaining.rs:45-57`), `execute_backward` returns a fixed failure trace
    (`engine/src/backward_chaining.rs:80-93`), `Engine::execute_forward` returns
@@ -493,11 +494,13 @@ HTTP endpoint forwards straight into it (`api/src/v1/simulation.rs:150-161`).
 11. **Two coverage implementations plus a duplicated file:** singleton
     `CoverageTracking` (`monitoring/coverage.rs:86-233`) versus `CoverageTracker`
     (`engine/src/coverage/mod.rs:26-234`) with different `record_fire` and percentage
-    semantics; `engine/src/coverage/history/mod.rs` is a byte-identical copy compiled under
-    `history`.
-12. **Dead test module:** `engine/src/tests/mod.rs` is not declared in `engine/src/lib.rs`, so it
-    never compiles; it calls `Agenda::with_strategy` (`tests/mod.rs:367`, `:378`, `:782`,
-    `:795`, `:808`), which does not exist on `Agenda` (`salience/agenda.rs:50-111`).
+    semantics. The byte-identical copy under `coverage/history/` is **deleted in 9.0.30**, together
+    with the `history` feature that no build enabled and nothing referenced.
+12. **~~Dead test module:~~** **Deleted in 9.0.30.** `engine/src/tests/mod.rs` was not declared in
+    `engine/src/lib.rs` and had never compiled: 992 lines and 70 tests targeting an older API
+    (`evaluate`, `Agenda::with_strategy`, `EngineBuilder::conflict_strategy`) — 45 compile errors.
+    It contributed no coverage, because a test that never builds never runs, and its subject matter
+    is covered by the 38 in-module tests in `engine/src/rules.rs`.
 13. **LEAPS metrics count non-events:** `record_rule_fired()` on aggregated-join traversal
     (`leaps/mod.rs:322-324`) inflates `rules_fired` beyond `EngineResult.rules_fired`.
 14. **`HealthRegistry::detect_dead_rules` returns live rules too** and hardcodes a 24-hour

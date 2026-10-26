@@ -12,6 +12,31 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.30] — 2026-10-25 — A test suite that never compiled, and a copied module nobody ran
+
+Two more pieces of code that existed without ever being executed, both already recorded in
+`specs/rule-engine.md` as gaps.
+
+**`engine/src/tests/mod.rs` is deleted.** 992 lines, 70 tests, declared by no module — so it had
+never compiled, let alone run. Wired into `lib.rs` to see what it would take, it produced 45 errors
+against an API that no longer exists (`evaluate`, `Agenda::with_strategy`,
+`EngineBuilder::conflict_strategy`). It contributed no coverage, because a test that never builds
+never runs, and its subject matter is covered by the 38 in-module tests in `engine/src/rules.rs`.
+
+**`engine/src/coverage/history/mod.rs` is deleted** — a copy of `coverage/mod.rs` identical apart
+from the line that declares it, behind a `history` feature no build enabled and nothing referenced.
+The feature, the declaration and the copy are gone.
+
+**The duplicated `ConflictStrategy`/`ConflictResolver` are collapsed.** `salience/agenda.rs` defined
+its own copies of both, so the crate carried two different types with the same names — one exported,
+one not — and `agenda.rs`'s tests used its private pair. They now use the canonical definitions from
+`salience/conflict_resolution.rs`, which is what `salience/mod.rs` and the crate root export.
+
+`AGENTS.md` (both copies) gains the rule that cost two rounds to learn: a handler that starts
+extracting `web::Data<T>` breaks every hand-rolled test app at **runtime** — they answer 500 instead
+of failing to build — so adding a dependency means grepping `api/tests/*.rs` in the same commit.
+
+
 ## [9.0.29] — 2026-10-25 — The DMN metrics socket streams
 
 `/v1/metrics/dmn/ws` forwarded what the evaluate path published, and the evaluate path published
