@@ -161,8 +161,12 @@ const report = (ok, label, detail) => {
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const profileRoot = process.env.E2E_PROFILE_DIR || join(repoRoot, 'target', 'e2e')
 mkdirSync(profileRoot, { recursive: true })
-const profile = join(profileRoot, `profile-${process.pid}`)
-rmSync(profile, { recursive: true, force: true })
+// One profile directory, reused: it is build output under `target/`, it does not
+// accumulate a copy per run, and Chromium rewriting it is harmless. Removing it on
+// the way out raced the browser still flushing to it (`ENOTEMPTY`), which turned a
+// tidy-up into a failed step once already.
+const profile = join(profileRoot, 'profile')
+rmSync(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
 const chromium = launchChromium(profile)
 let page
 
@@ -242,12 +246,9 @@ try {
   // Chromium keeps writing to its profile for a moment after being killed; deleting
   // it first can fail with ENOTEMPTY, which is not a failing check. Wait for the
   // process, and treat a profile that will not go away as untidy rather than fatal.
+  // Stop the browser, and leave the profile in place: it is inside the ignored build
+  // directory, and deleting it is what produced the `ENOTEMPTY` race in the first place.
   await stopChromium(chromium)
-  try {
-    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
-  } catch (error) {
-    console.warn(`could not remove the browser profile ${profile}: ${error.code ?? error}`)
-  }
 }
 
 console.log(`\n${failures.length ? `${failures.length} failure(s)` : 'all checks passed'}`)

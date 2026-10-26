@@ -12,6 +12,15 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.4] — 2026-10-25 — The browser gate stops deleting its own profile
+
+`make e2e` reused no browser profile: it created one per run and deleted it on the way out,
+which raced Chromium still flushing to it and printed an `ENOTEMPTY` warning on every run —
+and once failed the step outright. It now uses one profile under `target/e2e/` and leaves it
+there: it is build output, ignored by git, and a directory that is never deleted cannot fail
+to be deleted.
+
+
 ## [9.0.3] — 2026-10-25 — Vite 8, Vitest 5, jsdom 30
 
 The three remaining advisories after 9.0.2 lived in the build and test toolchain, and clearing
