@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger verify e2e image-check docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger verify e2e image-check bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -23,6 +23,13 @@ fmt-check:
 # Build Docker image using existing Dockerfile
 docker-build:
 	docker build -t rrules-server:latest .
+
+# Write a version to every place it lives: the crate manifests, package.json and its
+# lockfile, the chart, the OpenAPI document, the server banner and metrics footer, and
+# the spec that cites it. Usage: make bump-version VERSION=9.0.2
+bump-version:
+	@test -n "$(VERSION)" || { echo "usage: make bump-version VERSION=x.y.z" >&2; exit 1; }
+	python3 scripts/version-bump.py "$(VERSION)"
 
 # Check the Dockerfile's build logic without a container runtime: read its COPY
 # instructions, assemble those files, and run each stage's commands on the host.
@@ -147,4 +154,5 @@ help:
 	@echo "  frontend-test   - Run frontend tests (vitest)"
 	@echo "  e2e             - Browser smoke test of the built UI against a live server"
 	@echo "  image-check     - Check the Dockerfile's build logic without Docker"
+	@echo "  bump-version    - Write VERSION to every file that carries it"
 	@echo "  ci              - Full CI pipeline (build + test + lint + fmt-check + frontend)"

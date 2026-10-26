@@ -176,7 +176,7 @@ impl MemoryTenantStore {
     /// All tenants, newest first.
     pub fn list(&self) -> Vec<Tenant> {
         let mut tenants = self.tenants.clone();
-        tenants.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        tenants.sort_by_key(|tenant| std::cmp::Reverse(tenant.created_at));
         tenants
     }
 

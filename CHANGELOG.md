@@ -12,6 +12,21 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.1] — 2026-10-25 — Clippy 1.99 lints, and a version-bump script
+
+Ten findings that clippy 1.99 reports and 1.94.1 does not, fixed rather than deferred:
+`sort_by(|a, b| b.x.cmp(&a.x))` became `sort_by_key(.. Reverse(..))` in the tenant store and
+both salience orderings; four `format!("…{}", &string)` borrows lost their `&`; and the
+optional-sign split in the offset parser became a `match` on the two prefixes instead of an
+`if`/`else` chain. The compiler stays pinned at 1.94.1 — the code now passes on both.
+
+`make bump-version VERSION=x.y.z` (`scripts/version-bump.py`) writes the version to all eleven
+places it lives: four crate manifests, `package.json` and its lockfile, the chart's `version`
+and `appVersion`, the OpenAPI document, the server banner and metrics footer, and the citation
+in `specs/http-api.md`. They had drifted once — crates at 0.1.0, frontend at 4.0.0, chart at
+1.0.0 — and this is the cheapest way to stop that recurring.
+
+
 ### Added — gates that do not need infrastructure the project lacks
 
 Two failure modes kept hiding behind workflows whose logs nobody could read:

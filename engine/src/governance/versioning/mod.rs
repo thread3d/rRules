@@ -359,7 +359,7 @@ impl VersionControlRepo {
         let source_commit = src_ref.peel_to_commit()?;
 
         // Find the target (current) branch HEAD.
-        let target_ref_name = format!("refs/heads/{}", &target);
+        let target_ref_name = format!("refs/heads/{}", target);
         let target_ref = self.repo.find_reference(&target_ref_name)?;
         let target_commit = target_ref.peel_to_commit()?;
 
@@ -380,7 +380,7 @@ impl VersionControlRepo {
 
         if analysis.is_fast_forward() {
             // Fast-forward merge — just move the branch pointer.
-            let ref_name = format!("refs/heads/{}", &target);
+            let ref_name = format!("refs/heads/{}", target);
             self.repo
                 .reference(&ref_name, source_commit.id(), true, "merge: fast-forward")?;
 
@@ -429,10 +429,10 @@ impl VersionControlRepo {
                 let tree = self.repo.find_tree(tree_id)?;
 
                 let merge_commit = self.repo.commit(
-                    Some(&format!("refs/heads/{}", &target)),
+                    Some(&format!("refs/heads/{}", target)),
                     &sig,
                     &sig,
-                    &format!("Merge branch '{}' into '{}'", source, &target),
+                    &format!("Merge branch '{}' into '{}'", source, target),
                     &tree,
                     &[&target_commit, &source_commit],
                 )?;

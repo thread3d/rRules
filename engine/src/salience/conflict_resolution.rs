@@ -59,7 +59,7 @@ impl ConflictResolver {
             }
             ConflictStrategy::Recency => {
                 // Most recent activation wins
-                result.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                result.sort_by_key(|activation| std::cmp::Reverse(activation.timestamp));
             }
             ConflictStrategy::Lexicographic => {
                 // Alphabetical rule name for determinism
@@ -87,7 +87,7 @@ impl ConflictResolver {
                 activations.sort_by_key(|a| Reverse(a.fact_matches.len()));
             }
             ConflictStrategy::Recency => {
-                activations.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                activations.sort_by_key(|activation| std::cmp::Reverse(activation.timestamp));
             }
             ConflictStrategy::Lexicographic => {
                 activations.sort_by(|a, b| a.rule.name.cmp(&b.rule.name));

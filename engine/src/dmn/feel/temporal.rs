@@ -531,12 +531,10 @@ fn parse_date_time(s: &str) -> Option<DateTimeValue> {
 /// `chrono::FixedOffset`. Returns `None` on any malformed input — never
 /// panics (T-30-03-01).
 fn parse_fixed_offset(s: &str) -> Option<FixedOffset> {
-    let (sign, rest) = if let Some(r) = s.strip_prefix('+') {
-        (1, r)
-    } else if let Some(r) = s.strip_prefix('-') {
-        (-1, r)
-    } else {
-        return None;
+    let (sign, rest) = match (s.strip_prefix('+'), s.strip_prefix('-')) {
+        (Some(rest), _) => (1, rest),
+        (_, Some(rest)) => (-1, rest),
+        _ => return None,
     };
     let mut parts = rest.split(':');
     let h: i32 = parts.next()?.parse().ok()?;
