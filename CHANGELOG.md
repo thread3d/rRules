@@ -12,6 +12,23 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.3] — 2026-10-25 — Vite 8, Vitest 5, jsdom 30
+
+The three remaining advisories after 9.0.2 lived in the build and test toolchain, and clearing
+them meant major upgrades: `vite` 5 → 8, `vitest` 2 → 5, `@vitejs/plugin-react` 4 → 6, `jsdom`
+25 → 30. `npm audit` now reports **3 moderate** advisories, all in Tailwind's PostCSS chain,
+whose fix is the Tailwind 4 migration — a CSS rewrite, not a dependency bump.
+
+Two declarations were removed while there: `@vitejs/plugin-react-swc`, which nothing imports
+(`vite.config.ts` uses `@vitejs/plugin-react`), and `@types/axios`, a deprecated stub for a
+package that ships its own types.
+
+Vite 8 bundles with Rolldown. It still honours the `manualChunks` hook — the build emits one
+`vendor` chunk containing React — but that guarantee now rests on `make e2e`, which loads the
+real bundle and fails when a route renders nothing. That is the gate that caught the blank
+page this configuration exists to prevent.
+
+
 ## [9.0.2] — 2026-10-25 — Dependency advisories: 44 to 9
 
 `npm audit` reported 44 advisories in the frontend's dependency tree (11 critical, 20 high).

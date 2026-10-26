@@ -45,6 +45,11 @@ export default defineConfig({
         // while every jsdom test passed, because the tests run source modules and
         // never load the built chunks. Bundle splitting is a caching
         // optimisation; a build that does not boot is not worth 200 KB.
+        //
+        // Vite 8 bundles with Rolldown and still honours this hook here (the build
+        // emits one `vendor` chunk holding React), but the guarantee is the browser
+        // gate: `make e2e` loads the real bundle and fails if any route renders
+        // nothing, which is what caught the original blank page.
         manualChunks(id) {
           if (id.includes('node_modules')) {
             return 'vendor'

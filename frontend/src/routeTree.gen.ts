@@ -9,24 +9,24 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as GovernanceRouteImport } from './routes/governance'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as RulesIndexRouteImport } from './routes/rules/index'
-import { Route as MonitoringIndexRouteImport } from './routes/monitoring/index'
-import { Route as RulesNewRouteImport } from './routes/rules/new'
-import { Route as MonitoringEngineRouteImport } from './routes/monitoring/engine'
-import { Route as MonitoringDeadRulesRouteImport } from './routes/monitoring/dead-rules'
-import { Route as MonitoringCoverageRouteImport } from './routes/monitoring/coverage'
-import { Route as GovernanceRbacRouteImport } from './routes/governance/rbac'
-import { Route as GovernanceBranchesRouteImport } from './routes/governance/branches'
-import { Route as GovernanceAuditRouteImport } from './routes/governance/audit'
+import { Route as GovernanceRouteImport } from './routes/governance'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as GovernanceApprovalsRouteImport } from './routes/governance/approvals'
+import { Route as GovernanceAuditRouteImport } from './routes/governance/audit'
+import { Route as GovernanceBranchesRouteImport } from './routes/governance/branches'
+import { Route as GovernanceRbacRouteImport } from './routes/governance/rbac'
+import { Route as MonitoringIndexRouteImport } from './routes/monitoring/index'
+import { Route as MonitoringCoverageRouteImport } from './routes/monitoring/coverage'
+import { Route as MonitoringDeadRulesRouteImport } from './routes/monitoring/dead-rules'
+import { Route as MonitoringEngineRouteImport } from './routes/monitoring/engine'
+import { Route as RulesIndexRouteImport } from './routes/rules/index'
+import { Route as RulesNewRouteImport } from './routes/rules/new'
 import { Route as RulesIdEditRouteImport } from './routes/rules/$id.edit'
 
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GovernanceRoute = GovernanceRouteImport.update({
@@ -34,49 +34,14 @@ const GovernanceRoute = GovernanceRouteImport.update({
   path: '/governance',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RulesIndexRoute = RulesIndexRouteImport.update({
-  id: '/rules/',
-  path: '/rules/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MonitoringIndexRoute = MonitoringIndexRouteImport.update({
-  id: '/monitoring/',
-  path: '/monitoring/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RulesNewRoute = RulesNewRouteImport.update({
-  id: '/rules/new',
-  path: '/rules/new',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MonitoringEngineRoute = MonitoringEngineRouteImport.update({
-  id: '/monitoring/engine',
-  path: '/monitoring/engine',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MonitoringDeadRulesRoute = MonitoringDeadRulesRouteImport.update({
-  id: '/monitoring/dead-rules',
-  path: '/monitoring/dead-rules',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MonitoringCoverageRoute = MonitoringCoverageRouteImport.update({
-  id: '/monitoring/coverage',
-  path: '/monitoring/coverage',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const GovernanceRbacRoute = GovernanceRbacRouteImport.update({
-  id: '/rbac',
-  path: '/rbac',
-  getParentRoute: () => GovernanceRoute,
-} as any)
-const GovernanceBranchesRoute = GovernanceBranchesRouteImport.update({
-  id: '/branches',
-  path: '/branches',
+const GovernanceApprovalsRoute = GovernanceApprovalsRouteImport.update({
+  id: '/approvals',
+  path: '/approvals',
   getParentRoute: () => GovernanceRoute,
 } as any)
 const GovernanceAuditRoute = GovernanceAuditRouteImport.update({
@@ -84,10 +49,45 @@ const GovernanceAuditRoute = GovernanceAuditRouteImport.update({
   path: '/audit',
   getParentRoute: () => GovernanceRoute,
 } as any)
-const GovernanceApprovalsRoute = GovernanceApprovalsRouteImport.update({
-  id: '/approvals',
-  path: '/approvals',
+const GovernanceBranchesRoute = GovernanceBranchesRouteImport.update({
+  id: '/branches',
+  path: '/branches',
   getParentRoute: () => GovernanceRoute,
+} as any)
+const GovernanceRbacRoute = GovernanceRbacRouteImport.update({
+  id: '/rbac',
+  path: '/rbac',
+  getParentRoute: () => GovernanceRoute,
+} as any)
+const MonitoringIndexRoute = MonitoringIndexRouteImport.update({
+  id: '/monitoring/',
+  path: '/monitoring/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MonitoringCoverageRoute = MonitoringCoverageRouteImport.update({
+  id: '/monitoring/coverage',
+  path: '/monitoring/coverage',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MonitoringDeadRulesRoute = MonitoringDeadRulesRouteImport.update({
+  id: '/monitoring/dead-rules',
+  path: '/monitoring/dead-rules',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MonitoringEngineRoute = MonitoringEngineRouteImport.update({
+  id: '/monitoring/engine',
+  path: '/monitoring/engine',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RulesIndexRoute = RulesIndexRouteImport.update({
+  id: '/rules/',
+  path: '/rules/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RulesNewRoute = RulesNewRouteImport.update({
+  id: '/rules/new',
+  path: '/rules/new',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const RulesIdEditRoute = RulesIdEditRouteImport.update({
   id: '/rules/$id/edit',
@@ -210,11 +210,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/governance': {
@@ -224,67 +224,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GovernanceRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/rules/': {
-      id: '/rules/'
-      path: '/rules'
-      fullPath: '/rules/'
-      preLoaderRoute: typeof RulesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/monitoring/': {
-      id: '/monitoring/'
-      path: '/monitoring'
-      fullPath: '/monitoring/'
-      preLoaderRoute: typeof MonitoringIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/rules/new': {
-      id: '/rules/new'
-      path: '/rules/new'
-      fullPath: '/rules/new'
-      preLoaderRoute: typeof RulesNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/monitoring/engine': {
-      id: '/monitoring/engine'
-      path: '/monitoring/engine'
-      fullPath: '/monitoring/engine'
-      preLoaderRoute: typeof MonitoringEngineRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/monitoring/dead-rules': {
-      id: '/monitoring/dead-rules'
-      path: '/monitoring/dead-rules'
-      fullPath: '/monitoring/dead-rules'
-      preLoaderRoute: typeof MonitoringDeadRulesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/monitoring/coverage': {
-      id: '/monitoring/coverage'
-      path: '/monitoring/coverage'
-      fullPath: '/monitoring/coverage'
-      preLoaderRoute: typeof MonitoringCoverageRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/governance/rbac': {
-      id: '/governance/rbac'
-      path: '/rbac'
-      fullPath: '/governance/rbac'
-      preLoaderRoute: typeof GovernanceRbacRouteImport
-      parentRoute: typeof GovernanceRoute
-    }
-    '/governance/branches': {
-      id: '/governance/branches'
-      path: '/branches'
-      fullPath: '/governance/branches'
-      preLoaderRoute: typeof GovernanceBranchesRouteImport
+    '/governance/approvals': {
+      id: '/governance/approvals'
+      path: '/approvals'
+      fullPath: '/governance/approvals'
+      preLoaderRoute: typeof GovernanceApprovalsRouteImport
       parentRoute: typeof GovernanceRoute
     }
     '/governance/audit': {
@@ -294,12 +245,61 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GovernanceAuditRouteImport
       parentRoute: typeof GovernanceRoute
     }
-    '/governance/approvals': {
-      id: '/governance/approvals'
-      path: '/approvals'
-      fullPath: '/governance/approvals'
-      preLoaderRoute: typeof GovernanceApprovalsRouteImport
+    '/governance/branches': {
+      id: '/governance/branches'
+      path: '/branches'
+      fullPath: '/governance/branches'
+      preLoaderRoute: typeof GovernanceBranchesRouteImport
       parentRoute: typeof GovernanceRoute
+    }
+    '/governance/rbac': {
+      id: '/governance/rbac'
+      path: '/rbac'
+      fullPath: '/governance/rbac'
+      preLoaderRoute: typeof GovernanceRbacRouteImport
+      parentRoute: typeof GovernanceRoute
+    }
+    '/monitoring/': {
+      id: '/monitoring/'
+      path: '/monitoring'
+      fullPath: '/monitoring/'
+      preLoaderRoute: typeof MonitoringIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/monitoring/coverage': {
+      id: '/monitoring/coverage'
+      path: '/monitoring/coverage'
+      fullPath: '/monitoring/coverage'
+      preLoaderRoute: typeof MonitoringCoverageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/monitoring/dead-rules': {
+      id: '/monitoring/dead-rules'
+      path: '/monitoring/dead-rules'
+      fullPath: '/monitoring/dead-rules'
+      preLoaderRoute: typeof MonitoringDeadRulesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/monitoring/engine': {
+      id: '/monitoring/engine'
+      path: '/monitoring/engine'
+      fullPath: '/monitoring/engine'
+      preLoaderRoute: typeof MonitoringEngineRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rules/': {
+      id: '/rules/'
+      path: '/rules'
+      fullPath: '/rules/'
+      preLoaderRoute: typeof RulesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rules/new': {
+      id: '/rules/new'
+      path: '/rules/new'
+      fullPath: '/rules/new'
+      preLoaderRoute: typeof RulesNewRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/rules/$id/edit': {
       id: '/rules/$id/edit'
