@@ -12,6 +12,25 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.20] — 2026-10-25 — Which gates CI actually runs, stated rather than assumed
+
+`AGENTS.md` and `README.md` both claimed "CI runs exactly these gates". It does not: `make verify`
+needs CodeWitness, which is not published — it is a jar installed from a source checkout, so a hosted
+runner cannot obtain it, and the GitHub repository does not exist.
+
+Three changes, all about not overstating:
+
+- the workflow gains a `Requirement verification` job that runs `make verify` when
+  `CODEWITNESS_JAR_B64` is configured and is otherwise **skipped**. A skipped job is grey in the
+  check list; it is never a passing one, and the documentation says a skipped job means the claim did
+  not run in CI on that push.
+- `make verify` checks for the tool first and explains the situation, instead of failing with
+  `command not found` from inside a recipe.
+- both `AGENTS.md` files and the README now name the gates CI really runs — `make ci`, `make tck`,
+  `make spec-citations`, `make image-check` and the chart lint — and say plainly that the
+  requirement verification is local-only unless the jar is supplied.
+
+
 ## [9.0.19] — 2026-10-25 — The browser gate waits for content, not for a stopwatch
 
 CI failed the gates job with `/` rendering nothing while all thirteen other routes passed. The cause

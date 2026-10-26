@@ -75,11 +75,17 @@ Chromium: every route must render, a deep link must load, and the app must work 
 signed in. Unit tests in jsdom cannot see a bundle that throws at load or a route the
 server answers with 404 — both of which shipped before this gate existed.
 
-**CI runs exactly these gates.** `.github/workflows/ci.yml` invokes `make ci` and `make tck` on
-pushes and pull requests to `master`/`main`, so a green check means the same thing as a green run
-locally. `bench.yml` runs the benchmark and memory-regression gates nightly, `fuzz.yml` fuzzes the
-parser and decision-table loader nightly, and `deploy.yml` publishes the image on every push and
-deploys only when `KUBE_CONFIG` is configured. Run the gates yourself anyway — do not push something
+**CI runs these gates** — `make ci`, `make tck`, `make spec-citations`, `make image-check` and the
+chart lint — so a green check means the same thing as a green run locally. `bench.yml` runs the
+benchmark and memory-regression gates nightly, `fuzz.yml` fuzzes the parser and decision-table loader
+nightly, and `deploy.yml` publishes the image on every push and deploys only when `KUBE_CONFIG` is
+configured.
+
+`make verify` is the exception, and the difference matters. CodeWitness is not published: it is a jar
+installed from a source checkout, so a hosted runner cannot obtain it. The workflow's
+`Requirement verification` job runs only when `CODEWITNESS_JAR_B64` is configured and is otherwise
+**skipped** — a skipped job, never a passing one. When it is skipped the requirement verification did
+not run in CI on that push: run it locally. Run every gate yourself anyway — do not push something
 you have not seen pass.
 
 ## Where things live

@@ -145,3 +145,47 @@ jobs:
       # that quietly stops being true.
       - name: Check that every spec citation resolves
         run: make spec-citations
+
+  verification:
+    name: Requirement verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # CodeWitness is not published: it is a jar installed from a source checkout, so a hosted
+    # runner cannot obtain it. When the jar is supplied as a base64 secret this job runs the
+    # claim; otherwise GitHub reports the job as skipped, which is the honest state — the
+    # specification was not executed in CI on this run.
+    if: ${{ secrets.CODEWITNESS_JAR_B64 != '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Install CodeWitness
+        run: |
+          mkdir -p "$HOME/.local/lib/codewitness"
+          printf '%s' "$CODEWITNESS_JAR_B64" | base64 -d > "$HOME/.local/lib/codewitness/codewitness.jar"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        env:
+          CODEWITNESS_JAR_B64: ${{ secrets.CODEWITNESS_JAR_B64 }}
+
+      # The claim this project is built on: the specification is executed, not asserted. The
+      # api half builds the application in-process, so this needs no server, port or secret.
+      # `CARGO_NET_OFFLINE=false` is required — CodeWitness builds with `--offline` and cannot
+      # resolve a lockfile newer than its index snapshot.
+      - name: Verify the requirements
+        env:
+          CARGO_NET_OFFLINE: "false"
+        run: make verify

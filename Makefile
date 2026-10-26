@@ -86,6 +86,13 @@ tck-ledger:
 # Verify the specification with CodeWitness (requires the `codewitness` CLI).
 # Reports land under engine/.codewitness/runs/ and api/.codewitness/runs/.
 verify:
+	@# The tool is not published, so this gate is local-only unless it is installed; say so
+	@# rather than failing with "command not found" from inside a recipe.
+	@command -v codewitness >/dev/null 2>&1 || { \
+		echo "verify: codewitness is not installed." >&2; \
+		echo "        The requirement verification cannot run here; CI runs it only when" >&2; \
+		echo "        CODEWITNESS_JAR_B64 is configured. See AGENTS.md." >&2; \
+		exit 1; }
 	@# CodeWitness builds the crate itself and passes `--offline` to cargo, so its
 	@# resolution relies on a crates.io index snapshot. A `Cargo.lock` pinning a version
 	@# newer than that snapshot fails to resolve and the whole run is reported BLOCKED —

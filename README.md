@@ -3,7 +3,7 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.19** — released from a verified tree: everything in the table below was measured by a gate,
+**9.0.20** — released from a verified tree: everything in the table below was measured by a gate,
 not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
@@ -20,7 +20,8 @@ not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What is verified
 
-Claims in this repository come with a gate attached, and every one of these runs in CI:
+Claims in this repository come with a gate attached. All of these run locally; CI runs them all
+except the requirement verification, which needs a tool that is not published (see the note below):
 
 ```bash
 make ci              # build, test, clippy -D warnings, fmt --check, frontend build + tests
@@ -32,6 +33,11 @@ make image-check     # the Dockerfile's stages build from its COPY set, without 
 make memcheck        # memory-regression gate against a committed baseline
 make fuzz            # bounded fuzzing of the FEEL parser and the decision-table loader
 ```
+
+`make verify` executes the specification with [CodeWitness](https://github.com/codewitness/codewitness),
+which is a jar installed from a source checkout rather than a published package. CI runs it only
+when the jar is supplied as a secret; otherwise that job is skipped, which is the honest state and
+not a pass.
 
 | | Measured |
 |---|---|
