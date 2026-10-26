@@ -509,7 +509,7 @@ Limits and guards (with defaults and configuration points):
 | Limit | Default | Configured by | `path:line` |
 |---|---|---|---|
 | Chain/fixpoint iterations | `1000` | `RRULES_MAX_CHAIN_ITERATIONS` env var, read at each `execute` call | `engine/src/engine/direct_eval.rs:73-76`; `engine/src/engine/rete/mod.rs:378-381` |
-| Same knob at API startup | warn only if unparseable | `api/src/main.rs:76-83` | |
+| Same knob at API startup | warn only if unparseable | `api/src/app.rs:125-129` | |
 | Rules fired per `execute` call | 1 per rule (fired-set guard) | code constant | `direct_eval.rs:102-104,130` |
 | `EngineBuilder::max_iterations` | `1000` | builder method; stored but never read by execution | `engine/src/environment.rs:29,47-50,65` |
 | FEEL lexer tokens | `10_000` | `Lexer::with_max_tokens` | `engine/src/dmn/feel/parser.rs:170-194,207-215` |

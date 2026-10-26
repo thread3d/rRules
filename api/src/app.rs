@@ -62,6 +62,131 @@ pub struct ApiState {
     pub cors_allowed_origins: Vec<String>,
 }
 
+/// Where the server keeps things. Everything that differs between a deployment and a test is here,
+/// so the rest of the assembly has one shape.
+pub struct ApiPaths {
+    pub rules_dir: std::path::PathBuf,
+    pub dmn_dir: std::path::PathBuf,
+    pub frontend_dist: String,
+    pub cors_allowed_origins: Vec<String>,
+}
+
+impl ApiPaths {
+    /// The configuration a running server uses, from the environment.
+    pub fn from_environment() -> Self {
+        let rules_dir =
+            std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
+        let dmn_dir = std::env::var("DMN_STORAGE_PATH").unwrap_or_else(|_| "./dmn".to_string());
+        let frontend_dist =
+            std::env::var("FRONTEND_DIST").unwrap_or_else(|_| "../frontend/dist".to_string());
+        let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
+            .map(|raw| {
+                raw.split(',')
+                    .map(str::trim)
+                    .filter(|origin| !origin.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            rules_dir: rules_dir.into(),
+            dmn_dir: dmn_dir.into(),
+            frontend_dist,
+            cors_allowed_origins,
+        }
+    }
+}
+
+/// Assemble the state the application runs on.
+///
+/// This is the single place the state is built. `main` calls it with
+/// [`ApiPaths::from_environment`] and tests call it with a temporary directory, so a test cannot be
+/// exercising a differently wired server than a deployment does — which had already happened once,
+/// when a test registry had no engines registered.
+pub fn from_paths(paths: ApiPaths) -> std::io::Result<ApiState> {
+    let rules_dir = paths.rules_dir.display().to_string();
+    std::fs::create_dir_all(&paths.rules_dir)?;
+
+    let engine_state = web::Data::new(v1::execution::EngineState::new());
+
+    let mut registry = EngineRegistry::new();
+    registry.register_default_engines();
+    let registry = web::Data::new(registry);
+
+    let mut selector = EngineSelector::with_defaults();
+    let default_engine =
+        std::env::var("RRULES_DEFAULT_ENGINE").unwrap_or_else(|_| "rete".to_string());
+    if selector.select_engine(&default_engine).is_err() {
+        tracing::warn!(engine = %default_engine, "invalid RRULES_DEFAULT_ENGINE, falling back to rete");
+        let _ = selector.select_engine("rete");
+    }
+    let selector = web::Data::new(selector);
+
+    if let Ok(raw) = std::env::var("RRULES_MAX_CHAIN_ITERATIONS") {
+        if raw.parse::<usize>().is_err() {
+            tracing::warn!(value = %raw, "RRULES_MAX_CHAIN_ITERATIONS is not a number; ignoring it");
+        }
+    }
+
+    let ruleset = SharedRuleSet::new(v1::execution::build_ruleset_from_dir(&rules_dir));
+    let ruleset = web::Data::new(Arc::new(RwLock::new(ruleset)));
+
+    let shared_dmn_model = crate::dmn_loader::load_models(&paths.dmn_dir);
+    let dmn_evaluator = Arc::new(DecisionEvaluator::new(Arc::new(RwLock::new(
+        shared_dmn_model,
+    ))));
+
+    let (dmn_metrics_tx, _) = v1::dmn_metrics::create_dmn_metrics_channel(16);
+    let (metrics_tx, _) = metrics::create_metrics_channel(16);
+    let counters = web::Data::new(ExecutionCounters::new());
+
+    let session_config = v1::sessions::read_session_config();
+    let sessions_active =
+        prometheus::IntGauge::new("rrules_sessions_active", "Active stateful session count")
+            .expect("construct rrules_sessions_active gauge");
+    counters
+        .registry
+        .register(Box::new(sessions_active.clone()))
+        .expect("register rrules_sessions_active on the dedicated registry");
+    let session_manager = Arc::new(SessionManager::new(session_config, sessions_active));
+
+    let (tag_store, rule_tag_store) = v1::tags::init_stores();
+
+    let vcs_config = engine::governance::versioning::VcsConfig::new(&format!("{rules_dir}/.git"));
+    let repo_path = vcs_config.repo_path.clone();
+    let repo = VersionControlRepo::open_or_init(&repo_path, vcs_config)
+        .map_err(|error| std::io::Error::other(format!("Failed to init VCS: {error}")))?;
+
+    Ok(ApiState {
+        engine_state,
+        registry,
+        selector,
+        ruleset,
+        metrics_tx,
+        counters,
+        session_manager,
+        dmn_evaluator,
+        dmn_metrics_tx,
+        rule_store: v1::rules::init_store(),
+        category_store: v1::categories::init_store(),
+        tag_store,
+        rule_tag_store,
+        tenant_store: v1::tenants::init_store(),
+        approval_store: v1::approvals::init_store(),
+        audit_store: v1::audit::init_store(),
+        branch_store: web::Data::new(AsyncMutex::new(repo)),
+        job_store: v1::execution::init_job_store(),
+        user_store: auth::init_store(),
+        frontend_dist: paths.frontend_dist,
+        cors_allowed_origins: paths.cors_allowed_origins,
+    })
+}
+
+/// The state a running server uses: [`ApiPaths::from_environment`], then [`from_paths`].
+pub fn from_environment() -> std::io::Result<ApiState> {
+    from_paths(ApiPaths::from_environment())
+}
+
 /// Build the application. Called once per worker by the server, and directly by tests.
 pub fn build_app(
     state: &ApiState,
@@ -319,70 +444,23 @@ pub fn build_app(
 }
 
 impl ApiState {
-    /// A fully wired application state rooted in `root`, for tests and generated
-    /// verification.
+    /// A fully wired application state rooted in `root`, for tests and generated verification.
     ///
-    /// The stores are the same `init_store` constructors the server uses; only the two
-    /// paths differ (`frontend_dist` and the version-control repository), and both live
-    /// under `root` so nothing real is read or written. This is deliberately not
-    /// `#[cfg(test)]`: integration tests and the verification harness link against the
-    /// ordinary build, where a test-only constructor would not exist.
+    /// A thin wrapper over [`from_paths`]: it chooses where the paths point and nothing else, so a
+    /// test cannot run against a differently assembled server. (It once could: the test state had no
+    /// engines registered while the real one had four.)
     pub fn for_testing(root: &std::path::Path) -> Self {
-        use engine::dmn::evaluator::SharedDmnModel;
-        use engine::dmn::feel::cache::FeelAstCache;
-
-        let (metrics_tx, _metrics_rx) = metrics::create_metrics_channel(16);
-        let (dmn_metrics_tx, _dmn_rx) = v1::dmn_metrics::create_dmn_metrics_channel(16);
-        let counters = web::Data::new(metrics::ExecutionCounters::new());
-        let session_config = v1::sessions::read_session_config();
-        let (tag_store, rule_tag_store) = v1::tags::init_stores();
-
-        let evaluator = DecisionEvaluator::new(Arc::new(RwLock::new(SharedDmnModel::new(
-            engine::dmn::model::DmnModel::default(),
-            FeelAstCache::new(),
-        ))));
-
-        // The same registration the server performs: an empty registry would make every in-process
-        // execution test a test of the rejection path.
-        let mut registry = EngineRegistry::new();
-        registry.register_default_engines();
-        let mut selector = EngineSelector::with_defaults();
-        let _ = selector.select_engine("rete");
-
-        let repo_path = root.join("vcs.git").display().to_string();
-        let vcs_config =
-            engine::governance::versioning::VcsConfig::new(&format!("{repo_path}/.git"));
-        let repo = VersionControlRepo::open_or_init(&repo_path, vcs_config)
-            .expect("version control repository in a temporary directory");
-        let sessions_active =
-            prometheus::IntGauge::new("rrules_sessions_active_test", "Active sessions")
-                .expect("construct the session gauge");
-
-        Self {
-            engine_state: web::Data::new(v1::execution::EngineState::new()),
-            registry: web::Data::new(registry),
-            selector: web::Data::new(selector),
-            ruleset: web::Data::new(Arc::new(RwLock::new(SharedRuleSet::new(
-                engine::RuleSet::new(),
-            )))),
-            metrics_tx,
-            counters,
-            session_manager: Arc::new(SessionManager::new(session_config, sessions_active)),
-            dmn_evaluator: Arc::new(evaluator),
-            dmn_metrics_tx,
-            rule_store: v1::rules::init_store(),
-            category_store: v1::categories::init_store(),
-            tag_store,
-            rule_tag_store,
-            tenant_store: v1::tenants::init_store(),
-            approval_store: v1::approvals::init_store(),
-            audit_store: v1::audit::init_store(),
-            branch_store: web::Data::new(AsyncMutex::new(repo)),
-            job_store: v1::execution::init_job_store(),
-            user_store: auth::init_store(),
+        let rules_dir = root.join("rules");
+        let dmn_dir = root.join("dmn");
+        std::fs::create_dir_all(&rules_dir).expect("create the rules directory");
+        std::fs::create_dir_all(&dmn_dir).expect("create the DMN directory");
+        from_paths(ApiPaths {
+            rules_dir,
+            dmn_dir,
             frontend_dist: root.join("dist").display().to_string(),
             cors_allowed_origins: Vec::new(),
-        }
+        })
+        .expect("assemble the test state")
     }
 }
 
@@ -550,6 +628,81 @@ mod audit_tests {
         assert!(
             actions.contains(&"delete"),
             "the archive should be audited, saw {actions:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod assembly_tests {
+    //! The state a test builds and the state a server builds come from one function. These assert
+    //! the properties that drifted when they were two: the test state once had no engines registered
+    //! while the server had four.
+
+    use super::*;
+
+    fn temp_root(tag: &str) -> std::path::PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("rrules-assembly-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("temp dir");
+        root
+    }
+
+    #[actix_web::test]
+    async fn the_test_state_matches_what_the_server_registers() {
+        let state = ApiState::for_testing(&temp_root("engines"));
+        let names = state.registry.available_engines();
+        for expected in ["rete", "treat", "leaps", "phreak"] {
+            assert!(
+                names.contains(&expected),
+                "the assembled state should offer {expected}; it offers {names:?}"
+            );
+        }
+    }
+
+    #[actix_web::test]
+    async fn the_test_state_loads_rules_and_models_from_its_paths() {
+        let root = temp_root("loads");
+        let rules_dir = root.join("rules");
+        let dmn_dir = root.join("dmn");
+        std::fs::create_dir_all(&rules_dir).expect("rules dir");
+        std::fs::create_dir_all(&dmn_dir).expect("dmn dir");
+        std::fs::write(
+            dmn_dir.join("model.dmn"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20180913/MODEL/" id="m" name="m" namespace="http://example.com/m">
+  <decision id="assembled_decision" name="Assembled"><literalExpression><text>"ok"</text></literalExpression></decision>
+</definitions>"#,
+        )
+        .expect("write model");
+
+        let state = from_paths(ApiPaths {
+            rules_dir,
+            dmn_dir,
+            frontend_dist: root.join("dist").display().to_string(),
+            cors_allowed_origins: vec!["http://localhost:3000".to_string()],
+        })
+        .expect("assemble");
+
+        // The DMN model in the directory is the one the evaluator holds.
+        let model = state.dmn_evaluator.shared();
+        let guard = model.read().expect("model guard");
+        let decisions: Vec<&str> = guard
+            .model
+            .definitions
+            .children
+            .iter()
+            .filter_map(|child| match child {
+                engine::dmn::model::DefinitionsChild::Decision(decision) => {
+                    Some(decision.id.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(decisions, vec!["assembled_decision"]);
+
+        assert_eq!(
+            state.cors_allowed_origins,
+            vec!["http://localhost:3000".to_string()]
         );
     }
 }

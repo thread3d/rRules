@@ -9,11 +9,11 @@ with the code, the code wins and the drift is recorded in
   DMN decisions), the governance stores (rules, categories, tags, approvals,
   audit, branches, tenants), and the monitoring surfaces (Prometheus, WS).
 - **Base URL:** `http://127.0.0.1:8080` by default, from `RRULES_BIND_ADDRESS` and `PORT`
-  (`api/src/main.rs:45-52`). The default is loopback because that is right for a laptop and
+  (`api/src/main.rs:13-19`). The default is loopback because that is right for a laptop and
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.32` (`api/src/openapi.rs:12`).
+  version `9.0.33` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -29,7 +29,8 @@ with the code, the code wins and the drift is recorded in
 
 ## Server composition
 
-### Startup sequence (`api/src/main.rs:42-254`, then `api/src/app.rs:60-322`)
+### Startup sequence (`api/src/main.rs:20-53`, which is process wiring only, then
+`api/src/app.rs:105-155` for the state and `:157-320` for the routes)
 
 1. Build `EngineRegistry` + `register_default_engines()` (`:56-58`); build
    `EngineSelector::with_defaults()` and select `RRULES_DEFAULT_ENGINE` or
@@ -71,7 +72,7 @@ Twenty `app_data` entries; all are per-worker clones of process-shared Arcs.
 
 | Type | Notes | Source |
 |---|---|---|
-| `v1::execution::EngineState` | **never extracted by any handler** | `api/src/main.rs:48,272` |
+| `v1::execution::EngineState` | **never extracted by any handler** | `api/src/app.rs:108` |
 | `EngineRegistry` | engine factories | `:56-58,274` |
 | `EngineSelector` | default engine, read via `current_engine()` | `:60-70,275` |
 | `Arc<RwLock<SharedRuleSet>>` | ruleset + generation | `:94-95,276` |
@@ -109,14 +110,14 @@ file service (it also enables directory listing). `FRONTEND_DIST` defaults to
 
 | Variable | Default | Effect | Source |
 |---|---|---|---|
-| `RULE_STORAGE_PATH` | `./rules` | rules dir + `<dir>/.git` repo; read again per reload | `main.rs:92-93,198`, `v1/execution.rs:1295` |
-| `DMN_STORAGE_PATH` | `./dmn` | startup model load; also read by the store | `main.rs:102-103`, `engine_state/src/lib.rs:104` |
-| `FRONTEND_DIST` | `../frontend/dist` | static mount | `main.rs:217-218` |
-| `WATCH_RULES_DIR` | `true` (`"true"`/`"1"` truthy) | spawns the rules-directory watcher: it snapshots the directory and calls `reload_and_swap` when a rule file is added, removed, resized or modified | `main.rs:194-197`, `v1/execution.rs` `start_file_watcher` |
+| `RULE_STORAGE_PATH` | `./rules` | rules dir + `<dir>/.git` repo; read again per reload | `app.rs:107,110`, `v1/execution.rs:1295` |
+| `DMN_STORAGE_PATH` | `./dmn` | startup model load; also read by the store | `app.rs:100-101`, `engine_state/src/lib.rs:104` |
+| `FRONTEND_DIST` | `../frontend/dist` | static mount | `ApiPaths::from_environment` in `app.rs` |
+| `WATCH_RULES_DIR` | `true` (`"true"`/`"1"` truthy) | spawns the rules-directory watcher: it snapshots the directory and calls `reload_and_swap` when a rule file is added, removed, resized or modified | `main.rs:33-41`, `v1/execution.rs` `start_file_watcher` |
 | `RRULES_WATCH_INTERVAL_SECS` | `2` | how often the watcher looks for changes | `v1/execution.rs` `watch_interval` |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | comma-separated allowed origins | `main.rs:247-252` |
-| `RRULES_DEFAULT_ENGINE` | `rete` | validated at startup; re-read per request | `main.rs:61-69`, `v1/execution.rs:600-603,1148`, `v1/sessions.rs:200-202` |
-| `RRULES_MAX_CHAIN_ITERATIONS` | `1000` (engine-side) | main.rs only **warns** if unparseable; engine reads it per execution | `main.rs:76-83`, `engine/src/engine/rete/mod.rs:378` |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | comma-separated allowed origins | `ApiPaths::from_environment` in `app.rs` |
+| `RRULES_DEFAULT_ENGINE` | `rete` | validated at startup; re-read per request | `app.rs:117-123`, `v1/execution.rs:600-603,1148`, `v1/sessions.rs:200-202` |
+| `RRULES_MAX_CHAIN_ITERATIONS` | `1000` (engine-side) | main.rs only **warns** if unparseable; engine reads it per execution | `app.rs:125-129`, `engine/src/engine/rete/mod.rs:378` |
 | `API_SECRET_KEY` | `rrules-dev-secret-change-me` | JWT HMAC secret; warns when unset | `api/src/auth/mod.rs:87-98` |
 | `RRULES_SESSION_IDLE_TTL_SECS` | `900` | session idle TTL | `v1/sessions.rs:451-455` |
 | `RRULES_SESSION_MAX_LIFETIME_SECS` | `86400` | session max age | `v1/sessions.rs:456-460` |
@@ -391,9 +392,9 @@ decisions/categories/tags/tenants/branches. Inconsistencies:
 | Reload jobs | `RwLock<HashMap<String,ReloadJob>>` | **no** | `execution.rs:490-495` |
 | Users | seeded `HashMap` | recreated identical at boot | `auth/store.rs:27-48` |
 | Sessions | `DashMap` in `SessionManager`, TTL/LRU swept | **no** | `sessions.rs:92-105,272-312` |
-| Branches / commits | git repository at `<RULE_STORAGE_PATH>/.git` (libgit2) | yes | `main.rs:201-214` |
+| Branches / commits | git repository at `<RULE_STORAGE_PATH>/.git` (libgit2) | yes | `app.rs:147-152` |
 | DMN documents | `<DMN_STORAGE_PATH>/{id}.dmn` + `{id}.meta.json` | yes | `engine_state/src/lib.rs:96-166,243-305` |
-| Evaluated DMN model | in-process snapshot, replaced only by `POST /v1/decisions/reload` | re-read at boot (first file only) | `main.rs:102-142` |
+| Evaluated DMN model | in-process snapshot, replaced only by `POST /v1/decisions/reload` | re-read at boot (first file only) | `app.rs:100-155` |
 | Prometheus counters, gauges | process memory | **no** | `metrics.rs:96-162` |
 
 SQL backends: `SqlxTenantStore` is referenced only in `docs/API.md:469-471`;
@@ -415,7 +416,7 @@ Two WebSocket endpoints, both read-only upgrade handlers built on
 Delivery mechanics: each session calls `subscribe()` on the shared sender and
 polls with `try_recv` every 50 ms, emitting one JSON text frame per snapshot
 (`websocket.rs:44-59`, `dmn_metrics_ws.rs:26-34`). There is no history/replay
-and no back-pressure beyond the channel capacity of 16 (`main.rs:149,153`).
+and no back-pressure beyond the channel capacity of 16 (`app.rs:131,132`).
 Inbound frames are ignored except `Ping`→`Pong` and `Close`→echo
 (`websocket.rs:67-80`).
 
@@ -449,7 +450,7 @@ Dead or unreachable code:
 | ~~`get_audit_event` (GET /v1/audit/{id}) is implemented but unregistered~~ | **Deleted in 9.0.26**: with `record_audit_event` never called, a get-by-id could only ever answer 404. |
 | ~~Startup loads only the first `.dmn` file, in arbitrary `read_dir` order~~ | **Fixed in 9.0.26**: `api::dmn_loader::load_models` reads every `.dmn` file in sorted order and merges them, so a second decision file is visible and the result is reproducible (`api/src/dmn_loader.rs`). |
 | ~~`record_audit_event` has zero callers, so `/v1/audit` and `/v1/audit/export` are permanently empty~~ | **Fixed in 9.0.27**: rule create, update and delete (archive) and approval approve/reject record events, with the acting user from the JWT, the peer address and the `User-Agent` (`api/src/v1/audit.rs` `record_for_request`). Category, tag and tenant mutations and executions are still not recorded. |
-| `build_ruleset_from_dir`'s counterpart `EngineState` (+ `reload_from_directory`, `reload_engine`) is registered as `app_data` but never extracted; the git-log `from_commit` parameter is accepted and ignored | `api/src/main.rs:48,272`; `api/src/v1/execution.rs:295-378`; `branches.rs:216-251` |
+| `build_ruleset_from_dir`'s counterpart `EngineState` (+ `reload_from_directory`, `reload_engine`) is registered as `app_data` but never extracted; the git-log `from_commit` parameter is accepted and ignored | `api/src/app.rs:108`; `api/src/v1/execution.rs:295-378`; `branches.rs:216-251` |
 | ~~`start_file_watcher` is a stub, so `WATCH_RULES_DIR` has no functional effect~~ | **Fixed in 9.0.28**: the watcher polls the rules directory (`RRULES_WATCH_INTERVAL_SECS`, default 2 s) and calls `reload_and_swap` on any change, so an edit on disk swaps in a new rule set atomically. Polling rather than filesystem notifications keeps the dependency list unchanged; mtime-and-size catches adds, removes, edits and truncations, which is what a rules directory does. |
 | ~~DMN WS broadcaster drains and logs but never forwards; nothing publishes to `DmnMetricsTx`~~ | **Fixed in 9.0.29**: the evaluate path publishes a `DmnMetricsSnapshot` on success, and the WebSocket at `/v1/metrics/dmn/ws` forwards it (each client subscribes to the channel itself). The task that drained and logged the receiver is deleted — it competed with nothing and delivered nothing. |
 

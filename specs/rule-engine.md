@@ -28,7 +28,7 @@ The evaluator is a **direct interpreter**: every pass re-evaluates every loaded 
 1. **Resolve the fixpoint cap** from `RRULES_MAX_CHAIN_ITERATIONS`, unparseable/absent ⇒
    `1000`, read per `execute()` call (`engine/src/engine/direct_eval.rs:73-76`,
    `engine/src/engine/rete/mod.rs:378-381`). The API only logs a warning for a bad value
-   (`api/src/main.rs:76-81`).
+   (`api/src/app.rs:125-129`).
 2. **Loop `for _pass in 0..max_iter`** (`engine/src/engine/direct_eval.rs:96`); `max_iter
    == 0` means nothing is evaluated and `rules_fired == 0`.
 3. **Rule order** is `Vec` order, i.e. the order `load_ruleset` cloned
@@ -134,7 +134,7 @@ match (`:98-116`), and `from_yaml`/`from_json` always return `Err` (`:127-144`).
 
 | Env var | Read at | Default | Effect |
 |---|---|---|---|
-| `RRULES_DEFAULT_ENGINE` | per request (`api/src/v1/execution.rs:598-602`), per session create (`api/src/v1/sessions.rs:196-208`), startup (`api/src/main.rs:61-63`) | `"rete"` (session path) / `selector.current_engine()` (stateless) | Engine used when the request omits `engine`. |
+| `RRULES_DEFAULT_ENGINE` | per request (`api/src/v1/execution.rs:598-602`), per session create (`api/src/v1/sessions.rs:196-208`), startup (`api/src/app.rs:105-116`) | `"rete"` (session path) / `selector.current_engine()` (stateless) | Engine used when the request omits `engine`. |
 | `RRULES_MAX_CHAIN_ITERATIONS` | per `execute()` (`engine/src/engine/direct_eval.rs:73`, `rete/mod.rs:378`) | `1000` | Fixpoint pass cap. |
 | `RRULES_SESSION_*`, `RRULES_MAX_SESSIONS` | `api/src/v1/sessions.rs:451-465` | — | Session lifecycle only. |
 
@@ -144,7 +144,7 @@ returns `400 "unknown engine: {name}"` (`api/src/v1/execution.rs:606-613`,
 (`api/src/v1/execution.rs:626-631`); `None` from `create_engine_by_name` maps to the same
 400 (`:632-637`). Sessions pin the engine at creation and reject a conflicting `engine` on
 resume with 400 (`api/src/v1/sessions.rs:171-190`). Startup *warns and falls back* to `rete`
-for an invalid `RRULES_DEFAULT_ENGINE` (`api/src/main.rs:63-69`), but per-request resolution
+for an invalid `RRULES_DEFAULT_ENGINE` (`api/src/app.rs:117-123`), but per-request resolution
 re-reads the raw env value (`api/src/v1/execution.rs:600-602`), so a bad value still fails
 every engine-omitting request with 400.
 
@@ -523,7 +523,7 @@ HTTP endpoint forwards straight into it (`api/src/v1/simulation.rs:150-161`).
 16. **`facts_matched` is not a match count** — it sums working-memory size once per firing
     (`engine/src/engine/direct_eval.rs:116`), so it scales as `|facts| × firings`.
 17. **`RRULES_DEFAULT_ENGINE` fallback is startup-only:** the warning/fallback
-    (`api/src/main.rs:63-69`) affects only `selector.current_engine()`, while per-request
+    (`api/src/app.rs:117-123`) affects only `selector.current_engine()`, while per-request
     resolution re-reads the raw env var (`api/src/v1/execution.rs:600-602`) and rejects the
     value with 400 (`:606-613`).
 18. **`EngineBuilder::max_iterations` (default 1000, `engine/src/environment.rs:29`) is not wired

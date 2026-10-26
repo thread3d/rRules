@@ -1257,6 +1257,15 @@ impl DecisionEvaluator {
     /// within-level parallelism preserves sequential semantics. Levels with a
     /// single decision stay sequential to avoid rayon overhead on the common
     /// dependency-chain case.
+    /// The shared model this evaluator reads.
+    ///
+    /// Useful to inspect what the evaluator is working from — after a hot reload, or in a test that
+    /// wants to know which DMN documents were loaded — without reaching into the evaluator's
+    /// internals.
+    pub fn shared(&self) -> Arc<RwLock<SharedDmnModel>> {
+        Arc::clone(&self.shared)
+    }
+
     pub fn evaluate(
         &self,
         decision_id: &str,

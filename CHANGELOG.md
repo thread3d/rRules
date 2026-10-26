@@ -12,6 +12,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.33] — 2026-10-25 — One assembly, so a test cannot run a different server
+
+`main.rs` built the application state across ~150 lines and `ApiState::for_testing` built it again in
+~40. They had already drifted once — the test copy registered no engines, so every in-process API test
+touching `/v1/execute` or `/v1/engines` exercised an engine-less server — and two constructors of the
+same struct will always drift again.
+
+There is one now. `ApiPaths` names the four things that differ between a deployment and a test (rules
+directory, DMN directory, frontend build, allowed origins), `from_paths` assembles the state from them,
+`from_environment` reads the paths from the environment, and `for_testing` is a wrapper that chooses a
+temporary directory and nothing else. `main.rs` is down from 254 lines to 54: read the bind address,
+assemble, start the watcher and the session sweeper, serve.
+
+The assembly also gained what only `main` had: `for_testing` now loads a rule set from its `rules/`
+directory and DMN models from its `dmn/` directory, so an in-process test can exercise a real model —
+`assembly_tests` writes a `.dmn` file and asserts the evaluator holds it. `DecisionEvaluator::shared()`
+is the accessor that made that assertion possible without reaching into its internals.
+
+Sixteen spec citations pointed into the moved code; they now point at `app.rs`.
+
+
 ## [9.0.32] — 2026-10-25 — One functional suite for all four engines
 
 `ENG-002` says the four Rete-family implementations "must pass the same functional tests regardless
