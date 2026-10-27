@@ -12,6 +12,26 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.41] — 2026-10-25 — The loop's lessons, and a chart gate that runs the way CI does
+
+Two things that belong in the repository rather than in a session log.
+
+**`AGENTS.md` records what the 25-round loop taught**, in both copies. It is written to be read by the
+next agent rather than admired: the shapes a false claim takes (prose, machine contract, configuration,
+code nothing compiles, a test that asserts nothing, a command nobody runs), the two habits that caught
+them (verify in the mode the gate runs in; test the checker against the defect it was written for), the
+law that two implementations of one thing always drift, the delete/wire/document ordering, and the
+sandbox facts that cost time here.
+
+The same file's opening description still said storage was "hybrid — PostgreSQL for runtime metadata",
+which the previous release had established is false. It now says what is true.
+
+**`make chart-lint`** mirrors CI's `chart` job exactly — lint, render the default values, render each
+overlay — while reporting the Helm version it found, because a local Helm that lints differently from
+CI is otherwise invisible. It is deliberately **not** part of `make ci`: that job has no Helm, and a
+gate that cannot run where it runs is worse than none.
+
+
 ## [9.0.40] — 2026-10-25 — The published numbers match the tree
 
 The README claimed **1005 Rust tests across 38 targets**; the tree runs **996 across 40**, 6 ignored.

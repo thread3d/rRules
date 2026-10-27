@@ -13,9 +13,11 @@ watches their impact.
 monitor their impact — without modifying application code.
 
 **Layout:** a Cargo workspace (`engine/`, `api/`, `engine_state/`) plus `frontend/` (React 19 +
-TypeScript + Vite + TanStack). Storage is hybrid — Git for rule versioning, PostgreSQL for runtime
-metadata. Ships as a Docker image and a Helm chart (`helm/rrules-server`, with dev/staging/prod
-overlays; `k8s/` holds the equivalent raw manifests for `kubectl apply -k`).
+TypeScript + Vite + TanStack). Rule and decision documents live on disk, rule versioning is a git
+repository, and every runtime store is in memory — a restart starts empty; `migrations/` describes a
+PostgreSQL-backed store that is **not wired**. Ships as a Docker image and a Helm chart
+(`helm/rrules-server`, with dev/staging/prod overlays; `k8s/` holds the equivalent raw manifests for
+`kubectl apply -k`).
 
 **Key requirements:** a Rete-family rule engine with forward/backward chaining and runtime-selectable
 algorithms (Rete, TREAT, LEAPS, PHREAK); a web rule-authoring IDE; a REST API for execution and
@@ -61,10 +63,13 @@ make tck-ledger  # regenerate the failure ledger inside TCK-COVERAGE-GAPS.md
 make verify      # CodeWitness against specs/requirements.md (engine + api)
 make e2e         # browser smoke test of the built UI against a live server
 make image-check # check the Dockerfile's build logic without a container runtime
+make chart-lint  # lint + render the Helm chart (needs helm v3.14.0; CI's chart job)
 ```
 
 `make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).
-`make bench`, `make memcheck` and `make fuzz` need a nightly toolchain or a frozen baseline snapshot.
+`make bench` runs on the pinned stable toolchain and `make memcheck` compares against the tracked
+frozen baseline (`engine/benches/snapshots/baseline.json`); `make fuzz` is the only one that needs
+the nightly toolchain, plus `cargo-fuzz`.
 
 CodeWitness compiles the crate itself and passes `--offline` to cargo, so `make verify` runs with
 `CARGO_NET_OFFLINE=false`: a lockfile pinning a version newer than its index snapshot otherwise fails
@@ -76,10 +81,10 @@ signed in. Unit tests in jsdom cannot see a bundle that throws at load or a rout
 server answers with 404 — both of which shipped before this gate existed.
 
 **CI runs these gates** — `make ci`, `make tck`, `make spec-citations`, `make image-check` and the
-chart lint — so a green check means the same thing as a green run locally. `bench.yml` runs the
-benchmark and memory-regression gates nightly, `fuzz.yml` fuzzes the parser and decision-table loader
-nightly, and `deploy.yml` publishes the image on every push and deploys only when `KUBE_CONFIG` is
-configured.
+chart lint (`make chart-lint`) — so a green check means the same thing as a green run locally.
+`bench.yml` runs the benchmark and memory-regression gates nightly, `fuzz.yml` fuzzes the parser and
+decision-table loader nightly, and `deploy.yml` publishes the image on every push and deploys only
+when `KUBE_CONFIG` is configured.
 
 `make verify` is the exception, and the difference matters. CodeWitness is not published: it is a jar
 installed from a source checkout, so a hosted runner cannot obtain it. The workflow's
@@ -129,6 +134,84 @@ published with it.
 - **State limits plainly.** If something is stubbed, partially wired or unverifiable here, write it in
   the `Known gaps` section instead of describing intent as fact.
 - **Do not rewrite history** without explicit permission, and never commit secrets.
+
+## What the verification loop taught — keep these true
+
+A 25-round fix-and-verify loop ran on `rRules/`. Almost every defect it found was **a claim nothing
+executed**, and the remedies all had the same shape: make the claim executable, then put it in a gate
+that runs on every push. If you read one section of this file, read this one.
+
+### The law, and its disguises
+
+*"A claim without a gate behind it is not a claim this project should make."* The claims that turned out
+false were rarely code bugs first — they were **statements**:
+
+| Disguise | What was actually wrong |
+|---|---|
+| Prose | A memory baseline frozen at v6.0 that no release could pass; a README quoting "1005 tests, 38 targets" while the tree ran 996 across 40; four "removed" TODOs still in the file |
+| A machine-readable contract | `/api-docs/openapi.json` omitted **21 endpoints**, including all of auth — a generated client could not log in |
+| Configuration | `k8s/` set `SERVER_HOST`/`SERVER_PORT` while the server read `RRULES_BIND_ADDRESS`/`PORT`; the chart never set `API_SECRET_KEY`, so deployments ran on a public development string |
+| Code nothing compiled | Three `api` modules and a 992-line test suite that **no module declared**, so nothing had ever type-checked them |
+| A test that asserted nothing | `assert!(cache_hits >= 0 \|\| cache_misses >= 0)` on unsigned counters; five tests looping over an **empty** engine list |
+| A command nobody ran | The README's first command was `cargo run --bin api`; the binary is `rRules-server`, so it failed with `no bin target named api` |
+
+### Two habits that actually catch things
+
+**1. Verify in the mode the gate will run in, not the mode that is convenient.**
+A warm working tree hid a flaky test for two rounds: `api/tests/dmn_metrics_extended.rs` shared one
+global tracker and passed by scheduling luck until a clean clone ran it and CI failed. Before calling a
+suite green, run it the way CI does — `git clone --local . ../ci-repro` and build from cold. Related,
+and worse: `git checkout <path>` reverts to **HEAD**, so it silently discards the work-in-progress you
+were testing; copy the file to a scratch directory first.
+
+**2. Test the checker against the defect it was written for.**
+Five of this workspace's gates were themselves wrong, and each was found by reintroducing the bug and
+watching the check *not* fail:
+
+- a README check whose `--bin` matcher also accepted the package name, so `--bin api` passed;
+- a `curl` check that sent `POST` to a `GET` route, whose method-mismatch 404 fell through to the
+  single-page shell and reported a good endpoint as missing;
+- a browser `visit` that waited for *any* text (the navbar supplies it) and then asserted on data a page
+  fetches later — so it intermittently "proved" a route blank;
+- a memory gate whose baseline was twelve releases old;
+- a cross-engine suite that iterated an empty engine list and passed five assertions without testing an
+  engine.
+
+A check that has never failed has never been tested. Break the thing, watch it fail, put it back.
+
+### Two implementations of one thing always drift
+
+`main.rs` and the test-state constructor built the same application twice, and the test copy had no
+engines registered — so every in-process API test exercised an engine-less server. `agenda.rs` and
+`conflict_resolution.rs` each defined their own `ConflictStrategy`: two types with the same name, one
+exported. `tailwind.config.ts` declared a class-based dark mode the app never activated, while eighteen
+files carried `dark:` utilities that could not match.
+
+The fix is always the same: **one implementation, and a test that its consumers agree.** `build_app` for
+the router, `ApiPaths`/`from_paths` for the state, one cross-engine suite driven by
+`available_engines()`, `scripts/verify-summary.py` for the verification union.
+
+### Delete, wire, or document — and say which
+
+Dead code documented as a gap is still dead code. Three orphaned `api` modules sat in a gaps table for
+months; they went in one commit. A module returning hard-coded zeroes was both unregistered and lying,
+so the module went rather than being registered. Placeholders that return `Ok(false)` unconditionally
+were deleted after their callers turned out not to exist.
+
+The rule that emerged: **delete** what nothing calls, **wire** what the docs promise and the code can
+support, and only then **document** a gap — in the `Known gaps` table, with what it costs a reader. Gaps
+are struck through with the release that closed them, never quietly removed.
+
+### Sandbox facts that cost time here
+
+- `$HOME` is read-only. Point tool caches inside the workspace: `CARGO_HOME=$PWD/.cargo-home`,
+  `XDG_CACHE_HOME=$PWD/.gh-cache`, `npm_config_cache=…`, `HELM_CACHE_HOME=…`.
+- `cc` is a ccache wrapper: **`CCACHE_DISABLE=1`** for anything that compiles C (release builds,
+  `libgit2-sys`, fuzzing, CodeWitness), or it fails with `ccache: error: Read-only file system`.
+- Never share a port with something already listening. Both the API server and Chromium's DevTools
+  endpoint must take an OS-assigned free port: a stale server on a fixed port made every route render
+  blank once, and a fixed DevTools port failed CI.
+- `cmd | tail` reports *tail's* exit status. Use `cmd > log 2>&1; echo "exit=$?"`.
 
 ## Never commit binaries
 

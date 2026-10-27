@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme deploy-env verify e2e image-check bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme deploy-env verify e2e image-check chart-lint bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -69,6 +69,45 @@ bump-version:
 # otherwise only surface in a deploy.
 image-check:
 	./scripts/image-context-check.sh
+
+# The chart's gate, exactly as CI runs it (`.github/workflows/ci.yml`, job `chart`): lint
+# the chart, render the default values, then render each environment overlay. CI installs
+# Helm v3.14.0 in that job and nowhere else, so this target reports the version it found —
+# a local Helm that lints differently from CI is then visible instead of silent.
+#
+# Deliberately not part of `ci`: the job that runs `make ci` has no Helm, and a gate that
+# cannot run on the machine that runs it is worse than no gate. Pass HELM= to override.
+#
+# Helm's own cache/config/data directories are redirected into the tree when $HOME is not
+# writable (this sandbox's is read-only); `.helm/` is gitignored.
+CHART ?= helm/rrules-server
+HELM ?= $(firstword $(shell command -v helm 2>/dev/null) ../.tools/linux-amd64/helm)
+
+chart-lint:
+	@set -e; \
+	helm_bin="$(HELM)"; \
+	if [ -z "$$helm_bin" ] || [ ! -x "$$helm_bin" ]; then \
+		echo "helm not found: not on PATH and not at ../.tools/linux-amd64/helm." >&2; \
+		echo "CI pins v3.14.0; install it or pass HELM=/path/to/helm." >&2; \
+		exit 1; \
+	fi; \
+	case "$$helm_bin" in /*) ;; *) helm_bin="$$PWD/$$helm_bin" ;; esac; \
+	if [ ! -w "$${HOME:-/nonexistent}" ]; then \
+		export HELM_CACHE_HOME="$$PWD/.helm/cache" \
+			HELM_CONFIG_HOME="$$PWD/.helm/config" \
+			HELM_DATA_HOME="$$PWD/.helm/data"; \
+	fi; \
+	echo "helm: $$("$$helm_bin" version --short) (CI pins v3.14.0)"; \
+	echo "==> lint $(CHART)"; \
+	"$$helm_bin" lint "$(CHART)"; \
+	echo "==> render $(CHART) with the default values"; \
+	"$$helm_bin" template rrules "$(CHART)" > /dev/null; \
+	for overlay in $(CHART)/values-*.yaml; do \
+		[ -e "$$overlay" ] || continue; \
+		echo "==> render $(CHART) with $$overlay"; \
+		"$$helm_bin" template rrules "$(CHART)" -f "$$overlay" > /dev/null; \
+	done; \
+	echo "chart lint complete"
 
 # Run the application locally (dev mode)
 run:
@@ -160,9 +199,16 @@ baseline-update:
 	cargo run -p engine --bin memory_baseline -- --update-baseline
 	@echo "Frozen baseline refreshed. Commit engine/benches/snapshots/baseline.json."
 
+# `cargo fuzz` builds a second workspace (`engine/fuzz`) and pulls registry crates for it, so it
+# needs a writable CARGO_HOME. On a machine whose $HOME is read-only (this sandbox's is) that
+# build fails outright with `failed to open .../registry/cache/...: Read-only file system`, so
+# fall back to the gitignored `.cargo-home/` the workspace already carries. An explicit
+# CARGO_HOME from the environment still wins; where $HOME is writable this is cargo's default.
+CARGO_HOME ?= $(if $(shell test -w "$$HOME" 2>/dev/null && echo y),$(HOME)/.cargo,$(CURDIR)/.cargo-home)
+
 # Build cargo-fuzz targets (Phase 38+; requires nightly toolchain)
 fuzz-build:
-	cd engine && cargo +nightly fuzz build
+	cd engine && CARGO_HOME="$(CARGO_HOME)" cargo +nightly fuzz build
 
 # Run DMN fuzz targets (Phase 38+; requires nightly + cargo-fuzz).
 # Usage: make fuzz TARGET=decision_table FUZZ_MAX_TOTAL_TIME=300
@@ -179,7 +225,7 @@ fuzz:
 	run() { \
 		echo "Fuzzing $$1 ($(FUZZ_RUNS) runs, max $(FUZZ_MAX_TOTAL_TIME) s)..."; \
 		status=0; \
-		(cd engine && timeout --signal=INT --kill-after=30 $(FUZZ_MAX_TOTAL_TIME) \
+		(cd engine && CARGO_HOME="$(CARGO_HOME)" timeout --signal=INT --kill-after=30 $(FUZZ_MAX_TOTAL_TIME) \
 			cargo +nightly fuzz run $$1 -- \
 				-runs=$(FUZZ_RUNS) -max_total_time=$(FUZZ_MAX_TOTAL_TIME)) || status=$$?; \
 		if [ $$status -eq 124 ] || [ $$status -eq 130 ]; then \
@@ -216,6 +262,7 @@ help:
 	@echo "  frontend-test   - Run frontend tests (vitest)"
 	@echo "  e2e             - Browser smoke test of the built UI against a live server"
 	@echo "  image-check     - Check the Dockerfile's build logic without Docker"
+	@echo "  chart-lint      - Lint and render the Helm chart (needs helm; CI's chart job)"
 	@echo "  spec-citations  - Check that spec citations still resolve to code"
 	@echo "  docs-snippets   - Compile every Rust example in docs/user-guide.md"
 	@echo "  readme          - Check the README's commands against the Makefile and crates"

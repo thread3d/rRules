@@ -46,6 +46,8 @@ Thumbs.db
 
 # ── Local agent tooling (not part of the project) ─────────────
 .tools/
+# Helm's cache/config/data, used by `make chart-lint` when $HOME is not writable
+.helm/
 
 # Scratch checkouts used when reproducing CI (never part of the project)
 /.fstage*/
