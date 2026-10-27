@@ -1,0 +1,36 @@
+# `cargo audit` configuration.
+#
+# `make audit` fails on any advisory that is not listed here. Each entry is a decision with a reason,
+# not a silencer: `SECURITY.md` explains the assessment behind it, and an entry whose crate leaves the
+# dependency tree will make `cargo audit` report an unused ignore, which is how this list stays honest.
+
+[advisories]
+ignore = [
+    # --- Unreachable at runtime: the API verifies HS256 only (`api/src/middleware/auth.rs`) ---------
+    # `jsonwebtoken` compiles its RSA and ECDSA support unconditionally under the `rust_crypto`
+    # feature, so these crates are linked but no code path reaches them. RUSTSEC-2023-0071 has no
+    # fixed release. Removing them means either switching jsonwebtoken's crypto backend to
+    # `aws_lc_rs` (a C toolchain in the image) or replacing the crate — both are recorded as work,
+    # not done quietly.
+    "RUSTSEC-2023-0071", # rsa: Marvin attack (unfixed upstream)
+    "RUSTSEC-2026-0387", # crypto-bigint: timing variability (via elliptic-curve, same path)
+
+    # --- Pinned by actix-http, not by this project ------------------------------------------------
+    # Every actix-http release up to 3.20 depends on h2 0.3.x and zstd 0.13.x, the versions these
+    # advisories name. `actix-http` is our HTTP server; we cannot patch its dependencies from here.
+    # Re-audited whenever actix-http is bumped — the entries below are what that bump has to clear.
+    "RUSTSEC-2026-0258", # h2: unbounded empty DATA frames
+    "RUSTSEC-2026-0391", # zstd: data from an abandoned stream leaks into the next
+    "RUSTSEC-2026-0398", # zstd-safe: Seekable::decompress sets a Vec length beyond capacity
+    "RUSTSEC-2026-0403", # zstd-safe: uninitialised memory in streaming decompression
+
+    # --- Development-only paths: not in the shipped binary ----------------------------------------
+    # `pg-embed` (dev-dependency of the database tests) downloads a zip and extracts it, which is the
+    # only way `zip` enters the tree; `webpki-roots` comes with a test-only TLS client. `cargo tree
+    # -e normal -i <crate>` reports both as absent from the normal (shipped) dependency set.
+    "RUSTSEC-2026-0367", # zip: SUID/SGID preservation on extraction
+    "RUSTSEC-2026-0368", # zip: symlink attributes on extraction
+    "RUSTSEC-2026-0369", # zip: Unix permissions applied on extraction
+    "RUSTSEC-2026-0381", # webpki-roots: bundled roots include distrusted CAs
+    "RUSTSEC-2026-0235", # rkyv: archive validation can read out of bounds (test-only path)
+]

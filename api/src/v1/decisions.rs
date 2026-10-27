@@ -176,7 +176,7 @@ pub async fn evaluate_decision(
                 .unwrap_or("None");
 
             crate::v1::dmn_metrics::METRIC_DECISION_DURATION_SECONDS
-                .with_label_values(&[&decision_id, hit_policy_str])
+                .with_label_values(&[&decision_id, &hit_policy_str.to_string()])
                 .observe(result.duration_ms / 1000.0);
 
             // Publish to the WebSocket channel. `send` fails only when no client is subscribed,

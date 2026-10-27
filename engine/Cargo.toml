@@ -1,6 +1,6 @@
 [package]
 name = "engine"
-version = "9.0.50"
+version = "9.0.51"
 edition = "2021"
 
 [dependencies]
@@ -18,7 +18,9 @@ prometheus = { workspace = true }
 utoipa = { version = "4", features = ["chrono", "uuid"] }
 # DMN 1.5 XML parser/exporter (Phase 29+) — streaming NsReader/Writer, multi-namespace.
 # Supply-chain verified 2026-07-06 (Task 1 gate): repo tafia/quick-xml, 322M downloads.
-quick-xml = { version = "0.40", features = ["serialize"] }
+# 0.40 was found vulnerable by `cargo audit` (RUSTSEC-2026-0194, -0195) — this crate parses untrusted
+# DMN XML, so the fix matters here more than anywhere else in the tree.
+quick-xml = { version = "0.41", features = ["serialize"] }
 # FEEL Decimal128 numeric domain (Phase 29+). Supply-chain verified 2026-07-06 (Task 1 gate):
 # repo paupino/rust-decimal, 115M downloads. Features: serde (IR (de)serialization),
 # macros (decimal! literals), maths (sqrt/ln/... for Phase 31 built-ins).

@@ -201,3 +201,12 @@ jobs:
 
       - name: Singleton-observing tests serialise
         run: make singleton-tests
+
+      # Every advisory must be fixed or accounted for in `.cargo/audit.toml`.
+      - name: Dependency advisories
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Audit dependencies
+        run: make audit

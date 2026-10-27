@@ -1,6 +1,6 @@
 [package]
 name = "api"
-version = "9.0.50"
+version = "9.0.51"
 edition = "2021"
 
 [[bin]]
@@ -51,7 +51,7 @@ utoipa-swagger-ui = { version = "7", features = ["actix-web"] }
 # Battle-tested standard crate (Keats; RESEARCH §Package Legitimacy: OK).
 # `Validation::new(Algorithm::HS256)` pins the algorithm so `alg:none` is
 # rejected (T-22-01) — never use `Validation::default()` without pinning.
-jsonwebtoken = { version = "10.4", features = ["rust_crypto"] }
+jsonwebtoken = { version = "11", features = ["rust_crypto"] }
 # Phase 24 (Plan 24-02, D2 / Open Q4): promote the workspace-pinned
 # `prometheus = { version = "0.13", features = ["process"] }` (Cargo.toml:15)
 # into the api crate so `api::metrics::ExecutionCounters` can build its

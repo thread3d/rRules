@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme singleton-tests deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme singleton-tests audit deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -56,6 +56,17 @@ db-test:
 		cargo test -p api --features postgres --test audit_postgres -- --ignored --test-threads=1
 	@XDG_CACHE_HOME="$${XDG_CACHE_HOME:-$$PWD/.db-cache}" \
 		cargo test -p api --features postgres --test tenant_postgres -- --ignored --test-threads=1
+
+# Every dependency advisory must be either fixed or accounted for in `.cargo/audit.toml`, whose entries
+# carry their reason and are checked for staleness by the tool itself. The advisory database needs the
+# network on first run; it is cached afterwards.
+audit:
+	@command -v cargo-audit >/dev/null 2>&1 || { \
+		echo "audit: cargo-audit is not installed." >&2; \
+		echo "       Install it with: cargo install cargo-audit --locked" >&2; \
+		echo "       The gate is enforced in CI, which installs it for the job." >&2; \
+		exit 1; }
+	cargo audit
 
 # A test that observes a process-wide tracker must serialise itself: SYS-003 says the trackers are
 # resettable, and resettability buys nothing when two tests run at once.
@@ -304,6 +315,7 @@ help:
 	@echo "  docs-snippets   - Compile every Rust example in docs/user-guide.md"
 	@echo "  readme          - Check the README's commands against the Makefile and crates"
 	@echo "  singleton-tests - Tests observing a process-wide tracker must be #[serial]"
+	@echo "  audit           - Dependency advisories: none unaccounted for (needs cargo-audit)"
 	@echo "  deploy-env      - Check chart/manifest variables against the server's"
 	@echo "  bump-version    - Write VERSION to every file that carries it"
 	@echo "  ci              - Full CI pipeline (build + test + lint + fmt-check + frontend)"

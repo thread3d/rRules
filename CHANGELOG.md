@@ -12,6 +12,37 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.51] — 2026-10-27 — `cargo audit` was never run; the first run found 25 advisories
+
+Dependency vulnerabilities were one of the issue classes this loop is meant to fix, and only `npm audit`
+had ever run. `cargo audit` on the Rust tree found **25 advisories in 572 crates**.
+
+**The one that mattered was in the attack path**: `quick-xml` 0.40, which parses untrusted DMN XML,
+carried RUSTSEC-2026-0194 and -0195. Bumped to 0.41 and the DMN suite plus all 170 TCK layer results
+confirm parsing still behaves. Also fixed: `crossbeam-epoch`, `h2 0.4`, `quinn-proto` (updated within
+their majors), `protobuf` 2.x (via `prometheus` 0.13 → 0.14), and `zstd-sys`.
+
+**Fourteen remain, and each is now a recorded decision** rather than an unknown: `rsa` and
+`crypto-bigint` are linked but unreachable (the API verifies HS256 only, and `jsonwebtoken` compiles its
+RSA support unconditionally); `h2 0.3` and `zstd 0.13` are pinned by every actix-http release up to
+3.20; `zip` and `webpki-roots` arrive through test-only dependencies and are absent from the shipped
+tree (`cargo tree -e normal -i zip` is empty). `.cargo/audit.toml` lists them with their reasons,
+`make audit` fails on anything *not* listed, and CI installs `cargo-audit` and runs it. `SECURITY.md`
+carries the assessment.
+
+**A real FEEL bug fell out of the same round.** Probing the `in` operator showed `2 in (1, 2, 3)` — the
+list form DMN defines, and the shape a decision-table entry takes — evaluating to **null for every
+input**, because the parser treated `(1, 2, 3)` as a parenthesised expression and produced an error
+node. A rule written against it silently never fired. The operator now accepts `(1, 2, 3)`, `(< 5, > 10)`
+and `not(1, 2)`, with `engine/tests/feel_in_operator.rs` pinning each form.
+
+Getting that right took three attempts, all caught by tests: the first hijacked `x in (1..10)` and lost
+the range's exclusive endpoints (`1 in (1..10)` became true); the second used backtracking, which fixed
+that but left the arm inside `parse_expr`, inflating its stack frame until the parser's own depth-guard
+test **overflowed the stack**; the third decides the shape by lookahead and keeps the work out of line.
+FEEL-012 says the parser is bounded and never panics — the guard test is what said otherwise.
+
+
 ## [9.0.50] — 2026-10-27 — Every decision body DMN 1.5 defines is read
 
 Two body forms were still unmodelled, and both are common in models built by an editor:

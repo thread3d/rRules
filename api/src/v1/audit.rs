@@ -154,7 +154,7 @@ pub async fn query_audit_events(
 
     let filter = match audit_filter(&query) {
         Ok(filter) => filter,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
 
     let offset = (page as usize - 1) * page_size as usize;
@@ -186,7 +186,7 @@ pub async fn query_audit_events(
 /// The reader's filter, or the response explaining what is wrong with it.
 ///
 /// Shared by the list and the export so the two cannot disagree about what `action=approve` means.
-fn audit_filter(query: &AuditQuery) -> Result<AuditFilter, HttpResponse> {
+fn audit_filter(query: &AuditQuery) -> Result<AuditFilter, Box<HttpResponse>> {
     let resource_type = match query.resource_type.as_deref() {
         None => None,
         Some("rule") => Some(ResourceType::Rule),
@@ -195,8 +195,9 @@ fn audit_filter(query: &AuditQuery) -> Result<AuditFilter, HttpResponse> {
         Some("user") => Some(ResourceType::User),
         Some("approval") => Some(ResourceType::Approval),
         Some(_) => {
-            return Err(HttpResponse::BadRequest()
-                .json(serde_json::json!({ "error": "Invalid resource_type filter" })))
+            return Err(Box::new(HttpResponse::BadRequest().json(
+                serde_json::json!({ "error": "Invalid resource_type filter" }),
+            )))
         }
     };
 
@@ -211,8 +212,10 @@ fn audit_filter(query: &AuditQuery) -> Result<AuditFilter, HttpResponse> {
         Some("execute") => Some(AuditAction::Execute),
         Some("export") => Some(AuditAction::Export),
         Some(_) => {
-            return Err(HttpResponse::BadRequest()
-                .json(serde_json::json!({ "error": "Invalid action filter" })))
+            return Err(Box::new(
+                HttpResponse::BadRequest()
+                    .json(serde_json::json!({ "error": "Invalid action filter" })),
+            ))
         }
     };
 

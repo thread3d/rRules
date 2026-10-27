@@ -1320,6 +1320,18 @@ impl Parser {
                 continue;
             }
 
+            // --- Special: `in` with a parenthesised unary-test list (DMN 1.5 §10.3.1.2)
+            //
+            // Out of line on purpose: the locals this needs (checkpoints, parsed tests) would
+            // otherwise inflate `parse_expr`'s frame for *every* recursion level, and the frame size is
+            // what bounds how deep the DoS guard can recurse before the stack does (FEEL-012).
+            if self.is_keyword("in") && 30 >= min_bp {
+                if let Some(with_tests) = self.parse_in_unary_tests(lhs.clone()) {
+                    lhs = with_tests;
+                    continue;
+                }
+            }
+
             // --- Regular binary operators
             let (op, bp, rassoc) = match self.classify_binary() {
                 Some(c) => c,
@@ -2201,6 +2213,85 @@ impl Parser {
             };
         }
         self.parse_expr(0)
+    }
+
+    /// `lhs in (…)` where the parentheses hold a unary-test list, as `Some(expr)`; `None` when the
+    /// parentheses hold an expression (a range, an arithmetic group), which the normal path parses.
+    #[inline(never)]
+    fn parse_in_unary_tests(&mut self, lhs: FeelExpression) -> Option<FeelExpression> {
+        if !self.in_list_is_unary_tests() {
+            return None;
+        }
+        let negated = matches!(
+            self.tokens.get(self.pos + 1).map(|span| &span.token),
+            Some(Token::Name(name)) if name == "not"
+        );
+        self.advance(); // "in"
+        if negated {
+            self.advance(); // "not"
+        }
+        self.advance(); // "("
+        let tests = self.parse_positive_unary_tests();
+        if matches!(tests, FeelExpression::Err(_, _)) || !matches!(self.peek(), Token::RParen) {
+            return None;
+        }
+        self.advance(); // ")"
+        let rhs = if negated {
+            FeelExpression::Neg(Box::new(tests))
+        } else {
+            tests
+        };
+        Some(FeelExpression::BinOp {
+            op: BinOpKind::In,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        })
+    }
+
+    /// Is the token at the cursor an `in` whose parenthesised right-hand side is a **unary-test
+    /// list** rather than an expression?
+    ///
+    /// It is one when the parentheses open with a comparison operator (`< 5`), or when the contents
+    /// separate positive unary tests with a top-level comma (`1, 2, 3`), or when it is `not(...)`.
+    /// Anything else — `(1..10)`, `(a + b)` — is an expression and must take the normal path, because
+    /// only that path gives a range its parentheses' inclusivity.
+    fn in_list_is_unary_tests(&self) -> bool {
+        let mut index = self.pos + 1;
+        let negated = matches!(
+            self.tokens.get(index).map(|span| &span.token),
+            Some(Token::Name(name)) if name == "not"
+        );
+        if negated {
+            index += 1;
+        }
+        if !matches!(
+            self.tokens.get(index).map(|span| &span.token),
+            Some(Token::LParen)
+        ) {
+            return false;
+        }
+        index += 1;
+
+        if matches!(
+            self.tokens.get(index).map(|span| &span.token),
+            Some(Token::Lt | Token::Le | Token::Gt | Token::Ge | Token::Eq | Token::NotEq)
+        ) {
+            return true;
+        }
+
+        // A top-level comma: a list of tests. Nested commas belong to a call or a list literal.
+        let mut depth = 0usize;
+        while let Some(span) = self.tokens.get(index) {
+            match span.token {
+                Token::LParen | Token::LBracket | Token::LBrace => depth += 1,
+                Token::RParen if depth == 0 => return false,
+                Token::RParen | Token::RBracket | Token::RBrace => depth = depth.saturating_sub(1),
+                Token::Comma if depth == 0 => return true,
+                _ => {}
+            }
+            index += 1;
+        }
+        false
     }
 
     /// Parse comma-separated positive unary tests (rule 13), desugared
