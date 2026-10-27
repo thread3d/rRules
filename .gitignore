@@ -48,6 +48,11 @@ Thumbs.db
 .tools/
 # Helm's cache/config/data, used by `make chart-lint` when $HOME is not writable
 .helm/
+# pg-embed's downloaded PostgreSQL binaries, used by `make db-test` when $HOME is not writable
+.db-cache/
+# A writable HOME for tools that forward HOME but not CARGO_HOME (`make verify`)
+.verify-home/
+.cargo-home/
 
 # Scratch checkouts used when reproducing CI (never part of the project)
 /.fstage*/

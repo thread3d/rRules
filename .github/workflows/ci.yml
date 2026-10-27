@@ -132,6 +132,37 @@ jobs:
       - name: Check the Dockerfile's stages
         run: make image-check
 
+  database:
+    name: PostgreSQL store
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.1"
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      # The store is tested against a real PostgreSQL that pg-embed downloads
+      # and starts in userspace. The binaries are cached across runs so the
+      # download is paid once, not on every push.
+      - name: Cache the embedded PostgreSQL binaries
+        uses: actions/cache@v4
+        with:
+          path: .db-cache
+          key: pg-embed-${{ runner.os }}-${{ hashFiles('engine_state/Cargo.lock', 'engine_state/Cargo.toml') }}
+          restore-keys: pg-embed-${{ runner.os }}-
+
+      - name: Exercise the store against PostgreSQL
+        run: make db-test
+        env:
+          XDG_CACHE_HOME: ${{ github.workspace }}/.db-cache
+
   docs:
     name: Documentation
     runs-on: ubuntu-latest

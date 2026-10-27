@@ -12,6 +12,50 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.43] — 2026-10-26 — PostgreSQL: two fake stores deleted, one real store proven
+
+The "PostgreSQL issue" turned out to be three separate things, none of them a small fix:
+
+| Piece | What it was |
+|---|---|
+| `engine::governance::tenant::SqlxTenantStore` | held an `Option<PgPool>`, answered `NotConnected` to **every** call, and `new_from_env()` read `DATABASE_URL` only to return an error |
+| `engine::governance::audit::SqlxAuditStore` | the same shape, 700 lines apart |
+| `engine_state::PostgresDmnStore` | seven `todo!()` methods, never constructed, no callers |
+| `migrations/*.sql` | schema nothing applied — no `sqlx::migrate!`, no script, no target |
+| `engine`'s dependency on `sqlx` | a Postgres driver compiled into every build, used only by the two fake stores |
+
+**The two fake stores are gone**, and with them `sqlx` from the `engine` crate: its dependency tree
+drops from **247 unique crates to 206**. Deleting it exposed a second defect — `serde`'s `rc` feature
+was being switched on by `sqlx` through feature unification, so `Arc<FeelExpression>` only serialised
+by accident. `engine` now declares `serde = { features = ["derive", "rc"] }` itself.
+
+**`PostgresDmnStore` is now real.** `engine_state/src/postgres.rs` implements all seven
+`DmnPersistence` methods with actual SQL: byte-exact document round-trips, a conflict (not an
+overwrite) when a document id already exists, `NotFound` for updates and deletes that hit nothing,
+most-recent-first listing, and file blobs stored and reloaded. The schema
+(`migrations/21_01_dmn_documents.sql`) is applied idempotently on connect, so the store owns its DDL.
+It is behind the `postgres` feature: no database driver is compiled unless a deployment asks for one.
+
+**It is proven against a real PostgreSQL**, which this environment had never had: `pg-embed`
+downloads PostgreSQL 17 and runs it in userspace — no Docker, no root, no preinstalled server — and
+`engine_state/tests/postgres_store.rs` exercises the store against it. Five tests, all passing:
+
+```
+a_document_round_trips_through_the_database ... ok
+creating_an_id_that_exists_is_a_conflict_not_an_overwrite ... ok
+files_are_saved_and_loaded_as_bytes ... ok
+listing_is_most_recent_first ... ok
+updates_replace_content_and_deletes_are_final ... ok
+```
+
+`make db-test` runs them, and CI has a `PostgreSQL store` job that caches the downloaded binaries. They
+are `#[ignore]` by default so an ordinary `cargo test` does not pay 18 seconds and 30 MB for them.
+
+The store is **not wired into the API** — the filesystem store is still authoritative — and
+`README.md`, both `AGENTS.md` copies and `specs/http-api.md` now say exactly that, with the struck gap
+naming the release that closed it.
+
+
 ## [9.0.42] — 2026-10-26 — A model can invoke a model, and DMN 1.5 bodies load
 
 Two decision bodies were being dropped in silence. The parser's dispatch matched

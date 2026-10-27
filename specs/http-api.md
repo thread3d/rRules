@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.42` (`api/src/openapi.rs:12`).
+  version `9.0.43` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -399,7 +399,7 @@ decisions/categories/tags/tenants/branches. Inconsistencies:
 
 SQL backends: `SqlxTenantStore` is referenced only in `docs/API.md:469-471`;
 the reachable tenant backend is `MemoryTenantStore` (`tenants.rs:18-23`).
-`PostgresDmnStore` exists but every trait method is `todo!()`
+~~`PostgresDmnStore` exists but every trait method is `todo!()`~~ — **closed in 9.0.43**: the store is real SQL behind the `postgres` feature and `make db-test` runs it against a PostgreSQL that `pg-embed` starts; it is still not wired into the API
 (`engine_state/src/lib.rs:360-388`), so calling it panics; it is never
 constructed by the server. `migrations/` is not exercised by any API code path.
 

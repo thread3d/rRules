@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme deploy-env verify e2e image-check chart-lint bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -14,6 +14,8 @@ test:
 # — including a test that asserted nothing (`x >= 0 || y >= 0` on unsigned counters).
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings
+	@# The `postgres` feature is off by default, so a plain workspace lint never compiles it.
+	cargo clippy -p engine_state --features postgres --all-targets -- -D warnings
 
 # Format code with rustfmt
 fmt:
@@ -36,6 +38,16 @@ spec-citations:
 # default is unsafe must be set by each deployment path.
 deploy-env:
 	./scripts/check-deploy-env.py
+
+# The PostgreSQL store, against a real PostgreSQL that pg-embed downloads and runs in userspace: no
+# Docker, no root, no preinstalled server. Ignored by default because the first run downloads ~30 MB,
+# and a gate every `cargo test` pays for is a gate people stop running.
+#
+# The binary cache honours XDG_CACHE_HOME, which this sandbox's read-only $HOME makes necessary:
+# `XDG_CACHE_HOME=$PWD/.db-cache make db-test`.
+db-test:
+	@XDG_CACHE_HOME="$${XDG_CACHE_HOME:-$$PWD/.db-cache}" \
+		cargo test -p engine_state --features postgres --test postgres_store -- --ignored --test-threads=1
 
 # The commands the README tells a reader to run must exist: a target, a binary, a crate, a directory.
 readme:
@@ -150,8 +162,19 @@ verify:
 	@# resolution relies on a crates.io index snapshot. A `Cargo.lock` pinning a version
 	@# newer than that snapshot fails to resolve and the whole run is reported BLOCKED —
 	@# a tooling limit, not a code defect. `CARGO_NET_OFFLINE=false` lets the index refresh.
-	CARGO_NET_OFFLINE=false codewitness verify engine --requirements specs/requirements.md --in-place --no-mutation
-	CARGO_NET_OFFLINE=false codewitness verify api --requirements specs/requirements.md --config api/codewitness.yaml --in-place --no-mutation
+	@# CodeWitness replaces its child environment with an allow-list that forwards `HOME` but not
+	@# `CARGO_HOME`, so its cargo resolves against `$HOME/.cargo` — read-only in this sandbox, and it
+	@# passes `--offline`, so the cache it finds must already be populated. Give it a HOME inside the
+	@# tree whose `.cargo` is the workspace's own cache. (Never with git in the same recipe: git reads
+	@# `$HOME/.gitconfig` and would lose the author identity.)
+	@mkdir -p "$${VERIFY_HOME:-$$PWD/.verify-home}"; \
+		[ -e "$${VERIFY_HOME:-$$PWD/.verify-home}/.cargo" ] || \
+		ln -s "$$PWD/.cargo-home" "$${VERIFY_HOME:-$$PWD/.verify-home}/.cargo"
+	HOME="$${VERIFY_HOME:-$$PWD/.verify-home}" CARGO_NET_OFFLINE=false \
+		codewitness verify engine --requirements specs/requirements.md --in-place --no-mutation
+	HOME="$${VERIFY_HOME:-$$PWD/.verify-home}" CARGO_NET_OFFLINE=false \
+		codewitness verify api --requirements specs/requirements.md --config api/codewitness.yaml \
+		--in-place --no-mutation
 	@# Neither crate can execute the other's requirements, so each reports the other half
 	@# as UNVERIFIED. The union is the result a reader wants, and a requirement that
 	@# neither half verifies is a gap rather than a division of labour.
@@ -263,6 +286,7 @@ help:
 	@echo "  e2e             - Browser smoke test of the built UI against a live server"
 	@echo "  image-check     - Check the Dockerfile's build logic without Docker"
 	@echo "  chart-lint      - Lint and render the Helm chart (needs helm; CI's chart job)"
+	@echo "  db-test         - The PostgreSQL store against a real embedded PostgreSQL"
 	@echo "  spec-citations  - Check that spec citations still resolve to code"
 	@echo "  docs-snippets   - Compile every Rust example in docs/user-guide.md"
 	@echo "  readme          - Check the README's commands against the Makefile and crates"

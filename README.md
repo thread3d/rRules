@@ -3,7 +3,7 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.42** — released from a verified tree: everything in the table below was measured by a gate,
+**9.0.43** — released from a verified tree: everything in the table below was measured by a gate,
 not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
@@ -84,9 +84,13 @@ make tck && make verify          # the conformance and specification gates
 
 Storage today: rule and decision *documents* live on disk, and rule versioning is a git repository
 (`<RULE_STORAGE_PATH>/.git`, libgit2). Everything the API manages at runtime — rules, categories,
-tags, tenants, approvals, audit events, sessions — is in memory, so a restart starts empty. `migrations/`
-holds schemas for a PostgreSQL-backed store that is not wired: `PostgresDmnStore` is a `todo!()`, and no
-crate depends on a database driver. `specs/http-api.md` records this under its known gaps rather than
+tags, tenants, approvals, audit events, sessions — is in memory, so a restart starts empty.
+
+There is also a **PostgreSQL-backed DMN store**, `engine_state::postgres::PostgresDmnStore`, behind the
+`postgres` feature: real SQL, a schema applied idempotently on connect, and a real server in its tests
+(`make db-test` downloads PostgreSQL with `pg-embed` and runs the store against it). It is not wired
+into the API: the filesystem store is still authoritative, and the tenant/audit stores remain in
+memory. `migrations/` holds their schema for whoever wires them next. `specs/http-api.md` records this under its known gaps rather than
 implying otherwise.
 
 ## Licence

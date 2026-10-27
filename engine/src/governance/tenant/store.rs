@@ -1,7 +1,9 @@
-//! PostgreSQL-backed tenant store for multi-tenancy support.
+//! Tenant storage for multi-tenancy support.
 //!
-//! This module provides a trait-based interface for tenant CRUD operations
-//! with an in-memory implementation and a placeholder SQLx backend.
+//! The trait is the seam; the implementation that ships is in memory. There is no PostgreSQL
+//! backend: one existed here and answered `NotConnected` to every call while pretending to be a
+//! store, which is worse than not having one. `migrations/20_01_tenant_schema.sql` describes the
+//! schema a real one would use.
 
 #![allow(async_fn_in_trait)]
 
@@ -29,81 +31,6 @@ pub trait TenantStoreBackend {
         &mut self,
         id: &str,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
-}
-
-/// PostgreSQL-backed tenant store using sqlx.
-pub struct SqlxTenantStore {
-    pool: Option<sqlx::PgPool>,
-}
-
-impl SqlxTenantStore {
-    /// Create a new tenant store with the given database connection pool.
-    pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool: Some(pool) }
-    }
-
-    /// Get reference to the pool (for advanced usage).
-    pub fn pool(&self) -> Option<&sqlx::PgPool> {
-        self.pool.as_ref()
-    }
-}
-
-impl Default for SqlxTenantStore {
-    fn default() -> Self {
-        Self::new_from_env().unwrap_or_else(|_| Self { pool: None })
-    }
-}
-
-impl SqlxTenantStore {
-    /// Create a new store from DATABASE_URL environment variable.
-    pub fn new_from_env() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let _url = std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL not set")?;
-
-        // This would be: sqlx::PgPool::connect(&url).await
-        Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::NotConnected,
-            "SQLX tenant store requires DATABASE_URL and runtime setup",
-        )))
-    }
-}
-
-impl TenantStoreBackend for SqlxTenantStore {
-    async fn create_tenant(
-        &mut self,
-        _name: &str,
-    ) -> Result<Tenant, Box<dyn std::error::Error + Send + Sync>> {
-        Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::NotConnected,
-            "SqlxTenantStore requires sqlx with DATABASE_URL and runtime setup",
-        )))
-    }
-
-    async fn get_tenant(
-        &self,
-        _id: &str,
-    ) -> Result<Option<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::NotConnected,
-            "SqlxTenantStore requires sqlx with DATABASE_URL and runtime setup",
-        )))
-    }
-
-    async fn list_tenants(&self) -> Result<Vec<Tenant>, Box<dyn std::error::Error + Send + Sync>> {
-        Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::NotConnected,
-            "SqlxTenantStore requires sqlx with DATABASE_URL and runtime setup",
-        )))
-    }
-
-    async fn delete_tenant(
-        &mut self,
-        _id: &str,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::NotConnected,
-            "SqlxTenantStore requires sqlx with DATABASE_URL and runtime setup",
-        )))
-    }
 }
 
 /// In-memory tenant store for testing/dev (no database required).

@@ -14,8 +14,9 @@ monitor their impact — without modifying application code.
 
 **Layout:** a Cargo workspace (`engine/`, `api/`, `engine_state/`) plus `frontend/` (React 19 +
 TypeScript + Vite + TanStack). Rule and decision documents live on disk, rule versioning is a git
-repository, and every runtime store is in memory — a restart starts empty; `migrations/` describes a
-PostgreSQL-backed store that is **not wired**. Ships as a Docker image and a Helm chart
+repository, and every runtime store is in memory — a restart starts empty. A real PostgreSQL-backed DMN
+store exists behind the `postgres` feature and is tested against a live server (`make db-test`), but it
+is not wired into the API. Ships as a Docker image and a Helm chart
 (`helm/rrules-server`, with dev/staging/prod overlays; `k8s/` holds the equivalent raw manifests for
 `kubectl apply -k`).
 
@@ -64,6 +65,7 @@ make verify      # CodeWitness against specs/requirements.md (engine + api)
 make e2e         # browser smoke test of the built UI against a live server
 make image-check # check the Dockerfile's build logic without a container runtime
 make chart-lint  # lint + render the Helm chart (needs helm v3.14.0; CI's chart job)
+make db-test     # the PostgreSQL store against a real server pg-embed downloads and starts
 ```
 
 `make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).
@@ -80,8 +82,9 @@ Chromium: every route must render, a deep link must load, and the app must work 
 signed in. Unit tests in jsdom cannot see a bundle that throws at load or a route the
 server answers with 404 — both of which shipped before this gate existed.
 
-**CI runs these gates** — `make ci`, `make tck`, `make spec-citations`, `make image-check` and the
-chart lint (`make chart-lint`) — so a green check means the same thing as a green run locally.
+**CI runs these gates** — `make ci`, `make tck`, `make spec-citations`, `make image-check`, the chart
+lint (`make chart-lint`) and the database tests (`make db-test`) — so a green check means the same
+thing as a green run locally.
 `bench.yml` runs the benchmark and memory-regression gates nightly, `fuzz.yml` fuzzes the parser and
 decision-table loader nightly, and `deploy.yml` publishes the image on every push and deploys only
 when `KUBE_CONFIG` is configured.
@@ -205,13 +208,19 @@ are struck through with the release that closed them, never quietly removed.
 ### Sandbox facts that cost time here
 
 - `$HOME` is read-only. Point tool caches inside the workspace: `CARGO_HOME=$PWD/.cargo-home`,
-  `XDG_CACHE_HOME=$PWD/.gh-cache`, `npm_config_cache=…`, `HELM_CACHE_HOME=…`.
+  `XDG_CACHE_HOME=$PWD/.gh-cache`, `npm_config_cache=…`, `HELM_CACHE_HOME=…`. `make db-test` downloads
+  its PostgreSQL into `XDG_CACHE_HOME` too, so run it as
+  `XDG_CACHE_HOME=$PWD/.db-cache make db-test`.
 - `cc` is a ccache wrapper: **`CCACHE_DISABLE=1`** for anything that compiles C (release builds,
   `libgit2-sys`, fuzzing, CodeWitness), or it fails with `ccache: error: Read-only file system`.
 - Never share a port with something already listening. Both the API server and Chromium's DevTools
   endpoint must take an OS-assigned free port: a stale server on a fixed port made every route render
   blank once, and a fixed DevTools port failed CI.
 - `cmd | tail` reports *tail's* exit status. Use `cmd > log 2>&1; echo "exit=$?"`.
+- Some tools **replace** their child's environment rather than inheriting it. CodeWitness forwards
+  `HOME` but not `CARGO_HOME`, so its cargo resolves against `$HOME/.cargo` and fails on a read-only
+  home; `make verify` therefore points `HOME` at `.verify-home/` for that one command. Never put git
+  in the same recipe as a `HOME` override — it loses `$HOME/.gitconfig` and the author identity.
 
 ## Never commit binaries
 
@@ -256,6 +265,6 @@ rather than asserted, which is what `TCK-COVERAGE-GAPS.md` exists to do.
 **Next step:** no milestone is in flight. Scope the next one from `../.planning/TECH-DEBT.md`,
 `TCK-COVERAGE-GAPS.md` and the `Known gaps` sections of `specs/` — candidates: DMN 1.6 / FEEL 1.6
 (COLLECT `distinct`, the one remaining corpus divergence), `<functionDefinition>`/`<invocation>`
-decision bodies, non-literal business knowledge model bodies, real `PostgresDmnStore` queries, and
-PostgreSQL-backed tenants. The repository is published at
+decision bodies, non-literal business knowledge model bodies, wiring `PostgresDmnStore` into the API
+(its SQL is real and `make db-test` proves it), and PostgreSQL-backed tenants. The repository is published at
 github.com/thread3d/rRules (`origin`, default branch `main`).

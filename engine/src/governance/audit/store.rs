@@ -1,9 +1,9 @@
-//! PostgreSQL-backed audit event store for Phase 18 Enterprise Governance
+//! Audit event storage for enterprise governance.
 //!
-//! This module implements an immutable append-only audit log using event sourcing pattern.
-//!
-//! Note: Full implementation requires sqlx with DATABASE_URL set at compile time.
-//! For now, we provide a trait-based interface with placeholder implementations.
+//! An immutable append-only audit log, event-sourced. The trait is the seam; the implementation that
+//! ships is in memory. There is no PostgreSQL backend: one existed here and answered `NotConnected`
+//! to every call while pretending to be a store. `migrations/18_03a_audit_types.sql` describes the
+//! schema a real one would use.
 
 #![allow(async_fn_in_trait)]
 
@@ -35,79 +35,6 @@ pub trait AuditStoreBackend {
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
-}
-
-/// PostgreSQL-backed audit store using sqlx
-pub struct SqlxAuditStore {
-    pool: Option<sqlx::PgPool>,
-}
-
-impl SqlxAuditStore {
-    /// Create a new audit store with the given database connection pool
-    pub fn new(pool: sqlx::PgPool) -> Self {
-        Self { pool: Some(pool) }
-    }
-
-    /// Get reference to the pool (for advanced usage)
-    pub fn pool(&self) -> Option<&sqlx::PgPool> {
-        self.pool.as_ref()
-    }
-}
-
-impl Default for SqlxAuditStore {
-    fn default() -> Self {
-        Self::new_from_env().unwrap_or_else(|_| Self { pool: None })
-    }
-}
-
-impl SqlxAuditStore {
-    /// Create a new store from DATABASE_URL environment variable
-    pub fn new_from_env() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let _url = std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL not set")?;
-
-        // This would be: sqlx::PgPool::connect(&url).await
-        Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::NotConnected,
-            "SQLX store requires DATABASE_URL and runtime setup",
-        )))
-    }
-}
-
-impl AuditStoreBackend for SqlxAuditStore {
-    async fn append_event(
-        &mut self,
-        _event: &AuditEvent,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::NotConnected,
-            "SqlxAuditStore requires sqlx with DATABASE_URL and runtime setup",
-        )))
-    }
-
-    async fn query_events(
-        &self,
-        _event_types: Option<Vec<&str>>,
-        _start_time: Option<DateTime<Utc>>,
-        _end_time: Option<DateTime<Utc>>,
-        _actor_id: Option<i32>,
-        _limit: i64,
-    ) -> Result<Vec<AuditEvent>, Box<dyn std::error::Error + Send + Sync>> {
-        Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::NotConnected,
-            "SqlxAuditStore requires sqlx with DATABASE_URL and runtime setup",
-        )))
-    }
-
-    async fn export_csv(
-        &self,
-        _start_time: DateTime<Utc>,
-        _end_time: DateTime<Utc>,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::NotConnected,
-            "SqlxAuditStore requires sqlx with DATABASE_URL and runtime setup",
-        )))
-    }
 }
 
 /// In-memory audit store for testing/dev (no database required)

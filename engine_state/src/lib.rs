@@ -1,10 +1,11 @@
-//! Persistence layer for DMN decision documents (Phase 33).
+//! Persistence layer for DMN decision documents.
 //!
-//! Defines the `DmnPersistence` trait and two implementations:
-//! - `FileSystemDmnStore`: stores decisions as `.dmn` XML files + `.meta.json` on disk.
-//!   Authoritative store — Git-tracked via `DMN_STORAGE_PATH`.
-//! - `PostgresDmnStore`: skeleton implementation using `tokio-postgres` for HA/failover.
-//!   SQL queries are `todo!()` until the PostgreSQL connection is configured in a later phase.
+//! Defines the `DmnPersistence` trait and the implementations behind it:
+//! - `FileSystemDmnStore`: decisions as `.dmn` XML files + `.meta.json` on disk. The authoritative
+//!   store — Git-tracked via `DMN_STORAGE_PATH`.
+//! - `postgres::PostgresDmnStore`: real SQL over PostgreSQL, behind the `postgres` feature so no
+//!   database driver is compiled unless a deployment asks for one. `engine_state/tests/postgres_store.rs`
+//!   runs it against a real server started by `pg-embed`; `make db-test` is the gate.
 //!
 //! The trait uses native async methods (Rust 1.75+), avoiding the `async-trait` dependency.
 
@@ -352,66 +353,8 @@ impl Default for FileSystemDmnStore {
     }
 }
 
-// =========================================================================
-// PostgresDmnStore (skeleton — todo!() at SQL sites)
-// =========================================================================
-
-/// PostgreSQL-backed DMN persistence skeleton.
-///
-/// This is a secondary/failover store. The actual `.dmn` XML content is also
-/// persisted for Git-tracked backup; the filesystem store remains authoritative.
-/// SQL queries are `todo!()` until a live database connection is configured in
-/// a later phase. Connection string comes from env var `DATABASE_URL`.
-pub struct PostgresDmnStore {
-    /// The (unconfigured) connection pool placeholder. Real implementation would
-    /// use `deadpool-postgres` or `tokio-postgres::Client`.
-    _placeholder: (),
-}
-
-impl PostgresDmnStore {
-    pub fn new() -> Self {
-        eprintln!(
-            "PostgresDmnStore constructed (skeleton — DATABASE_URL must be set for live use)"
-        );
-        Self { _placeholder: () }
-    }
-}
-
-impl Default for PostgresDmnStore {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DmnPersistence for PostgresDmnStore {
-    async fn list(&self) -> Result<Vec<DmnSummary>, PersistenceError> {
-        todo!("PostgresDmnStore::list — SELECT id, name, version, updated_at FROM dmn_documents ORDER BY updated_at DESC")
-    }
-
-    async fn get(&self, _id: &str) -> Result<DmnDocument, PersistenceError> {
-        todo!("PostgresDmnStore::get — SELECT content, metadata, created_at, updated_at FROM dmn_documents WHERE id = $1")
-    }
-
-    async fn create(&self, _doc: DmnDocument) -> Result<DmnDocument, PersistenceError> {
-        todo!("PostgresDmnStore::create — INSERT INTO dmn_documents (id, name, content, metadata, created_at, updated_at) VALUES (...)")
-    }
-
-    async fn update(&self, _id: &str, _doc: DmnDocument) -> Result<DmnDocument, PersistenceError> {
-        todo!("PostgresDmnStore::update — UPDATE dmn_documents SET content = $2, metadata = $3, updated_at = NOW() WHERE id = $1")
-    }
-
-    async fn delete(&self, _id: &str) -> Result<(), PersistenceError> {
-        todo!("PostgresDmnStore::delete — DELETE FROM dmn_documents WHERE id = $1")
-    }
-
-    async fn save_file(&self, _filename: &str, _content: &[u8]) -> Result<(), PersistenceError> {
-        todo!("PostgresDmnStore::save_file — INSERT INTO dmn_files (filename, content) VALUES ($1, $2)")
-    }
-
-    async fn load_file(&self, _filename: &str) -> Result<Vec<u8>, PersistenceError> {
-        todo!("PostgresDmnStore::load_file — SELECT content FROM dmn_files WHERE filename = $1")
-    }
-}
+#[cfg(feature = "postgres")]
+pub mod postgres;
 
 // =========================================================================
 // Helpers: parse name/version from DMN XML (lightweight string scanning)
