@@ -1,6 +1,6 @@
 [package]
 name = "engine-fuzz"
-version = "9.0.51"
+version = "9.0.52"
 edition = "2021"
 
 [package.metadata]

@@ -308,14 +308,16 @@ does not use, so the two could drift.
 (`engine/src/environment.rs:34-37`, default `Automatic` `:27`) stores it and
 `Engine::get_chaining_mode` returns it (`:107-109`); no execution path reads it.
 
-* **Forward**: `execute_forward(&mut Engine, &Session)` ignores both arguments and returns a
-  default `ExecutionResult` — the body is comments only
-  (`engine/src/forward_chaining.rs:45-57`); `execute_forward_simple` is identical (`:62-67`).
-  Its `ExecutionResult` has `rules_fired`/`facts_added`/`facts_retracted`/`errors` (`:9-18`).
-  A **second, incompatible** `ExecutionResult` lives on `Engine`
-  (`engine/src/environment.rs:211-232`, private fields), returned by
-  `Engine::execute_forward` as `new(true, "Forward chaining not yet implemented")`
-  (`:132-138`).
+* **Forward**: ~~`execute_forward(&mut Engine, &Session)` ignores both arguments and returns a
+  default `ExecutionResult` — the body is comments only~~ — **closed in 9.0.52**: it runs the shared
+  fixpoint evaluator over the engine's rules and working memory
+  (`engine/src/forward_chaining.rs`), and both it and `execute_forward_simple` delegate to one `run`,
+  so the two entry points cannot answer differently. `Engine::load_rules` parses the same JSON the
+  API stores (a rule document, a bare rule, or an array) instead of returning `Ok(())` without
+  reading anything, which is what makes a firing path reachable at all.
+  `engine/tests/forward_chaining.rs` loads a rule, fires it, and reads the effect back out of
+  working memory. `Engine::execute_forward` reports the count through its own `ExecutionResult`
+  rather than the fixed string.
 * **Backward**: `execute_backward(&Engine, &Session, goal)` always returns
   `InferenceTrace::new(false)` with exactly `Query{goal}` and
   `Backtrack{"No rules match the query"}` (`engine/src/backward_chaining.rs:80-93`). The

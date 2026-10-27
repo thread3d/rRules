@@ -215,6 +215,19 @@ impl WorkingMemory {
         }
     }
 
+    /// Replace every fact with `facts`, re-indexing as it goes.
+    ///
+    /// A chaining pass runs over a plain map (that is what the shared evaluator takes) and writes the
+    /// result back through this, so working memory and the map cannot disagree afterwards.
+    pub(crate) fn replace_all(&mut self, facts: Vec<Fact>) {
+        self.facts.clear();
+        self.index = FactRetrievalIndex::new();
+        for fact in facts {
+            self.index.add(&fact);
+            self.facts.insert(fact.id, fact);
+        }
+    }
+
     /// Gets a fact by ID.
     pub fn get_fact(&self, id: Uuid) -> Option<&Fact> {
         self.facts.get(&id)

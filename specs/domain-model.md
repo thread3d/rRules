@@ -540,14 +540,15 @@ Limits and guards (with defaults and configuration points):
   honours `set_config("max_iterations", …)`, which overrides `RRULES_MAX_CHAIN_ITERATIONS`; the
   legacy `EngineBuilder` still stores its value without effect because the `Engine`/`Session`
   surface below is a placeholder.
-- **The `Environment`/`Session` execution surface is a placeholder.** `Engine::load_rules` is a
-  no-op, `Engine::execute_forward`/`execute_backward` return fixed messages
-  (`environment.rs:122-147`), `Session::insert_fact` discards its argument (`environment.rs:176-183`),
-  `Session::execute` returns "Not implemented" (`environment.rs:186-192`), and `Session` holds a
-  raw `*const Engine` that is never dereferenced (`environment.rs:154,180-181`).
-  `forward_chaining::execute_forward` and `backward_chaining::execute_backward` are stubs
-  (`engine/src/forward_chaining.rs:46-57`, `engine/src/backward_chaining.rs:80-93`), even though
-  `lib.rs` re-exports both as entry points (`engine/src/lib.rs:71-73`).
+- **The `Environment`/`Session` execution surface is partly real and partly a placeholder.**
+  Forward chaining works: `Engine::load_rules` parses the same JSON the API stores,
+  `Engine::execute_forward` runs the shared fixpoint evaluator and reports what fired, and
+  `forward_chaining::execute_forward` delegates to the same loop (**closed in 9.0.52**, see
+  `engine/tests/forward_chaining.rs`). What remains a placeholder: `Engine::execute_backward` and
+  `backward_chaining::execute_backward` still return a fixed result, `Session::insert_fact`
+  discards its argument (`environment.rs`), `Session::execute` returns "Not implemented", and
+  `Session` holds a raw `*const Engine` that is never dereferenced. `lib.rs` re-exports both chaining
+  entry points, so the backward one is reachable and answers nothing.
 - **Validator module is unused by the API and partly unreachable.** `validate_rule_syntax` now
   real (it runs `Rule::validate` and syntax-checks string operands), and the `unsafe` `transmute`
   is gone (the type owns its data), but no crate outside `engine/src/validation.rs` calls the

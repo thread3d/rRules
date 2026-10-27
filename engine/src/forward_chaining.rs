@@ -39,28 +39,63 @@ impl ExecutionResult {
     }
 }
 
-/// Executes forward chaining using Rete algorithm.
+/// Execute the engine's rules over its working memory until nothing new fires.
 ///
-/// This is the main entry point for forward rule execution as exported from lib.rs.
+/// Forward chaining *is* the fixpoint loop: evaluate every rule, fire the ones whose conditions hold,
+/// let their actions change working memory, and repeat until a pass changes nothing or the iteration
+/// cap is reached. `engine::direct_eval` already implements exactly that — salience ordering, agenda
+/// groups, once-per-rule firing, chaining under `RRULES_MAX_CHAIN_ITERATIONS` — so this runs that
+/// rather than a second implementation of it.
+///
+/// Both entry points delegate here, which is what makes the answer the same whichever one a caller
+/// uses.
 #[allow(dead_code)]
-pub fn execute_forward(_engine: &mut Engine, _session: &Session) -> ExecutionResult {
-    // Placeholder implementation - actual Rete integration would go here
+fn run(engine: &mut Engine) -> ExecutionResult {
+    use std::collections::{HashMap, HashSet};
 
-    // This would:
-    // 1. Build or reuse the Rete network from compiled rules
-    // 2. Propagate facts through alpha/beta memories
-    // 3. Trigger rule actions when conditions match
-    // 4. Handle salience-based agenda ordering
+    // The evaluator takes a plain fact map, keyed the way rule actions name their targets.
+    let mut facts: HashMap<String, crate::fact::Fact> = engine
+        .working_memory()
+        .get_all_facts()
+        .into_iter()
+        .map(|fact| (fact.id.to_string(), fact.clone()))
+        .collect();
+    let before: HashSet<String> = facts.keys().cloned().collect();
 
-    ExecutionResult::new()
+    let (fired, _evaluated, _trace) = crate::engine::direct_eval::direct_execute_with_limit(
+        engine.rules(),
+        &mut facts,
+        false,
+        engine.max_iterations(),
+    );
+
+    // Write the result back, so working memory and the map cannot disagree afterwards.
+    let after: HashSet<String> = facts.keys().cloned().collect();
+    let facts_added: Vec<crate::fact::Fact> = after
+        .difference(&before)
+        .filter_map(|id| facts.get(id).cloned())
+        .collect();
+    let facts_retracted: Vec<String> = before.difference(&after).cloned().collect();
+    engine
+        .working_memory_mut()
+        .replace_all(facts.into_values().collect());
+
+    ExecutionResult {
+        rules_fired: fired.len(),
+        facts_added,
+        facts_retracted,
+        errors: Vec::new(),
+    }
+}
+
+/// Executes forward chaining over the engine's rules and working memory.
+#[allow(dead_code)]
+pub fn execute_forward(engine: &mut Engine, _session: &Session) -> ExecutionResult {
+    run(engine)
 }
 
 /// Executes forward chaining using just the engine (no session needed).
-///
-/// This is a convenience wrapper for testing purposes.
 #[allow(dead_code)]
-pub fn execute_forward_simple(_engine: &mut Engine) -> ExecutionResult {
-    // Placeholder implementation - actual Rete integration would go here
-
-    ExecutionResult::new()
+pub fn execute_forward_simple(engine: &mut Engine) -> ExecutionResult {
+    run(engine)
 }

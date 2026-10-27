@@ -119,22 +119,56 @@ impl Engine {
     }
 
     /// Loads rules from a string representation and compiles them.
-    pub fn load_rules(&mut self, _rules_text: &str) -> Result<(), String> {
-        // This is a placeholder - full implementation would:
-        // 1. Parse the rule text into Rule AST
-        // 2. Validate syntax and semantics
-        // 3. Compile to KIE base
-        // 4. Add to rule_set
-        Ok(())
+    /// Load rules from their JSON form — a rule document, a bare rule, or an array of either.
+    ///
+    /// This is the same shape the API stores (`build_ruleset_from_dir` reads `.rules` files as JSON)
+    /// and the same `Rule` type the engines execute, so a rule written for one path works in the
+    /// other. It is not a text DSL parser: `dsl_body` is the FEEL expression inside a rule, not a
+    /// second syntax for rules themselves.
+    pub fn load_rules(&mut self, rules_text: &str) -> Result<(), String> {
+        let parsed: Result<LoadedRules, _> = serde_json::from_str(rules_text);
+
+        // Files in a rules directory are `{ "rules": [ … ] }`; a caller holding one rule passes it
+        // bare, and a caller holding several passes an array.
+        let rules = match parsed {
+            Ok(LoadedRules::Document { rules }) => rules,
+            Ok(LoadedRules::Many(rules)) => rules,
+            Ok(LoadedRules::One(rule)) => vec![*rule],
+            Err(error) => return Err(format!("rules are not valid JSON: {error}")),
+        };
+
+        self.rule_set
+            .add_rules(rules)
+            .map_err(|error| format!("rules were rejected: {error}"))
     }
 
     /// Executes forward chaining with the current rules and facts.
+    /// The rules this engine holds.
+    pub(crate) fn rules(&self) -> &[crate::rules::Rule] {
+        &self.rule_set.rules
+    }
+
+    /// The fixpoint cap this engine was built with.
+    pub(crate) fn max_iterations(&self) -> Option<usize> {
+        Some(self.max_iterations)
+    }
+
     pub fn execute_forward(&mut self) -> ExecutionResult {
-        // This is a placeholder - full implementation would:
-        // 1. Build Rete network from compiled rules
-        // 2. Propagate facts through alpha/beta memories
-        // 3. Fire rules based on salience and conflict resolution
-        ExecutionResult::new(true, "Forward chaining not yet implemented".to_string())
+        // The session-taking entry point and this one run the same loop; see
+        // `forward_chaining::run`, which exists so they cannot answer differently.
+        let session = Session::new(self, false, None);
+        let report = crate::forward_chaining::execute_forward(self, &session);
+        if report.rules_fired == 0 && !report.errors.is_empty() {
+            return ExecutionResult::new(false, report.errors.join("; "));
+        }
+        ExecutionResult::new(
+            true,
+            format!(
+                "{} rule(s) fired, {} fact(s) changed",
+                report.rules_fired,
+                report.facts_added.len() + report.facts_retracted.len()
+            ),
+        )
     }
 
     /// Executes backward chaining from a goal.
@@ -205,6 +239,18 @@ impl Session {
     pub fn id(&self) -> Option<&str> {
         self.session_id.as_deref()
     }
+}
+
+/// The JSON shapes a rule document may take.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum LoadedRules {
+    /// `{ "rules": [ … ] }` — what a `.rules` file holds.
+    Document { rules: Vec<crate::rules::Rule> },
+    /// `[ … ]` — several rules.
+    Many(Vec<crate::rules::Rule>),
+    /// `{ … }` — one rule.
+    One(Box<crate::rules::Rule>),
 }
 
 /// Result of a rule execution.

@@ -12,6 +12,33 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.52] — 2026-10-27 — Forward chaining was answering "Not implemented"
+
+Two placeholders sat at the front door of the engine. `Engine::load_rules` returned `Ok(())` without
+parsing anything, and `Engine::execute_forward` answered `"Forward chaining not yet implemented"` — so
+the pair could not fire a rule however they were used, while `lib.rs` re-exported both as entry points.
+
+Both are real now:
+
+- **`load_rules` parses the same JSON the API stores** — a rule document (`{ "rules": [...] }`, which
+  is what a `.rules` file holds), a bare rule, or an array — into the engine's rule set. Invalid text
+  is an error naming the problem, not a silent `Ok(())`.
+- **`execute_forward` runs the shared fixpoint evaluator** over the engine's rules and working memory,
+  then writes the result back, so working memory and the evaluator cannot disagree afterwards. It
+  reports what fired rather than a fixed string.
+- `forward_chaining::execute_forward` and `execute_forward_simple` both delegate to one `run`, so the
+  two entry points cannot answer differently — the drift this code base keeps producing.
+
+`engine/tests/forward_chaining.rs` loads a rule from JSON, fires it, and reads the action's effect back
+out of working memory; it also pins that invalid text fails loudly, that an empty rule set fires nothing
+and says so, and that the session-taking entry point agrees with the engine's.
+
+**Backward chaining is still a placeholder** and `specs/` says so in two places, now precisely: the
+forward halves are closed with the release that closed them, and what remains (`execute_backward`,
+`Session::insert_fact`, `Session::execute`, the un-dereferenced `*const Engine`) is listed rather than
+implied by silence.
+
+
 ## [9.0.51] — 2026-10-27 — `cargo audit` was never run; the first run found 25 advisories
 
 Dependency vulnerabilities were one of the issue classes this loop is meant to fix, and only `npm audit`
