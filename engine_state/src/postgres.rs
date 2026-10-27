@@ -62,7 +62,14 @@ impl PostgresDmnStore {
 type ListRow = (String, Option<String>, Option<String>, DateTime<Utc>);
 
 /// A `get` row: id, name, content, metadata, created_at, updated_at.
-type DocumentRow = (String, Option<String>, Vec<u8>, JsonValue, DateTime<Utc>, DateTime<Utc>);
+type DocumentRow = (
+    String,
+    Option<String>,
+    Vec<u8>,
+    JsonValue,
+    DateTime<Utc>,
+    DateTime<Utc>,
+);
 
 impl DmnPersistence for PostgresDmnStore {
     async fn list(&self) -> Result<Vec<DmnSummary>, PersistenceError> {

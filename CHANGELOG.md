@@ -12,6 +12,17 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.44] — 2026-10-27 — The format gate caught what I committed
+
+`9.0.43` went to CI unformatted: `cargo fmt --all` ran before the clippy fix that introduced two row
+type aliases in `engine_state/src/postgres.rs`, and the commit was made after it. The gates job failed
+on `cargo fmt --all -- --check` — which is the gate working, on the one thing this round did not
+re-check after its last edit.
+
+The rule it illustrates is in `AGENTS.md` already ("run the gate, paste the evidence"), and the sharper
+version is: re-run the *cheap* gates after the *last* edit, not before it.
+
+
 ## [9.0.43] — 2026-10-26 — PostgreSQL: two fake stores deleted, one real store proven
 
 The "PostgreSQL issue" turned out to be three separate things, none of them a small fix:
