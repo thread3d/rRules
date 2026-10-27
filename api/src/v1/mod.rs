@@ -23,6 +23,9 @@ pub mod tags;
 // Multi-tenancy: tenant (organization/workspace) CRUD. Rule CRUD is already
 // scoped by the `X-Tenant-ID` header; this module manages the tenants
 // themselves.
+#[cfg(feature = "postgres")]
+pub mod tenant_postgres;
+pub mod tenant_store;
 pub mod tenants;
 
 // Export common types for use in main.rs

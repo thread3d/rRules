@@ -685,6 +685,7 @@ Every variable the server reads, with the default that applies when it is unset.
 | `DMN_STORAGE_PATH` | `./dmn` | DMN decision model directory (the filesystem store). |
 | `DMN_PERSISTENCE` | `filesystem` | Backend for decision documents: `filesystem` or `postgres`. `postgres` requires a build with `--features postgres` and a `DATABASE_URL`; an unusable choice fails startup instead of silently using the filesystem. |
 | `DATABASE_URL` | unset | PostgreSQL connection string, read when `DMN_PERSISTENCE` or `AUDIT_PERSISTENCE` is `postgres`. |
+| `TENANT_PERSISTENCE` | `memory` | Where the tenant registry lives: `memory` or `postgres`. Same requirements and same failure rule as `AUDIT_PERSISTENCE`. |
 | `AUDIT_PERSISTENCE` | `memory` | Where the audit trail lives: `memory` (lost on restart) or `postgres`. `postgres` requires a build with `--features postgres` and a `DATABASE_URL`; an unusable choice fails startup instead of silently keeping the trail in memory. |
 | `FRONTEND_DIST` | `../frontend/dist` | built interface served at `/` and for every client-side route. |
 | `WATCH_RULES_DIR` | `true` | watch the rules directory and reload on change. Set `false` to disable. |

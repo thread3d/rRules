@@ -45,6 +45,11 @@ pub enum TenantStoreError {
     DuplicateName(String),
     /// The name was empty or whitespace-only.
     EmptyName,
+    /// The storage itself failed — a database that is unreachable, a table that is missing.
+    ///
+    /// Distinct from the other two, which are the caller's mistake: this one is the server's, and an
+    /// HTTP layer should answer it as such rather than as a conflict.
+    Backend(String),
 }
 
 impl std::fmt::Display for TenantStoreError {
@@ -54,6 +59,7 @@ impl std::fmt::Display for TenantStoreError {
                 write!(f, "Tenant with name '{name}' already exists")
             }
             Self::EmptyName => write!(f, "name is required and cannot be empty"),
+            Self::Backend(reason) => write!(f, "tenant storage unavailable: {reason}"),
         }
     }
 }

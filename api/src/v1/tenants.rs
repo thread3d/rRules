@@ -13,18 +13,18 @@
 //! `.await`.
 
 use actix_web::{web, HttpResponse, Responder};
-use std::sync::{Arc, Mutex};
 
+use crate::v1::tenant_store::TenantBackend;
 use engine::governance::tenant::{
-    CreateTenantRequest, MemoryTenantStore, TenantListResponse, TenantResponse, TenantStoreError,
+    CreateTenantRequest, TenantListResponse, TenantResponse, TenantStoreError,
 };
 
-/// Shared in-memory tenant store.
-pub type TenantStore = Arc<Mutex<MemoryTenantStore>>;
+/// The tenant registry: in memory by default, PostgreSQL when `TENANT_PERSISTENCE=postgres`.
+pub type TenantStore = TenantBackend;
 
-/// Initialize an empty in-memory tenant store.
+/// An empty in-memory registry.
 pub fn init_store() -> TenantStore {
-    Arc::new(Mutex::new(MemoryTenantStore::new()))
+    TenantBackend::in_memory()
 }
 
 /// Map a store error to the matching HTTP status.
@@ -35,6 +35,11 @@ fn store_error_response(err: TenantStoreError) -> HttpResponse {
         }
         TenantStoreError::EmptyName => {
             HttpResponse::BadRequest().json(serde_json::json!({ "error": err.to_string() }))
+        }
+        TenantStoreError::Backend(_) => {
+            // The caller's request was fine; the storage is not. 503 says that, where 409 would blame
+            // the user for someone else's outage.
+            HttpResponse::ServiceUnavailable().json(serde_json::json!({ "error": err.to_string() }))
         }
     }
 }
@@ -59,16 +64,7 @@ pub async fn create_tenant(
     req: web::Json<CreateTenantRequest>,
     store: web::Data<TenantStore>,
 ) -> impl Responder {
-    let mut guard = match store.lock() {
-        Ok(guard) => guard,
-        Err(_) => {
-            return HttpResponse::ServiceUnavailable().json(serde_json::json!({
-                "error": "Resource temporarily unavailable"
-            }));
-        }
-    };
-
-    match guard.create(&req.name) {
+    match store.create(&req.name).await {
         Ok(tenant) => HttpResponse::Created().json(TenantResponse::from(&tenant)),
         Err(err) => store_error_response(err),
     }
@@ -84,16 +80,11 @@ pub async fn create_tenant(
     ),
 )]
 pub async fn list_tenants(store: web::Data<TenantStore>) -> impl Responder {
-    let guard = match store.lock() {
-        Ok(guard) => guard,
-        Err(_) => {
-            return HttpResponse::ServiceUnavailable().json(serde_json::json!({
-                "error": "Resource temporarily unavailable"
-            }));
-        }
+    let listed = match store.list().await {
+        Ok(listed) => listed,
+        Err(err) => return store_error_response(err),
     };
-
-    let tenants: Vec<TenantResponse> = guard.list().iter().map(TenantResponse::from).collect();
+    let tenants: Vec<TenantResponse> = listed.iter().map(TenantResponse::from).collect();
 
     HttpResponse::Ok().json(TenantListResponse {
         total_count: tenants.len(),
@@ -115,20 +106,12 @@ pub async fn list_tenants(store: web::Data<TenantStore>) -> impl Responder {
 pub async fn get_tenant(path: web::Path<String>, store: web::Data<TenantStore>) -> impl Responder {
     let id = path.into_inner();
 
-    let guard = match store.lock() {
-        Ok(guard) => guard,
-        Err(_) => {
-            return HttpResponse::ServiceUnavailable().json(serde_json::json!({
-                "error": "Resource temporarily unavailable"
-            }));
-        }
-    };
-
-    match guard.get(&id) {
-        Some(tenant) => HttpResponse::Ok().json(TenantResponse::from(tenant)),
-        None => HttpResponse::NotFound().json(serde_json::json!({
+    match store.get(&id).await {
+        Ok(Some(tenant)) => HttpResponse::Ok().json(TenantResponse::from(&tenant)),
+        Ok(None) => HttpResponse::NotFound().json(serde_json::json!({
             "error": "Tenant not found"
         })),
+        Err(err) => store_error_response(err),
     }
 }
 
@@ -149,21 +132,12 @@ pub async fn delete_tenant(
 ) -> impl Responder {
     let id = path.into_inner();
 
-    let mut guard = match store.lock() {
-        Ok(guard) => guard,
-        Err(_) => {
-            return HttpResponse::ServiceUnavailable().json(serde_json::json!({
-                "error": "Resource temporarily unavailable"
-            }));
-        }
-    };
-
-    if guard.delete(&id) {
-        HttpResponse::NoContent().finish()
-    } else {
-        HttpResponse::NotFound().json(serde_json::json!({
+    match store.delete(&id).await {
+        Ok(true) => HttpResponse::NoContent().finish(),
+        Ok(false) => HttpResponse::NotFound().json(serde_json::json!({
             "error": "Tenant not found"
-        }))
+        })),
+        Err(err) => store_error_response(err),
     }
 }
 
@@ -175,70 +149,81 @@ pub async fn delete_tenant(
 mod tests {
     use super::*;
 
-    #[test]
-    fn init_store_is_empty() {
+    #[actix_web::test]
+    async fn init_store_is_empty() {
         let store = init_store();
-        assert!(store.lock().unwrap().list().is_empty());
+        assert_eq!(store.kind(), "memory");
+        assert!(store.list().await.expect("listed").is_empty());
     }
 
-    #[test]
-    fn create_then_get_roundtrip() {
-        let mut store = MemoryTenantStore::new();
-        let created = store.create("Acme Corp").expect("create");
-        let fetched = store.get(&created.id).expect("tenant present");
+    #[actix_web::test]
+    async fn create_then_get_roundtrip() {
+        let store = TenantBackend::in_memory();
+        let created = store.create("Acme Corp").await.expect("create");
+        let fetched = store
+            .get(&created.id)
+            .await
+            .expect("looked up")
+            .expect("tenant present");
         assert_eq!(fetched.name, "Acme Corp");
     }
 
-    #[test]
-    fn duplicate_name_is_rejected() {
-        let mut store = MemoryTenantStore::new();
-        store.create("Acme").expect("first create");
-        let err = store.create("Acme").expect_err("duplicate rejected");
+    #[actix_web::test]
+    async fn duplicate_name_is_rejected() {
+        let store = TenantBackend::in_memory();
+        store.create("Acme").await.expect("first create");
+        let err = store.create("Acme").await.expect_err("duplicate rejected");
         assert!(matches!(err, TenantStoreError::DuplicateName(_)));
     }
 
-    #[test]
-    fn blank_name_is_rejected() {
-        let mut store = MemoryTenantStore::new();
-        let err = store.create("   ").expect_err("blank rejected");
+    #[actix_web::test]
+    async fn blank_name_is_rejected() {
+        let store = TenantBackend::in_memory();
+        let err = store.create("   ").await.expect_err("blank rejected");
         assert_eq!(err, TenantStoreError::EmptyName);
     }
 
-    #[test]
-    fn names_are_trimmed() {
-        let mut store = MemoryTenantStore::new();
-        let created = store.create("  Acme  ").expect("create");
+    #[actix_web::test]
+    async fn names_are_trimmed() {
+        let store = TenantBackend::in_memory();
+        let created = store.create("  Acme  ").await.expect("create");
         assert_eq!(created.name, "Acme");
     }
 
-    #[test]
-    fn delete_is_idempotent() {
-        let mut store = MemoryTenantStore::new();
-        let created = store.create("ToDelete").expect("create");
-        assert!(store.delete(&created.id));
-        assert!(!store.delete(&created.id));
-        assert!(store.get(&created.id).is_none());
+    #[actix_web::test]
+    async fn delete_is_idempotent() {
+        let store = TenantBackend::in_memory();
+        let created = store.create("ToDelete").await.expect("create");
+        assert!(store.delete(&created.id).await.expect("deleted"));
+        assert!(!store.delete(&created.id).await.expect("deleted"));
+        assert!(store.get(&created.id).await.expect("looked up").is_none());
     }
 
-    #[test]
-    fn list_is_newest_first() {
-        let mut store = MemoryTenantStore::new();
-        let first = store.create("First").expect("create");
+    #[actix_web::test]
+    async fn list_is_newest_first() {
+        let store = TenantBackend::in_memory();
+        let first = store.create("First").await.expect("create");
         std::thread::sleep(std::time::Duration::from_millis(2));
-        let second = store.create("Second").expect("create");
+        let second = store.create("Second").await.expect("create");
 
-        let listed = store.list();
+        let listed = store.list().await.expect("listed");
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].id, second.id);
         assert_eq!(listed[1].id, first.id);
     }
 
-    #[test]
-    fn list_response_serializes() {
-        let mut store = MemoryTenantStore::new();
-        let a = store.create("Alpha").expect("create");
-        let b = store.create("Beta").expect("create");
-        let tenants: Vec<TenantResponse> = store.list().iter().map(TenantResponse::from).collect();
+    #[actix_web::test]
+    async fn list_response_serializes() {
+        let store = TenantBackend::in_memory();
+        let a = store.create("Alpha").await.expect("create");
+        let b = store.create("Beta").await.expect("create");
+        let tenants: Vec<TenantResponse> = store
+            .list()
+            .await
+            .expect("listed")
+            .iter()
+            .map(TenantResponse::from)
+            .collect();
         let list = TenantListResponse {
             total_count: tenants.len(),
             tenants,

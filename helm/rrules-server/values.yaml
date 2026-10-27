@@ -85,6 +85,8 @@ config:
   # `database.urlSecret`). The trail is the evidence an auditor reads, so a real deployment
   # usually wants it persisted.
   AUDIT_PERSISTENCE: "memory"
+  # Where the tenant registry lives: `memory` or `postgres` (needs `database.urlSecret`).
+  TENANT_PERSISTENCE: "memory"
 
 # PostgreSQL for decision documents and the audit trail, when the matching `*_PERSISTENCE` is
 # `postgres`.

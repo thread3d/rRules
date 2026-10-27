@@ -12,6 +12,29 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.48] — 2026-10-27 — The tenant registry can be persisted
+
+Tenants are the organisations that own rules; the registry is what makes `X-Tenant-ID` mean anything.
+It was a `MemoryTenantStore` behind a `Mutex`, so a restart forgot every tenant and orphaned the rules
+scoped to them — the same shape of hole the audit trail had, in the store beside it.
+
+`TENANT_PERSISTENCE=postgres` keeps the registry in the table `migrations/20_01_tenant_schema.sql`
+already described, answering exactly what the in-memory store answers: names trimmed, blanks rejected
+before the database sees them, duplicates rejected by the unique constraint, newest first, `true` from
+the first delete and `false` from the next. The two are interchangeable behind `TenantBackend`, and the
+tests hold them to the same expectations rather than to two sets.
+
+**A lie avoided on the way.** The first draft mapped a database failure onto
+`TenantStoreError::DuplicateName`, because the enum had no other vocabulary — so an unreachable database
+would have answered **409 Conflict, "the name already exists"**. `TenantStoreError` gained a `Backend`
+variant, the store reports it, and the endpoint answers **503**: the caller's request was fine; the
+storage is not.
+
+Verified against a real PostgreSQL: the semantics test drives the Postgres registry through the same
+case list as the memory one, and an HTTP test creates a tenant through `/v1/tenants` and finds it again
+from a second connection the writer never shared. `make db-test` now runs four suites (5 + 2 + 2 + 2).
+
+
 ## [9.0.47] — 2026-10-27 — The audit trail can be persisted, and a 467-line orphan is gone
 
 The audit trail was a `HashMap` behind a `Mutex`: it was also **nothing after a restart**, which is a

@@ -30,7 +30,6 @@ use crate::v1::routes::monitoring::configure_monitoring;
 use crate::v1::rules::StoredRule;
 use crate::v1::sessions::SessionManager;
 use crate::v1::tags::StoredTag;
-use crate::v1::tenants::TenantStore;
 use crate::{auth, health, middleware, spa, websocket};
 
 /// Everything the application needs, cloned into each worker.
@@ -52,7 +51,7 @@ pub struct ApiState {
     pub category_store: Arc<Mutex<HashMap<Uuid, StoredCategory>>>,
     pub tag_store: Arc<Mutex<HashMap<String, StoredTag>>>,
     pub rule_tag_store: Arc<Mutex<HashSet<(Uuid, String)>>>,
-    pub tenant_store: TenantStore,
+    pub tenant_store: web::Data<v1::tenants::TenantStore>,
     pub approval_store: Arc<Mutex<HashMap<Uuid, StoredApproval>>>,
     pub audit_store: web::Data<v1::audit::AuditStore>,
     pub branch_store: web::Data<AsyncMutex<VersionControlRepo>>,
@@ -176,7 +175,7 @@ pub fn from_paths(paths: ApiPaths) -> std::io::Result<ApiState> {
         category_store: v1::categories::init_store(),
         tag_store,
         rule_tag_store,
-        tenant_store: v1::tenants::init_store(),
+        tenant_store: web::Data::new(v1::tenants::init_store()),
         approval_store: v1::approvals::init_store(),
         audit_store: web::Data::new(v1::audit::init_store()),
         branch_store: web::Data::new(AsyncMutex::new(repo)),
@@ -195,6 +194,15 @@ impl ApiState {
     /// for a differently wired server.
     pub fn with_dmn_store(mut self, store: v1::dmn_store::DmnStore) -> Self {
         self.dmn_store = web::Data::new(store);
+        self
+    }
+
+    /// Keep the tenant registry in `backend` instead of in memory.
+    ///
+    /// The third of the same shape: one field, so a persisted registry cannot drift into being a
+    /// differently assembled server.
+    pub fn with_tenant_backend(mut self, backend: v1::tenant_store::TenantBackend) -> Self {
+        self.tenant_store = web::Data::new(backend);
         self
     }
 
@@ -281,7 +289,7 @@ pub fn build_app(
         .app_data(web::Data::new(state.category_store.clone()))
         .app_data(web::Data::new(state.tag_store.clone()))
         .app_data(web::Data::new(state.rule_tag_store.clone()))
-        .app_data(web::Data::new(state.tenant_store.clone()))
+        .app_data(state.tenant_store.clone())
         .app_data(web::Data::new(state.approval_store.clone()))
         .app_data(state.audit_store.clone())
         .app_data(state.branch_store.clone())

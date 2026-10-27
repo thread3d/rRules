@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.47` (`api/src/openapi.rs:12`).
+  version `9.0.48` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -115,6 +115,7 @@ file service (it also enables directory listing). `FRONTEND_DIST` defaults to
 | `DMN_PERSISTENCE` | `filesystem` | which backend the decision endpoints persist through: `filesystem` or `postgres`; anything else, or `postgres` without the feature, fails startup rather than falling back | `api/src/v1/dmn_store.rs` |
 | `DATABASE_URL` | unset | required when `DMN_PERSISTENCE=postgres` or `AUDIT_PERSISTENCE=postgres` | `engine_state/src/postgres.rs`, `api/src/v1/audit_postgres.rs` |
 | `AUDIT_PERSISTENCE` | `memory` | where the audit trail lives: `memory` (a restart empties it) or `postgres`; anything else, or `postgres` without the feature, fails startup rather than falling back | `api/src/v1/audit_store.rs` |
+| `TENANT_PERSISTENCE` | `memory` | where the tenant registry lives: `memory` (a restart empties it) or `postgres`; same failure rule as the two above | `api/src/v1/tenant_store.rs` |
 | `FRONTEND_DIST` | `../frontend/dist` | static mount | `ApiPaths::from_environment` in `app.rs` |
 | `WATCH_RULES_DIR` | `true` (`"true"`/`"1"` truthy) | spawns the rules-directory watcher: it snapshots the directory and calls `reload_and_swap` when a rule file is added, removed, resized or modified | `main.rs:33-41`, `v1/execution.rs` `start_file_watcher` |
 | `RRULES_WATCH_INTERVAL_SECS` | `2` | how often the watcher looks for changes | `v1/execution.rs` `watch_interval` |
@@ -400,6 +401,7 @@ decisions/categories/tags/tenants/branches. Inconsistencies:
 | Evaluated DMN model | in-process snapshot, replaced only by `POST /v1/decisions/reload` | re-read at boot (first file only) | `app.rs:100-155` |
 | Prometheus counters, gauges | process memory | **no** | `metrics.rs:96-162` |
 | Audit trail | process memory, **or** PostgreSQL when `AUDIT_PERSISTENCE=postgres` | memory: no; postgres: yes | `api/src/v1/audit_store.rs`, `api/src/v1/audit_postgres.rs` |
+| Tenant registry | process memory, **or** PostgreSQL when `TENANT_PERSISTENCE=postgres` | memory: no; postgres: yes | `api/src/v1/tenant_store.rs`, `api/src/v1/tenant_postgres.rs` |
 
 SQL backends: `SqlxTenantStore` is referenced only in `docs/API.md:469-471`;
 the reachable tenant backend is `MemoryTenantStore` (`tenants.rs:18-23`).
