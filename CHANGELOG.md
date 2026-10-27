@@ -12,6 +12,38 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.45] — 2026-10-27 — Postgres is selectable: `DMN_PERSISTENCE=postgres`
+
+The store existed and proved itself; nothing used it. Now the `/v1/decisions` endpoints can persist
+through PostgreSQL: build with `--features postgres` and set `DMN_PERSISTENCE=postgres` with a
+`DATABASE_URL`, and import, list, get, export and delete all run against the database. The default is
+unchanged — the filesystem store, which is what git tracks — and the choice is explicit: asking for
+`postgres` without the feature or without the URL **fails startup** rather than quietly writing files,
+because a deployment believing its documents are in a database that never received them is the same lie
+as a store whose methods return `NotConnected`.
+
+The wiring is one field. `ApiState` carries a `DmnStore` (filesystem or postgres); `from_paths`
+assembles it with the filesystem one, and `with_dmn_store` substitutes exactly one field, so the
+database path cannot drift into being a second assembly of the server. That mattered immediately: three
+hand-rolled test apps still passed `web::Data<FileSystemDmnStore>` and started answering **500** —
+compiling happily, failing at runtime, exactly the hazard `AGENTS.md` warns about. They hand the
+handler the type it extracts now.
+
+**A backend difference the tests found.** `list()` reads `dmn_documents` while the import path writes
+through `save_file`, which went to `dmn_files` — so an imported decision was invisible to the list.
+On disk the two views coincide by construction (a `.dmn` file *is* the document), and the store now
+enforces the same rule in SQL: a `.dmn` filename names a document, whichever method writes it.
+
+**Verified over HTTP against a real PostgreSQL**: `api/tests/dmn_postgres.rs` imports a model, lists
+it, reads its metadata length, exports the XML and deletes it, through the whole application.
+`make db-test` runs it beside the store's own five tests.
+
+**The option works in the shipped artifacts**, or it would be a promise only a from-source build could
+keep: the Dockerfile builds `--features postgres`, the chart exposes `config.DMN_PERSISTENCE` and mounts
+`DATABASE_URL` from a Secret you supply, and `make deploy-env` — which scans the crates the binary is
+built from rather than `api/src` alone — confirms every variable the chart sets is one the server reads.
+
+
 ## [9.0.44] — 2026-10-27 — The format gate caught what I committed
 
 `9.0.43` went to CI unformatted: `cargo fmt --all` ran before the clippy fix that introduced two row

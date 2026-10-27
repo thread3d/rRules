@@ -58,6 +58,16 @@ impl PostgresDmnStore {
     }
 }
 
+/// A `.dmn` file *is* a decision document in either backend.
+///
+/// The filesystem store proves it: `save_file("x.dmn", …)` writes `x.dmn`, and `list()` finds it by
+/// scanning `*.dmn`, so the file view and the document view are the same data. Keeping two tables
+/// here without this rule would make an imported document invisible to `list` — a difference between
+/// backends that no test would catch unless something imported and then listed.
+fn decision_id(filename: &str) -> Option<&str> {
+    filename.strip_suffix(".dmn")
+}
+
 /// A `list` row: id, name, version, updated_at.
 type ListRow = (String, Option<String>, Option<String>, DateTime<Utc>);
 
@@ -191,6 +201,26 @@ impl DmnPersistence for PostgresDmnStore {
     }
 
     async fn save_file(&self, filename: &str, content: &[u8]) -> Result<(), PersistenceError> {
+        if let Some(id) = decision_id(filename) {
+            // Same data the document methods use, so an imported model is listed and deletable.
+            let text = String::from_utf8_lossy(content);
+            let (name, version) = crate::parse_dmn_name_version(&text);
+            sqlx::query(
+                "INSERT INTO dmn_documents (id, name, version, content, metadata, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, '{}'::jsonb, NOW(), NOW()) \
+                 ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, name = EXCLUDED.name, \
+                     version = EXCLUDED.version, updated_at = NOW()",
+            )
+            .bind(id)
+            .bind(name)
+            .bind(version)
+            .bind(content)
+            .execute(&self.pool)
+            .await
+            .map_err(|error| PersistenceError::Database(error.to_string()))?;
+            return Ok(());
+        }
+
         sqlx::query(
             "INSERT INTO dmn_files (filename, content, updated_at) VALUES ($1, $2, NOW()) \
              ON CONFLICT (filename) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()",
@@ -204,6 +234,20 @@ impl DmnPersistence for PostgresDmnStore {
     }
 
     async fn load_file(&self, filename: &str) -> Result<Vec<u8>, PersistenceError> {
+        if let Some(id) = decision_id(filename) {
+            // Read the document table first: that is where `save_file` put a `.dmn` file.
+            let document: Option<(Vec<u8>,)> =
+                sqlx::query_as("SELECT content FROM dmn_documents WHERE id = $1")
+                    .bind(id)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(|error| PersistenceError::Database(error.to_string()))?;
+            return match document {
+                Some((content,)) => Ok(content),
+                None => Err(PersistenceError::NotFound(filename.to_string())),
+            };
+        }
+
         let row: Option<(Vec<u8>,)> =
             sqlx::query_as("SELECT content FROM dmn_files WHERE filename = $1")
                 .bind(filename)

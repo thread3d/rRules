@@ -11,6 +11,7 @@ pub mod categories;
 pub mod decisions;
 pub mod dmn_metrics;
 pub mod dmn_metrics_ws;
+pub mod dmn_store;
 pub mod execution;
 pub mod rules;
 pub mod sessions;

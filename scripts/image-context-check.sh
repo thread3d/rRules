@@ -15,6 +15,10 @@
 # packages, the base image) is out of scope and is listed at the end.
 set -euo pipefail
 
+# `cc` here is a ccache wrapper whose home is read-only; C build scripts inside the simulated
+# build (libgit2-sys, zstd-sys) fail without this.
+export CCACHE_DISABLE=1
+
 cd "$(dirname "$0")/.."
 REPO_ROOT=$(pwd)
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/rrules-image-check.XXXXXX")

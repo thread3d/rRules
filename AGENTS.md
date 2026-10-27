@@ -15,8 +15,8 @@ monitor their impact — without modifying application code.
 **Layout:** a Cargo workspace (`engine/`, `api/`, `engine_state/`) plus `frontend/` (React 19 +
 TypeScript + Vite + TanStack). Rule and decision documents live on disk, rule versioning is a git
 repository, and every runtime store is in memory — a restart starts empty. A real PostgreSQL-backed DMN
-store exists behind the `postgres` feature and is tested against a live server (`make db-test`), but it
-is not wired into the API. Ships as a Docker image and a Helm chart
+store exists behind the `postgres` feature, is selected with `DMN_PERSISTENCE=postgres`, and is tested
+against a live server (`make db-test`); the filesystem store remains the default. Ships as a Docker image and a Helm chart
 (`helm/rrules-server`, with dev/staging/prod overlays; `k8s/` holds the equivalent raw manifests for
 `kubectl apply -k`).
 

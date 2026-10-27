@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.44` (`api/src/openapi.rs:12`).
+  version `9.0.45` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -111,7 +111,9 @@ file service (it also enables directory listing). `FRONTEND_DIST` defaults to
 | Variable | Default | Effect | Source |
 |---|---|---|---|
 | `RULE_STORAGE_PATH` | `./rules` | rules dir + `<dir>/.git` repo; read again per reload | `app.rs:107,110`, `v1/execution.rs:1295` |
-| `DMN_STORAGE_PATH` | `./dmn` | startup model load; also read by the store | `app.rs:100-101`, `engine_state/src/lib.rs:104` |
+| `DMN_STORAGE_PATH` | `./dmn` | startup model load; also read by the filesystem store | `app.rs:100-101`, `engine_state/src/lib.rs:104` |
+| `DMN_PERSISTENCE` | `filesystem` | which backend the decision endpoints persist through: `filesystem` or `postgres`; anything else, or `postgres` without the feature, fails startup rather than falling back | `api/src/v1/dmn_store.rs` |
+| `DATABASE_URL` | unset | required when `DMN_PERSISTENCE=postgres` | `engine_state/src/postgres.rs` |
 | `FRONTEND_DIST` | `../frontend/dist` | static mount | `ApiPaths::from_environment` in `app.rs` |
 | `WATCH_RULES_DIR` | `true` (`"true"`/`"1"` truthy) | spawns the rules-directory watcher: it snapshots the directory and calls `reload_and_swap` when a rule file is added, removed, resized or modified | `main.rs:33-41`, `v1/execution.rs` `start_file_watcher` |
 | `RRULES_WATCH_INTERVAL_SECS` | `2` | how often the watcher looks for changes | `v1/execution.rs` `watch_interval` |
@@ -393,13 +395,18 @@ decisions/categories/tags/tenants/branches. Inconsistencies:
 | Users | seeded `HashMap` | recreated identical at boot | `auth/store.rs:27-48` |
 | Sessions | `DashMap` in `SessionManager`, TTL/LRU swept | **no** | `sessions.rs:92-105,272-312` |
 | Branches / commits | git repository at `<RULE_STORAGE_PATH>/.git` (libgit2) | yes | `app.rs:147-152` |
-| DMN documents | `<DMN_STORAGE_PATH>/{id}.dmn` + `{id}.meta.json` | yes | `engine_state/src/lib.rs:96-166,243-305` |
+| DMN documents | `<DMN_STORAGE_PATH>/{id}.dmn` + `{id}.meta.json`, **or** PostgreSQL when `DMN_PERSISTENCE=postgres` | filesystem: yes; postgres: no | `engine_state/src/lib.rs:96-166,243-305`, `engine_state/src/postgres.rs` |
 | Evaluated DMN model | in-process snapshot, replaced only by `POST /v1/decisions/reload` | re-read at boot (first file only) | `app.rs:100-155` |
 | Prometheus counters, gauges | process memory | **no** | `metrics.rs:96-162` |
 
 SQL backends: `SqlxTenantStore` is referenced only in `docs/API.md:469-471`;
 the reachable tenant backend is `MemoryTenantStore` (`tenants.rs:18-23`).
-~~`PostgresDmnStore` exists but every trait method is `todo!()`~~ — **closed in 9.0.43**: the store is real SQL behind the `postgres` feature and `make db-test` runs it against a PostgreSQL that `pg-embed` starts; it is still not wired into the API
+~~`PostgresDmnStore` exists but every trait method is `todo!()`~~ — **closed in 9.0.43**: real SQL behind
+the `postgres` feature, exercised against a PostgreSQL that `pg-embed` starts.
+~~it is not wired into the API~~ — **closed in 9.0.45**: `DMN_PERSISTENCE=postgres` selects it
+(`api/src/v1/dmn_store.rs`), and `api/tests/dmn_postgres.rs` imports, lists, reads, exports and deletes
+a decision over HTTP through a real database. Default deployments are unchanged: the filesystem store
+remains the default and the one git tracks. The tenant and audit stores are still in memory.
 (`engine_state/src/lib.rs:360-388`), so calling it panics; it is never
 constructed by the server. `migrations/` is not exercised by any API code path.
 

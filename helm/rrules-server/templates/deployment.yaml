@@ -40,6 +40,14 @@ spec:
             - name: {{ $name }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- if .Values.database.urlSecret }}
+            # A connection string carries credentials, so it comes from a Secret, never from values.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.urlSecret }}
+                  key: {{ .Values.database.urlSecretKey | default "DATABASE_URL" }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           livenessProbe:

@@ -46,6 +46,9 @@ pub struct ApiState {
     pub session_manager: Arc<SessionManager>,
     pub dmn_evaluator: Arc<DecisionEvaluator>,
     pub dmn_metrics_tx: DmnMetricsTx,
+    /// Where decision documents are persisted: the filesystem by default, PostgreSQL when a
+    /// deployment asks for it (`DMN_PERSISTENCE=postgres`).
+    pub dmn_store: web::Data<crate::v1::dmn_store::DmnStore>,
     pub rule_store: Arc<Mutex<HashMap<(String, Uuid), StoredRule>>>,
     pub category_store: Arc<Mutex<HashMap<Uuid, StoredCategory>>>,
     pub tag_store: Arc<Mutex<HashMap<String, StoredTag>>>,
@@ -137,6 +140,8 @@ pub fn from_paths(paths: ApiPaths) -> std::io::Result<ApiState> {
     ))));
 
     let (dmn_metrics_tx, _) = v1::dmn_metrics::create_dmn_metrics_channel(16);
+    // The filesystem store here; `from_environment` swaps in PostgreSQL when a deployment asks.
+    let dmn_store = web::Data::new(v1::dmn_store::DmnStore::from_filesystem());
     let (metrics_tx, _) = metrics::create_metrics_channel(16);
     let counters = web::Data::new(ExecutionCounters::new());
 
@@ -167,6 +172,7 @@ pub fn from_paths(paths: ApiPaths) -> std::io::Result<ApiState> {
         session_manager,
         dmn_evaluator,
         dmn_metrics_tx,
+        dmn_store,
         rule_store: v1::rules::init_store(),
         category_store: v1::categories::init_store(),
         tag_store,
@@ -182,9 +188,33 @@ pub fn from_paths(paths: ApiPaths) -> std::io::Result<ApiState> {
     })
 }
 
-/// The state a running server uses: [`ApiPaths::from_environment`], then [`from_paths`].
-pub fn from_environment() -> std::io::Result<ApiState> {
-    from_paths(ApiPaths::from_environment())
+impl ApiState {
+    /// Use `store` for decision persistence instead of the filesystem one.
+    ///
+    /// The state is assembled once, in [`from_paths`]; this substitutes exactly one field, so the
+    /// PostgreSQL path cannot drift into being a second assembly. A caller asks for a backend, not
+    /// for a differently wired server.
+    pub fn with_dmn_store(mut self, store: v1::dmn_store::DmnStore) -> Self {
+        self.dmn_store = web::Data::new(store);
+        self
+    }
+}
+
+/// The state a running server uses: [`ApiPaths::from_environment`], then [`from_paths`], then the
+/// decision store named by `DMN_PERSISTENCE`.
+///
+/// Async because connecting to a database is. The default (`filesystem`) is the same synchronous
+/// assembly the tests use.
+pub async fn from_environment() -> std::io::Result<ApiState> {
+    let state = from_paths(ApiPaths::from_environment())?;
+    let store = v1::dmn_store::DmnStore::from_environment()
+        .await
+        .map_err(|error| std::io::Error::other(format!("DMN persistence: {error}")))?;
+    tracing::info!(
+        backend = store.kind(),
+        "decision documents are persisted through this store"
+    );
+    Ok(state.with_dmn_store(store))
 }
 
 /// Build the application. Called once per worker by the server, and directly by tests.
@@ -238,7 +268,7 @@ pub fn build_app(
         // can push DmnMetricsSnapshot events after each evaluation (WS delivery).
         .app_data(web::Data::new(state.dmn_metrics_tx.clone()))
         // Phase 33 (Task 5): inject the FileSystemDmnStore for decision CRUD.
-        .app_data(web::Data::new(engine_state::FileSystemDmnStore::default()))
+        .app_data(state.dmn_store.clone())
         .app_data(web::Data::new(state.rule_store.clone()))
         .app_data(web::Data::new(state.category_store.clone()))
         .app_data(web::Data::new(state.tag_store.clone()))

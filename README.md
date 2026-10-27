@@ -3,7 +3,7 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.44** — released from a verified tree: everything in the table below was measured by a gate,
+**9.0.45** — released from a verified tree: everything in the table below was measured by a gate,
 not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
@@ -86,11 +86,16 @@ Storage today: rule and decision *documents* live on disk, and rule versioning i
 (`<RULE_STORAGE_PATH>/.git`, libgit2). Everything the API manages at runtime — rules, categories,
 tags, tenants, approvals, audit events, sessions — is in memory, so a restart starts empty.
 
-There is also a **PostgreSQL-backed DMN store**, `engine_state::postgres::PostgresDmnStore`, behind the
-`postgres` feature: real SQL, a schema applied idempotently on connect, and a real server in its tests
-(`make db-test` downloads PostgreSQL with `pg-embed` and runs the store against it). It is not wired
-into the API: the filesystem store is still authoritative, and the tenant/audit stores remain in
-memory. `migrations/` holds their schema for whoever wires them next. `specs/http-api.md` records this under its known gaps rather than
+Decision documents can also be kept in **PostgreSQL**: build with `--features postgres` and set
+`DMN_PERSISTENCE=postgres` with a `DATABASE_URL`, and the `/v1/decisions` endpoints persist there
+instead of to `DMN_STORAGE_PATH`. The default is unchanged — the filesystem store, which is what git
+tracks — and a deployment that asks for Postgres without the feature or the URL fails at startup
+rather than silently writing files. The tenant and audit stores remain in memory;
+`migrations/` holds their schema.
+
+Both are exercised against a real database: `make db-test` downloads PostgreSQL with `pg-embed` and
+runs the store's own tests plus an HTTP-level test that imports, lists, reads, exports and deletes a
+decision through the API. `specs/http-api.md` records this under its known gaps rather than
 implying otherwise.
 
 ## Licence

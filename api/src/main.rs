@@ -19,12 +19,12 @@ async fn main() -> std::io::Result<()> {
         format!("{host}:{port}")
     };
 
-    println!("rRules REST API Server v9.0.44");
+    println!("rRules REST API Server v9.0.45");
     println!("Starting on http://{bind_address}");
 
     // One assembly, shared with the tests: `from_paths` builds every store, the engine registry,
     // the shared rule set and the DMN model, so a test cannot run against a differently wired server.
-    let state = api::app::from_environment()?;
+    let state = api::app::from_environment().await?;
     let ruleset_inner = state.ruleset.get_ref().clone();
     let sweep_manager = state.session_manager.clone();
     let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());

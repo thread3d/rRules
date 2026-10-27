@@ -17,8 +17,9 @@ use engine::data_types::Value;
 use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest};
 use engine::dmn::model::{Decision, DefinitionsChild, DmnModel};
 use engine_state::DmnDocument;
-use engine_state::FileSystemDmnStore;
-// Import the DmnPersistence trait so its methods are in scope for FileSystemDmnStore.
+// The store is chosen at startup (filesystem or PostgreSQL); the handlers see the selector.
+use crate::v1::dmn_store::DmnStore;
+// Import the DmnPersistence trait so its methods are in scope for `DmnStore`.
 use engine_state::DmnPersistence;
 
 // Re-export DmnMetricsSnapshot for use in handlers.
@@ -235,15 +236,14 @@ pub async fn evaluate_decision(
     tag = "decisions",
 )]
 pub async fn list_decisions(
-    persistence: web::Data<FileSystemDmnStore>,
+    persistence: web::Data<crate::v1::dmn_store::DmnStore>,
     query: web::Query<ListQuery>,
 ) -> HttpResponse {
     let page = query.page as usize;
     let per_page = query.per_page as usize;
     let offset = (page.saturating_sub(1)) * per_page;
 
-    // Dereference Arc to access the underlying FileSystemDmnStore methods.
-    let store: &FileSystemDmnStore = &persistence;
+    let store: &DmnStore = persistence.get_ref();
     match store.list().await {
         Ok(summaries) => {
             let total = summaries.len();
@@ -272,7 +272,7 @@ pub async fn list_decisions(
     tag = "decisions",
 )]
 pub async fn get_decision(
-    persistence: web::Data<FileSystemDmnStore>,
+    persistence: web::Data<crate::v1::dmn_store::DmnStore>,
     path: web::Path<String>,
 ) -> HttpResponse {
     let decision_id = path.into_inner();
@@ -306,7 +306,7 @@ pub async fn get_decision(
     tag = "decisions",
 )]
 pub async fn create_decision(
-    persistence: web::Data<FileSystemDmnStore>,
+    persistence: web::Data<crate::v1::dmn_store::DmnStore>,
     body: web::Json<CreateDecisionRequest>,
 ) -> HttpResponse {
     let id = body
@@ -355,7 +355,7 @@ pub async fn create_decision(
     tag = "decisions",
 )]
 pub async fn update_decision(
-    persistence: web::Data<FileSystemDmnStore>,
+    persistence: web::Data<crate::v1::dmn_store::DmnStore>,
     path: web::Path<String>,
     body: web::Json<UpdateDecisionRequest>,
 ) -> HttpResponse {
@@ -409,7 +409,7 @@ pub async fn update_decision(
     tag = "decisions",
 )]
 pub async fn delete_decision(
-    persistence: web::Data<FileSystemDmnStore>,
+    persistence: web::Data<crate::v1::dmn_store::DmnStore>,
     path: web::Path<String>,
 ) -> HttpResponse {
     let id = path.into_inner();
@@ -436,7 +436,7 @@ pub async fn delete_decision(
     tag = "decisions",
 )]
 pub async fn import_dmn(
-    persistence: web::Data<FileSystemDmnStore>,
+    persistence: web::Data<crate::v1::dmn_store::DmnStore>,
     body: web::Json<ImportDmnRequest>,
 ) -> HttpResponse {
     let filename = format!("{}.dmn", &body.id);
@@ -481,7 +481,7 @@ pub async fn import_dmn(
     tag = "decisions",
 )]
 pub async fn export_dmn(
-    persistence: web::Data<FileSystemDmnStore>,
+    persistence: web::Data<crate::v1::dmn_store::DmnStore>,
     path: web::Path<String>,
 ) -> HttpResponse {
     let id = path.into_inner();
@@ -520,7 +520,7 @@ pub async fn export_dmn(
     tag = "decisions",
 )]
 pub async fn get_decision_ir(
-    persistence: web::Data<FileSystemDmnStore>,
+    persistence: web::Data<crate::v1::dmn_store::DmnStore>,
     path: web::Path<String>,
 ) -> HttpResponse {
     let decision_id = path.into_inner();

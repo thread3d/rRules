@@ -56,7 +56,10 @@ COPY engine ./engine
 COPY api ./api
 COPY engine_state ./engine_state
 
-RUN cargo build --release --locked -p api --bin rRules-server
+# `--features postgres` compiles the PostgreSQL-backed DMN store, so a deployment can set
+# `DMN_PERSISTENCE=postgres` against this image. Without it the flag would be a documented option
+# that no shipped artifact could honour.
+RUN cargo build --release --locked -p api --bin rRules-server --features postgres
 
 # ---- 3. Runtime ------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime

@@ -16,6 +16,7 @@ use std::sync::{Arc, RwLock};
 use actix_web::{body::BoxBody, dev::ServiceResponse, test, web, App as ActixApp};
 use serde_json::{json, Value};
 
+use api::v1::dmn_store::DmnStore;
 use engine::dmn::evaluator::{DecisionEvaluator, SharedDmnModel};
 use engine_state::FileSystemDmnStore;
 
@@ -122,7 +123,7 @@ async fn evaluate_not_found_returns_404() {
 #[actix_web::test]
 async fn list_decisions_returns_array() {
     let evaluator = build_evaluator(MINIMAL_DMN_XML);
-    let store = web::Data::new(FileSystemDmnStore::default());
+    let store = web::Data::new(DmnStore::FileSystem(FileSystemDmnStore::default()));
     let app = test::init_service(ActixApp::new().app_data(evaluator).app_data(store).route(
         "/decisions",
         web::get().to(api::v1::decisions::list_decisions),
@@ -141,7 +142,7 @@ async fn list_decisions_returns_array() {
 #[actix_web::test]
 async fn create_and_get_decision() {
     let evaluator = build_evaluator(MINIMAL_DMN_XML);
-    let store = web::Data::new(FileSystemDmnStore::default());
+    let store = web::Data::new(DmnStore::FileSystem(FileSystemDmnStore::default()));
     let app = test::init_service(
         ActixApp::new()
             .app_data(evaluator)
@@ -183,7 +184,7 @@ async fn create_and_get_decision() {
 #[actix_web::test]
 async fn hot_reload_swaps_model() {
     let evaluator: Arc<DecisionEvaluator> = build_evaluator(MINIMAL_DMN_XML);
-    let store = web::Data::new(FileSystemDmnStore::default());
+    let store = web::Data::new(DmnStore::FileSystem(FileSystemDmnStore::default()));
     let app = test::init_service(
         ActixApp::new()
             .app_data(web::Data::new(evaluator))

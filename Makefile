@@ -16,6 +16,7 @@ lint:
 	cargo clippy --workspace --all-targets -- -D warnings
 	@# The `postgres` feature is off by default, so a plain workspace lint never compiles it.
 	cargo clippy -p engine_state --features postgres --all-targets -- -D warnings
+	cargo clippy -p api --features postgres --all-targets -- -D warnings
 
 # Format code with rustfmt
 fmt:
@@ -46,8 +47,11 @@ deploy-env:
 # The binary cache honours XDG_CACHE_HOME, which this sandbox's read-only $HOME makes necessary:
 # `XDG_CACHE_HOME=$PWD/.db-cache make db-test`.
 db-test:
+	@# Two suites: the store itself, and the API's decision endpoints persisting through it.
 	@XDG_CACHE_HOME="$${XDG_CACHE_HOME:-$$PWD/.db-cache}" \
 		cargo test -p engine_state --features postgres --test postgres_store -- --ignored --test-threads=1
+	@XDG_CACHE_HOME="$${XDG_CACHE_HOME:-$$PWD/.db-cache}" \
+		cargo test -p api --features postgres --test dmn_postgres -- --ignored --test-threads=1
 
 # The commands the README tells a reader to run must exist: a target, a binary, a crate, a directory.
 readme:

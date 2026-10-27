@@ -1,11 +1,16 @@
 [package]
 name = "api"
-version = "9.0.44"
+version = "9.0.45"
 edition = "2021"
 
 [[bin]]
 name = "rRules-server"
 path = "src/main.rs"
+
+[features]
+default = []
+# The PostgreSQL-backed DMN store; off by default so the API image carries no database driver.
+postgres = ["engine_state/postgres"]
 
 [dependencies]
 # Phase 23 (D-01 / L-01): enable all four pluggable-engine features on the
@@ -70,3 +75,7 @@ actix-test = "0.1"
 # other, so clear()+record() pairs aren't raced by sibling tests firing the
 # same rule id.
 serial_test = { workspace = true }
+
+# Only the ignored `dmn_postgres` test uses these: a real PostgreSQL, downloaded and run in
+# userspace, so the API's Postgres wiring is exercised rather than assumed.
+pg-embed = "1.0.0"

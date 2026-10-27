@@ -46,9 +46,16 @@ TEMPLATE_VAR = re.compile(r"\{\{\s*\.Values\.config\.([A-Z][A-Z0-9_]*)")
 
 
 def read_by_server() -> set[str]:
+    """Every environment variable the binary can read.
+
+    The server is one binary built from three crates, so a variable read in `engine_state` (the
+    PostgreSQL store's `DATABASE_URL`) is as real as one read in `api/src`. Scanning only `api/src`
+    reported `DATABASE_URL` as dead configuration while the code that reads it sat one crate away.
+    """
     found: set[str] = set()
-    for path in (REPO / "api" / "src").rglob("*.rs"):
-        found.update(ENV_READ.findall(path.read_text(encoding="utf-8", errors="replace")))
+    for crate in ("api", "engine", "engine_state"):
+        for path in (REPO / crate / "src").rglob("*.rs"):
+            found.update(ENV_READ.findall(path.read_text(encoding="utf-8", errors="replace")))
     return found
 
 
@@ -122,7 +129,7 @@ def report(label: str, read: set[str], configured: dict[str, set[str]], verbose:
     print(f"  never set            : {len(unset_optional)} optional, {len(unset_secrets)} security-relevant")
 
     for name in sorted(dead):
-        print(f"  DEAD      {name}: set by {', '.join(sorted(dead[name]))}, read nowhere in api/src")
+        print(f"  DEAD      {name}: set by {', '.join(sorted(dead[name]))}, read nowhere in the server crates (api, engine, engine_state)")
     for name in unset_secrets:
         print(f"  UNSET     {name}: the server falls back to an unsafe default")
     if verbose:

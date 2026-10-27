@@ -682,7 +682,9 @@ Every variable the server reads, with the default that applies when it is unset.
 | `PORT` | `8080` | listening port. |
 | `CORS_ALLOWED_ORIGINS` | none (no cross-origin origin allowed) | comma-separated list of browser origins allowed to call the API. Origins are pinned, never a wildcard, so the Bearer-token flow works without allowing credentials. |
 | `RULE_STORAGE_PATH` | `./rules` | rules directory; also the git repository the version control uses (`<path>/.git`). |
-| `DMN_STORAGE_PATH` | `./dmn` | DMN decision model directory. |
+| `DMN_STORAGE_PATH` | `./dmn` | DMN decision model directory (the filesystem store). |
+| `DMN_PERSISTENCE` | `filesystem` | Backend for decision documents: `filesystem` or `postgres`. `postgres` requires a build with `--features postgres` and a `DATABASE_URL`; an unusable choice fails startup instead of silently using the filesystem. |
+| `DATABASE_URL` | unset | PostgreSQL connection string, read when `DMN_PERSISTENCE=postgres`. |
 | `FRONTEND_DIST` | `../frontend/dist` | built interface served at `/` and for every client-side route. |
 | `WATCH_RULES_DIR` | `true` | watch the rules directory and reload on change. Set `false` to disable. |
 | `RRULES_DEFAULT_ENGINE` | `rete` | engine used when a request does not name one. |
