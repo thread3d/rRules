@@ -39,6 +39,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # This job builds the workspace, the release binary and the user-guide's snippets. The runner
+      # ships several GB of toolchains this project never uses, and the gate once failed with
+      # "No space left on device" compiling chrono-tz; reclaim the space before building.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
       # An exact compiler, not "whatever stable is today": a newer clippy or
       # rustfmt then fails CI in a commit that changed neither the lint config nor
       # the formatting. Bump this together with `rust-toolchain.toml`'s notes.

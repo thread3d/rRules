@@ -104,12 +104,19 @@ def main() -> int:
     workdir = REPO / "target" / "doc-snippets"
     build_crate(snippets, workdir)
 
+    # Build into the workspace's own target directory: a private one rebuilds every dependency the
+    # workspace already built, and on a CI runner that duplication is what fills the disk — it did,
+    # with "No space left on device" while compiling chrono-tz.
     result = subprocess.run(
         ["cargo", "test", "--quiet"],
         cwd=workdir,
         capture_output=True,
         text=True,
-        env={**__import__("os").environ, "CCACHE_DISABLE": "1"},
+        env={
+            **__import__("os").environ,
+            "CCACHE_DISABLE": "1",
+            "CARGO_TARGET_DIR": str(REPO / "target"),
+        },
     )
     if result.returncode != 0:
         print(f"doc-snippets: {len(snippets)} blocks from {args.doc.name}, build or test failed\n")

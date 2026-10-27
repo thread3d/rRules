@@ -22,6 +22,12 @@ re-check after its last edit.
 The rule it illustrates is in `AGENTS.md` already ("run the gate, paste the evidence"), and the sharper
 version is: re-run the *cheap* gates after the *last* edit, not before it.
 
+The next run failed differently — **"No space left on device"** compiling `chrono-tz` in the
+user-guide snippet step. The checker built its throwaway crate into a private target directory, so it
+rebuilt every dependency the workspace had already built, and this release's larger dependency tree
+made that duplication fatal on a runner. It now builds into the workspace's own `target/`, and the
+gates job reclaims the multi-gigabyte toolchains a hosted runner ships and this project never uses.
+
 
 ## [9.0.43] — 2026-10-26 — PostgreSQL: two fake stores deleted, one real store proven
 
