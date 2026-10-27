@@ -198,3 +198,6 @@ jobs:
 
       - name: README commands resolve
         run: make readme
+
+      - name: Singleton-observing tests serialise
+        run: make singleton-tests

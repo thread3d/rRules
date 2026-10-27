@@ -298,8 +298,15 @@ Malformed FEEL expressions, malformed DMN documents and malformed JSON bodies mu
 produce an error path (a parse error, a `null` value, a `4xx` response) and must
 never abort the process, panic a request worker, or leave shared state inconsistent.
 
-# SYS-003 Global singletons are test-isolated
+# SYS-003 Global singletons are resettable, and their observers serialise
 
 Process-wide state (rule-execution tracking, coverage tracking, decision tracking)
-must be resettable so that tests observing it are independent of test order and of
-parallel execution.
+must be resettable, and every test that observes it must serialise itself with
+`#[serial]`.
+
+Resettability alone does **not** make observers independent: two tests that each
+clear the tracker and then record will see each other's records whatever the reset
+does. The eleven coverage unit tests demonstrated the gap in 9.0.47 — they passed for
+months on scheduling luck and then failed two assertions when the timing shifted.
+`make singleton-tests` enforces the second half of this requirement, which nothing
+did before it existed.

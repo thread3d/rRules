@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme singleton-tests deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -56,6 +56,11 @@ db-test:
 		cargo test -p api --features postgres --test audit_postgres -- --ignored --test-threads=1
 	@XDG_CACHE_HOME="$${XDG_CACHE_HOME:-$$PWD/.db-cache}" \
 		cargo test -p api --features postgres --test tenant_postgres -- --ignored --test-threads=1
+
+# A test that observes a process-wide tracker must serialise itself: SYS-003 says the trackers are
+# resettable, and resettability buys nothing when two tests run at once.
+singleton-tests:
+	./scripts/check-singleton-tests.py
 
 # The commands the README tells a reader to run must exist: a target, a binary, a crate, a directory.
 readme:
@@ -199,7 +204,7 @@ e2e:
 	./scripts/e2e-smoke.sh
 
 # Full CI pipeline (build + test + lint + format check + frontend)
-ci: build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets readme deploy-env e2e
+ci: build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets readme singleton-tests deploy-env e2e
 	@echo "CI pipeline complete"
 
 # Run DMN subsystem benchmarks (Criterion, Phase 36+)
@@ -298,6 +303,7 @@ help:
 	@echo "  spec-citations  - Check that spec citations still resolve to code"
 	@echo "  docs-snippets   - Compile every Rust example in docs/user-guide.md"
 	@echo "  readme          - Check the README's commands against the Makefile and crates"
+	@echo "  singleton-tests - Tests observing a process-wide tracker must be #[serial]"
 	@echo "  deploy-env      - Check chart/manifest variables against the server's"
 	@echo "  bump-version    - Write VERSION to every file that carries it"
 	@echo "  ci              - Full CI pipeline (build + test + lint + fmt-check + frontend)"

@@ -94,6 +94,7 @@ async fn metrics_json_engine_state() {
     );
 }
 
+#[serial_test::serial]
 #[actix_web::test]
 async fn dead_rules_returns_valid_json_array() {
     // dead_rules_endpoint reads from the process-wide RuleExecutionTracker
@@ -124,6 +125,7 @@ async fn dead_rules_returns_valid_json_array() {
     assert!(body.is_array(), "expected a JSON array; got: {body}");
 }
 
+#[serial_test::serial]
 #[actix_web::test]
 async fn coverage_endpoint_reads_tracked_data() {
     // Pre-populate the global singleton BEFORE the request. The coverage

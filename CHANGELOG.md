@@ -12,6 +12,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.49] — 2026-10-27 — SYS-003 was claiming more than `clear()` gives
+
+`SYS-003` read: *"Process-wide state must be resettable so that tests observing it are independent of
+test order and of parallel execution."* The first half is true and verified. The second does not follow:
+two tests that each call `clear()` and then record **will** see each other's records, whatever the reset
+does — which is precisely what happened to the eleven coverage unit tests in 9.0.47, after months of
+passing on scheduling luck.
+
+So the requirement now says what is actually true — *resettable, and every observant test serialises* —
+and the second half has a gate, which it never did. `scripts/check-singleton-tests.py` walks every test
+in the workspace, finds the ones that touch a process-wide tracker, and fails unless the test carries
+`#[serial]`. `make singleton-tests` runs it, `make ci` includes it, and CI runs it beside the citation
+and README checks.
+
+**It found real offenders immediately**: two tests in `api/tests/metrics_integration.rs` read the
+trackers with no serialisation at all, while every other file that touches them serialises. Both are
+`#[serial]` now. The gate's own detector had a blind spot first — it only looked for attributes below
+the `#[test]` line, so eight correctly-serialised tests were reported as offenders; it reads upwards to
+the blank line now. Proved by removing one `#[serial]` and watching it fail, then restoring it.
+
+
 ## [9.0.48] — 2026-10-27 — The tenant registry can be persisted
 
 Tenants are the organisations that own rules; the registry is what makes `X-Tenant-ID` mean anything.
