@@ -52,6 +52,24 @@ for line in text.splitlines():
 PY
 )
 
+# The exact command the Dockerfile runs, features included. Restating it here would let this gate and
+# the image drift apart: the image builds with `--features postgres`, and a restated command kept
+# passing while the image failed.
+mapfile -t BUILD_CMDS < <(
+    python3 - "$DOCKERFILE" <<'PYEOF'
+import sys
+text = open(sys.argv[1]).read().replace("\\\n", " ")
+for line in text.splitlines():
+    line = line.strip()
+    if line.startswith("RUN ") and "cargo build" in line:
+        print(line[4:].strip())
+PYEOF
+)
+if [ ${#BUILD_CMDS[@]} -eq 0 ]; then
+    echo "image-check: the Dockerfile has no 'RUN cargo build' line to simulate" >&2
+    exit 1
+fi
+
 missing=0
 for path in "${COPY_PATHS[@]}"; do
     if [ -e "$REPO_ROOT/$path" ]; then
@@ -94,13 +112,24 @@ tar -C frontend --exclude=node_modules --exclude=dist -cf - . | tar -C "$WORK/fr
 echo "    dist/index.html built"
 
 echo "==> stage 2: server binary"
-mkdir -p "$WORK/api" "$WORK/engine" "$WORK/engine_state"
-cp Cargo.toml Cargo.lock "$WORK/"
-for crate in engine api engine_state; do
-    cp "$crate/Cargo.toml" "$WORK/$crate/"
-    tar -C "$crate" -cf - . | tar -C "$WORK/$crate" -xf -
+# Whatever the COPY set names, at the same relative path — so a new COPY (the migrations an
+# `include_str!` needs, for instance) is exercised without editing this script.
+for path in "${COPY_PATHS[@]}"; do
+    case "$path" in
+        frontend | frontend/*) continue ;;
+    esac
+    if [ -d "$path" ]; then
+        mkdir -p "$WORK/$path"
+        tar -C "$path" -cf - . | tar -C "$WORK/$path" -xf -
+    else
+        mkdir -p "$WORK/$(dirname "$path")"
+        cp "$path" "$WORK/$path"
+    fi
 done
-(cd "$WORK" && cargo build --release --locked -p api --bin rRules-server)
+for cmd in "${BUILD_CMDS[@]}"; do
+    echo "    running: $cmd"
+    (cd "$WORK" && eval "$cmd")
+done
 [ -x "$WORK/target/release/rRules-server" ] || { echo "image-check: no release binary" >&2; exit 1; }
 echo "    target/release/rRules-server built ($(du -h "$WORK/target/release/rRules-server" | cut -f1))"
 

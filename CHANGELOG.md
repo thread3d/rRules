@@ -12,6 +12,24 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.46] — 2026-10-27 — The image build failed, and the gate that should have caught it
+
+Deploy went red the moment the image tried to build `--features postgres`:
+
+```
+error: couldn't read `engine_state/src/../../migrations/21_01_dmn_documents.sql`: No such file or directory
+```
+
+The store embeds its schema with `include_str!`, and the Dockerfile's COPY set never included
+`migrations/`. `make image-check` exists to catch exactly this — and missed it, because it carried its
+own copy of the build command **without** `--features postgres` and its own hand-written list of
+directories to copy. A gate that restates what it is checking can only prove its own restatement.
+
+It now derives both from the Dockerfile: the `RUN cargo build` line it finds is the one it runs (features
+and all), and it copies whatever the COPY set names. Proved by deleting `COPY migrations` and watching
+it fail with the same message the image build produced, then restoring it.
+
+
 ## [9.0.45] — 2026-10-27 — Postgres is selectable: `DMN_PERSISTENCE=postgres`
 
 The store existed and proved itself; nothing used it. Now the `/v1/decisions` endpoints can persist

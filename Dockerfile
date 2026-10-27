@@ -55,6 +55,9 @@ COPY engine_state/Cargo.toml ./engine_state/
 COPY engine ./engine
 COPY api ./api
 COPY engine_state ./engine_state
+# `engine_state/src/postgres.rs` embeds the schema with `include_str!`, so the build needs these
+# present or `--features postgres` fails with "couldn't read .../migrations/21_01_dmn_documents.sql".
+COPY migrations ./migrations
 
 # `--features postgres` compiles the PostgreSQL-backed DMN store, so a deployment can set
 # `DMN_PERSISTENCE=postgres` against this image. Without it the flag would be a documented option
