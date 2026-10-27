@@ -3,7 +3,7 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.46** — released from a verified tree: everything in the table below was measured by a gate,
+**9.0.47** — released from a verified tree: everything in the table below was measured by a gate,
 not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
@@ -93,9 +93,14 @@ tracks — and a deployment that asks for Postgres without the feature or the UR
 rather than silently writing files. The tenant and audit stores remain in memory;
 `migrations/` holds their schema.
 
-Both are exercised against a real database: `make db-test` downloads PostgreSQL with `pg-embed` and
-runs the store's own tests plus an HTTP-level test that imports, lists, reads, exports and deletes a
-decision through the API. `specs/http-api.md` records this under its known gaps rather than
+The **audit trail** can be persisted the same way: `AUDIT_PERSISTENCE=postgres` records every
+governance event into a table instead of process memory, so the trail survives a restart — which is the
+property an audit trail is for. It is append-only, and the in-memory default is unchanged.
+
+All three are exercised against a real database: `make db-test` downloads PostgreSQL with `pg-embed`
+and runs the DMN store's tests, an HTTP-level test that imports, lists, reads, exports and deletes a
+decision, and two that record governance events and read them back — including one that reopens the
+database from a second connection to prove the trail outlived the writer. `specs/http-api.md` records this under its known gaps rather than
 implying otherwise.
 
 ## Licence

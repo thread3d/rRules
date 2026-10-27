@@ -684,7 +684,8 @@ Every variable the server reads, with the default that applies when it is unset.
 | `RULE_STORAGE_PATH` | `./rules` | rules directory; also the git repository the version control uses (`<path>/.git`). |
 | `DMN_STORAGE_PATH` | `./dmn` | DMN decision model directory (the filesystem store). |
 | `DMN_PERSISTENCE` | `filesystem` | Backend for decision documents: `filesystem` or `postgres`. `postgres` requires a build with `--features postgres` and a `DATABASE_URL`; an unusable choice fails startup instead of silently using the filesystem. |
-| `DATABASE_URL` | unset | PostgreSQL connection string, read when `DMN_PERSISTENCE=postgres`. |
+| `DATABASE_URL` | unset | PostgreSQL connection string, read when `DMN_PERSISTENCE` or `AUDIT_PERSISTENCE` is `postgres`. |
+| `AUDIT_PERSISTENCE` | `memory` | Where the audit trail lives: `memory` (lost on restart) or `postgres`. `postgres` requires a build with `--features postgres` and a `DATABASE_URL`; an unusable choice fails startup instead of silently keeping the trail in memory. |
 | `FRONTEND_DIST` | `../frontend/dist` | built interface served at `/` and for every client-side route. |
 | `WATCH_RULES_DIR` | `true` | watch the rules directory and reload on change. Set `false` to disable. |
 | `RRULES_DEFAULT_ENGINE` | `rete` | engine used when a request does not name one. |

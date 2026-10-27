@@ -219,41 +219,50 @@ pub async fn approve_request(
         .unwrap_or_else(|| "system".to_string());
     let reason = req.reason.clone();
 
-    let mut store_guard = store
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-    match store_guard.get_mut(&approval_id) {
-        Some(approval) => {
-            // Transition to approved state
-            approval.state = ApprovalState::Approved {
-                approved_by: vec![approver_id],
-                completed_at: chrono::Utc::now().to_rfc3339(),
-            };
-            if let Some(reason) = reason {
-                approval.approved_by.push(reason);
+    let (approval_id_text, rule_id_text, approved_by) = {
+        let mut store_guard = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match store_guard.get_mut(&approval_id) {
+            Some(approval) => {
+                // Transition to approved state
+                approval.state = ApprovalState::Approved {
+                    approved_by: vec![approver_id],
+                    completed_at: chrono::Utc::now().to_rfc3339(),
+                };
+                if let Some(reason) = reason {
+                    approval.approved_by.push(reason);
+                }
+                (
+                    approval.id.to_string(),
+                    approval.rule_id.to_string(),
+                    approval.approved_by.clone(),
+                )
             }
-
-            crate::v1::audit::record_for_request(
-                &audit,
-                &request,
-                AuditAction::Approve,
-                ResourceType::Approval,
-                approval.id.to_string(),
-                Some(approval.rule_id.to_string()),
-                serde_json::json!({ "approved_by": approval.approved_by }),
-            );
-            HttpResponse::Ok().json(serde_json::json!({
-                "approval_id": approval.id.to_string(),
-                "status": "approved",
-                "approved_by": approval.approved_by
-            }))
+            None => {
+                return HttpResponse::NotFound().json(serde_json::json!({
+                    "error": "Approval not found"
+                }))
+            }
         }
-        None => HttpResponse::NotFound().json(serde_json::json!({
-            "error": "Approval not found",
-            "approval_id": approval_id.to_string()
-        })),
-    }
+    };
+
+    // The lock's scope has ended; a `MutexGuard` held across an await can deadlock the worker.
+    crate::v1::audit::record_for_request(
+        &audit,
+        &request,
+        AuditAction::Approve,
+        ResourceType::Approval,
+        approval_id_text.clone(),
+        Some(rule_id_text),
+        serde_json::json!({ "approved_by": approved_by }),
+    )
+    .await;
+    HttpResponse::Ok().json(serde_json::json!({
+        "approval_id": approval_id_text,
+        "status": "approved",
+        "approved_by": approved_by
+    }))
 }
 
 /// Reject an approval request - POST /v1/approvals/{id}/reject
@@ -293,37 +302,42 @@ pub async fn reject_request(
         .unwrap_or_else(|| "system".to_string());
     let reason = req.reason.clone();
 
-    let mut store_guard = store
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-    match store_guard.get_mut(&approval_id) {
-        Some(approval) => {
-            approval.state = ApprovalState::Rejected {
-                rejected_by: approver_id,
-                reason,
-                completed_at: chrono::Utc::now().to_rfc3339(),
-            };
-
-            crate::v1::audit::record_for_request(
-                &audit,
-                &request,
-                AuditAction::Reject,
-                ResourceType::Approval,
-                approval.id.to_string(),
-                Some(approval.rule_id.to_string()),
-                serde_json::json!({ "rejected": true }),
-            );
-            HttpResponse::Ok().json(serde_json::json!({
-                "approval_id": approval.id.to_string(),
-                "status": "rejected"
-            }))
+    let (approval_id_text, rule_id_text) = {
+        let mut store_guard = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match store_guard.get_mut(&approval_id) {
+            Some(approval) => {
+                approval.state = ApprovalState::Rejected {
+                    rejected_by: approver_id,
+                    reason,
+                    completed_at: chrono::Utc::now().to_rfc3339(),
+                };
+                (approval.id.to_string(), approval.rule_id.to_string())
+            }
+            None => {
+                return HttpResponse::NotFound().json(serde_json::json!({
+                    "error": "Approval not found",
+                    "approval_id": approval_id.to_string()
+                }))
+            }
         }
-        None => HttpResponse::NotFound().json(serde_json::json!({
-            "error": "Approval not found",
-            "approval_id": approval_id.to_string()
-        })),
-    }
+    };
+
+    crate::v1::audit::record_for_request(
+        &audit,
+        &request,
+        AuditAction::Reject,
+        ResourceType::Approval,
+        approval_id_text.clone(),
+        Some(rule_id_text),
+        serde_json::json!({ "rejected": true }),
+    )
+    .await;
+    HttpResponse::Ok().json(serde_json::json!({
+        "approval_id": approval_id_text,
+        "status": "rejected"
+    }))
 }
 
 fn state_to_string(state: &ApprovalState) -> &'static str {

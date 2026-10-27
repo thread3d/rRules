@@ -12,6 +12,34 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.47] — 2026-10-27 — The audit trail can be persisted, and a 467-line orphan is gone
+
+The audit trail was a `HashMap` behind a `Mutex`: it was also **nothing after a restart**, which is a
+poor property for the record an auditor reads. `AUDIT_PERSISTENCE=postgres` now writes it to a table
+(`migrations/21_02_audit_events.sql`), append-only, with the reader's three filters pushed into SQL
+instead of loading the trail to answer a question about it. The in-memory default is unchanged, and an
+unusable choice — `postgres` without the feature or without `DATABASE_URL` — fails startup rather than
+quietly leaving the trail in memory.
+
+Recording became `async` (a database write is), which rippled through six call sites and, in doing so,
+made clippy find a **real hazard**: four handlers held a `std::sync::MutexGuard` across the await. Each
+now finishes its mutation under the lock, ends the lock's scope, and only then writes the trail.
+
+**Deleted: `engine::governance::audit`.** Four hundred and sixty-seven lines — an `AuditEvent` type, a
+trait, a `MemoryAuditStore` and their tests — used by nothing. The API's `v1::audit` is the trail that
+actually records; the engine module was the third audit concept in a repository with one.
+
+**A latent flake, exposed by the change and fixed.** Eleven unit tests in `monitoring/coverage.rs`
+share one process-wide tracker and ran in parallel, so each one's `clear()` raced its neighbours. They
+had been passing on scheduling luck; deleting tests elsewhere shifted the timing and two failed. They
+are `#[serial]` now — as `engine/tests/coverage.rs` already did — and the full suite was run twice to
+confirm stability rather than once to confirm hope.
+
+Verified against a real PostgreSQL: a governance mutation is recorded, read back through `/v1/audit`,
+and found again through a **second connection after the writer is dropped** — which is what surviving a
+restart means. `make db-test` runs all three suites: 5 store tests, 2 DMN HTTP tests, 2 audit tests.
+
+
 ## [9.0.46] — 2026-10-27 — The image build failed, and the gate that should have caught it
 
 Deploy went red the moment the image tried to build `--features postgres`:

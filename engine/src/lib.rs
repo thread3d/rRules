@@ -28,7 +28,8 @@ pub mod testing;
 // Governance modules (Phase 18)
 pub mod governance {
     pub mod approval;
-    pub mod audit;
+    // `audit` was declared here and used by nothing: the API's audit trail lives in
+    // `api/src/v1/audit.rs`, which is what actually records events. Deleted in 9.0.47.
     pub mod rbac;
     pub mod tenant;
     pub mod versioning;

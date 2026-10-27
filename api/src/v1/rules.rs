@@ -391,7 +391,8 @@ pub async fn create_rule(
         rule.id.to_string(),
         Some(rule.rule_name.clone()),
         serde_json::json!({ "tenant_id": tenant_id, "category": rule.category }),
-    );
+    )
+    .await;
     {
         let mut store_guard = store
             .lock()
@@ -651,66 +652,73 @@ pub async fn update_rule(
         }
     }
 
-    // Now we can take mutable access to update
-    let mut store_guard = store
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // The mutation runs under the lock and the response is built from it; the lock's scope ends
+    // before the trail write, because a `MutexGuard` held across an await can deadlock the worker.
+    let response = {
+        let mut store_guard = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match store_guard.get_mut(&key) {
+            Some(rule) => {
+                // Apply all updates (duplicate check already done above)
+                if let Some(ref description) = req.description {
+                    rule.description = Some(description.clone());
+                }
 
-    match store_guard.get_mut(&key) {
-        Some(rule) => {
-            // Apply all updates (duplicate check already done above)
-            if let Some(ref description) = req.description {
-                rule.description = Some(description.clone());
+                if let Some(ref new_category) = req.category {
+                    rule.category = new_category.clone();
+                }
+
+                if let Some(ref dsl_body) = req.dsl_body {
+                    rule.dsl_body = dsl_body.clone();
+                }
+
+                if !req.tags.is_empty() {
+                    rule.tags = req.tags.clone();
+                }
+
+                if let Some(salience) = req.salience {
+                    rule.salience = salience;
+                }
+
+                if let Some(ref status_str) = req.status {
+                    rule.status = match status_str.as_str() {
+                        "draft" => RuleStatus::Draft,
+                        "active" => RuleStatus::Active,
+                        "inactive" => RuleStatus::Inactive,
+                        "archived" => RuleStatus::Archived,
+                        _ => {
+                            return HttpResponse::BadRequest().json(serde_json::json!({
+                                "error": "Invalid status value"
+                            }))
+                        }
+                    };
+                }
+
+                rule.updated_at = Utc::now().to_rfc3339();
+                rule.updated_by = Some("system".to_string());
+
+                RuleResponse::from(rule)
             }
-
-            if let Some(ref new_category) = req.category {
-                rule.category = new_category.clone();
+            None => {
+                return HttpResponse::NotFound().json(serde_json::json!({
+                    "error": "Rule not found"
+                }))
             }
-
-            if let Some(ref dsl_body) = req.dsl_body {
-                rule.dsl_body = dsl_body.clone();
-            }
-
-            if !req.tags.is_empty() {
-                rule.tags = req.tags.clone();
-            }
-
-            if let Some(salience) = req.salience {
-                rule.salience = salience;
-            }
-
-            if let Some(ref status_str) = req.status {
-                rule.status = match status_str.as_str() {
-                    "draft" => RuleStatus::Draft,
-                    "active" => RuleStatus::Active,
-                    "inactive" => RuleStatus::Inactive,
-                    "archived" => RuleStatus::Archived,
-                    _ => {
-                        return HttpResponse::BadRequest().json(serde_json::json!({
-                            "error": "Invalid status value"
-                        }))
-                    }
-                };
-            }
-
-            rule.updated_at = Utc::now().to_rfc3339();
-            rule.updated_by = Some("system".to_string());
-
-            crate::v1::audit::record_for_request(
-                &audit,
-                &headers,
-                AuditAction::Update,
-                ResourceType::Rule,
-                rule.id.to_string(),
-                Some(rule.rule_name.clone()),
-                serde_json::json!({ "tenant_id": tenant_id }),
-            );
-            HttpResponse::Ok().json(RuleResponse::from(rule))
         }
-        None => HttpResponse::NotFound().json(serde_json::json!({
-            "error": "Rule not found"
-        })),
-    }
+    };
+
+    crate::v1::audit::record_for_request(
+        &audit,
+        &headers,
+        AuditAction::Update,
+        ResourceType::Rule,
+        response.id.to_string(),
+        Some(response.name.clone()),
+        serde_json::json!({ "tenant_id": tenant_id }),
+    )
+    .await;
+    HttpResponse::Ok().json(response)
 }
 
 /// Delete a rule (soft delete) - DELETE /v1/rules/{id}
@@ -744,36 +752,41 @@ pub async fn delete_rule(
     };
 
     let key = (tenant_id, id);
-    let mut store_guard = store
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-
-    match store_guard.get_mut(&key) {
-        Some(rule) => {
-            rule.status = RuleStatus::Archived;
-            rule.updated_at = Utc::now().to_rfc3339();
-            rule.updated_by = Some("system".to_string());
-
-            crate::v1::audit::record_for_request(
-                &audit,
-                &headers,
-                AuditAction::Delete,
-                ResourceType::Rule,
-                rule.id.to_string(),
-                Some(rule.rule_name.clone()),
-                serde_json::json!({ "tenant_id": key.0.clone(), "archived": true }),
-            );
-            HttpResponse::Ok().json(serde_json::json!({
-                "id": id.to_string(),
-                "name": rule.rule_name,
-                "status": "archived",
-                "message": "Rule has been soft-deleted (archived)"
-            }))
+    let archived_name = {
+        let mut store_guard = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match store_guard.get_mut(&key) {
+            Some(rule) => {
+                rule.status = RuleStatus::Archived;
+                rule.updated_at = Utc::now().to_rfc3339();
+                rule.updated_by = Some("system".to_string());
+                rule.rule_name.clone()
+            }
+            None => {
+                return HttpResponse::NotFound().json(serde_json::json!({
+                    "error": "Rule not found"
+                }))
+            }
         }
-        None => HttpResponse::NotFound().json(serde_json::json!({
-            "error": "Rule not found"
-        })),
-    }
+    };
+
+    crate::v1::audit::record_for_request(
+        &audit,
+        &headers,
+        AuditAction::Delete,
+        ResourceType::Rule,
+        id.to_string(),
+        Some(archived_name.clone()),
+        serde_json::json!({ "tenant_id": key.0.clone(), "archived": true }),
+    )
+    .await;
+    HttpResponse::Ok().json(serde_json::json!({
+        "id": id.to_string(),
+        "name": archived_name,
+        "status": "archived",
+        "message": "Rule has been soft-deleted (archived)"
+    }))
 }
 
 /// Undelete a rule - POST /v1/rules/{id}/undelete

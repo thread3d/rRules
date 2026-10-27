@@ -81,8 +81,13 @@ config:
   # Which store decision documents are persisted through: `filesystem` (the default) or `postgres`.
   # `postgres` needs `database.urlSecret` set; asking for it without a URL fails startup on purpose.
   DMN_PERSISTENCE: "filesystem"
+  # Where the audit trail lives: `memory` (a restart empties it) or `postgres` (needs
+  # `database.urlSecret`). The trail is the evidence an auditor reads, so a real deployment
+  # usually wants it persisted.
+  AUDIT_PERSISTENCE: "memory"
 
-# PostgreSQL for decision documents, when `config.DMN_PERSISTENCE` is `postgres`.
+# PostgreSQL for decision documents and the audit trail, when the matching `*_PERSISTENCE` is
+# `postgres`.
 # The connection string lives in a Secret you create; this chart never puts it in values.
 database:
   # Name of an existing Secret holding the connection string. Empty means none is mounted.

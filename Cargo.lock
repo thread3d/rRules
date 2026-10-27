@@ -441,7 +441,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "api"
-version = "9.0.46"
+version = "9.0.47"
 dependencies = [
  "actix",
  "actix-cors",
@@ -463,6 +463,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "sqlx 0.9.0",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -1497,7 +1498,7 @@ dependencies = [
 
 [[package]]
 name = "engine"
-version = "9.0.46"
+version = "9.0.47"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -1529,7 +1530,7 @@ dependencies = [
 
 [[package]]
 name = "engine_state"
-version = "9.0.46"
+version = "9.0.47"
 dependencies = [
  "chrono",
  "engine",
@@ -4350,6 +4351,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -4496,6 +4498,7 @@ dependencies = [
  "sqlx-core 0.9.0",
  "thiserror 2.0.18",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -4568,6 +4571,7 @@ dependencies = [
  "stringprep",
  "thiserror 2.0.18",
  "tracing",
+ "uuid",
  "whoami 2.1.3",
 ]
 
@@ -4618,6 +4622,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]

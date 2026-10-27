@@ -262,6 +262,7 @@ impl Default for CoverageTracking {
 mod tests {
     use super::*;
 
+    #[serial_test::serial]
     #[test]
     fn test_coverage_report_creation() {
         let report = CoverageReport::new("rule-1");
@@ -271,18 +272,21 @@ mod tests {
         assert!(report.skipped_reason.is_none());
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_with_evaluated() {
         let report = CoverageReport::new("rule-1").with_evaluated(true);
         assert!(report.evaluated);
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_with_fired() {
         let report = CoverageReport::new("rule-1").with_fired(true);
         assert!(report.fired);
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_with_skipped_reason() {
         let report = CoverageReport::new("rule-1").with_skipped_reason("condition not matched");
@@ -292,6 +296,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_to_json() {
         let report = CoverageReport::new("rule-1")
@@ -303,6 +308,7 @@ mod tests {
         assert!(json.contains("\"fired\":false"));
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_default() {
         let report = CoverageReport::default();
@@ -311,6 +317,7 @@ mod tests {
         assert!(!report.fired);
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_coverage_tracking_singleton() {
         // Clear and create fresh tracking
@@ -325,6 +332,7 @@ mod tests {
         assert_eq!(states.len(), 2);
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_coverage_tracking_fire() {
         let tracker = CoverageTracking;
@@ -340,6 +348,7 @@ mod tests {
         assert_eq!(state.fire_count, 1);
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_coverage_tracking_skipped() {
         let tracker = CoverageTracking;
@@ -354,6 +363,7 @@ mod tests {
         );
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_coverage_summary() {
         let tracker = CoverageTracking;
@@ -371,6 +381,7 @@ mod tests {
         assert_eq!(summary.fired_count, 1);
     }
 
+    #[serial_test::serial]
     #[test]
     fn test_to_csv() {
         let tracker = CoverageTracking;

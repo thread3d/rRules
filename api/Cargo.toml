@@ -1,6 +1,6 @@
 [package]
 name = "api"
-version = "9.0.46"
+version = "9.0.47"
 edition = "2021"
 
 [[bin]]
@@ -10,7 +10,7 @@ path = "src/main.rs"
 [features]
 default = []
 # The PostgreSQL-backed DMN store; off by default so the API image carries no database driver.
-postgres = ["engine_state/postgres"]
+postgres = ["engine_state/postgres", "dep:sqlx"]
 
 [dependencies]
 # Phase 23 (D-01 / L-01): enable all four pluggable-engine features on the
@@ -21,6 +21,7 @@ postgres = ["engine_state/postgres"]
 # is explicit and safe.
 engine = { path = "../engine", features = ["engine-rete", "engine-treat", "engine-leaps", "engine-phreak"] }
 engine_state = { path = "../engine_state" }
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"], optional = true }
 actix-web = { version = "4.4", features = ["macros", "ws"] }
 actix-files = "0.6"
 # CORS middleware — required for D-22-05's separate-host prod URL mode (VITE_API_URL

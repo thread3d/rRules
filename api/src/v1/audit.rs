@@ -4,9 +4,8 @@ use actix_web::{web, HttpResponse, Responder};
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::v1::audit_store::{AuditBackend, AuditFilter};
 use actix_web::HttpMessage;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
 /// Audit action types
 #[derive(Debug, Clone, serde::Serialize, PartialEq, utoipa::ToSchema)]
@@ -70,7 +69,9 @@ pub struct AuditQuery {
 }
 
 /// Shared state for audit API
-pub type AuditStore = Arc<Mutex<HashMap<Uuid, StoredAuditEvent>>>;
+/// The trail's storage. `AuditBackend` is in memory by default and PostgreSQL when
+/// `AUDIT_PERSISTENCE=postgres`; recording is async because a database write is.
+pub type AuditStore = AuditBackend;
 
 /// Internal representation of an audit event
 #[derive(Debug, Clone)]
@@ -123,8 +124,7 @@ impl From<&StoredAuditEvent> for AuditEvent {
 
 /// Initialize in-memory audit store
 pub fn init_store() -> AuditStore {
-    let store: HashMap<Uuid, StoredAuditEvent> = HashMap::new();
-    Arc::new(Mutex::new(store))
+    AuditBackend::in_memory()
 }
 
 /// Query audit events - GET /v1/audit
@@ -152,80 +152,74 @@ pub async fn query_audit_events(
     let page = query.page.unwrap_or(1).max(1);
     let page_size = query.page_size.unwrap_or(50).clamp(1, 100);
 
-    let store_guard = store
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let filter = match audit_filter(&query) {
+        Ok(filter) => filter,
+        Err(response) => return response,
+    };
 
-    // Filter events based on query parameters
-    let mut events: Vec<&StoredAuditEvent> = store_guard.values().collect();
-
-    if let Some(ref resource_type) = query.resource_type {
-        let filter_type = match resource_type.as_str() {
-            "rule" => ResourceType::Rule,
-            "category" => ResourceType::Category,
-            "tag" => ResourceType::Tag,
-            "user" => ResourceType::User,
-            "approval" => ResourceType::Approval,
-            _ => {
-                return HttpResponse::BadRequest().json(serde_json::json!({
-                    "error": "Invalid resource_type filter"
-                }))
-            }
-        };
-        events.retain(|e| e.resource_type == filter_type);
-    }
-
-    if let Some(ref action) = query.action {
-        let filter_action = match action.as_str() {
-            "create" => AuditAction::Create,
-            "read" => AuditAction::Read,
-            "update" => AuditAction::Update,
-            "delete" => AuditAction::Delete,
-            "approve" => AuditAction::Approve,
-            "reject" => AuditAction::Reject,
-            "execute" => AuditAction::Execute,
-            "export" => AuditAction::Export,
-            _ => {
-                return HttpResponse::BadRequest().json(serde_json::json!({
-                    "error": "Invalid action filter"
-                }))
-            }
-        };
-        events.retain(|e| e.action == filter_action);
-    }
-
-    if let Some(ref user_id) = query.user_id {
-        events.retain(|e| e.user_id.as_ref() == Some(user_id));
-    }
-
-    // Sort by timestamp descending (most recent first)
-    events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-
-    let total_count = events.len();
-    let total_pages = total_count
-        .div_ceil(page_size as usize)
-        .try_into()
-        .unwrap_or(0);
-
-    // Apply pagination
-    let start_idx = (page - 1) as usize * page_size as usize;
-    let end_idx = (start_idx + page_size as usize).min(total_count);
-
-    let paginated_events: Vec<AuditEvent> = if start_idx < total_count {
-        events[start_idx..end_idx]
-            .iter()
-            .map(|e| AuditEvent::from(*e))
-            .collect()
-    } else {
-        vec![]
+    let offset = (page as usize - 1) * page_size as usize;
+    let total_count = match store.count(&filter).await {
+        Ok(count) => count,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({ "error": error }))
+        }
+    };
+    let events = match store.page(&filter, offset, page_size as usize).await {
+        Ok(events) => events,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({ "error": error }))
+        }
     };
 
     HttpResponse::Ok().json(AuditListResponse {
         total_count,
-        events: paginated_events,
+        events: events.iter().map(AuditEvent::from).collect(),
         page,
         page_size,
-        total_pages,
+        total_pages: total_count
+            .div_ceil(page_size as usize)
+            .try_into()
+            .unwrap_or(0),
+    })
+}
+
+/// The reader's filter, or the response explaining what is wrong with it.
+///
+/// Shared by the list and the export so the two cannot disagree about what `action=approve` means.
+fn audit_filter(query: &AuditQuery) -> Result<AuditFilter, HttpResponse> {
+    let resource_type = match query.resource_type.as_deref() {
+        None => None,
+        Some("rule") => Some(ResourceType::Rule),
+        Some("category") => Some(ResourceType::Category),
+        Some("tag") => Some(ResourceType::Tag),
+        Some("user") => Some(ResourceType::User),
+        Some("approval") => Some(ResourceType::Approval),
+        Some(_) => {
+            return Err(HttpResponse::BadRequest()
+                .json(serde_json::json!({ "error": "Invalid resource_type filter" })))
+        }
+    };
+
+    let action = match query.action.as_deref() {
+        None => None,
+        Some("create") => Some(AuditAction::Create),
+        Some("read") => Some(AuditAction::Read),
+        Some("update") => Some(AuditAction::Update),
+        Some("delete") => Some(AuditAction::Delete),
+        Some("approve") => Some(AuditAction::Approve),
+        Some("reject") => Some(AuditAction::Reject),
+        Some("execute") => Some(AuditAction::Execute),
+        Some("export") => Some(AuditAction::Export),
+        Some(_) => {
+            return Err(HttpResponse::BadRequest()
+                .json(serde_json::json!({ "error": "Invalid action filter" })))
+        }
+    };
+
+    Ok(AuditFilter {
+        resource_type,
+        action,
+        user_id: query.user_id.clone(),
     })
 }
 
@@ -239,15 +233,20 @@ pub async fn query_audit_events(
     ),
 )]
 pub async fn export_audit_log(store: web::Data<AuditStore>) -> impl Responder {
-    let store_guard = store
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // An export is a full read: no filter, and a page large enough that the caller sees the trail
+    // rather than the first page of it.
+    let events = match store.page(&AuditFilter::default(), 0, usize::MAX).await {
+        Ok(events) => events,
+        Err(error) => {
+            return HttpResponse::InternalServerError().json(serde_json::json!({ "error": error }))
+        }
+    };
 
     // Build CSV content
     let mut csv =
         "id,timestamp,user_id,action,resource_type,resource_id,resource_name,details\n".to_string();
 
-    for event in store_guard.values() {
+    for event in &events {
         let details_json = serde_json::to_string(&event.details).unwrap_or_default();
         let details_escaped = details_json.replace('"', "\"\"");
 
@@ -298,7 +297,7 @@ pub async fn export_audit_log(store: web::Data<AuditStore>) -> impl Responder {
 /// The actor comes from the `Claims` the auth middleware put in the request extensions, the
 /// address from the peer connection, the agent from the header — the three things an audit trail
 /// needs and that a handler would otherwise have to unpack at every call site.
-pub fn record_for_request(
+pub async fn record_for_request(
     store: &AuditStore,
     request: &actix_web::HttpRequest,
     action: AuditAction,
@@ -331,7 +330,8 @@ pub fn record_for_request(
             ip_address,
             user_agent,
         },
-    );
+    )
+    .await;
 }
 
 pub struct NewAuditEvent {
@@ -350,10 +350,7 @@ pub struct NewAuditEvent {
 /// Takes a struct rather than nine positional arguments: at a call site, two `Option<String>`s in a
 /// row (`user_id`, `ip_address`) are indistinguishable, and swapping them would silently write the
 /// wrong one. Callers describing a request should use [`record_for_request`].
-pub fn record_audit_event(store: &AuditStore, new: NewAuditEvent) {
-    let mut store_guard = store
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+pub async fn record_audit_event(store: &AuditStore, new: NewAuditEvent) {
     let event_id = Uuid::new_v4();
 
     let event = StoredAuditEvent {
@@ -369,17 +366,26 @@ pub fn record_audit_event(store: &AuditStore, new: NewAuditEvent) {
         user_agent: new.user_agent,
     };
 
-    store_guard.insert(event_id, event);
+    // A trail that fails to record must not fail the request that was already performed: the
+    // mutation happened. Losing the record silently would be worse, so it is logged loudly.
+    if let Err(error) = store.append(event).await {
+        tracing::error!(%error, "the audit trail could not record an event");
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_init_store() {
+    #[actix_web::test]
+    async fn test_init_store() {
+        // A fresh trail is empty and stays in memory unless a deployment says otherwise.
         let store = init_store();
-        assert!(store.lock().unwrap().is_empty());
+        assert_eq!(store.kind(), "memory");
+        assert_eq!(
+            store.count(&AuditFilter::default()).await.expect("counted"),
+            0
+        );
     }
 
     #[test]

@@ -4,6 +4,9 @@ use actix_web::web;
 
 pub mod approvals;
 pub mod audit;
+#[cfg(feature = "postgres")]
+pub mod audit_postgres;
+pub mod audit_store;
 // Auth is implemented at `crate::auth` (handlers) + `crate::middleware::auth`
 // (JWT validation) — see api/src/lib.rs, not a v1 submodule.
 pub mod branches;

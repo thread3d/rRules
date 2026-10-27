@@ -23,7 +23,6 @@ use crate::metrics::{self, ExecutionCounters, MetricsTx};
 use crate::openapi::ApiDoc;
 use crate::v1;
 use crate::v1::approvals::StoredApproval;
-use crate::v1::audit::StoredAuditEvent;
 use crate::v1::categories::StoredCategory;
 use crate::v1::dmn_metrics::DmnMetricsTx;
 use crate::v1::execution::{get_job_status, list_jobs, EngineState, JobStore, SharedRuleSet};
@@ -55,7 +54,7 @@ pub struct ApiState {
     pub rule_tag_store: Arc<Mutex<HashSet<(Uuid, String)>>>,
     pub tenant_store: TenantStore,
     pub approval_store: Arc<Mutex<HashMap<Uuid, StoredApproval>>>,
-    pub audit_store: Arc<Mutex<HashMap<Uuid, StoredAuditEvent>>>,
+    pub audit_store: web::Data<v1::audit::AuditStore>,
     pub branch_store: web::Data<AsyncMutex<VersionControlRepo>>,
     pub job_store: JobStore,
     pub user_store: UserStore,
@@ -179,7 +178,7 @@ pub fn from_paths(paths: ApiPaths) -> std::io::Result<ApiState> {
         rule_tag_store,
         tenant_store: v1::tenants::init_store(),
         approval_store: v1::approvals::init_store(),
-        audit_store: v1::audit::init_store(),
+        audit_store: web::Data::new(v1::audit::init_store()),
         branch_store: web::Data::new(AsyncMutex::new(repo)),
         job_store: v1::execution::init_job_store(),
         user_store: auth::init_store(),
@@ -196,6 +195,15 @@ impl ApiState {
     /// for a differently wired server.
     pub fn with_dmn_store(mut self, store: v1::dmn_store::DmnStore) -> Self {
         self.dmn_store = web::Data::new(store);
+        self
+    }
+
+    /// Persist the audit trail through `backend` instead of in memory.
+    ///
+    /// Same shape as [`Self::with_dmn_store`]: one field, so the persisted trail cannot drift into
+    /// being a differently assembled server.
+    pub fn with_audit_backend(mut self, backend: v1::audit_store::AuditBackend) -> Self {
+        self.audit_store = web::Data::new(backend);
         self
     }
 }
@@ -275,7 +283,7 @@ pub fn build_app(
         .app_data(web::Data::new(state.rule_tag_store.clone()))
         .app_data(web::Data::new(state.tenant_store.clone()))
         .app_data(web::Data::new(state.approval_store.clone()))
-        .app_data(web::Data::new(state.audit_store.clone()))
+        .app_data(state.audit_store.clone())
         .app_data(state.branch_store.clone())
         .app_data(web::Data::new(state.job_store.clone()))
         .app_data(web::Data::new(state.user_store.clone()))
