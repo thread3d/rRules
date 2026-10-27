@@ -12,6 +12,30 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.50] — 2026-10-27 — Every decision body DMN 1.5 defines is read
+
+Two body forms were still unmodelled, and both are common in models built by an editor:
+`<invocation>` with `<binding>` arguments, and `<for>`.
+
+**The `<binding>` form** names its arguments instead of writing the call. It cannot be finished where it
+is parsed: `href` points at a model by **id**, and that model may appear later in the document. The
+parser records the bindings and joins them once the whole IR exists, producing ordinary FEEL text —
+`quadruple(10)` — which is why nothing downstream needed a second representation.
+
+**`<for>`** turned out to be subtler than it looks, and my first attempt was wrong in a way the test
+caught. DMN's `<in>` does not hold a list; it holds a `<context>` whose entries **bind the iteration
+variables**. Synthesising `for [1, 2, 3] return x * 2` evaluates to `null`, because there is no `x` —
+which the test reported as `got {"result": Null}` rather than passing on a key-existence check. The
+parser now reads the context entries and emits `for x in [1, 2, 3] return x * 2`, and the test asserts
+the doubled list rather than that *something* came back.
+
+`engine/tests/decision_bodies.rs` now covers four documents end to end: a BKM body written as
+`<functionDefinition>`, a decision written as a literal-expression invocation, one written with
+bindings, and one written as a `for`. `specs/dmn-feel.md` states exactly what a body may be, and the
+one remaining limit — `<for>` needs its variables in `<in>`'s context, so a bare `<in>` expression
+binds nothing and is left unread.
+
+
 ## [9.0.49] — 2026-10-27 — SYS-003 was claiming more than `clear()` gives
 
 `SYS-003` read: *"Process-wide state must be resettable so that tests observing it are independent of

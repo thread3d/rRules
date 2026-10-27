@@ -149,7 +149,7 @@ self.skip_element(...)` arm in every other element loop). There is no `extension
 
 | Dropped content | Cite |
 |---|---|
-| `literalExpression`, `<context>`, `<list>`, `<relation>` and `<invocation>` decision bodies, and a business knowledge model body written as `<encapsulatedLogic>` **or** `<functionDefinition>` (`engine/tests/decision_bodies.rs`); an `<invocation>` whose arguments come from `<binding>` elements, and a `<for>` decision body, are still unmodelled | `engine/src/dmn/model.rs`, `engine/src/dmn/parser.rs` |
+| `literalExpression`, `<context>`, `<list>`, `<relation>`, `<invocation>` (both the literal-expression **and** the `<binding>` form) and `<for>` decision bodies, and a business knowledge model body written as `<encapsulatedLogic>` **or** `<functionDefinition>` — all exercised by `engine/tests/decision_bodies.rs`. An invocation or `for` body is joined into FEEL text once the document is read (`triple(14)`, `for x in [1, 2, 3] return x * 2`), because `href` names a model by **id** and the model may appear later; the exporter therefore emits the joined expression rather than the original element structure. `<for>` requires its iteration variables in `<in>`'s context, as DMN does; a bare `<in>` expression binds nothing and is left unread | `engine/src/dmn/model.rs`, `engine/src/dmn/parser.rs` |
 | `extensionElements`, `otherElements`, vendor metadata | `parser.rs:613` |
 | `description` on `decisionTable` (explicitly skipped; `DecisionTable` has no such field) and on `textAnnotation` | `parser.rs:870-873`, `1435-1437`; `engine/src/dmn/model.rs:310-328`, `277-283` |
 | `id` on entry elements (`inputEntry`/`outputEntry`/`annotationEntry`) — `RuleEntry` has no id field | `engine/src/dmn/model.rs:379-382` |

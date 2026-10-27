@@ -204,9 +204,32 @@ fn walk_decision_table(table: &DecisionTable, cache: &FeelAstCache) {
 // =========================================================================
 
 /// Streaming pull-parser state over a `&[u8]` DMN source.
+/// A decision body that names its model by id, recorded until the whole document is read.
+struct PendingInvocation {
+    decision_id: String,
+    /// The `href` of the `<invocation>`: `#model_id`.
+    href: Option<String>,
+    /// `(parameter name, argument text)` in document order.
+    bindings: Vec<(Option<String>, String)>,
+}
+
+/// A `<for>` decision body, recorded for the same reason: its arms are parsed before they are joined.
+///
+/// `<in>` holds a `<context>` whose entries *bind* the iteration variables
+/// (`<variable name="x"/>` + a list), which is what makes `x` available in `<return>`.
+struct PendingFor {
+    decision_id: String,
+    /// `(iteration variable, source expression)` in document order.
+    bindings: Vec<(String, String)>,
+    result: String,
+}
+
 struct Parser<'a> {
     reader: NsReader<&'a [u8]>,
     buf: Vec<u8>,
+    /// Decision bodies whose model is named by id, resolved once the document is complete.
+    pending_invocations: Vec<PendingInvocation>,
+    pending_fors: Vec<PendingFor>,
 }
 
 impl<'a> Parser<'a> {
@@ -221,6 +244,8 @@ impl<'a> Parser<'a> {
         Ok(Self {
             reader,
             buf: Vec::new(),
+            pending_invocations: Vec::new(),
+            pending_fors: Vec::new(),
         })
     }
 
@@ -281,8 +306,10 @@ impl<'a> Parser<'a> {
                 Err(e) => return Err(DmnParseError::XmlError(e.to_string())),
             }
         }
-        let definitions = definitions
+        let mut definitions = definitions
             .ok_or_else(|| DmnParseError::MissingElement("definitions root element".into()))?;
+        // Bodies that name a model by id can only be joined now: the model may appear after them.
+        self.resolve_pending_bodies(&mut definitions);
         Ok(DmnModel {
             definitions,
             source_namespace: source_ns,
@@ -636,7 +663,11 @@ impl<'a> Parser<'a> {
                         // expression (read here, resolved by name at evaluation) or a set of
                         // `<binding>` elements, which are still unmodelled — see the spec's gaps.
                         "invocation" => {
-                            self.parse_invocation_body(&mut dec)?;
+                            let attrs = collect_attrs(&e)?;
+                            self.parse_invocation_body(&mut dec, attrs)?;
+                        }
+                        "for" => {
+                            self.parse_for_body(&mut dec)?;
                         }
                         "annotation" => {
                             let attrs = collect_attrs(&e)?;
@@ -1064,10 +1095,32 @@ impl<'a> Parser<'a> {
     /// `<literalExpression>` with the call. An invocation whose arguments come from `<binding>`
     /// elements is skipped, leaving the decision without an expression — the same behaviour as
     /// before the parser knew the element, and recorded as a gap rather than pretended otherwise.
+    /// Read an `<invocation>` used as a decision body.
+    ///
+    /// Two forms exist. The literal-expression form carries the call itself:
+    ///
+    /// ```xml
+    /// <invocation href="#model"><literalExpression><text>triple(14)</text></literalExpression></invocation>
+    /// ```
+    ///
+    /// The binding form names the arguments instead:
+    ///
+    /// ```xml
+    /// <invocation href="#model">
+    ///   <binding><parameter name="value"/><literalExpression><text>14</text></literalExpression></binding>
+    /// </invocation>
+    /// ```
+    ///
+    /// The second cannot be finished here: `href` names the model by **id**, and the model may appear
+    /// later in the document. Its bindings are recorded and joined once the document is read.
     fn parse_invocation_body(
         &mut self,
         decision: &mut crate::dmn::model::Decision,
+        attrs: Attrs,
     ) -> Result<(), DmnParseError> {
+        let href = attrs.get("href").cloned();
+        let mut bindings: Vec<(Option<String>, String)> = Vec::new();
+
         loop {
             self.buf.clear();
             match self.reader.read_event_into(&mut self.buf) {
@@ -1078,6 +1131,11 @@ impl<'a> Parser<'a> {
                             let attrs = collect_attrs(&e)?;
                             decision.literal_expression =
                                 Some(self.parse_literal_expression(attrs)?);
+                        }
+                        "binding" => {
+                            if let Some(binding) = self.parse_binding()? {
+                                bindings.push(binding);
+                            }
                         }
                         _ => self.skip_element(&ln)?,
                     }
@@ -1096,7 +1154,263 @@ impl<'a> Parser<'a> {
                 Err(e) => return Err(DmnParseError::XmlError(e.to_string())),
             }
         }
+
+        if decision.literal_expression.is_none() && !bindings.is_empty() {
+            self.pending_invocations.push(PendingInvocation {
+                decision_id: decision.id.clone(),
+                href,
+                bindings,
+            });
+        }
         Ok(())
+    }
+
+    /// One `<binding>`: the parameter it fills and the expression bound to it.
+    fn parse_binding(&mut self) -> Result<Option<(Option<String>, String)>, DmnParseError> {
+        let mut parameter = None;
+        let mut expression: Option<String> = None;
+
+        loop {
+            self.buf.clear();
+            match self.reader.read_event_into(&mut self.buf) {
+                Ok(Event::Start(e)) => {
+                    let ln = local_name_str(e.name());
+                    match ln.as_str() {
+                        "parameter" => {
+                            let attrs = collect_attrs(&e)?;
+                            parameter = attrs.get("name").cloned();
+                            self.skip_element(&ln)?;
+                        }
+                        "literalExpression" => {
+                            let attrs = collect_attrs(&e)?;
+                            let literal = self.parse_literal_expression(attrs)?;
+                            expression = Some(literal.text.content);
+                        }
+                        _ => self.skip_element(&ln)?,
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    if local_name_str(e.name()) == "binding" {
+                        break;
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(DmnParseError::UnexpectedElement(
+                        "unexpected EOF while parsing <binding>".into(),
+                    ));
+                }
+                Ok(_) => {}
+                Err(e) => return Err(DmnParseError::XmlError(e.to_string())),
+            }
+        }
+
+        Ok(expression.map(|expression| (parameter, expression)))
+    }
+
+    /// Read a `<for>` decision body: `<in>` the iteration source, `<return>` the result.
+    fn parse_for_body(
+        &mut self,
+        decision: &mut crate::dmn::model::Decision,
+    ) -> Result<(), DmnParseError> {
+        let mut iteration = None;
+        let mut result = None;
+
+        loop {
+            self.buf.clear();
+            match self.reader.read_event_into(&mut self.buf) {
+                Ok(Event::Start(e)) => {
+                    let ln = local_name_str(e.name());
+                    match ln.as_str() {
+                        "in" => iteration = Some(self.parse_for_bindings()?),
+                        "return" => result = Some(self.parse_boxed_expression_text(&ln)?),
+                        _ => self.skip_element(&ln)?,
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    if local_name_str(e.name()) == "for" {
+                        break;
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(DmnParseError::UnexpectedElement(
+                        "unexpected EOF while parsing <for>".into(),
+                    ));
+                }
+                Ok(_) => {}
+                Err(e) => return Err(DmnParseError::XmlError(e.to_string())),
+            }
+        }
+
+        if let (Some(bindings), Some(result)) = (iteration, result) {
+            if decision.literal_expression.is_none() && !bindings.is_empty() {
+                self.pending_fors.push(PendingFor {
+                    decision_id: decision.id.clone(),
+                    bindings,
+                    result,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// The `<in>` of a `<for>`: a context whose entries name the iteration variables.
+    fn parse_for_bindings(&mut self) -> Result<Vec<(String, String)>, DmnParseError> {
+        let mut bindings = Vec::new();
+        loop {
+            self.buf.clear();
+            match self.reader.read_event_into(&mut self.buf) {
+                Ok(Event::Start(e)) => {
+                    let ln = local_name_str(e.name());
+                    match ln.as_str() {
+                        "context" => {
+                            let attrs = collect_attrs(&e)?;
+                            let context = self.parse_boxed_context(attrs)?;
+                            for entry in context.entries {
+                                if let crate::dmn::model::BoxedValue::Literal(literal) = entry.value
+                                {
+                                    bindings.push((entry.key, literal.text.content));
+                                }
+                            }
+                        }
+                        _ => self.skip_element(&ln)?,
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    if local_name_str(e.name()) == "in" {
+                        break;
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(DmnParseError::UnexpectedElement(
+                        "unexpected EOF while parsing <in>".into(),
+                    ));
+                }
+                Ok(_) => {}
+                Err(e) => return Err(DmnParseError::XmlError(e.to_string())),
+            }
+        }
+        Ok(bindings)
+    }
+
+    /// The FEEL text of the boxed expression inside `parent` (`in` / `return`).
+    fn parse_boxed_expression_text(&mut self, parent: &str) -> Result<String, DmnParseError> {
+        let mut text = String::new();
+        loop {
+            self.buf.clear();
+            match self.reader.read_event_into(&mut self.buf) {
+                Ok(Event::Start(e)) => {
+                    let ln = local_name_str(e.name());
+                    match ln.as_str() {
+                        "literalExpression" => {
+                            let attrs = collect_attrs(&e)?;
+                            let literal = self.parse_literal_expression(attrs)?;
+                            text = literal.text.content;
+                        }
+                        _ => self.skip_element(&ln)?,
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    if local_name_str(e.name()) == parent {
+                        break;
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(DmnParseError::UnexpectedElement(format!(
+                        "unexpected EOF while parsing <{parent}>"
+                    )));
+                }
+                Ok(_) => {}
+                Err(e) => return Err(DmnParseError::XmlError(e.to_string())),
+            }
+        }
+        Ok(text)
+    }
+
+    /// Join the recorded bodies into the FEEL text the evaluator reads.
+    ///
+    /// The result is ordinary text — `triple(14)`, `for x in xs return x` — which is why nothing
+    /// downstream needed a second representation, and why the exporter round-trips the result rather
+    /// than the original element structure (recorded in `specs/dmn-feel.md`).
+    fn resolve_pending_bodies(&mut self, defs: &mut crate::dmn::model::Definitions) {
+        use crate::dmn::model::{DefinitionsChild, LiteralExpression, TextContent};
+
+        let mut names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for child in &defs.children {
+            match child {
+                DefinitionsChild::BusinessKnowledgeModel(model) => {
+                    names.insert(
+                        model.id.clone(),
+                        model.name.clone().unwrap_or_else(|| model.id.clone()),
+                    );
+                }
+                DefinitionsChild::Decision(decision) => {
+                    names.insert(
+                        decision.id.clone(),
+                        decision.name.clone().unwrap_or_else(|| decision.id.clone()),
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        let invocations = std::mem::take(&mut self.pending_invocations);
+        let fors = std::mem::take(&mut self.pending_fors);
+
+        for child in &mut defs.children {
+            let DefinitionsChild::Decision(decision) = child else {
+                continue;
+            };
+
+            if let Some(pending) = invocations
+                .iter()
+                .find(|pending| pending.decision_id == decision.id)
+            {
+                let target = pending
+                    .href
+                    .as_deref()
+                    .map(|href| href.trim_start_matches('#'))
+                    .and_then(|id| names.get(id).cloned())
+                    .unwrap_or_else(|| pending.decision_id.clone());
+                let arguments: Vec<&str> = pending
+                    .bindings
+                    .iter()
+                    .map(|(_, expression)| expression.as_str())
+                    .collect();
+                decision.literal_expression = Some(LiteralExpression {
+                    id: None,
+                    type_ref: None,
+                    text: TextContent {
+                        content: format!("{target}({})", arguments.join(", ")),
+                        is_cdata: false,
+                    },
+                    description: None,
+                });
+            }
+
+            if let Some(pending) = fors
+                .iter()
+                .find(|pending| pending.decision_id == decision.id)
+            {
+                decision.literal_expression = Some(LiteralExpression {
+                    id: None,
+                    type_ref: None,
+                    text: TextContent {
+                        content: format!(
+                            "for {} return {}",
+                            pending
+                                .bindings
+                                .iter()
+                                .map(|(variable, source)| format!("{variable} in {source}"))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            pending.result
+                        ),
+                        is_cdata: false,
+                    },
+                    description: None,
+                });
+            }
+        }
     }
 
     fn parse_encapsulated_logic(
