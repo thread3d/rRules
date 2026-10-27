@@ -631,6 +631,13 @@ impl<'a> Parser<'a> {
                             let attrs = collect_attrs(&e)?;
                             dec.boxed_relation = Some(self.parse_boxed_relation(attrs)?);
                         }
+                        // A decision may express itself as an invocation of a business knowledge
+                        // model. The `href` names the model; the arguments are either a literal
+                        // expression (read here, resolved by name at evaluation) or a set of
+                        // `<binding>` elements, which are still unmodelled — see the spec's gaps.
+                        "invocation" => {
+                            self.parse_invocation_body(&mut dec)?;
+                        }
                         "annotation" => {
                             let attrs = collect_attrs(&e)?;
                             dec.annotations.push(self.parse_annotation(attrs)?);
@@ -1051,6 +1058,47 @@ impl<'a> Parser<'a> {
     /// Parse a BKM's `<encapsulatedLogic>`: formal parameters plus the body
     /// expression (which this IR models as a literal expression, the form every
     /// real model uses for a business knowledge model).
+    /// Read an `<invocation>` used as a decision body.
+    ///
+    /// Only the literal-expression form is modelled: `<invocation href="#model">` carrying a
+    /// `<literalExpression>` with the call. An invocation whose arguments come from `<binding>`
+    /// elements is skipped, leaving the decision without an expression — the same behaviour as
+    /// before the parser knew the element, and recorded as a gap rather than pretended otherwise.
+    fn parse_invocation_body(
+        &mut self,
+        decision: &mut crate::dmn::model::Decision,
+    ) -> Result<(), DmnParseError> {
+        loop {
+            self.buf.clear();
+            match self.reader.read_event_into(&mut self.buf) {
+                Ok(Event::Start(e)) => {
+                    let ln = local_name_str(e.name());
+                    match ln.as_str() {
+                        "literalExpression" => {
+                            let attrs = collect_attrs(&e)?;
+                            decision.literal_expression =
+                                Some(self.parse_literal_expression(attrs)?);
+                        }
+                        _ => self.skip_element(&ln)?,
+                    }
+                }
+                Ok(Event::End(e)) => {
+                    if local_name_str(e.name()) == "invocation" {
+                        break;
+                    }
+                }
+                Ok(Event::Eof) => {
+                    return Err(DmnParseError::UnexpectedElement(
+                        "unexpected EOF while parsing <invocation>".into(),
+                    ));
+                }
+                Ok(_) => {}
+                Err(e) => return Err(DmnParseError::XmlError(e.to_string())),
+            }
+        }
+        Ok(())
+    }
+
     fn parse_encapsulated_logic(
         &mut self,
         bkm: &mut crate::dmn::model::BusinessKnowledgeModel,
@@ -1075,7 +1123,12 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Ok(Event::End(e)) => {
-                    if local_name_str(e.name()) == "encapsulatedLogic" {
+                    // DMN 1.5 spells this element `<functionDefinition>`; both end tags close the
+                    // same body, and matching only the 1.3 name consumed the rest of the document.
+                    if matches!(
+                        local_name_str(e.name()).as_str(),
+                        "encapsulatedLogic" | "functionDefinition"
+                    ) {
                         break;
                     }
                 }
@@ -1577,7 +1630,10 @@ impl<'a> Parser<'a> {
                         "knowledgeRequirement" => {
                             self.collect_required_knowledge(&ln, &mut bkm.knowledge_requirement)?;
                         }
-                        "encapsulatedLogic" => {
+                        // DMN 1.5 renamed `<encapsulatedLogic>` to `<functionDefinition>`; the
+                        // child structure is identical, and a model authored to the current
+                        // standard should not lose its body for using the current name.
+                        "encapsulatedLogic" | "functionDefinition" => {
                             self.parse_encapsulated_logic(&mut bkm)?;
                         }
                         "annotation" => {

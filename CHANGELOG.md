@@ -12,6 +12,28 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.42] — 2026-10-26 — A model can invoke a model, and DMN 1.5 bodies load
+
+Two decision bodies were being dropped in silence. The parser's dispatch matched
+`literalExpression`, `decisionTable`, `context`, `list` and `relation`, and sent everything else —
+including `<invocation>` and the BKM body element — to `skip_element`. A decision that expressed
+itself as a call therefore arrived at the evaluator with **no expression at all**, and a business
+knowledge model written to the current standard lost its body.
+
+- **`<functionDefinition>` is read as a BKM body.** DMN 1.5 renamed `<encapsulatedLogic>` to
+  `<functionDefinition>`; the child structure is identical, and the parser knew only the older name.
+  The end tag needed teaching too — matching only `</encapsulatedLogic>` consumed the rest of the
+  document and failed with `unexpected EOF while parsing <businessKnowledgeModel>`.
+- **`<invocation>` is read as a decision body.** The literal-expression form (the common one) becomes
+  the decision's expression, and the existing name resolution calls the model. An invocation whose
+  arguments come from `<binding>` elements is still unmodelled, and the spec says so rather than
+  pretending otherwise.
+
+`engine/tests/decision_bodies.rs` evaluates both: a BKM written with `<functionDefinition>` and a
+decision written as `<invocation href="#model">` each produce the expected number. `specs/dmn-feel.md`'s
+body-coverage row names what is read and what is not.
+
+
 ## [9.0.41] — 2026-10-25 — The loop's lessons, and a chart gate that runs the way CI does
 
 Two things that belong in the repository rather than in a session log.

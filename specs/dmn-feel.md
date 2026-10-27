@@ -149,7 +149,7 @@ self.skip_element(...)` arm in every other element loop). There is no `extension
 
 | Dropped content | Cite |
 |---|---|
-| `literalExpression`, `<context>`, `<list>` and `<relation>` decision bodies (`Decision` carries `literal_expression`, `boxed_context`, `boxed_list`, `boxed_relation`); `<functionDefinition>`, `<invocation>` and `<for>` bodies are still unmodelled | `engine/src/dmn/model.rs` |
+| `literalExpression`, `<context>`, `<list>`, `<relation>` and `<invocation>` decision bodies, and a business knowledge model body written as `<encapsulatedLogic>` **or** `<functionDefinition>` (`engine/tests/decision_bodies.rs`); an `<invocation>` whose arguments come from `<binding>` elements, and a `<for>` decision body, are still unmodelled | `engine/src/dmn/model.rs`, `engine/src/dmn/parser.rs` |
 | `extensionElements`, `otherElements`, vendor metadata | `parser.rs:613` |
 | `description` on `decisionTable` (explicitly skipped; `DecisionTable` has no such field) and on `textAnnotation` | `parser.rs:870-873`, `1435-1437`; `engine/src/dmn/model.rs:310-328`, `277-283` |
 | `id` on entry elements (`inputEntry`/`outputEntry`/`annotationEntry`) — `RuleEntry` has no id field | `engine/src/dmn/model.rs:379-382` |
