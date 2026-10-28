@@ -483,10 +483,18 @@ HTTP endpoint forwards straight into it (`api/src/v1/simulation.rs:150-161`).
 4. **PHREAK truth maintenance is dead weight:** facts are supported (`phreak/mod.rs:487`), no
    `Justification` is ever created, `justification_count()` is structurally 0 (asserted `:793`),
    and `execute_rules` ignores the TMS (`:574-577`).
-5. **TREAT's cache is neither LRU nor sound:** key-sorted eviction (`treat/mod.rs:66-73`),
-   per-node key that can skip a different fact (`:267`, `:275-279`), hardcoded `stats()`
-   (`:110-117`), duplicate counters (`:191-192`), `with_cache_size` ignoring its argument
-   (`:507-510`).
+5. ~~**TREAT's cache is neither LRU nor sound:** key-sorted eviction, a per-node key that can skip a
+   different fact, a hardcoded `stats()`, duplicate counters, and a `with_cache_size` that ignored its
+   argument.~~ — **closed in 9.0.56**: entries carry a `last_used` mark and eviction takes the coldest,
+   which `eviction_takes_the_least_recently_used_entry` pins (the alphabetical version evicted `aaa`
+   whether it had just been used or never); the propagation key names the **fact** as well as the node,
+   so the second fact reaching a cached join node is no longer answered with the first one's entry;
+   `stats()` counts the hits and misses the cache itself observes; the duplicated `cache_hits`/
+   `cache_misses` fields are gone, leaving the metrics collector as the single source; and
+   `TreatEngineFactory::with_cache_size` carries its argument into every engine it builds.
+   **Note:** execution goes through the shared evaluator rather than this network, so the cache is
+   tested where it lives — `engine/src/engine/treat/mod.rs`'s unit tests — and not through the public
+   execution path.
 6. ~~**LEAPS aggregation never computes:** `recalculate` returns `None`, `execute_aggregations`
    discards its result, and every fact is fed to every node.~~ — **closed in 9.0.55**: the node holds
    the values it aggregates and recomputes on add and on removal; a fact whose payload lacks the

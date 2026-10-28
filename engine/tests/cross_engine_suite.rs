@@ -228,3 +228,44 @@ fn every_engine_is_freshly_constructed_per_execution() {
         );
     }
 }
+
+#[test]
+fn every_engine_holds_two_facts_of_the_same_type() {
+    // Inserting a second fact of a type the engine has already seen must not be swallowed. (The TREAT
+    // network's join cache had exactly that defect — keyed by node alone, so the second fact found the
+    // first one's entry and was never propagated — but execution goes through the shared evaluator
+    // rather than that network, so the cache is tested where it lives: `treat::mod`'s unit tests.)
+    for name in engine_names() {
+        let mut engine = engine(name);
+        engine
+            .load_ruleset(&score_rule_set())
+            .unwrap_or_else(|error| panic!("{name} should load a rule set: {error}"));
+
+        let mut first = HashMap::new();
+        first.insert("score".to_string(), Value::Integer(0));
+        engine
+            .insert_fact(Fact::with_id(uuid::Uuid::from_u128(1), "scorecard", first))
+            .unwrap_or_else(|error| panic!("{name} should insert the first fact: {error}"));
+
+        let mut second = HashMap::new();
+        second.insert("score".to_string(), Value::Integer(0));
+        engine
+            .insert_fact(Fact::with_id(uuid::Uuid::from_u128(2), "scorecard", second))
+            .unwrap_or_else(|error| panic!("{name} should insert the second fact: {error}"));
+
+        let facts = engine.get_facts();
+        assert_eq!(
+            facts.len(),
+            2,
+            "{name} should hold both facts, not just the one that reached the cache first"
+        );
+        assert!(
+            facts.iter().any(|fact| fact.id == uuid::Uuid::from_u128(1)),
+            "{name} lost the first fact"
+        );
+        assert!(
+            facts.iter().any(|fact| fact.id == uuid::Uuid::from_u128(2)),
+            "{name} lost the second fact"
+        );
+    }
+}

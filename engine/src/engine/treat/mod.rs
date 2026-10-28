@@ -16,13 +16,14 @@ use std::collections::{HashMap, HashSet};
 // `record_rule_eval`/`record_rule_fire` calls in the old `execute_rules`
 // are gone.
 
-/// Cache entry with a generation timestamp for LRU ordering.
-#[allow(dead_code)]
+/// One cache entry: the partial match and when it was last used.
+///
+/// It used to carry a `generation` and a `last_accessed` field that nothing ever wrote, which is why
+/// eviction sorted the keys instead.
 #[derive(Debug, Clone)]
 struct CacheEntry {
     nagram: Nagram,
-    generation: usize,
-    last_accessed: usize,
+    last_used: u64,
 }
 
 /// LRU cache for join node partial matches.
@@ -32,8 +33,13 @@ pub struct LRUCache {
     max_size: usize,
     /// Current size
     current_size: usize,
-    /// Map from key to nagram
-    entries: HashMap<String, Nagram>,
+    /// Map from key to the nagram and when it was last used
+    entries: HashMap<String, CacheEntry>,
+    /// Monotonic use counter: the entry with the smallest value is the coldest.
+    tick: u64,
+    /// Hits and misses, counted where they happen.
+    hit_count: u64,
+    miss_count: u64,
 }
 
 impl LRUCache {
@@ -42,46 +48,77 @@ impl LRUCache {
             max_size,
             current_size: 0,
             entries: HashMap::new(),
+            tick: 0,
+            hit_count: 0,
+            miss_count: 0,
         }
     }
 
-    /// Gets a cached nagram if it exists.
+    /// Gets a cached nagram if it exists, marking it as used.
+    ///
+    /// The recency mark is what makes eviction least-recently-used. Reporting hits and misses here is
+    /// also what makes `stats()` say something true: the counters live with the cache that produces
+    /// them rather than being hardcoded zeroes.
     pub fn get(&mut self, key: &str) -> Option<&Nagram> {
-        self.entries.get(key)
+        self.tick += 1;
+        let tick = self.tick;
+        match self.entries.get_mut(key) {
+            Some(entry) => {
+                entry.last_used = tick;
+                self.hit_count += 1;
+                Some(&entry.nagram)
+            }
+            None => {
+                self.miss_count += 1;
+                None
+            }
+        }
     }
 
     /// Inserts or updates a cache entry.
     pub fn insert(&mut self, key: String, nagram: Nagram) {
-        // If key already exists, just update the value
+        // If the key already exists, replace the value and mark it used.
         if let Some(entry) = self.entries.get_mut(&key) {
-            *entry = nagram;
+            self.tick += 1;
+            entry.last_used = self.tick;
+            entry.nagram = nagram;
             return;
         }
 
-        // If at capacity, evict an arbitrary entry (HashMap iteration order is non-deterministic)
-        // For a proper LRU implementation we'd use a LinkedHashMap-like structure
-        // Evict oldest entry - for testing purposes, we use a deterministic policy
-        // Since HashMap iteration is non-deterministic in Rust, sort keys first to ensure consistency
+        // Evict the least recently used entry. Sorting the keys made eviction deterministic, which
+        // looked like a policy but was not one: the alphabetically-first key is evicted whether it was
+        // used a moment ago or not.
         if self.current_size >= self.max_size && !self.entries.is_empty() {
-            let mut keys: Vec<_> = self.entries.keys().cloned().collect();
-            keys.sort(); // Sort for deterministic eviction order
-            if let Some(key) = keys.first().cloned() {
-                self.entries.remove(&key);
+            if let Some(coldest) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(key, _)| key.clone())
+            {
+                self.entries.remove(&coldest);
                 self.current_size -= 1;
             }
         }
 
-        // Insert new entry
-        self.entries.insert(key, nagram);
+        self.tick += 1;
+        let tick = self.tick;
+        self.entries.insert(
+            key,
+            CacheEntry {
+                nagram,
+                last_used: tick,
+            },
+        );
         self.current_size += 1;
     }
 
-    /// Gets the key of an arbitrary entry for eviction (not truly LRU due to HashMap ordering)
+    /// The least recently used key, which is the entry eviction takes.
     #[allow(dead_code)]
     fn get_oldest_entry(&self) -> Option<String> {
-        // Since we're using HashMap which has non-deterministic iteration order,
-        // just return the first key
-        self.entries.keys().next().cloned()
+        self.entries
+            .iter()
+            .min_by_key(|(_, entry)| entry.last_used)
+            .map(|(key, _)| key.clone())
     }
 
     /// Removes an entry from the cache.
@@ -105,13 +142,13 @@ impl LRUCache {
         self.current_size
     }
 
-    /// Returns cache statistics.
+    /// Returns cache statistics, counted as they happened.
     pub fn stats(&self) -> CacheStats {
         CacheStats {
             max_size: self.max_size,
             current_size: self.current_size,
-            hit_count: 0, // Would need to track separately for precise stats
-            miss_count: 0,
+            hit_count: self.hit_count,
+            miss_count: self.miss_count,
         }
     }
 }
@@ -187,8 +224,9 @@ pub struct TreatEngine {
     /// `RuleSet` snapshot; per-request engines carry their own copy.
     rules: Vec<crate::rules::Rule>,
     metrics: crate::engine::metrics::SimpleMetricsCollector,
-    cache_hits: u64,
-    cache_misses: u64,
+    // Cache hits and misses are counted by `metrics` alone. Two fields used to shadow it, and
+    // `get_metrics` overwrote the collector's numbers with theirs — the same fact, twice, with the
+    // loser silently discarded.
     /// Phase 28 (D-01 / EXEC-04): trace-collection flag. Set via
     /// `set_collect_trace` before `execute()`; threaded into `direct_execute`
     /// so the shared helper emits ordered `TraceEvent`s when true. Default
@@ -210,8 +248,6 @@ impl TreatEngine {
             working_facts: HashMap::new(),
             rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
-            cache_hits: 0,
-            cache_misses: 0,
             collect_trace: false,
             max_iterations: None,
         }
@@ -226,8 +262,6 @@ impl TreatEngine {
             working_facts: HashMap::new(),
             rules: Vec::new(),
             metrics: crate::engine::metrics::SimpleMetricsCollector::new(),
-            cache_hits: 0,
-            cache_misses: 0,
             collect_trace: false,
             max_iterations: None,
         }
@@ -274,7 +308,7 @@ impl TreatEngine {
             test_node
                 .successors
                 .iter()
-                .map(|s| (s.clone(), format!("join_{}", s.0)))
+                .map(|s| (s.clone(), format!("join_{}_{}", s.0, fact_id)))
                 .collect()
         };
 
@@ -284,7 +318,6 @@ impl TreatEngine {
 
             if is_cached && self.network.cache.get(&key).is_some() {
                 self.metrics.record_cache_hit();
-                self.cache_hits += 1;
                 continue; // Use cached result
             }
 
@@ -297,7 +330,6 @@ impl TreatEngine {
         }
 
         self.metrics.record_cache_miss();
-        self.cache_misses += 1;
     }
 
     /// Propagates from join node with caching support.
@@ -333,7 +365,6 @@ impl TreatEngine {
                     self.beta_memory.insert(&join_node.id, new_nagram);
                 }
                 self.metrics.record_cache_hit();
-                self.cache_hits += 1;
                 return;
             }
         }
@@ -483,8 +514,6 @@ impl ExecutionEngine for TreatEngine {
         let mut metrics = self.metrics.get_metrics();
         metrics.alpha_memory_size = self.alpha_memory.size();
         metrics.beta_memory_size = self.beta_memory.size();
-        metrics.cache_hits = self.cache_hits;
-        metrics.cache_misses = self.cache_misses;
         metrics
     }
 
@@ -499,8 +528,6 @@ impl ExecutionEngine for TreatEngine {
         self.working_facts.clear();
         self.rules.clear();
         self.metrics.reset_metrics();
-        self.cache_hits = 0;
-        self.cache_misses = 0;
         // `collect_trace` is a config flag, not state — leave it across reset.
     }
 
@@ -529,18 +556,34 @@ impl ExecutionEngine for TreatEngine {
 
 /// Factory for creating TREAT engine instances.
 #[derive(Debug, Clone)]
-pub struct TreatEngineFactory;
+pub struct TreatEngineFactory {
+    /// Cache size given to each engine this factory creates.
+    max_cache_size: usize,
+}
 
 impl TreatEngineFactory {
     /// Creates a new factory.
     pub fn new() -> Self {
-        Self
+        Self {
+            max_cache_size: 1024,
+        }
     }
 
-    /// Creates a factory with custom cache size.
+    /// Builds the engine this factory describes.
+    ///
+    /// `create_engine` boxes exactly this, and the tests ask for it directly so the factory's one
+    /// promise — that the size it was given is the size it builds — can be checked without a downcast
+    /// the trait does not offer.
+    pub fn build(&self) -> TreatEngine {
+        TreatEngine::with_cache_size(self.max_cache_size)
+    }
+
+    /// Creates a factory with a custom cache size.
+    ///
+    /// The size is carried on the factory and applied to every engine it creates; it used to be
+    /// accepted and dropped, so a caller asking for a small cache silently got the default.
     pub fn with_cache_size(max_cache_size: usize) -> Self {
-        let _ = max_cache_size; // Will be used when creating engine
-        Self::new()
+        Self { max_cache_size }
     }
 }
 
@@ -556,7 +599,7 @@ impl EngineFactory for TreatEngineFactory {
     }
 
     fn create_engine(&self) -> Result<Box<dyn ExecutionEngine>, String> {
-        Ok(Box::new(TreatEngine::new()))
+        Ok(Box::new(self.build()))
     }
 }
 
@@ -586,9 +629,61 @@ mod tests {
     }
 
     #[test]
+    fn eviction_takes_the_least_recently_used_entry() {
+        // Sorting the keys made eviction deterministic but not least-recently-used: `aaa` went whether
+        // it had been used a moment ago or never. Using `a` must protect it and expose `b`.
+        let mut cache = LRUCache::new(2);
+        cache.insert("aaa".to_string(), vec![]);
+        cache.insert("bbb".to_string(), vec![]);
+        assert!(
+            cache.get("aaa").is_some(),
+            "touch `aaa` so it becomes recent"
+        );
+
+        cache.insert("ccc".to_string(), vec![]);
+
+        assert!(
+            cache.get("aaa").is_some(),
+            "the recently used entry should survive"
+        );
+        assert!(
+            cache.get("bbb").is_none(),
+            "the least recently used entry should be the one evicted, whatever its name"
+        );
+    }
+
+    #[test]
+    fn statistics_count_what_happened() {
+        // `stats()` used to return hardcoded zeroes, so a caller could not tell a working cache from a
+        // bypassed one.
+        let mut cache = LRUCache::new(2);
+        cache.insert("a".to_string(), vec![]);
+        let _ = cache.get("a"); // hit
+        let _ = cache.get("missing"); // miss
+
+        let stats = cache.stats();
+        assert_eq!(stats.hit_count, 1);
+        assert_eq!(stats.miss_count, 1);
+        assert_eq!(stats.current_size, 1);
+        assert_eq!(stats.max_size, 2);
+        assert_eq!(stats.hit_rate(), 0.5);
+    }
+
+    #[test]
     fn test_treat_engine_creation() {
         let engine = TreatEngine::new();
         assert_eq!(engine.engine_type(), EngineType::Treat);
+    }
+
+    #[test]
+    fn a_factory_honours_its_cache_size() {
+        let factory = TreatEngineFactory::with_cache_size(7);
+        let engine = factory.build();
+        assert_eq!(
+            engine.network.cache.stats().max_size,
+            7,
+            "the size asked for should be the size built"
+        );
     }
 
     #[test]

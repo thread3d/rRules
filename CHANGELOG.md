@@ -12,6 +12,33 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.56] — 2026-10-28 — The TREAT cache had five defects, one of them a wrong answer
+
+`specs/rule-engine.md` listed five things wrong with TREAT's join cache. All five are fixed, and one of
+them was a correctness bug rather than an inefficiency:
+
+- **The key named the node, not the fact.** The second fact reaching a cached join node found the
+  *first* fact's entry, counted a hit, and `continue`d — so a different fact was silently never
+  propagated. It is keyed by `(node, fact)` now.
+- **Eviction sorted the keys.** Deterministic, which is why it looked like a policy; it evicted
+  whatever sorted first, used a moment ago or never. Entries carry a `last_used` mark and the coldest
+  goes. `eviction_takes_the_least_recently_used_entry` proves it by using `aaa` and watching it survive;
+  with the alphabetical version that test fails.
+- **`stats()` returned hardcoded zeroes**, so a caller could not tell a working cache from a bypassed
+  one. The cache counts the hits and misses it observes.
+- **The counters existed twice** — struct fields shadowing the metrics collector, with `get_metrics`
+  overwriting the collector's answer with theirs. One source of truth now.
+- **`TreatEngineFactory::with_cache_size` accepted its argument and dropped it**, so a caller asking for
+  a small cache got the default. It carries the size into every engine it builds, and `build()` exists
+  so that promise is testable without a downcast the trait does not offer.
+
+**A test I wrote first did not test what it claimed**, and I caught it the way this loop has learned to:
+by reintroducing the defect. The cross-engine "second fact" test passed with the node-only key restored,
+because TREAT's execution path goes through the shared evaluator and never touches this network. It is
+renamed for the property it actually asserts, and the cache is tested where it lives — in the module's
+own unit tests — with the spec saying plainly that the network is not on the execution path.
+
+
 ## [9.0.55] — 2026-10-28 — LEAPS aggregations compute
 
 `AggregationNode` tracked the *ids* of the facts feeding it and nothing else, so `recalculate` had
