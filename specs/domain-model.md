@@ -511,7 +511,7 @@ Limits and guards (with defaults and configuration points):
 | Chain/fixpoint iterations | `1000` | `RRULES_MAX_CHAIN_ITERATIONS` env var, read at each `execute` call | `engine/src/engine/direct_eval.rs:73-76`; `engine/src/engine/rete/mod.rs:378-381` |
 | Same knob at API startup | warn only if unparseable | `api/src/app.rs:125-129` | |
 | Rules fired per `execute` call | 1 per rule (fired-set guard) | code constant | `direct_eval.rs:102-104,130` |
-| `EngineBuilder::max_iterations` | `1000` | builder method; stored but never read by execution | `engine/src/environment.rs:29,47-50,65` |
+| `EngineBuilder::max_iterations` | `1000` | builder method, passed to the fixpoint loop as its cap (`engine.max_iterations()`), so a builder-created engine honours it | `engine/src/environment.rs` (`EngineBuilder::max_iterations`), `engine/src/forward_chaining.rs` |
 | FEEL lexer tokens | `10_000` | `Lexer::with_max_tokens` | `engine/src/dmn/feel/parser.rs:170-194,207-215` |
 | FEEL parser recursion depth | `256` (`DEFAULT_MAX_DEPTH`) | internal constant; exceeding it yields an `Err` node | `parser.rs:1010-1012,1088-1122` |
 | FEEL token-cache entries | `10_000` (FIFO eviction) | `DEFAULT_MAX_TOKEN_CACHE_ENTRIES` | `parser.rs:798,824` |
@@ -538,8 +538,17 @@ Limits and guards (with defaults and configuration points):
   flag.
 - **~~Two max-chain-iteration knobs, only one live.~~** Partly closed 2026-10-25: each engine now
   honours `set_config("max_iterations", …)`, which overrides `RRULES_MAX_CHAIN_ITERATIONS`; the
-  legacy `EngineBuilder` still stores its value without effect because the `Engine`/`Session`
-  surface below is a placeholder.
+  ~~the legacy `EngineBuilder` still stores its value without effect~~ — **closed in 9.0.68**: the
+  fixpoint loop takes the builder's cap, so every path is live.
+
+- **Two builder settings stored and never read, one deleted.** `EngineBuilder::enable_debug_trace`
+  asked for a trace the evaluator was never told to collect; it is honoured now — with the flag set,
+  `Engine::last_trace()` returns the run's `TraceData`. `EngineBuilder::default_salience` is **deleted**:
+  a rule's `salience` is an `i32` that always has a value, so "the default for rules without one" is a
+  distinction the type cannot express, and a knob that cannot keep its promise should not exist.
+  `Session`'s `stateful` flag was also stored and never read; a stateless session now clears its working
+  memory when a run completes, which is what "single-use" means. `engine/tests/session_and_trace.rs`
+  pins all three.
 - **The `Environment`/`Session` execution surface is partly real and partly a placeholder.**
   Forward chaining works: `Engine::load_rules` parses the same JSON the API stores,
   `Engine::execute_forward` runs the shared fixpoint evaluator and reports what fired, and

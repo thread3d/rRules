@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use engine::data_types::Value;
 use engine::dmn::evaluator::{DecisionEvaluator, EvaluateRequest};
-use engine::dmn::model::{Decision, DefinitionsChild, DmnModel};
+use engine::dmn::model::DefinitionsChild;
 use engine_state::DmnDocument;
 // The store is chosen at startup (filesystem or PostgreSQL); the handlers see the selector.
 use crate::v1::dmn_store::DmnStore;
@@ -114,19 +114,6 @@ fn default_per_page() -> u32 {
 // =========================================================================
 // Helper: extract decisions from Definitions children
 // =========================================================================
-
-#[allow(dead_code)]
-fn extract_decisions(definitions: &DmnModel) -> Vec<&Decision> {
-    definitions
-        .definitions
-        .children
-        .iter()
-        .filter_map(|child| match child {
-            DefinitionsChild::Decision(d) => Some(d),
-            _ => None,
-        })
-        .collect()
-}
 
 // =========================================================================
 // Handlers

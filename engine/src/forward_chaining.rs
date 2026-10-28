@@ -67,12 +67,17 @@ pub(crate) fn run(engine: &mut Engine) -> ExecutionResult {
         .collect();
     let before: HashSet<String> = facts.keys().cloned().collect();
 
-    let (fired, _evaluated, _trace) = crate::engine::direct_eval::direct_execute_with_limit(
+    // `enable_debug_trace` used to be a builder setting nobody read: the evaluator was always asked for
+    // no trace and the trace was discarded. It is honoured now, and the trace is kept on the engine for
+    // `Engine::last_trace`.
+    let collect_trace = engine.debug_trace_enabled();
+    let (fired, _evaluated, trace) = crate::engine::direct_eval::direct_execute_with_limit(
         engine.rules(),
         &mut facts,
-        false,
+        collect_trace,
         engine.max_iterations(),
     );
+    engine.set_last_trace(trace);
 
     let rules_fired_count = fired.len();
     // Write the result back, so working memory and the map cannot disagree afterwards.

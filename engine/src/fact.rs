@@ -143,16 +143,9 @@ pub struct WorkingMemory {
     facts: HashMap<Uuid, Fact>,
     /// Index for efficient retrieval
     index: FactRetrievalIndex,
-    /// Track inserted/removed facts for session isolation
-    #[allow(dead_code)]
-    changes: Vec<WorkingMemoryChange>,
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-enum WorkingMemoryChange {
-    Inserted(Uuid),
-    Removed(Uuid),
+    // A `changes: Vec<WorkingMemoryChange>` used to track inserted and removed facts "for session
+    // isolation". Nothing ever pushed to it and nothing ever read it — session isolation is done by
+    // cloning the engine — so it and its enum are deleted rather than left as a field no caller can use.
 }
 
 impl WorkingMemory {
@@ -161,7 +154,6 @@ impl WorkingMemory {
         Self {
             facts: HashMap::new(),
             index: FactRetrievalIndex::new(),
-            changes: Vec::new(),
         }
     }
 

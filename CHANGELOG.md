@@ -12,6 +12,34 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.68] — 2026-10-28 — Settings that were stored and never read
+
+Continuing the sweep for work that is computed and then discarded, this round read `#[allow(dead_code)]`
+and found four settings that promised behaviour and delivered storage:
+
+- **`EngineBuilder::enable_debug_trace`** asked for a trace the evaluator was never told to collect — the
+  fixpoint loop passed `collect_trace: false` unconditionally and discarded whatever came back. It is
+  honoured now: with the flag set, `Engine::last_trace()` returns the run's `TraceData`.
+- **`EngineBuilder::default_salience`** is **deleted.** A rule's `salience` is an `i32` that always has a
+  value, so "the default for rules without one" is a distinction the type cannot express. A knob that
+  cannot keep its promise should not exist; its two tests only asserted that the value was stored.
+- **`Session`'s `stateful` flag** was stored and never read, so "stateless" was a word in a signature. A
+  stateless session now clears its working memory when a run completes, which is what single-use means;
+  a stateful one keeps its facts.
+- **`WorkingMemory.changes`** — a `Vec<WorkingMemoryChange>` kept "for session isolation" that nothing
+  ever pushed to or read, plus the enum it carried. Session isolation is done by cloning the engine.
+
+`api/src/v1/decisions.rs`'s `extract_decisions` — 12 lines no code called — is gone too.
+
+`specs/domain-model.md` claimed `EngineBuilder::max_iterations` was "stored but never read by execution";
+it has been passed to the fixpoint loop as its cap since 9.0.52, so **that claim was stale**, the second
+such entry closed in three rounds.
+
+`engine/tests/session_and_trace.rs` pins the three behaviours, and each fails when the behaviour is
+reverted: no trace without the flag, a trace with it, a stateless session that clears what it ran on, and
+a stateful one that keeps it.
+
+
 ## [9.0.67] — 2026-10-28 — The what-if simulation answered "success, nothing happened"
 
 `POST /v1/simulation` is a live, documented endpoint. Its runner built a `WorkingMemory` and a `Fact`

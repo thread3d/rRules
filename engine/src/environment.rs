@@ -12,8 +12,6 @@ use crate::ChainingMode;
 pub struct EngineBuilder {
     /// Chaining mode selection strategy
     chaining_mode: ChainingMode,
-    /// Default salience for rules without explicit value
-    default_salience: i32,
     /// Maximum iterations before loop detection triggers
     max_iterations: usize,
     /// Enable detailed debug tracing
@@ -25,7 +23,6 @@ impl EngineBuilder {
     pub fn new() -> Self {
         Self {
             chaining_mode: ChainingMode::Automatic,
-            default_salience: 0,
             max_iterations: 1000,
             enable_debug_trace: false,
         }
@@ -34,12 +31,6 @@ impl EngineBuilder {
     /// Sets the chaining mode selection strategy.
     pub fn chaining_mode(mut self, mode: ChainingMode) -> Self {
         self.chaining_mode = mode;
-        self
-    }
-
-    /// Sets default salience for rules without explicit value.
-    pub fn default_salience(mut self, salience: i32) -> Self {
-        self.default_salience = salience;
         self
     }
 
@@ -61,9 +52,9 @@ impl EngineBuilder {
             working_memory: WorkingMemory::new(),
             rule_set: RuleSet::new(),
             chaining_mode: self.chaining_mode,
-            default_salience: self.default_salience,
             max_iterations: self.max_iterations,
             enable_debug_trace: self.enable_debug_trace,
+            last_trace: None,
         }
     }
 }
@@ -76,7 +67,6 @@ impl Default for EngineBuilder {
 
 /// The main engine instance managing rules and execution.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub struct Engine {
     /// Working memory for facts
     working_memory: WorkingMemory,
@@ -84,12 +74,12 @@ pub struct Engine {
     rule_set: RuleSet,
     /// Chaining mode selection strategy
     chaining_mode: ChainingMode,
-    /// Default salience for rules without explicit value
-    default_salience: i32,
     /// Maximum iterations before loop detection triggers
     max_iterations: usize,
     /// Enable detailed debug tracing
     enable_debug_trace: bool,
+    /// The trace of the most recent execution, when `enable_debug_trace` is set.
+    last_trace: Option<crate::engine::TraceData>,
 }
 
 impl Engine {
@@ -152,8 +142,22 @@ impl Engine {
             .map_err(|error| format!("the fact was rejected: {error}"))
     }
 
+    /// Whether this engine records a trace of the fixpoint run (`enable_debug_trace`).
+    pub(crate) fn debug_trace_enabled(&self) -> bool {
+        self.enable_debug_trace
+    }
+
+    /// Record the trace of a run (used by the fixpoint loop, which owns the evaluator call).
+    pub(crate) fn set_last_trace(&mut self, trace: Option<crate::engine::TraceData>) {
+        self.last_trace = trace;
+    }
+
+    /// The trace of the most recent execution, when tracing is enabled.
+    pub fn last_trace(&self) -> Option<&crate::engine::TraceData> {
+        self.last_trace.as_ref()
+    }
+
     /// Executes forward chaining with the current rules and facts.
-    /// The rules this engine holds.
     pub(crate) fn rules(&self) -> &[crate::rules::Rule] {
         &self.rule_set.rules
     }
@@ -205,7 +209,6 @@ impl Engine {
 }
 
 /// A session manages execution state for a single rule application.
-#[allow(dead_code)]
 pub struct Session {
     /// The engine this session holds.
     ///
@@ -252,11 +255,20 @@ impl Session {
     }
 
     /// Executes the rules this session holds, over the facts it has accumulated.
+    ///
+    /// `stateful` now means what its documentation says. A **stateless** session is for single-use
+    /// execution: its working memory is cleared once the run completes, so the next `execute` starts
+    /// from the facts inserted since (none, unless the caller adds more). A **stateful** session keeps
+    /// its facts, which is what makes it long-lived. The flag was stored and never read, so both modes
+    /// behaved identically and "stateless" was simply a word in a signature.
     pub fn execute(&mut self) -> Result<ExecutionResult, String> {
         if self.destroyed {
             return Err("Session has been destroyed".to_string());
         }
         let report = crate::forward_chaining::run(&mut self.engine);
+        if !self.stateful {
+            self.engine.working_memory_mut().replace_all(Vec::new());
+        }
         Ok(ExecutionResult::new(
             report.errors.is_empty(),
             format!(
@@ -351,7 +363,6 @@ mod tests {
     fn test_engine_builder_defaults() {
         let engine = EngineBuilder::new().build();
         assert_eq!(engine.chaining_mode, ChainingMode::Automatic);
-        assert_eq!(engine.default_salience, 0);
         assert_eq!(engine.max_iterations, 1000);
     }
 
@@ -359,13 +370,11 @@ mod tests {
     fn test_engine_builder_custom() {
         let engine = EngineBuilder::new()
             .chaining_mode(ChainingMode::ForwardOnly)
-            .default_salience(10)
             .max_iterations(500)
             .enable_debug_trace(true)
             .build();
 
         assert_eq!(engine.chaining_mode, ChainingMode::ForwardOnly);
-        assert_eq!(engine.default_salience, 10);
         assert_eq!(engine.max_iterations, 500);
     }
 
