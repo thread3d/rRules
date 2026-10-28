@@ -12,6 +12,36 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.69] — 2026-10-28 — The test framework this library ships could not fail
+
+`ForwardChainingTester` is part of the public testing surface: it offers `assert_rule_sequence`,
+`assert_fired_count`, `assert_fired_in_order` and `assert_rule_not_fired` for downstream rule tests. Two
+defects made it useless in complementary ways:
+
+- **`add_rule` never added anything.** It built the **DSL** text `"rule <id>"` and passed it to
+  `load_rules`, which parses **JSON** — so every call failed and the error was discarded with `let _ =`.
+  A test could add a rule, run, and assert about a rule set that was empty. It calls `Engine::add_rule`
+  now and returns the rejection instead of swallowing it.
+- **`execute_forward` never recorded what fired.** It cleared the trace, ran the engine, and returned
+  the report while leaving `activations` empty — so `assert_fired_count(0)` and
+  `assert_rule_not_fired(anything)` passed for every engine, however it behaved. The report's
+  `fired_rules` ids are mapped to rule **names** into the trace now, which is the contract
+  `activation_trace` documents.
+
+Two smaller things: `assert_fired_in_order` advanced its cursor *to* the match rather than past it, so a
+repeated expectation could match a single firing twice; and `with_rules` logged nothing when a rule was
+rejected.
+
+**The tester's own tests are why this survived**: they injected activations by hand through
+`activations_mut()`, so the assertions were tested and the tester was not. There are now two tests that
+drive it against a real engine — one where a rule fires, one where nothing matches — and the first fails
+if either defect comes back.
+
+`BackwardChainingTrace` is deleted: both of its "recorders" were empty and nothing called the type. The
+real trace is `backward_chaining::InferenceTrace`, which `Engine::execute_backward` returns and
+`explain()` renders.
+
+
 ## [9.0.68] — 2026-10-28 — Settings that were stored and never read
 
 Continuing the sweep for work that is computed and then discarded, this round read `#[allow(dead_code)]`

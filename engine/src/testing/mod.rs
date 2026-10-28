@@ -463,14 +463,36 @@ impl ForwardChainingTester {
         // Create a temporary session for the engine
         let session = crate::environment::Session::new(&temp_engine, false, None);
 
-        // Execute forward using the actual engine method
+        let report = crate::forward_chaining::execute_forward(&mut temp_engine, &session);
 
-        crate::forward_chaining::execute_forward(&mut temp_engine, &session)
+        // Populate the trace the assertions read. This was the whole point of the type and it never
+        // happened: the report was returned and the trace left empty, so `assert_fired_count(0)` and
+        // `assert_rule_not_fired(anything)` passed for every engine, however it behaved.
+        //
+        // `activation_trace` documents rule *names*, while the report carries ids, so map them here.
+        let names: std::collections::HashMap<&str, &str> = temp_engine
+            .rules()
+            .iter()
+            .map(|rule| (rule.id.as_str(), rule.name.as_str()))
+            .collect();
+        for id in &report.fired_rules {
+            let name = names.get(id.as_str()).copied().unwrap_or(id.as_str());
+            self.activations.push(name.to_string());
+        }
+
+        report
     }
 
-    /// Add a rule to the engine's rule set for testing
-    pub fn add_rule(&mut self, rule: crate::rules::Rule) {
-        let _ = self.engine_mut().load_rules(&format!("rule {}", rule.id));
+    /// Add a rule to the engine's rule set for testing.
+    ///
+    /// This used to build the **DSL** text `"rule <id>"` and hand it to `load_rules`, which parses
+    /// **JSON** — so the call always failed, the error was discarded with `let _ =`, and the rule was
+    /// never added. A tester whose rules silently do not exist cannot fail a test, which makes it worse
+    /// than no tester at all.
+    pub fn add_rule(&mut self, rule: crate::rules::Rule) -> TestResult<()> {
+        self.engine_mut()
+            .add_rule(rule)
+            .map_err(TestError::AssertionFailed)
     }
 
     /// Get the activation trace (rule names in firing order)
@@ -520,7 +542,7 @@ impl ForwardChainingTester {
         let mut last_pos = 0;
         for rule in expected {
             match actual[last_pos..].iter().position(|&r| r == *rule) {
-                Some(pos) => last_pos += pos,
+                Some(pos) => last_pos += pos + 1,
                 None => {
                     return Err(TestError::AssertionFailed(format!(
                         "Rule '{}' not found or out of order. Expected: {:?}, Actual: {:?}",
@@ -551,7 +573,12 @@ impl ForwardChainingTester {
         I: IntoIterator<Item = crate::rules::Rule>,
     {
         for rule in rules {
-            self.add_rule(rule);
+            if let Err(error) = self.add_rule(rule) {
+                // `with_rules` is a fluent builder; it stops at the first rule the engine rejects and
+                // leaves the tester holding the rules it did accept.
+                eprintln!("ForwardChainingTester::with_rules: {error}");
+                break;
+            }
         }
         self
     }
@@ -614,45 +641,6 @@ impl ForwardChainingTester {
             .path
             .iter()
             .any(|s| s.step_type == StepType::FactMatch)
-    }
-}
-
-/// Backward chaining trace capture
-///
-/// Captures the inference path during backward chaining execution.
-#[allow(dead_code)]
-pub struct BackwardChainingTrace {
-    /// Rule applications in order
-    rule_applications: Vec<String>,
-    /// Missing facts at each step
-    missing_facts: Vec<String>,
-}
-
-impl Default for BackwardChainingTrace {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl BackwardChainingTrace {
-    /// Create a new empty trace
-    pub fn new() -> Self {
-        BackwardChainingTrace {
-            rule_applications: Vec::new(),
-            missing_facts: Vec::new(),
-        }
-    }
-
-    /// Record a rule application in the trace
-    #[allow(dead_code)]
-    pub fn record_application(&mut self, _rule_name: &str) {
-        // Stub implementation
-    }
-
-    /// Add a missing fact to the trace
-    #[allow(dead_code)]
-    pub fn record_missing_fact(&mut self, _fact_name: &str) {
-        // Stub implementation
     }
 }
 
@@ -810,6 +798,119 @@ mod tests {
 
         assert!(tester.assert_rule_not_fired("c").is_ok());
         assert!(tester.assert_rule_not_fired("a").is_err());
+    }
+
+    /// A rule the tester is given must reach the engine and fire.
+    ///
+    /// The tester's own tests used to *inject* activations by hand, which is why the type passed them
+    /// while `add_rule` silently discarded every rule and `execute_forward` never recorded anything:
+    /// the assertions were tested, the tester was not.
+    #[test]
+    fn a_rule_added_to_the_tester_fires_and_is_recorded() {
+        use crate::data_types::Value;
+        use crate::rules::{Action, Condition, LogLevel, Rule};
+        use std::collections::HashMap;
+
+        let mut tester = ForwardChainingTester::new();
+        tester
+            .add_rule(Rule {
+                id: "gold".to_string(),
+                name: "gold discount".to_string(),
+                salience: 0,
+                no_loop: false,
+                lock_on_active: false,
+                agenda_group: None,
+                condition: Condition::Pattern {
+                    fact_type: "customer".to_string(),
+                    field: "tier".to_string(),
+                    value: Value::String("Gold".to_string()),
+                    op: crate::rules::ComparisonOp::Eq,
+                },
+                actions: vec![Action::LogMessage {
+                    level: LogLevel::Info,
+                    message: "gold".to_string(),
+                }],
+            })
+            .expect("the tester must accept a valid rule");
+
+        let mut payload = HashMap::new();
+        payload.insert("tier".to_string(), Value::String("Gold".to_string()));
+        tester
+            .engine_mut()
+            .insert_fact_for_simulation(crate::fact::Fact::new("customer", payload))
+            .expect("fact");
+
+        let report = tester.execute_forward();
+
+        assert_eq!(report.rules_fired, 1, "the rule the facts satisfy fired");
+        assert_eq!(
+            tester.activation_trace(),
+            ["gold discount"],
+            "the trace records the rule's *name*, which is what the assertions compare"
+        );
+        tester.assert_fired_count(1).expect("one rule fired");
+        tester
+            .assert_rule_sequence(&["gold discount"])
+            .expect("in that order");
+        tester
+            .assert_rule_not_fired("bronze discount")
+            .expect("a rule that does not exist cannot have fired");
+        assert!(
+            tester.assert_fired_count(2).is_err(),
+            "and the assertions can still fail"
+        );
+    }
+
+    /// A rule the facts do not satisfy must not appear in the trace — the assertion that used to pass
+    /// for every engine, however it behaved.
+    #[test]
+    fn a_rule_the_facts_do_not_satisfy_is_not_recorded() {
+        use crate::data_types::Value;
+        use crate::rules::{Action, ComparisonOp, Condition, LogLevel, Rule};
+        use std::collections::HashMap;
+
+        let mut tester = ForwardChainingTester::new();
+        tester
+            .add_rule(Rule {
+                id: "platinum".to_string(),
+                name: "platinum discount".to_string(),
+                salience: 0,
+                no_loop: false,
+                lock_on_active: false,
+                agenda_group: None,
+                condition: Condition::Pattern {
+                    fact_type: "customer".to_string(),
+                    field: "tier".to_string(),
+                    value: Value::String("Platinum".to_string()),
+                    op: ComparisonOp::Eq,
+                },
+                actions: vec![Action::LogMessage {
+                    level: LogLevel::Info,
+                    message: "platinum".to_string(),
+                }],
+            })
+            .expect("rule");
+
+        let mut payload = HashMap::new();
+        payload.insert("tier".to_string(), Value::String("Gold".to_string()));
+        tester
+            .engine_mut()
+            .insert_fact_for_simulation(crate::fact::Fact::new("customer", payload))
+            .expect("fact");
+
+        tester.execute_forward();
+
+        assert_eq!(
+            tester.firing_count(),
+            0,
+            "nothing matched, so nothing fired"
+        );
+        tester
+            .assert_fired_count(0)
+            .expect("zero is the right count");
+        tester
+            .assert_rule_not_fired("platinum discount")
+            .expect("the rule did not fire");
     }
 
     #[test]
