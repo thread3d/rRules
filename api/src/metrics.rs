@@ -299,7 +299,7 @@ fn metrics_html(
       <div class="status-row"><span class="status-label">Engine Name</span><span class="status-value">{}</span></div>
       <div class="status-row"><span class="status-label">Status</span><span class="status-value">Running</span></div>
     </div>
-    <p class="timestamp">Last updated: {} | rRules v9.0.70</p>
+    <p class="timestamp">Last updated: {} | rRules v9.0.71</p>
   </div>
 </body>
 </html>

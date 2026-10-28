@@ -336,12 +336,18 @@ Hot-reload rules from the configured directory (`RULE_STORAGE_PATH`).
 
 **Auth:** none. **Request** (`ReloadRequest`):
 ```json
-{ "rule_file": "gold.rules", "async_reload": false }
+{ "async_reload": false }
 ```
+
+Reload re-reads the whole `RULE_STORAGE_PATH` directory and swaps the ruleset it builds. There is no
+per-file reload: a request carrying `rule_file` is answered with **400** rather than reloading everything
+and pretending otherwise.
+
 - `async_reload: false` → `200` `ReloadResponse`:
   `{ "reload_id", "rules_reloaded", "status" }`
-- `async_reload: true` → `202` `JobResponse`: `{ "job_id", "status": "running" }`
-  (poll via `GET /v1/jobs/{job_id}`)
+- `async_reload: true` → `202` `JobResponse`: `{ "job_id", "status": "pending" }`
+  (poll via `GET /v1/jobs/{job_id}`; the row is inserted as pending *before* the task is spawned, so the
+  202 and the job agree even for an immediate poll)
 
 ## GET /v1/jobs/{job_id}
 Reload job status. **Response:** `200` `ReloadJob`, `404` if unknown.

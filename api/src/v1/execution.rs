@@ -3,15 +3,12 @@
 use actix_web::{web, HttpResponse, Responder};
 use chrono::Utc;
 use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 
 use engine::engine::{EngineRegistry, EngineSelector};
-use engine::environment::EngineBuilder;
 use engine::rules::{Rule, RuleSet};
 
 use crate::metrics::{ExecutionCounters, MetricsSnapshot, MetricsTx};
@@ -278,116 +275,6 @@ pub struct EnginesResponse {
     pub default: String,
 }
 
-/// Shared engine state for hot reload functionality
-pub struct EngineState {
-    pub engine: Arc<std::sync::RwLock<engine::environment::Engine>>,
-    pub rule_files: Arc<std::sync::RwLock<HashMap<String, String>>>,
-}
-
-impl Default for EngineState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl EngineState {
-    pub fn new() -> Self {
-        let engine = EngineBuilder::new().build();
-        EngineState {
-            engine: Arc::new(std::sync::RwLock::new(engine)),
-            rule_files: Arc::new(std::sync::RwLock::new(HashMap::new())),
-        }
-    }
-
-    /// Reload rules from a directory (async-friendly)
-    pub async fn reload_from_directory(&self, directory: &str) -> Result<usize, String> {
-        let path = Path::new(directory);
-
-        if !path.exists() {
-            return Err(format!("Directory not found: {}", directory));
-        }
-
-        let mut rule_count = 0;
-        let mut files_updated = HashMap::new();
-
-        for entry in fs::read_dir(path).map_err(|e| format!("Failed to read directory: {}", e))? {
-            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-            let file_name = entry.file_name();
-            let file_name_str = file_name.to_string_lossy();
-
-            if file_name_str.ends_with(".rules") || file_name_str.ends_with(".drl") {
-                let file_path = entry.path();
-                let content = fs::read_to_string(&file_path)
-                    .map_err(|e| format!("Failed to read file {}: {}", file_path.display(), e))?;
-
-                files_updated.insert(file_path.to_string_lossy().to_string(), content);
-                rule_count += 1;
-            }
-        }
-
-        {
-            let mut rule_files = self
-                .rule_files
-                .write()
-                .map_err(|e| format!("Failed to acquire lock: {}", e))?;
-            *rule_files = files_updated;
-        }
-
-        Ok(rule_count)
-    }
-
-    /// Reload engine with new rules (full recompilation)
-    pub async fn reload_engine(&self, directory: &str) -> Result<ReloadResult, String> {
-        let start_time = Utc::now();
-
-        let path = Path::new(directory);
-        if !path.exists() {
-            return Err(format!("Directory not found: {}", directory));
-        }
-
-        let mut rules_content = Vec::new();
-        let mut rule_files = HashMap::new();
-
-        for entry in fs::read_dir(path).map_err(|e| format!("Failed to read directory: {}", e))? {
-            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-            let file_name = entry.file_name();
-            let file_name_str = file_name.to_string_lossy();
-
-            if file_name_str.ends_with(".rules") || file_name_str.ends_with(".drl") {
-                let file_path = entry.path();
-                let content = fs::read_to_string(&file_path)
-                    .map_err(|e| format!("Failed to read file {}: {}", file_path.display(), e))?;
-
-                rules_content.push(content.clone());
-                rule_files.insert(file_path.to_string_lossy().to_string(), content);
-            }
-        }
-
-        {
-            let mut files = self
-                .rule_files
-                .write()
-                .map_err(|e| format!("Failed to acquire write lock: {}", e))?;
-            *files = rule_files;
-        }
-
-        {
-            let _engine = self
-                .engine
-                .write()
-                .map_err(|e| format!("Failed to acquire engine lock: {}", e))?;
-        }
-
-        Ok(ReloadResult {
-            reload_id: Uuid::new_v4().to_string(),
-            rule_count: rules_content.len(),
-            start_time,
-            end_time: Utc::now(),
-            success: true,
-        })
-    }
-}
-
 /// Result of a reload operation
 #[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 pub struct ReloadResult {
@@ -511,6 +398,13 @@ pub fn init_job_store() -> JobStore {
 /// Request to reload rules
 #[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 pub struct ReloadRequest {
+    /// A single file to reload — **rejected**, not ignored.
+    ///
+    /// Reload re-reads the whole `RULE_STORAGE_PATH` directory and swaps the ruleset it builds. A
+    /// per-file reload would need per-rule provenance (which rule came from which file) that this path
+    /// does not keep, and the nearest thing it could do — swap in one file's rules and drop the rest —
+    /// would silently disable every other rule. So the field is answered with a 400 that says exactly
+    /// that, instead of being parsed and ignored as it was from its introduction until 9.0.71.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_file: Option<String>,
     #[serde(default)]
@@ -1324,6 +1218,17 @@ pub async fn reload_rules(
     job_store: web::Data<JobStore>,
 ) -> impl Responder {
     let rules_dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
+
+    // A per-file reload has never been implemented, and silently ignoring the field let a caller believe
+    // one file had been swapped. Refuse it and say why.
+    if let Some(rule_file) = req.rule_file.as_deref() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "error": format!(
+                "per-file reload is not supported: `rule_file` was '{rule_file}', but reload re-reads the whole                  RULE_STORAGE_PATH directory and swaps the ruleset it builds. Reloading one file alone would                  drop every rule in the others."
+            ),
+            "status_code": 400
+        }));
+    }
 
     if req.async_reload {
         // L-03 / Pitfall 14: insert the Pending ReloadJob into the JobStore

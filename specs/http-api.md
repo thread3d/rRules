@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.70` (`api/src/openapi.rs:12`).
+  version `9.0.71` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -210,7 +210,7 @@ JSON; otherwise Prometheus text. Because `*/*` wins before JSON, a plain
 
 | Method | Path | Request | Success response | Errors | Auth | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/rules/reload` | `ReloadRequest{rule_file?,async_reload}` | `202 {job_id,status:"pending"}` when async; `200 {reload_id,rules_reloaded,status}` when sync | `500 {reload_id,rules_reloaded:0,status:"Reload failed: …"}` (lock poisoning only) | yes | `rule_file` is parsed but never used — reload always reads the whole `RULE_STORAGE_PATH` dir (`execution.rs:1290-1395`). |
+| POST | `/v1/rules/reload` | `ReloadRequest{rule_file?,async_reload}` | `202 {job_id,status:"pending"}` when async; `200 {reload_id,rules_reloaded,status}` when sync | `500 {reload_id,rules_reloaded:0,status:"Reload failed: …"}` (lock poisoning only) | yes | ~~`rule_file` is parsed but never used.~~ **Fixed in 9.0.71**: a request carrying `rule_file` is a `400` that names the file and explains that reload re-reads the whole directory — there is no per-rule provenance, and a one-file swap would silently drop every other rule. |
 | GET | `/v1/jobs/{job_id}` | — | `200 ReloadJob{job_id,status,result?,error?}` | `404 {"error":"Job not found"}` | yes | `execution.rs:1410-1424` |
 | GET | `/v1/jobs` | — | `200 [ReloadJob]` (unordered map iteration) | — | yes | `execution.rs:1435-1441` |
 

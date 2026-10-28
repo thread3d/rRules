@@ -25,7 +25,7 @@ use crate::v1;
 use crate::v1::approvals::StoredApproval;
 use crate::v1::categories::StoredCategory;
 use crate::v1::dmn_metrics::DmnMetricsTx;
-use crate::v1::execution::{get_job_status, list_jobs, EngineState, JobStore, SharedRuleSet};
+use crate::v1::execution::{get_job_status, list_jobs, JobStore, SharedRuleSet};
 use crate::v1::routes::monitoring::configure_monitoring;
 use crate::v1::rules::StoredRule;
 use crate::v1::sessions::SessionManager;
@@ -35,7 +35,6 @@ use crate::{auth, health, middleware, spa, websocket};
 /// Everything the application needs, cloned into each worker.
 #[derive(Clone)]
 pub struct ApiState {
-    pub engine_state: web::Data<EngineState>,
     pub registry: web::Data<EngineRegistry>,
     pub selector: web::Data<EngineSelector>,
     pub ruleset: web::Data<Arc<RwLock<SharedRuleSet>>>,
@@ -108,8 +107,6 @@ pub fn from_paths(paths: ApiPaths) -> std::io::Result<ApiState> {
     let rules_dir = paths.rules_dir.display().to_string();
     std::fs::create_dir_all(&paths.rules_dir)?;
 
-    let engine_state = web::Data::new(v1::execution::EngineState::new());
-
     let mut registry = EngineRegistry::new();
     registry.register_default_engines();
     let registry = web::Data::new(registry);
@@ -161,7 +158,6 @@ pub fn from_paths(paths: ApiPaths) -> std::io::Result<ApiState> {
         .map_err(|error| std::io::Error::other(format!("Failed to init VCS: {error}")))?;
 
     Ok(ApiState {
-        engine_state,
         registry,
         selector,
         ruleset,
@@ -265,7 +261,6 @@ pub fn build_app(
     };
     App::new()
         .wrap(cors)
-        .app_data(state.engine_state.clone())
         // Phase 23 (D-03 / L-07): real engine wiring for POST /v1/execute.
         .app_data(state.registry.clone())
         .app_data(state.selector.clone())

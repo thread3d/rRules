@@ -42,7 +42,7 @@ use api::metrics::{
 };
 use api::v1::execution::{
     batch_execute_rules, execute_rules, get_job_status, init_job_store, list_engines, list_jobs,
-    reload_rules, EngineState, JobStore, SharedRuleSet,
+    reload_rules, JobStore, SharedRuleSet,
 };
 use api::v1::sessions::{
     dispose_session, read_session_config, reset_session, SessionConfig, SessionManager,
@@ -243,7 +243,6 @@ macro_rules! init_two_rule_app {
                 .app_data(shared_counters())
                 .app_data(shared_metrics_tx())
                 .app_data(shared_job_store())
-                .app_data(shared_engine_state())
                 // Phase 27 (D-09): shared SessionManager for SC-1..SC-4.
                 .app_data(shared_session_manager())
                 .configure(configure_test_routes)
@@ -307,16 +306,6 @@ fn shared_counters() -> web::Data<ExecutionCounters> {
 /// extractor error.
 fn shared_job_store() -> web::Data<JobStore> {
     web::Data::new(init_job_store())
-}
-
-/// Build a shared `EngineState` for the current (pre-25-03) `reload_rules`
-/// handler which extracts `web::Data<EngineState>`. Installing it lets the
-/// reload endpoint return 202/200 so the RED reload tests fail on the
-/// substantive assertion (no swap, no generation bump, job 404) rather than
-/// on a 500 missing-extractor error. Harmless for pre-existing tests (actix
-/// silently ignores unused `app_data`).
-fn shared_engine_state() -> web::Data<EngineState> {
-    web::Data::new(EngineState::new())
 }
 
 // =====================================================================
@@ -442,7 +431,6 @@ macro_rules! init_test_app {
                 .app_data(shared_counters())
                 .app_data(shared_metrics_tx())
                 .app_data(shared_job_store())
-                .app_data(shared_engine_state())
                 // Phase 27 (D-09): shared SessionManager for SC-1..SC-4.
                 .app_data(shared_session_manager())
                 .configure(configure_test_routes)
@@ -469,7 +457,6 @@ macro_rules! init_test_app_with_manager {
                 .app_data(shared_counters())
                 .app_data(shared_metrics_tx())
                 .app_data(shared_job_store())
-                .app_data(shared_engine_state())
                 .app_data($manager_data)
                 .configure(configure_test_routes)
                 .configure(configure_metrics),
@@ -2400,5 +2387,40 @@ async fn metrics_json_active_sessions_live() {
         "MON-07 / WARNING 2: /metrics JSON arm should report the live session \
          count (>= 1 after creating a session), got {:?}; body: {body}",
         body["active_sessions"]
+    );
+}
+
+/// `rule_file` is refused, not ignored.
+///
+/// The field was parsed and dropped from its introduction until 9.0.71: a caller asking to reload one
+/// file got a whole-directory reload and no indication that their instruction had been discarded. There is
+/// no per-file reload — the ruleset is built from the directory and keeps no per-rule provenance — and the
+/// nearest implementation would swap in one file's rules and silently drop every other rule, so the field
+/// is answered with a 400 that says so.
+#[serial_test::serial]
+#[actix_web::test]
+async fn reloading_one_file_is_refused_with_an_explanation() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+
+    let app = init_test_app!();
+
+    let reload_req = test::TestRequest::post()
+        .uri("/v1/rules/reload")
+        .set_json(json!({ "rule_file": "gold.rules", "async_reload": false }))
+        .to_request();
+    let resp = test::call_service(&app, reload_req).await;
+
+    assert_eq!(resp.status().as_u16(), 400, "a per-file reload is refused");
+    let body: Value = test::read_body_json(resp).await;
+    let message = body["error"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("per-file reload is not supported"),
+        "the refusal explains itself: {message}"
+    );
+    assert!(
+        message.contains("gold.rules"),
+        "and names the file that was asked for: {message}"
     );
 }

@@ -12,6 +12,26 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.71] — 2026-10-28 — A field nobody honoured, and an engine state nobody extracted
+
+`POST /v1/rules/reload` accepted `rule_file` and dropped it on the floor: a caller asking to reload one
+file got a whole-directory reload and no indication that their instruction had been discarded. The spec
+recorded it; `docs/API.md` even showed a request using it.
+
+There is no per-file reload to implement cheaply. The ruleset is built from the directory and keeps no
+per-rule provenance, so the nearest thing — swap in one file's rules and drop the rest — would silently
+disable every other rule. So the field is **refused**: a request carrying `rule_file` gets a 400 that names
+the file and explains why, and the documentation now says what reload actually does. `docs/API.md` also
+claimed the async response reports `"status": "running"` when the handler answers `"pending"`; corrected in
+the same pass.
+
+**`EngineState` is deleted** — a type with no production users, carrying a `rule_files` provenance map and
+two `reload_*` methods that the live path (`reload_and_swap`, `build_ruleset_from_dir`) never called. It
+survived only because a test helper installed it as `app_data` *for a handler that no longer extracts it*:
+`api/src/app.rs` built one at startup and registered it, and nothing ever asked for it. The test
+scaffolding went with it.
+
+
 ## [9.0.70] — 2026-10-28 — The trace promised events nobody emitted, and a route nobody wrote
 
 `engine/src/dmn/evaluator/trace.rs` described itself as recording `evaluate_table`, `match_rule`,
