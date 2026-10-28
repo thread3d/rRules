@@ -154,7 +154,7 @@ every engine-omitting request with 400.
 | `engine-treat` | registration of `TreatEngineFactory` (`registry.rs:250-253`) | `engine/Cargo.toml:66` (`= ["engine-rete"]`) |
 | `engine-leaps` | `pub mod leaps` (`mod.rs:36-37`); alone it *also* compiles `treat` via `any(engine-treat, engine-leaps)` (`mod.rs:34-35`) | `engine/Cargo.toml:67` (`= ["engine-rete"]`) |
 | `engine-phreak` | `pub mod phreak` (`mod.rs:38-39`) | `engine/Cargo.toml:68` (`= ["engine-rete"]`) |
-| `history` | `pub mod history` — a verbatim copy of `coverage/mod.rs` (`engine/src/coverage/mod.rs:316-317`) | `engine/Cargo.toml:69` |
+| ~~`history`~~ | deleted in 9.0.30 with `coverage/`; both went in 9.0.58 | — |
 
 The crate default is exactly those four engine features
 (`engine/Cargo.toml:58-63`: `default = ["engine-rete","engine-treat","engine-leaps","engine-phreak"]`)
@@ -258,8 +258,8 @@ only caller-supplied `Fact::with_id` (`:37-40`) can, and then insert silently ov
 Idempotency (Rete/TREAT/LEAPS): retracting an absent id returns `Ok(false)` and mutates
 nothing, so a second retract is a no-op
 (test: `engine/src/engine/rete/mod.rs:635-636`). No engine calls
-`record_fact_retracted` (`engine/src/engine/metrics.rs:77`, `engine/src/metrics/mod.rs:57`), so
-`facts_retracted` stays `0` after successful retracts. Retraction does not touch the
+`record_fact_retracted` (`engine/src/engine/metrics.rs:77`), so `facts_retracted` stays `0` after
+successful retracts. Retraction does not touch the
 coverage/tracker singletons; `fired_set` is per-call, so a later `execute()` re-evaluates all
 rules against the reduced working memory.
 
@@ -350,20 +350,18 @@ Four different "trace" mechanisms: evaluator rule-firing trace
 
 ## Observability
 
-**Two coverage implementations, one singleton.** `monitoring::coverage::CoverageTracking` is a
+**One coverage implementation, one singleton.** `monitoring::coverage::CoverageTracking` is a
 process-wide `static INSTANCE: LazyLock<Mutex<TrackingState>>`
 (`engine/src/monitoring/coverage.rs:86-90`) with associated-function recording
 (`record_rule_eval`/`record_rule_fire`/`record_rule_skipped`, `:97-118`), owned-clone reads
 (`:121-131`), `coverage_percent = fired / total_tracked` (`:152-157`), plus JSON (`:167-197`)
-and CSV (`:200-226`) exports. `coverage::CoverageTracker` is a separate `&mut self` type
-(`engine/src/coverage/mod.rs:26-234`) whose `record_fire` on an unseen id sets
-`evaluated_at: Some(now)` but **`fired_at: None`** (`:67-73`), whose `coverage_percent`
-returns `100.0` when nothing is tracked (`:109-120`), and whose report hardcodes
-`evaluation_count`/`fire_count` to `Some(1)` (`:203-210`). `engine/src/coverage/history/mod.rs`
-is a byte-identical copy of `coverage/mod.rs` (`diff` differs only by the `pub mod history`
-stanza), compiled under `history`. The engine records only into the singleton, from the two
-evaluator sites (`direct_eval.rs:152-158`, `rete/mod.rs:459-465`); `CoverageTracker` and
-`history` have no production callers.
+and CSV (`:200-226`) exports. It is the only one the engine records into, from the two evaluator
+sites (`direct_eval.rs:152-158`, `rete/mod.rs:459-465`).
+
+~~`coverage::CoverageTracker` is a separate `&mut self` type with different `record_fire` and
+percentage semantics, and `coverage/history/` is a byte-identical copy.~~ — **deleted in 9.0.58**: the
+second `CoverageTracker` had no production callers, and the copy under `history/` went in 9.0.30 with
+the feature that no build enabled.
 
 **Execution tracker / dead rules — a second singleton.** `RuleExecutionTracker` is a unit
 struct over a third `LazyLock<Mutex<TrackerState>>`
@@ -389,12 +387,9 @@ it reads `SlidingWindowConfig` into `config` (`:200`) for the confidence window 
 `facts_retracted`, `alpha_memory_size`, `beta_memory_size`, `network_traversals`,
 `execution_time_ms`, `cache_hits`, `cache_misses`, with `total_operations` (`:42-44`),
 `firing_rate` (`:47-53`), `total_memory_estimate` (`:56-59`) and Prometheus/JSON export
-(`:177-282`). A **second** stack with a different trait and struct of the same names lives in
-`engine/src/metrics/mod.rs:3-124` (`memory_bytes = (alpha+beta)*8`, `:100-103`) with no engine
-users, and `engine/src/metrics/prometheus.rs` is gated on a `metrics` feature that
-`engine/Cargo.toml` never declares (`engine/src/metrics/mod.rs:127-128`,
-`#![allow(unexpected_cfgs)]` at `:1`), so it never compiles — as does
-`engine/src/engine/metrics.rs:284-308`, which would return an empty `String`.
+(`:177-282`). A ~~second~~ stack with a different trait and struct of the same names used to live in
+`engine/src/metrics/`, with no engine users and a `prometheus` module gated on a feature no build
+declared; **it is deleted in 9.0.58**, so one metric stack remains.
 
 **Singleton implications.** Coverage and dead-rule state are shared by every engine, session and
 request in the process (`monitoring/coverage.rs:86-90`, `monitoring/detection.rs:91-97`), keyed by
@@ -518,16 +513,22 @@ HTTP endpoint forwards straight into it (`api/src/v1/simulation.rs:150-161`).
    (`engine/src/simulation/runner.rs:177-189`, `:219-232`), `RuleChange` never applied
    (`:208-248`), `rules_fired` always empty (`:193`, `:236`), `base_state` ignored
    (`engine/src/simulation/types.rs:25`).
-10. **Two parallel metric stacks and a dead file:** `engine::engine::metrics`
-    (`engine/src/engine/metrics.rs:63-166`) is used, `engine::metrics`
-    (`engine/src/metrics/mod.rs:3-124`) is not, and `engine/src/metrics/prometheus.rs` is gated
-    on the undeclared `metrics` feature (`engine/src/metrics/mod.rs:127-128`).
-11. **Two coverage implementations plus a duplicated file:** singleton
-    `CoverageTracking` (`monitoring/coverage.rs:86-233`) versus `CoverageTracker`
-    (`engine/src/coverage/mod.rs:26-234`) with different `record_fire` and percentage
-    semantics. The byte-identical copy under `coverage/history/` is **deleted in 9.0.30**, together
-    with the `history` feature that no build enabled and nothing referenced.
-12. **~~Dead test module:~~** **Deleted in 9.0.30.** `engine/src/tests/mod.rs` was not declared in
+10. ~~**Two parallel metric stacks and a dead file:** `engine::engine::metrics` is used,
+    `engine::metrics` is not, and `engine/src/metrics/prometheus.rs` is gated on a feature no build
+    declares.~~ — **closed in 9.0.58**: `engine::metrics` and its `prometheus` module are deleted, leaving
+    `engine::engine::metrics` as the one metric stack.
+11. ~~**Two coverage implementations plus a duplicated file.**~~ — **closed in 9.0.58**: the singleton
+    `CoverageTracking` (`monitoring/coverage.rs:86-233`) is the only one left; `CoverageTracker`
+    (`engine/src/coverage/mod.rs`) had no production callers and is deleted, and the byte-identical copy
+    under `coverage/history/` went in 9.0.30 with the `history` feature nothing enabled.
+12. **~~Code that was never compiled: `testing/report/`~~** — **deleted in 9.0.58.** A 573-line
+    HTML report generator (`HtmlReport`, `ReportSummary`, `TestResult`) sat in
+    `engine/src/testing/report/`, and **no module declared it**: nothing in the crate reached `mod
+    report;`, so it had never been type-checked, let alone run. It also imported
+    `crate::testing::RuleCoverage`, a name that does not exist there — which is why it could not have
+    compiled had anyone declared it. Found by scanning for public functions nothing references outside
+    their own file; the scan is a heuristic, and this entry is what came of checking it.
+13. **~~Dead test module:~~** **Deleted in 9.0.30.** `engine/src/tests/mod.rs` was not declared in
     `engine/src/lib.rs` and had never compiled: 992 lines and 70 tests targeting an older API
     (`evaluate`, `Agenda::with_strategy`, `EngineBuilder::conflict_strategy`) — 45 compile errors.
     It contributed no coverage, because a test that never builds never runs, and its subject matter

@@ -1,6 +1,6 @@
 [package]
 name = "api"
-version = "9.0.57"
+version = "9.0.58"
 edition = "2021"
 
 [[bin]]
@@ -77,6 +77,5 @@ actix-test = "0.1"
 # same rule id.
 serial_test = { workspace = true }
 
-# Only the ignored `dmn_postgres` test uses these: a real PostgreSQL, downloaded and run in
-# userspace, so the API's Postgres wiring is exercised rather than assumed.
-pg-embed = "1.0.0"
+# The API's PostgreSQL tests live in the `db_tests` crate: `pg-embed` here would be compiled by every
+# build and coverage pass of this crate, which pushed the requirement verification past its budget.

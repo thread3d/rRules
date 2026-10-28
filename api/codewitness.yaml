@@ -20,8 +20,12 @@ language:
   adapter: rust
 
 verification:
-  timeout: 10m
-  max_duration: 15m
+  # The tool builds this crate and its dev-dependencies from scratch, and those now include `pg-embed`
+  # (the embedded PostgreSQL the ignored database tests start). A ten-minute budget timed out on a cold
+  # tree, which reports every requirement BLOCKED instead of verifying anything — so the budget is sized
+  # for the build rather than the other way round.
+  timeout: 25m
+  max_duration: 30m
   max_test_generation_iterations: 1
   max_generated_tests: 0
   max_mutation_time: 5m

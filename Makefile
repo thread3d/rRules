@@ -17,6 +17,7 @@ lint:
 	@# The `postgres` feature is off by default, so a plain workspace lint never compiles it.
 	cargo clippy -p engine_state --features postgres --all-targets -- -D warnings
 	cargo clippy -p api --features postgres --all-targets -- -D warnings
+	cargo clippy -p db_tests --all-targets -- -D warnings
 
 # Format code with rustfmt
 fmt:
@@ -50,12 +51,10 @@ db-test:
 	@# Two suites: the store itself, and the API's decision endpoints persisting through it.
 	@XDG_CACHE_HOME="$${XDG_CACHE_HOME:-$$PWD/.db-cache}" \
 		cargo test -p engine_state --features postgres --test postgres_store -- --ignored --test-threads=1
+	@# The API's database tests live in their own crate so `pg-embed` is not an `api` dev-dependency:
+	@# see `db_tests/Cargo.toml` for why that mattered.
 	@XDG_CACHE_HOME="$${XDG_CACHE_HOME:-$$PWD/.db-cache}" \
-		cargo test -p api --features postgres --test dmn_postgres -- --ignored --test-threads=1
-	@XDG_CACHE_HOME="$${XDG_CACHE_HOME:-$$PWD/.db-cache}" \
-		cargo test -p api --features postgres --test audit_postgres -- --ignored --test-threads=1
-	@XDG_CACHE_HOME="$${XDG_CACHE_HOME:-$$PWD/.db-cache}" \
-		cargo test -p api --features postgres --test tenant_postgres -- --ignored --test-threads=1
+		cargo test -p db_tests -- --ignored --test-threads=1
 
 # Every dependency advisory must be either fixed or accounted for in `.cargo/audit.toml`, whose entries
 # carry their reason and are checked for staleness by the tool itself. The advisory database needs the

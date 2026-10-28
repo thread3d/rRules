@@ -12,6 +12,38 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.58] — 2026-10-28 — Three modules nothing used, one of which never even compiled
+
+A sweep for `pub fn`s that nothing references outside their own file turned up three modules:
+
+- **`engine/src/testing/report/` — 573 lines that had never been compiled.** No module declared
+  `mod report;`, so the HTML report generator was not part of the crate at all. It also imported
+  `crate::testing::RuleCoverage`, a name that does not exist there, which is why it could not have
+  compiled had anyone declared it. This one was not in the spec's gap list: the earlier orphan hunt
+  looked for modules that were *declared but unused* and missed the ones that were never declared.
+- **`engine::coverage` — 326 lines**, a `CoverageTracker` with different `record_fire` and percentage
+  semantics from the singleton the engines actually record into. Spec gap 11.
+- **`engine::metrics` — 381 lines**, a second metric stack with a `prometheus` module gated on a feature
+  no build declared, so it never compiled either. Spec gap 10.
+
+All three are deleted; `monitoring::coverage::CoverageTracking` and `engine::engine::metrics` are the
+only implementations now. Fifteen tests went with them — they were tests **of** the deleted code, which
+is why the suite count falls while nothing else changes. The spec's gaps 10 and 11 are struck with this
+release, and the never-compiled module is recorded as gap 12.
+
+**Then the requirement verification broke, and it was my fault from 9.0.45.** `make verify` reported all
+35 requirements BLOCKED: the api half could not finish its build inside the budget. The cause was
+`pg-embed` sitting in `api`'s **dev-dependencies** (added in 9.0.45 for the PostgreSQL tests), so every
+build *and every coverage pass* of that crate compiled the embedded-server tree; raising the timeout did
+not help because the coverage phase then exhausted the run's 30-minute ceiling instead.
+
+The three API-level database tests moved to their own crate, `db_tests/`, which depends on `api` with
+the `postgres` feature. The tests are unchanged and all eleven still pass through `make db-test`; the
+api build is back to a fraction of a second and the union is **35 verified / 0 failed / 0 unverified**
+again. `db_tests/Cargo.toml` carries the reason in its header, because a test that makes the gate
+verifying everything else stop working is in the wrong crate.
+
+
 ## [9.0.57] — 2026-10-28 — A comment said lambda application was a stub; it had worked all along
 
 Chasing what `specs/dmn-feel.md` listed as an unimplemented lambda path, I found a comment in

@@ -6,8 +6,6 @@
 //!
 //! `make db-test` runs these against a PostgreSQL that `pg-embed` downloads and starts.
 
-#![cfg(feature = "postgres")]
-
 use actix_web::test;
 use api::v1::audit_store::AuditBackend;
 use pg_embed::pg_enums::PgAuthMethod;

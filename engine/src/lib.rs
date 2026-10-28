@@ -35,11 +35,9 @@ pub mod governance {
     pub mod versioning;
 }
 
-// Coverage tracking module (Phase 19)
-pub mod coverage;
-
-// Engine metrics module (Phase 19)
-pub mod metrics;
+// `pub mod coverage;` (a `CoverageTracker` nothing recorded into) and `pub mod metrics;` (a second
+// metric stack nothing read) were declared here and used by nothing: the live equivalents are
+// `monitoring::coverage::CoverageTracking` and `engine::engine::metrics`. Deleted in 9.0.58.
 
 // Monitoring modules (Phase 19)
 pub mod monitoring {
