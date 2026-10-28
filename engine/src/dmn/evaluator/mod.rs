@@ -1413,8 +1413,6 @@ impl DecisionEvaluator {
                 t.emit_with(
                     "evaluate_table",
                     format!("evaluated table (hit policy: {})", hp_str),
-                    None,
-                    Vec::new(),
                     Some(outputs.values().next().cloned().unwrap_or(Value::Null)),
                 );
             }
@@ -1425,8 +1423,6 @@ impl DecisionEvaluator {
                         "merged {} outputs from upstream decisions",
                         merged_context.len()
                     ),
-                    None,
-                    Vec::new(),
                     Some(Value::Object(merged_context.clone())),
                 );
             }

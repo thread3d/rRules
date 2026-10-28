@@ -22,35 +22,6 @@ pub struct RuleHealth {
     pub confidence_score: f64,
 }
 
-/// Configuration for dead rule detection.
-#[derive(Debug, Clone)]
-pub struct DeadRuleConfig {
-    /// Threshold duration after which a rule with no activations is considered dead
-    pub inactivity_threshold: Duration,
-}
-
-impl Default for DeadRuleConfig {
-    fn default() -> Self {
-        Self {
-            // Default 24 hours threshold
-            inactivity_threshold: Duration::hours(24),
-        }
-    }
-}
-
-/// Alias for compatibility - uses sliding window config's inactivity threshold
-#[deprecated(
-    note = "Use SlidingWindowConfig directly with the `window_duration` and `num_windows` fields"
-)]
-impl DeadRuleConfig {
-    /// Creates a new dead rule config with specified inactivity threshold.
-    pub fn new(inactivity_threshold: Duration) -> Self {
-        Self {
-            inactivity_threshold,
-        }
-    }
-}
-
 impl RuleHealth {
     /// Creates a new RuleHealth instance with default values.
     pub fn new(rule_id: impl Into<String>, name: impl Into<String>) -> Self {

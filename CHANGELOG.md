@@ -12,6 +12,28 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.70] — 2026-10-28 — The trace promised events nobody emitted, and a route nobody wrote
+
+`engine/src/dmn/evaluator/trace.rs` described itself as recording `evaluate_table`, `match_rule`,
+`aggregate` and `resolve_reference` events and serving them from `GET /v1/decisions/{id}/trace`. None of
+that was true: two event kinds exist, two were never emitted, and the route was never written.
+
+The measurement, now pinned by `engine/tests/dmn_trace_events.rs`, is that a single-decision evaluation
+records `evaluate_table` (with the hit policy in the message and the produced value in `output`) followed
+by `merge_scope` (with the merged context); a decision-requirement graph adds `drd_resolve`. `match_rule`,
+`aggregate` and `resolve_reference` are never emitted. The one consumer is the evaluation response, which
+publishes `event_count` and `duration_ms` — not the events.
+
+**My first version of that test asserted the opposite** — that a lone decision records *no* events — and
+it failed within a minute, because the trace is richer than I assumed. That is the whole reason the test
+exists; the description had the same problem for the same reason.
+
+`TraceEvent`'s `rule_index` and `inputs` fields existed for events that never occur and are deleted;
+`output` stays, because two event kinds populate it. And `DeadRuleConfig` — a `#[deprecated]` type with no
+users whose only field (`inactivity_threshold`) nothing read — is deleted too, found by sweeping struct
+fields nothing accesses.
+
+
 ## [9.0.69] — 2026-10-28 — The test framework this library ships could not fail
 
 `ForwardChainingTester` is part of the public testing surface: it offers `assert_rule_sequence`,

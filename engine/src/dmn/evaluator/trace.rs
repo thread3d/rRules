@@ -1,8 +1,23 @@
-//! Inference trace for DMN decision evaluations (Phase 33).
+//! Trace for DMN decision evaluations.
 //!
-//! Mirrors Phase 28's `TraceEvent`/`TraceData` pattern but scoped to the DMN path.
-//! Each evaluation emits a sequence of trace events; when `trace: true` is set on the
-//! evaluate request, these are stored in-memory and served via `GET /v1/decisions/{id}/trace`.
+//! **What this records, measured** (`engine/tests/dmn_trace_events.rs` pins it), because the description
+//! here used to promise more:
+//!
+//! - `evaluate_table` — a decision table was evaluated; the event carries the hit policy in its message
+//!   and the first output value in `output`.
+//! - `merge_scope` — upstream outputs were merged into the evaluating decision's scope; `output` carries
+//!   the merged context.
+//! - `drd_resolve` — an upstream decision of a decision-requirement graph was resolved.
+//!
+//! A single-decision evaluation with no upstream requirements still records `evaluate_table` followed by
+//! `merge_scope`. The only consumer is the evaluation response: with `trace: true` on
+//! `POST /v1/decisions/{id}/evaluate`, `TraceResponse` reports `event_count` (`events.len()`) and
+//! `duration_ms` — the events themselves, and the outputs they carry, are not published.
+//!
+//! It does **not** record `match_rule`, `aggregate` or `resolve_reference` events, and there is no
+//! `GET /v1/decisions/{id}/trace` endpoint — that sentence described a route nobody wrote. The
+//! `rule_index` and `inputs` fields existed for events that are never emitted and are deleted; `output`
+//! stays, because two event kinds populate it.
 
 use std::time::Instant;
 
@@ -17,10 +32,6 @@ pub struct TraceEvent {
     pub event_type: String,
     /// Human-readable description of what happened.
     pub message: String,
-    /// Optional: the rule index that was matched (for hit-policy events).
-    pub rule_index: Option<usize>,
-    /// Optional: input values evaluated for this event.
-    pub inputs: Vec<(String, Value)>,
     /// Optional: output value produced.
     pub output: Option<Value>,
 }
@@ -52,19 +63,15 @@ impl InferenceTrace {
             elapsed_ms,
             event_type: event_type.into(),
             message: message.into(),
-            rule_index: None,
-            inputs: Vec::new(),
             output: None,
         });
     }
 
-    /// Emit a trace event with additional context.
+    /// Emit a trace event that carries an output value.
     pub fn emit_with(
         &mut self,
         event_type: impl Into<String>,
         message: impl Into<String>,
-        rule_index: Option<usize>,
-        inputs: Vec<(String, Value)>,
         output: Option<Value>,
     ) {
         let elapsed_ms = self.started_at.elapsed().as_secs_f64() * 1000.0;
@@ -72,8 +79,6 @@ impl InferenceTrace {
             elapsed_ms,
             event_type: event_type.into(),
             message: message.into(),
-            rule_index,
-            inputs,
             output,
         });
     }

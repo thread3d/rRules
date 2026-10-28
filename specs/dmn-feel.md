@@ -913,6 +913,20 @@ outputs, exact structural equality) but its outcome is invisible to the pass/fai
 | Multi-word names, `sort` comparator, `round *` scale, `get entries` shape | previously-fixed defects | Confirmed fixed at `parser.rs:1455-1484`, `builtins.rs:1365-1402`, `builtins.rs:306-331`, `builtins.rs:1662-1689` |
 | An internal phase document reported `Parser 51/51, Round-trip 51/51, **Evaluator 21/51**` and said the sweep failed only on parser/DMNDI layers | conflicts with the root doc's "51/51 evaluator"; its 21 equals the DMNDI pass count. That document lives in the workspace-level `.planning/` tree, which this repository does not publish — the measured state is `TCK-COVERAGE-GAPS.md` | `TCK-COVERAGE-GAPS.md:1-20`, `tck_sweep.rs:467-505` |
 
+### The evaluation trace's vocabulary
+
+`InferenceTrace` (`engine/src/dmn/evaluator/trace.rs`) records three event kinds and no others:
+`evaluate_table` (carrying the hit policy and the first output value), `merge_scope` (carrying the merged
+context) and `drd_resolve`. A single-decision evaluation records the first two. The only consumer is
+`POST /v1/decisions/{id}/evaluate` with `trace: true`, whose `TraceResponse` publishes `event_count` and
+`duration_ms` — **not** the events themselves.
+
+The module used to claim `match_rule`, `aggregate` and `resolve_reference` events and a
+`GET /v1/decisions/{id}/trace` endpoint; nothing emitted those events and the route was never written
+(9.0.70). `rule_index` and `inputs` were fields for events that never occur and are deleted;
+`engine/tests/dmn_trace_events.rs` pins the vocabulary that exists so the description cannot drift from
+it again.
+
 ## 10. Known gaps
 
 Implementation defects, stubs and spec/code disagreements. Entries closed on 2026-10-25 are struck
