@@ -49,8 +49,7 @@ impl ExecutionResult {
 ///
 /// Both entry points delegate here, which is what makes the answer the same whichever one a caller
 /// uses.
-#[allow(dead_code)]
-fn run(engine: &mut Engine) -> ExecutionResult {
+pub(crate) fn run(engine: &mut Engine) -> ExecutionResult {
     use std::collections::{HashMap, HashSet};
 
     // The evaluator takes a plain fact map, keyed the way rule actions name their targets.

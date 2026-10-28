@@ -544,11 +544,12 @@ Limits and guards (with defaults and configuration points):
   Forward chaining works: `Engine::load_rules` parses the same JSON the API stores,
   `Engine::execute_forward` runs the shared fixpoint evaluator and reports what fired, and
   `forward_chaining::execute_forward` delegates to the same loop (**closed in 9.0.52**, see
-  `engine/tests/forward_chaining.rs`). What remains a placeholder: `Engine::execute_backward` and
-  `backward_chaining::execute_backward` still return a fixed result, `Session::insert_fact`
-  discards its argument (`environment.rs`), `Session::execute` returns "Not implemented", and
-  `Session` holds a raw `*const Engine` that is never dereferenced. `lib.rs` re-exports both chaining
-  entry points, so the backward one is reachable and answers nothing.
+  `engine/tests/forward_chaining.rs`). **`Session` is real too (closed in 9.0.53)**: it owns a clone
+  of the engine instead of a raw `*const Engine` it never dereferenced, `insert_fact` puts the fact in
+  that engine's working memory, and `execute` runs the same loop and reports what fired. What remains
+  a placeholder: `Engine::execute_backward` and `backward_chaining::execute_backward` still return a
+  fixed result, and `lib.rs` re-exports both chaining entry points, so the backward one is reachable
+  and answers nothing.
 - **Validator module is unused by the API and partly unreachable.** `validate_rule_syntax` now
   real (it runs `Rule::validate` and syntax-checks string operands), and the `unsafe` `transmute`
   is gone (the type owns its data), but no crate outside `engine/src/validation.rs` calls the

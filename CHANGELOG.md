@@ -12,6 +12,35 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.53] — 2026-10-27 — The session surface was a pointer to nothing
+
+`Session` kept the engine as a raw `*const Engine` and never dereferenced it. Everything that depended
+on that pointer therefore did nothing: `insert_fact` discarded its argument, and `execute` answered
+"Not implemented". A caller had a session object that could not hold a fact or run a rule, and nothing
+said so.
+
+It owns a clone of the engine now. `insert_fact` puts the fact in that engine's working memory,
+`execute` runs the same forward-chaining loop the engine does and reports what fired, and
+`Session::engine()` exposes the state afterwards so a caller can read the results. `destroy()` is
+honoured: a destroyed session refuses both.
+
+`engine/tests/forward_chaining.rs` covers it: a session accepts a fact, runs the rule over it, sees the
+action's effect in its own memory — and the engine it was created from stays untouched, which is what
+owning a clone means. A second test pins that a destroyed session errors rather than silently
+succeeding.
+
+`specs/domain-model.md` now says precisely which halves of the `Environment`/`Session` surface are real
+and that backward chaining is the one still fixed, instead of lumping five placeholders together.
+`AGENTS.md`'s roadmap was rewritten for the same reason: it listed work that has since been done.
+It also now records the procedure agreed with the maintainer while CI cannot run: keep working on local
+gates, mark each release `CI/Deploy not confirmed: account billing`, and run `gh run rerun` over every
+unverified commit once billing returns.
+
+Verified, locally only: 1007 tests, TCK 170/0, clippy and rustfmt clean, `make audit` clean, `make e2e`
+green, `make spec-citations` 1131/0, `make singleton-tests` clean, `make deploy-env` 0 dead.
+CI/Deploy not confirmed: account billing.
+
+
 ## [9.0.52] — 2026-10-27 — Forward chaining was answering "Not implemented"
 
 Two placeholders sat at the front door of the engine. `Engine::load_rules` returned `Ok(())` without

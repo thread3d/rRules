@@ -184,8 +184,13 @@ impl Engine {
 /// A session manages execution state for a single rule application.
 #[allow(dead_code)]
 pub struct Session {
-    /// Reference to the engine
-    engine: *const Engine,
+    /// The engine this session holds.
+    ///
+    /// A session used to keep a raw `*const Engine` that was never dereferenced, so it could neither
+    /// read nor change anything. It owns a clone instead: a session accumulates facts and runs the
+    /// rules against them, which is what makes it a session rather than a handle to somebody else's
+    /// state.
+    engine: Engine,
     /// Stateful vs stateless mode
     stateful: bool,
     /// Optional explicit ID
@@ -196,33 +201,45 @@ pub struct Session {
 
 impl Session {
     /// Creates a new session from the engine.
-    #[allow(dead_code)]
     pub fn new(engine: &Engine, stateful: bool, session_id: Option<String>) -> Self {
         Self {
-            engine: engine as *const Engine,
+            engine: engine.clone(),
             stateful,
             session_id,
             destroyed: false,
         }
     }
 
+    /// The engine this session is running, with the facts it has accumulated.
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
     /// Inserts a fact into this session's working memory.
-    pub fn insert_fact(&mut self, _fact: crate::fact::Fact) -> Result<(), String> {
+    pub fn insert_fact(&mut self, fact: crate::fact::Fact) -> Result<(), String> {
         if self.destroyed {
             return Err("Session has been destroyed".to_string());
         }
-        // Get engine from raw pointer and call its methods
-        // Safety: This assumes the engine lives longer than the session
-        Ok(())
+        self.engine
+            .working_memory_mut()
+            .insert_fact(fact)
+            .map_err(|error| format!("the fact was rejected: {error}"))
     }
 
-    /// Executes rules in this session.
+    /// Executes the rules this session holds, over the facts it has accumulated.
     pub fn execute(&mut self) -> Result<ExecutionResult, String> {
         if self.destroyed {
             return Err("Session has been destroyed".to_string());
         }
-        // Execute using the engine's forward chaining
-        Ok(ExecutionResult::new(true, "Not implemented".to_string()))
+        let report = crate::forward_chaining::run(&mut self.engine);
+        Ok(ExecutionResult::new(
+            report.errors.is_empty(),
+            format!(
+                "{} rule(s) fired, {} fact(s) changed",
+                report.rules_fired,
+                report.facts_added.len() + report.facts_retracted.len()
+            ),
+        ))
     }
 
     /// Destroys the session and releases resources.

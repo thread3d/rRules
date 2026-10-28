@@ -222,6 +222,23 @@ are struck through with the release that closed them, never quietly removed.
   home; `make verify` therefore points `HOME` at `.verify-home/` for that one command. Never put git
   in the same recipe as a `HOME` override — it loses `$HOME/.gitconfig` and the author identity.
 
+## When CI cannot run: local evidence, and a debt to repay
+
+GitHub will refuse to start workflow jobs when the account's billing lapses — every job fails in a few
+seconds with "recent account payments have failed or your spending limit needs to be increased" and
+no step executes. That is not a code result and there is nothing in the repository to fix.
+
+The agreed procedure when that happens:
+
+1. **Keep working**, on local gates only. Do not describe a release as CI-green.
+2. **Mark the release in `CHANGELOG.md`**: append `CI/Deploy not confirmed: account billing` to the
+   entry's verification line, so the debt is visible where a reader looks.
+3. **Keep the exact list of unverified commits.** `gh run list --limit N` reproduces it afterwards.
+4. **Repay the debt when billing returns**: `gh run rerun <run-id>` for every workflow run of every
+   unverified commit (the commits are already pushed; nothing is lost), then confirm green in `gh run
+   view` before resuming normal operation.
+5. Do **not** mark the goal complete while any pushed commit is unverified by CI.
+
 ## Never commit binaries
 
 **No built or generated binaries in git. Ever.** Not in a commit, not in history, not "just this
@@ -263,8 +280,16 @@ API, governance, testing/monitoring, DMN compliance) is all delivered; the DMN c
 rather than asserted, which is what `TCK-COVERAGE-GAPS.md` exists to do.
 
 **Next step:** no milestone is in flight. Scope the next one from `../.planning/TECH-DEBT.md`,
-`TCK-COVERAGE-GAPS.md` and the `Known gaps` sections of `specs/` — candidates: DMN 1.6 / FEEL 1.6
-(COLLECT `distinct`, the one remaining corpus divergence), `<functionDefinition>`/`<invocation>`
-decision bodies, non-literal business knowledge model bodies, wiring `PostgresDmnStore` into the API
-(its SQL is real and `make db-test` proves it), and PostgreSQL-backed tenants. The repository is published at
-github.com/thread3d/rRules (`origin`, default branch `main`).
+`TCK-COVERAGE-GAPS.md` and the `Known gaps` sections of `specs/`. What is left, in the order it costs a
+reader something:
+
+1. **Backward chaining** — `Engine::execute_backward` and `backward_chaining::execute_backward` still
+   return a fixed result, and `lib.rs` re-exports the latter as an entry point. Forward chaining works
+   (9.0.52); this is the other half of a headline requirement.
+2. **LEAPS aggregation** — `recalculate` returns `None` and every fact is fed to every node, so the
+   aggregations a LEAPS network is built for never compute.
+3. **DMN 1.6 / FEEL 1.6** — COLLECT `distinct`, the one remaining corpus divergence.
+4. **`rsa` / `crypto-bigint`** — linked but unreachable (the API verifies HS256 only); see `SECURITY.md`
+   for what closing that would take.
+
+The repository is published at github.com/thread3d/rRules (`origin`, default branch `main`).

@@ -147,3 +147,61 @@ fn the_session_entry_point_and_the_engine_entry_point_agree() {
     let direct = engine::forward_chaining::execute_forward(&mut engine, &session);
     assert_eq!(direct.rules_fired, 1);
 }
+
+#[test]
+fn a_session_holds_the_facts_it_is_given_and_runs_the_rules_over_them() {
+    // The session used to keep a raw pointer it never dereferenced: `insert_fact` discarded its
+    // argument and `execute` answered "Not implemented". It owns the engine now, so both are real.
+    let mut engine = EngineBuilder::new().build();
+    engine
+        .load_rules(RULE_JSON)
+        .expect("the rule document loads");
+
+    let mut session = engine.create_session(true, Some("s-1".to_string()));
+    assert_eq!(session.id(), Some("s-1"));
+    session
+        .insert_fact(card())
+        .expect("the session accepts a fact");
+    assert_eq!(
+        session
+            .engine()
+            .working_memory()
+            .get_facts_by_type("scorecard")
+            .len(),
+        1,
+        "the fact is in the session's working memory, not discarded"
+    );
+
+    let result = session.execute().expect("the session executes");
+    assert!(result.is_success(), "{}", result.message());
+    assert!(
+        result.message().contains("1 rule(s) fired"),
+        "the session runs the rules it holds: {}",
+        result.message()
+    );
+
+    // The session's own memory reflects the action's effect…
+    let score = session
+        .engine()
+        .working_memory()
+        .get_facts_by_type("scorecard")
+        .first()
+        .and_then(|fact| fact.payload.get("score").cloned());
+    assert_eq!(score, Some(engine::data_types::Value::Integer(10)));
+
+    // …and the engine it was created from is untouched, which is what owning a clone means.
+    assert!(engine
+        .working_memory()
+        .get_facts_by_type("scorecard")
+        .is_empty());
+}
+
+#[test]
+fn a_destroyed_session_refuses_to_work() {
+    let engine = EngineBuilder::new().build();
+    let mut session = engine.create_session(true, None);
+    session.destroy();
+    assert!(!session.is_valid());
+    assert!(session.insert_fact(card()).is_err());
+    assert!(session.execute().is_err());
+}
