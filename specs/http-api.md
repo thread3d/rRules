@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.71` (`api/src/openapi.rs:12`).
+  version `9.0.72` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -177,7 +177,7 @@ Auth column: **yes** = requires a valid Bearer JWT (inside the `/v1` wrap);
 |---|---|---|---|---|---|---|
 | GET | `/health`, `/health/live` | — | `200`, empty body | — | no | `api/src/health.rs` |
 | GET | `/health/ready`, `/ready` | — | `200`, empty body | — | no | No dependency checks: the stores are in-memory (`health.rs`). The flat `/health` and `/ready` are aliases, because the Kubernetes manifests and the Helm chart probe those paths. |
-| POST | `/v1/execute` | `ExecuteRequest{facts, rule_filter?, engine?, trace?}` | `200 {execution_id, rules_fired, rules_matched, rules_not_fired[], facts_after, …}` | `400` on a malformed body | yes | Runs the engine's rule set, which is loaded from `RULE_STORAGE_PATH`; rules created through `/v1/rules` are stored as text and are **not** part of it. `rules_matched` reports how many rules the filter selected, so a filter that matches nothing is distinguishable from a run where nothing fired. |
+| POST | `/v1/execute` | `ExecuteRequest{facts, rule_filter?, engine?, trace?}` | `200 {execution_id, rules_fired, rules_matched, rules_not_fired[], facts_after, …}` | `400` on a malformed body; `400 {"error":"rule_filter.categories is not supported: …"}` when a category filter is sent | yes | `rule_filter.name_pattern` filters by rule id or name. `rule_filter.categories` is **refused, not ignored** (9.0.72): the executing ruleset carries no category, and the API's categories describe rule documents in another store, so the field could only ever have matched everything. Runs the engine's rule set, which is loaded from `RULE_STORAGE_PATH`; rules created through `/v1/rules` are stored as text and are **not** part of it. `rules_matched` reports how many rules the filter selected, so a filter that matches nothing is distinguishable from a run where nothing fired. |
 | GET | `/metrics` | — | `200` HTML / JSON / Prometheus text | — | no | Content-negotiated on `Accept` (`api/src/metrics.rs:330-383`); see drift note. |
 | GET | `/api-docs/openapi.json` | — | `200` OpenAPI 3 JSON | — | no | `api/src/app.rs:129-132` |
 | GET | `/swagger-ui/{_:.*}` | — | `200` HTML | — | no | Same registration. |

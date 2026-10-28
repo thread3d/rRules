@@ -12,6 +12,25 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.72] — 2026-10-28 — A filter that filtered nothing, answered instead of ignored
+
+`POST /v1/execute` accepted `rule_filter.categories` and did nothing with it: the executing ruleset is
+loaded from `RULE_STORAGE_PATH` and carries no category, while the API's categories describe rule
+**documents** in a separate store keyed by tenant. So a caller who sent a category filter believed they had
+narrowed the run and got every rule. `docs/API.md` advertised the field — "restrict categories" — and the
+frontend's request type declared it.
+
+I set out to implement it and concluded that the honest move is the opposite. Making it work means either a
+third category notion on the engine's `Rule` (matching neither the API's category entity nor the rule
+store's string, across 54 struct literals) or threading the rule store into the execute path — which,
+per `AGENTS.md`, makes every hand-rolled test app that mounts the handler answer 500. Both add a liability
+to honour a field that **no client sends**: the TestRunner passes `name_pattern` and nothing else.
+
+So the field is **refused with a 400** that names it and explains why, `name_pattern` still works, and the
+docs and the frontend type no longer advertise what cannot happen. The integration test asserts both
+halves: the category filter is a 400, and a `name_pattern` filter still returns 200.
+
+
 ## [9.0.71] — 2026-10-28 — A field nobody honoured, and an engine state nobody extracted
 
 `POST /v1/rules/reload` accepted `rule_file` and dropped it on the floor: a caller asking to reload one

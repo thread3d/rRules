@@ -269,7 +269,7 @@ Execute a rule set against supplied facts. **Auth:** Bearer JWT.
 **Request** (`ExecuteRequest`):
 ```json
 { "session_id": "sess-1", "facts": { "customer": { "tier": "Gold" } },
-  "rule_filter": { "name_pattern": "gold-*", "categories": ["pricing"] },
+  "rule_filter": { "name_pattern": "gold-*" },
   "engine": "rete", "trace": false }
 ```
 | Field | Type | Notes |
@@ -277,7 +277,7 @@ Execute a rule set against supplied facts. **Auth:** Bearer JWT.
 | `session_id` | string? | opt-in **stateful** execution: the working memory is kept under this id and resumed on the next call (server UUID returned as `session_id`) |
 | `facts` | map<string, json> | fact type → object payload |
 | `rule_filter.name_pattern` | string? | glob on rule name |
-| `rule_filter.categories` | [string]? | restrict categories |
+| ~~`rule_filter.categories`~~ | — | **refused with 400**: the executing ruleset carries no category; the API's categories describe rule documents. Filter with `name_pattern`. |
 | `engine` | string? | `rete`/`treat`/`leaps`/`phreak`; defaults to `RRULES_DEFAULT_ENGINE` (or `rete`). Unknown names → `400` |
 | `trace` | bool? | opt-in inference trace (off by default; no latency cost when off) |
 

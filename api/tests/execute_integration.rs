@@ -2424,3 +2424,53 @@ async fn reloading_one_file_is_refused_with_an_explanation() {
         "and names the file that was asked for: {message}"
     );
 }
+
+/// A category filter is refused, not ignored.
+///
+/// `rule_filter.categories` was a silent no-op: the executing ruleset is loaded from
+/// `RULE_STORAGE_PATH` and carries no category, while the API's categories describe rule *documents* in a
+/// separate store. A caller sending it believed they had narrowed the run and got every rule. It is a 400
+/// that says which field and why.
+#[serial_test::serial]
+#[actix_web::test]
+async fn a_category_filter_is_refused_with_an_explanation() {
+    reset_test_env();
+    let app = init_test_app!();
+
+    let req = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "engine": "rete",
+            "facts": { "scorecard": { "score": 0 } },
+            "rule_filter": { "categories": ["pricing"] }
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(
+        resp.status().as_u16(),
+        400,
+        "the category filter is refused"
+    );
+    let body = String::from_utf8_lossy(&test::read_body(resp).await).to_string();
+    assert!(
+        body.contains("rule_filter.categories is not supported"),
+        "the refusal names the field: {body}"
+    );
+
+    // `name_pattern` — the filter that works — is still accepted.
+    let ok = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "engine": "rete",
+            "facts": { "scorecard": { "score": 0 } },
+            "rule_filter": { "name_pattern": "r1" }
+        }))
+        .to_request();
+    let ok_resp = test::call_service(&app, ok).await;
+    assert!(
+        ok_resp.status().is_success(),
+        "name_pattern still filters, got {}",
+        ok_resp.status()
+    );
+}

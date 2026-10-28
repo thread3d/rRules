@@ -136,7 +136,8 @@ export interface ExecuteRequest {
   facts: Record<string, unknown>
   rule_filter?: {
     name_pattern?: string
-    categories?: string[]
+    // No `categories`: the API refuses that field with a 400, because the executing ruleset carries no
+    // category. Declaring it here invited a caller to send something that can only be rejected.
   } | null
   engine?: string | null
   /**

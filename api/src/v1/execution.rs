@@ -43,6 +43,9 @@ pub struct ExecuteRequest {
 pub struct RuleFilter {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name_pattern: Option<String>,
+    /// Categories to restrict the run to — **refused with a 400**, see `filter_ruleset`.
+    ///
+    /// Kept in the type so a request that sends it can be answered instead of silently ignored.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub categories: Option<Vec<String>>,
 }
@@ -120,8 +123,9 @@ impl SharedRuleSet {
 /// `{ name_pattern: ruleId }` for a "test this rule" UX but the engine
 /// previously loaded ALL rules). A rule matches when `name_pattern` equals its
 /// `id` OR `name` (exact match — the TestRunner sends the edited rule's id).
-/// The `categories` field is not yet backed by `Rule` metadata (rules carry no
-/// category field) and is therefore a documented no-op.
+/// `categories` is **refused with a 400** rather than ignored: the executing ruleset carries no category,
+/// and the API's categories describe rule *documents* in a different store. Until 9.0.72 the field was a
+/// silent no-op, which read as a filter that matched everything.
 ///
 /// Returns `Cow::Borrowed(src)` when `filter` is `None` or carries no
 /// `name_pattern`, so the non-filtered execute path borrows the shared
@@ -509,6 +513,22 @@ pub async fn execute_single(
         std::env::var("RRULES_DEFAULT_ENGINE")
             .unwrap_or_else(|_| selector.current_engine().to_string())
     });
+
+    // 2. Refuse a category filter. `RuleFilter::categories` has never been honoured: the rules the engine
+    //    executes come from `RULE_STORAGE_PATH` and carry no category, while the API's categories belong
+    //    to rule *documents* in a separate store keyed by tenant. Silently ignoring the field let a caller
+    //    believe they had narrowed the run; this path says so instead.
+    if let Some(filter) = req.rule_filter.as_ref() {
+        if filter.categories.as_ref().is_some_and(|c| !c.is_empty()) {
+            return Err((
+                actix_web::http::StatusCode::BAD_REQUEST,
+                "rule_filter.categories is not supported: the executing ruleset carries no category, and \
+                 the API's categories describe rule documents, not executed rules. Filter with \
+                 `name_pattern` instead."
+                    .to_string(),
+            ));
+        }
+    }
 
     // 2. Validate the engine param against registered factories (ENGINE-07).
     //    Do NOT call selector.select_engine (it takes &mut self).
