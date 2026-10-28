@@ -12,6 +12,29 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.59] — 2026-10-28 — A gate on the gate: the verification cannot be starved again
+
+9.0.58's repair was necessary but not sufficient: it put the database tests where they belong, and left
+nothing keeping them there. `make verify` had been reporting "35 verified" while quietly running out of
+budget for ten releases, and only a timeout threshold exposed it — a failure mode that returns on the
+next heavy dev-dependency.
+
+`make verification-cost` now measures what the requirement verification has to build and fails when it
+grows: `api` at 262 crates (normal + dev) against a ceiling of 320, `engine` at 198 against 330, and a
+forbidden list — `pg-embed`, `sqlx`, `reqwest`, `zip` — that must never be a dev-dependency of a verified
+crate. The ceilings sit just above today's numbers and far below the ~600 the embedded-server tree added,
+so ordinary churn passes and a repeat does not.
+
+It runs in `make ci` and in CI, and it is proven the same way as every other check here: with a stubbed
+tree carrying 400 crates and `pg-embed` + `zip` as dev-dependencies, it fails with all three reasons
+before the real tree passes again. `AGENTS.md` records the lesson as *"a gate can be starved into
+silence"* — the third habit, beside "verify in the mode the gate runs in" and "test the checker against
+the defect it was written for".
+
+`AGENTS.md`'s roadmap was also rewritten: it still listed backward chaining and LEAPS aggregation, both
+of which closed in 9.0.54 and 9.0.55.
+
+
 ## [9.0.58] — 2026-10-28 — Three modules nothing used, one of which never even compiled
 
 A sweep for `pub fn`s that nothing references outside their own file turned up three modules:

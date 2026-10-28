@@ -202,6 +202,10 @@ jobs:
       - name: Singleton-observing tests serialise
         run: make singleton-tests
 
+      # The verified crates must stay light enough for `make verify` to finish.
+      - name: Verification stays affordable
+        run: make verification-cost
+
       # Every advisory must be fixed or accounted for in `.cargo/audit.toml`.
       - name: Dependency advisories
         uses: taiki-e/install-action@v2

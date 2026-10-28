@@ -66,6 +66,7 @@ make e2e         # browser smoke test of the built UI against a live server
 make image-check # check the Dockerfile's build logic without a container runtime
 make chart-lint  # lint + render the Helm chart (needs helm v3.14.0; CI's chart job)
 make db-test     # the PostgreSQL store against a real server pg-embed downloads and starts
+make verification-cost  # the verified crates stay light enough for `make verify` to finish
 ```
 
 `make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).
@@ -182,6 +183,13 @@ watching the check *not* fail:
 
 A check that has never failed has never been tested. Break the thing, watch it fail, put it back.
 
+**3. A gate can be starved into silence.** Adding `pg-embed` to `api`'s dev-dependencies in 9.0.45 made
+every build and coverage pass of that crate compile the embedded-server tree; `make verify` then
+exceeded its budget and reported **all 35 requirements BLOCKED** — for ten releases, unnoticed, because a
+blocked run still prints a report. `make verification-cost` now fails when the verified crates grow past
+what the verification can afford, or when a heavy test-only dependency is declared on them. Test-only
+weight belongs in a crate the verification does not build (`db_tests/`).
+
 ### Two implementations of one thing always drift
 
 `main.rs` and the test-state constructor built the same application twice, and the test copy had no
@@ -283,13 +291,20 @@ rather than asserted, which is what `TCK-COVERAGE-GAPS.md` exists to do.
 `TCK-COVERAGE-GAPS.md` and the `Known gaps` sections of `specs/`. What is left, in the order it costs a
 reader something:
 
-1. **Backward chaining** — `Engine::execute_backward` and `backward_chaining::execute_backward` still
-   return a fixed result, and `lib.rs` re-exports the latter as an entry point. Forward chaining works
-   (9.0.52); this is the other half of a headline requirement.
-2. **LEAPS aggregation** — `recalculate` returns `None` and every fact is fed to every node, so the
-   aggregations a LEAPS network is built for never compute.
-3. **DMN 1.6 / FEEL 1.6** — COLLECT `distinct`, the one remaining corpus divergence.
-4. **`rsa` / `crypto-bigint`** — linked but unreachable (the API verifies HS256 only); see `SECURITY.md`
-   for what closing that would take.
+1. **DMN 1.6 / FEEL 1.6** — `COLLECT distinct` and `let` bindings. Both are later-version constructs and
+   the vendored corpus is 1.5, so implementing them means writing vectors as well as code; nothing in the
+   corpus would check the result.
+2. **`rsa` / `crypto-bigint`** — linked but unreachable (the API verifies HS256 only, and `jsonwebtoken`
+   compiles its RSA support unconditionally). Closing it means switching the crypto backend to
+   `aws_lc_rs` (a C toolchain in the image) or replacing the crate. See `SECURITY.md`.
+3. **A stale claim, wherever the next one is.** Four consecutive rounds each found one: a FEEL operator
+   returning `null` for every input, a session holding a pointer it never dereferenced, a cache keyed by
+   node rather than fact, a comment claiming a feature was unimplemented that had worked all along.
+   Sweeping for code comments that assert a limitation — and then probing the limitation — is the highest
+   yield per round this project has found.
+
+Closed since `v9.0`: forward and backward chaining, the whole `Session` surface, LEAPS aggregation, the
+TREAT cache's five defects, three orphaned modules, a `quick-xml` advisory in the DMN parser, the
+OpenAPI document's missing half, and every persistence gap the specification recorded.
 
 The repository is published at github.com/thread3d/rRules (`origin`, default branch `main`).
