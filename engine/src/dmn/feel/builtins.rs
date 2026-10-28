@@ -44,13 +44,41 @@ pub type BuiltinFn = fn(&[Value]) -> Value;
 pub static COMPILED_PATTERNS: OnceLock<Mutex<HashMap<String, regex::Regex>>> = OnceLock::new();
 
 fn get_or_compile(pattern: &str) -> Option<regex::Regex> {
+    get_or_compile_with_flags(pattern, "")
+}
+
+/// Compile `pattern` with DMN's `flags` argument (`i`, `s`, `m`, `x` — the XPath/XQuery set).
+///
+/// The cache key is the pattern **and** the flags: keying on the pattern alone would answer a
+/// case-insensitive `matches(x, p, "i")` from the case-sensitive entry compiled earlier for the same
+/// `p`, which is the same class of defect as keying a rule cache by node rather than by fact.
+///
+/// Returns `None` for an invalid pattern or an unknown flag — DMN answers null for both.
+fn get_or_compile_with_flags(pattern: &str, flags: &str) -> Option<regex::Regex> {
     let cache = COMPILED_PATTERNS.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(r) = cache.lock().ok()?.get(pattern) {
+    let key = if flags.is_empty() {
+        pattern.to_string()
+    } else {
+        format!("{flags}\0{pattern}")
+    };
+    if let Some(r) = cache.lock().ok()?.get(&key) {
         return Some(r.clone());
     }
-    match regex::Regex::new(pattern) {
+
+    let mut builder = regex::RegexBuilder::new(pattern);
+    for flag in flags.chars() {
+        match flag {
+            'i' => builder.case_insensitive(true),
+            's' => builder.dot_matches_new_line(true),
+            'm' => builder.multi_line(true),
+            'x' => builder.ignore_whitespace(true),
+            // DMN 1.5 §10.3.4.5 takes the XPath flags; anything else is an error, and an error is null.
+            _ => return None,
+        };
+    }
+    match builder.build() {
         Ok(r) => {
-            cache.lock().ok()?.insert(pattern.to_string(), r.clone());
+            cache.lock().ok()?.insert(key, r.clone());
             Some(r)
         }
         Err(_) => None,
@@ -825,9 +853,15 @@ fn built_in_replace(args: &[Value]) -> Value {
     {
         return Value::Null;
     }
-    let re = match get_or_compile(pattern_str) {
+    // DMN 1.5 §10.3.4.5 gives `replace` the same optional `flags` argument `matches` has.
+    let flags = match args.get(3) {
+        None => "",
+        Some(Value::String(f)) => f.as_str(),
+        Some(_) => return Value::Null,
+    };
+    let re = match get_or_compile_with_flags(pattern_str, flags) {
         Some(r) => r,
-        None => return Value::Null, // pattern compilation error → null
+        None => return Value::Null, // pattern compilation error or unknown flag → null
     };
     let result = re.replace_all(&s, replacement.as_str());
     Value::String(result.into_owned())
@@ -873,7 +907,14 @@ fn built_in_matches(args: &[Value]) -> Value {
     if args.is_empty() || matches!(args[0], Value::Null) || matches!(args[1], Value::Null) {
         return Value::Null;
     }
-    let re = match get_or_compile(pattern_str) {
+    // DMN 1.5 §10.3.4.5: an optional third argument carries regex flags (`i`, `s`, `m`, `x`). It used
+    // to be accepted and dropped, so `matches("abc", "ABC", "i")` answered false.
+    let flags = match args.get(2) {
+        None => "",
+        Some(Value::String(f)) => f.as_str(),
+        Some(_) => return Value::Null,
+    };
+    let re = match get_or_compile_with_flags(pattern_str, flags) {
         Some(r) => r,
         None => return Value::Null,
     };
@@ -2519,10 +2560,10 @@ pub fn builtin_param_names(name: &str) -> Option<&'static [&'static str]> {
         "string length" => &["string"],
         "upper case" | "lower case" => &["string"],
         "substring before" | "substring after" => &["string", "match"],
-        "replace" => &["input", "pattern", "replacement"],
+        "replace" => &["input", "pattern", "replacement", "flags"],
         "contains" => &["string", "match"],
         "starts with" | "ends with" => &["string", "match"],
-        "matches" => &["input", "pattern"],
+        "matches" => &["input", "pattern", "flags"],
         "split" => &["string", "delimiter"],
         "string join" => &["list", "delimiter"],
         // List family.

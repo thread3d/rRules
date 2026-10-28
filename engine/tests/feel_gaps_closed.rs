@@ -68,3 +68,67 @@ fn an_invalid_pattern_answers_null_consistently() {
         "a valid pattern still replaces"
     );
 }
+
+#[test]
+fn matches_honours_its_flags_argument() {
+    // DMN 1.5 §10.3.4.5: `matches(input, pattern, flags?)`, the flags being the XPath set.
+    assert_eq!(feel("matches(\"abc\", \"ABC\")"), Value::Bool(false));
+    assert_eq!(
+        feel("matches(\"abc\", \"ABC\", \"i\")"),
+        Value::Bool(true),
+        "case-insensitive"
+    );
+    assert_eq!(
+        feel("matches(\"a\\nb\", \"a.b\")"),
+        Value::Bool(false),
+        "`.` stops at a newline"
+    );
+    assert_eq!(
+        feel("matches(\"a\\nb\", \"a.b\", \"s\")"),
+        Value::Bool(true),
+        "dot-all"
+    );
+    assert_eq!(
+        feel("matches(\"ab\", \"a b\", \"x\")"),
+        Value::Bool(true),
+        "extended: whitespace ignored"
+    );
+    // An unknown flag is an error, and an error is null — not a silently unflagged match.
+    assert_eq!(feel("matches(\"abc\", \"ABC\", \"q\")"), Value::Null);
+}
+
+#[test]
+fn replace_honours_its_flags_argument() {
+    assert_eq!(
+        feel("replace(\"aBc\", \"b\", \"X\")"),
+        Value::String("aBc".to_string())
+    );
+    assert_eq!(
+        feel("replace(\"aBc\", \"B\", \"X\", \"i\")"),
+        Value::String("aXc".to_string()),
+        "case-insensitive replacement"
+    );
+    assert_eq!(feel("replace(\"abc\", \"b\", \"X\", \"q\")"), Value::Null);
+}
+
+#[test]
+fn a_flagged_pattern_does_not_reuse_the_unflagged_cache_entry() {
+    // The compiled-pattern cache is keyed by pattern *and* flags. Keying on the pattern alone would
+    // answer this case-insensitive call from the case-sensitive entry compiled on the line above —
+    // the same defect class as a rule cache keyed by node rather than by fact.
+    assert_eq!(
+        feel("matches(\"ABC\", \"abc\")"),
+        Value::Bool(false),
+        "compiles the plain pattern"
+    );
+    assert_eq!(
+        feel("matches(\"ABC\", \"abc\", \"i\")"),
+        Value::Bool(true),
+        "must not reuse it"
+    );
+    assert_eq!(
+        feel("matches(\"ABC\", \"abc\")"),
+        Value::Bool(false),
+        "and the plain entry is intact"
+    );
+}

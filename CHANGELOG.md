@@ -12,6 +12,24 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.65] — 2026-10-28 — `matches` and `replace` accept the flags DMN gives them
+
+Two entries in `specs/dmn-feel.md`'s gap list said the same thing from different angles: `matches`
+declared two parameters and ignored the third, so **`matches("abc", "ABC", "i")` answered `false`** — a
+wrong answer, not a missing feature. DMN 1.5 §10.3.4.5 gives `matches` and `replace` an optional flags
+argument carrying the XPath flag set.
+
+Both now honour `i`, `s`, `m` and `x`; an unknown flag answers null, because an error is null in FEEL.
+The compiled-pattern cache is keyed by **pattern and flags**: keying on the pattern alone would answer a
+case-insensitive call from the case-sensitive entry compiled earlier for the same pattern — the same
+defect class as a rule cache keyed by node rather than by fact, which cost a round in 9.0.56. The test
+that proves it compiles the plain pattern, then the flagged one, then checks the plain one again, and it
+fails when the key is narrowed back to the pattern.
+
+`matches` and `replace` now declare `flags` in the signature table, so a call with extra arguments is
+checked against something true.
+
+
 ## [9.0.64] — 2026-10-28 — Four gaps closed, one of them a gap that was not there
 
 Working through `specs/dmn-feel.md`'s remaining gap list, four entries resolved — and the first was the
