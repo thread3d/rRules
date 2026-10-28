@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.66` (`api/src/openapi.rs:12`).
+  version `9.0.67` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -313,10 +313,17 @@ No tenant scoping; `required_approvals` is fixed at 1 and never enforced.
 
 | Method | Path | Request | Success response | Errors | Auth | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/simulation` | `SimulationRunRequest{name,base_state?,proposed_changes,fact_sets}` | `200 SimulationRunResponse` | `400 {"error":"fact_sets must contain at least one fact group","status_code":400}` | yes | `simulation.rs:133-211`. |
+| POST | `/v1/simulation` | `SimulationRunRequest{name,rules?,base_state?,proposed_changes,fact_sets}` | `200 SimulationRunResponse` | `400 {"error":"fact_sets must contain at least one fact group","status_code":400}`, `400 {"error":"rules were rejected: …"}` | yes | `api/src/v1/simulation.rs` (`run_simulation`). |
 | POST | `/v1/simulation/` | same | same | same | yes | Trailing-slash alias registered in `v1/mod.rs:48-49`. |
 
-Runs against a fresh empty `EngineBuilder` engine, so `rules_fired` is empty in practice (`simulation.rs:145`, `api/tests/simulation_integration.rs:7-9`).
+~~Runs against a fresh empty `EngineBuilder` engine, so `rules_fired` is empty in practice.~~ **Fixed in
+9.0.67**: the request carries the `rules` to simulate and the runner inserts each fact set into its
+variant engine and reads back the ids of the rules that fired (`ExecutionResult::fired_rules`), so a
+`DisableRule` variant produces a real difference. Before that, the handler built an engine with no rules,
+the runner built a working memory and a `Fact` per test fact and discarded both, and every variant
+answered `success: true` with nothing fired. `api/tests/simulation_integration.rs` asserts that a
+satisfied rule is reported as fired, that disabling it empties the list and yields a difference, and that
+unparseable rules are a 400.
 
 ### Decisions (DMN)
 

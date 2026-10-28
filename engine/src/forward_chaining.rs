@@ -9,6 +9,11 @@ use crate::fact::Fact;
 pub struct ExecutionResult {
     /// Number of rules fired
     pub rules_fired: usize,
+    /// The ids of the rules that fired, in firing order.
+    ///
+    /// The count was kept and the ids thrown away, so nothing could say *which* rule fired — which is
+    /// what a what-if simulation is for. `rules_fired` remains the count for callers that only want it.
+    pub fired_rules: Vec<String>,
     /// Facts added during execution
     pub facts_added: Vec<Fact>,
     /// Facts removed during execution
@@ -27,6 +32,7 @@ impl ExecutionResult {
     pub fn new() -> Self {
         Self {
             rules_fired: 0,
+            fired_rules: Vec::new(),
             facts_added: Vec::new(),
             facts_retracted: Vec::new(),
             errors: Vec::new(),
@@ -68,6 +74,7 @@ pub(crate) fn run(engine: &mut Engine) -> ExecutionResult {
         engine.max_iterations(),
     );
 
+    let rules_fired_count = fired.len();
     // Write the result back, so working memory and the map cannot disagree afterwards.
     let after: HashSet<String> = facts.keys().cloned().collect();
     let facts_added: Vec<crate::fact::Fact> = after
@@ -80,7 +87,12 @@ pub(crate) fn run(engine: &mut Engine) -> ExecutionResult {
         .replace_all(facts.into_values().collect());
 
     ExecutionResult {
-        rules_fired: fired.len(),
+        rules_fired: rules_fired_count,
+        fired_rules: {
+            let mut ids: Vec<String> = fired.into_iter().collect();
+            ids.sort();
+            ids
+        },
         facts_added,
         facts_retracted,
         errors: Vec::new(),

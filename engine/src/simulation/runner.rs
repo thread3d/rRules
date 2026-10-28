@@ -8,7 +8,7 @@
 
 use crate::data_types::Value;
 use crate::environment::Engine;
-use crate::fact::{Fact, WorkingMemory};
+use crate::fact::Fact;
 
 use super::types::*;
 
@@ -173,8 +173,26 @@ impl SimulationRunner {
         // Clone the engine for this variant.
         let mut variant_engine = base_engine.clone();
 
-        // Load facts into working memory.
-        let _working_memory = WorkingMemory::new();
+        Self::load_facts(&mut variant_engine, fact_set)?;
+        let (rules_fired, output, success, error) = Self::execute(&mut variant_engine);
+
+        let duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+
+        Ok(VariantResult {
+            variant_label: "base".to_string(),
+            rules_fired,
+            execution_time_ms: duration_ms,
+            output,
+            success,
+            error,
+        })
+    }
+
+    /// Insert a fact set into a variant engine's working memory.
+    ///
+    /// This used to build a `WorkingMemory` and a `Fact` per test fact and drop both, so a "what-if"
+    /// variant ran against an engine that had never seen the facts.
+    fn load_facts(engine: &mut Engine, fact_set: &[TestFact]) -> SimulationRunnerResult<()> {
         for test_fact in fact_set {
             let fields: serde_json::Map<String, serde_json::Value> =
                 match serde_json::from_value(test_fact.fields.clone()) {
@@ -187,23 +205,41 @@ impl SimulationRunner {
                 payload.insert(key, json_to_engine_value(&value));
             }
 
-            let _fact = Fact::new(test_fact.id.clone(), payload);
+            engine
+                .insert_fact_for_simulation(Fact::new(test_fact.id.clone(), payload))
+                .map_err(SimulationRunnerError::General)?;
         }
+        Ok(())
+    }
 
-        // Execute the engine (result discarded in placeholder implementation).
-        let _execution_result = variant_engine.execute_forward();
-        let rules_fired: Vec<String> = Vec::new(); // Placeholder - full implementation would extract from execution trace.
-
-        let duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
-
-        Ok(VariantResult {
-            variant_label: "base".to_string(),
-            rules_fired,
-            execution_time_ms: duration_ms,
-            output: None, // Placeholder - full implementation would capture engine output.
-            success: true,
-            error: None,
-        })
+    /// Run a variant engine to its fixpoint and report what happened.
+    ///
+    /// The result is no longer discarded: the fired rule ids come from the same evaluator the engine
+    /// runs, and the facts the run produced become the variant's `output`, so two variants that behave
+    /// differently produce different answers instead of two empty successes.
+    fn execute(
+        engine: &mut Engine,
+    ) -> (Vec<String>, Option<serde_json::Value>, bool, Option<String>) {
+        let report = crate::forward_chaining::run(engine);
+        let output = if report.facts_added.is_empty() && report.facts_retracted.is_empty() {
+            None
+        } else {
+            Some(serde_json::json!({
+                "facts_added": report
+                    .facts_added
+                    .iter()
+                    .map(|f| f.id.to_string())
+                    .collect::<Vec<_>>(),
+                "facts_retracted": report.facts_retracted,
+            }))
+        };
+        let error = if report.errors.is_empty() {
+            None
+        } else {
+            Some(report.errors.join("; "))
+        };
+        let success = error.is_none();
+        (report.fired_rules, output, success, error)
     }
 
     /// Execute a variant with proposed changes applied against one fact set.
@@ -214,29 +250,13 @@ impl SimulationRunner {
     ) -> SimulationRunnerResult<VariantResult> {
         let start_time = std::time::Instant::now();
 
-        // Clone the engine for this variant.
+        // Clone the engine for this variant and apply the proposed change to *its* rules, so the
+        // variant differs from the base by exactly the change under test.
         let mut variant_engine = base_engine.clone();
+        Self::apply_change(&mut variant_engine, change)?;
 
-        // Load facts into working memory.
-        let _working_memory = WorkingMemory::new();
-        for test_fact in fact_set {
-            let fields: serde_json::Map<String, serde_json::Value> =
-                match serde_json::from_value(test_fact.fields.clone()) {
-                    Ok(m) => m,
-                    Err(_) => serde_json::Map::new(),
-                };
-
-            let mut payload = std::collections::HashMap::with_capacity(fields.len());
-            for (key, value) in fields {
-                payload.insert(key, json_to_engine_value(&value));
-            }
-
-            let _fact = Fact::new(test_fact.id.clone(), payload);
-        }
-
-        // Execute the engine (result discarded in placeholder implementation).
-        let _execution_result = variant_engine.execute_forward();
-        let rules_fired: Vec<String> = Vec::new(); // Placeholder - full implementation would extract from execution trace.
+        Self::load_facts(&mut variant_engine, fact_set)?;
+        let (rules_fired, output, success, error) = Self::execute(&mut variant_engine);
 
         let duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
 
@@ -244,10 +264,87 @@ impl SimulationRunner {
             variant_label: format_change_label(0, change),
             rules_fired,
             execution_time_ms: duration_ms,
-            output: None,
-            success: true,
-            error: None,
+            output,
+            success,
+            error,
         })
+    }
+
+    /// Apply one proposed change to a variant engine's rules.
+    fn apply_change(engine: &mut Engine, change: &RuleChange) -> SimulationRunnerResult<()> {
+        let rules = engine.rules_mut();
+        match change {
+            RuleChange::AddCondition { rule_id, condition } => {
+                let parsed: crate::rules::Condition = serde_json::from_value(condition.clone())
+                    .map_err(|e| {
+                        SimulationRunnerError::InvalidCondition(format!("{rule_id}: {e}"))
+                    })?;
+                let rule = rules
+                    .iter_mut()
+                    .find(|r| r.name == *rule_id || r.id == *rule_id)
+                    .ok_or_else(|| SimulationRunnerError::RuleNotFound(rule_id.clone()))?;
+                // Conjoining with the existing condition is what "add a condition" means: the rule
+                // fires only when both hold.
+                rule.condition = crate::rules::Condition::And(vec![rule.condition.clone(), parsed]);
+                Ok(())
+            }
+            RuleChange::RemoveCondition { rule_id, field } => {
+                let rule = rules
+                    .iter_mut()
+                    .find(|r| r.name == *rule_id || r.id == *rule_id)
+                    .ok_or_else(|| SimulationRunnerError::RuleNotFound(rule_id.clone()))?;
+                rule.condition.remove_field(field);
+                Ok(())
+            }
+            RuleChange::ModifyAction {
+                rule_id,
+                action_index,
+                new_action,
+            } => {
+                let parsed: crate::rules::Action = serde_json::from_value(new_action.clone())
+                    .map_err(|e| SimulationRunnerError::InvalidAction(format!("{rule_id}: {e}")))?;
+                let rule = rules
+                    .iter_mut()
+                    .find(|r| r.name == *rule_id || r.id == *rule_id)
+                    .ok_or_else(|| SimulationRunnerError::RuleNotFound(rule_id.clone()))?;
+                let count = rule.actions.len();
+                let slot = rule.actions.get_mut(*action_index).ok_or_else(|| {
+                    SimulationRunnerError::InvalidActionIndex {
+                        rule_id: rule_id.clone(),
+                        index: *action_index,
+                        count,
+                    }
+                })?;
+                *slot = parsed;
+                Ok(())
+            }
+            RuleChange::RemoveRule { rule_id } => {
+                let before = rules.len();
+                rules.retain(|r| r.name != *rule_id && r.id != *rule_id);
+                if rules.len() == before {
+                    return Err(SimulationRunnerError::RuleNotFound(rule_id.clone()));
+                }
+                Ok(())
+            }
+            RuleChange::AddRule { rule } => {
+                let parsed: crate::rules::Rule = serde_json::from_value(rule.clone())
+                    .map_err(|e| SimulationRunnerError::General(format!("invalid rule: {e}")))?;
+                engine
+                    .add_rule(parsed)
+                    .map_err(SimulationRunnerError::General)
+            }
+            RuleChange::DisableRule { rule_id } => {
+                let rule = engine
+                    .rules_mut()
+                    .iter_mut()
+                    .find(|r| r.name == *rule_id || r.id == *rule_id)
+                    .ok_or_else(|| SimulationRunnerError::RuleNotFound(rule_id.clone()))?;
+                // A disabled rule is one that can never fire; `False` is exactly that, and it keeps the
+                // rule visible in the variant's rule set so "disabled" and "removed" stay different.
+                rule.condition = crate::rules::Condition::False;
+                Ok(())
+            }
+        }
     }
 }
 

@@ -31,6 +31,15 @@ pub struct SimulationRunRequest {
     /// test scenario. Empty groups are rejected at validation time.
     #[serde(default)]
     pub fact_sets: Vec<Vec<TestFact>>,
+
+    /// The rules to simulate, in the same JSON form `POST /v1/execute` accepts (`Rule[]`, a rule
+    /// document, or a `{"rules": […]}` envelope).
+    ///
+    /// The endpoint used to build a fresh engine with **no rules**, so every variant reported zero
+    /// fired rules and no differences — a confident answer that simulated nothing. A what-if run has
+    /// to be given what it is a what-if of.
+    #[serde(default)]
+    pub rules: serde_json::Value,
 }
 
 /// Response body for POST /v1/simulation/run
@@ -139,8 +148,18 @@ pub async fn run_simulation(request: web::Json<SimulationRunRequest>) -> impl Re
         }));
     }
 
-    // Build the base engine from a fresh builder (isolated, no shared state).
-    let base_engine = engine::environment::EngineBuilder::new().build();
+    // Build the base engine from a fresh builder (isolated, no shared state) and load the rules the
+    // caller wants to simulate. An empty `rules` value means an empty rule set, which is a legitimate
+    // (if uninformative) request rather than an error.
+    let mut base_engine = engine::environment::EngineBuilder::new().build();
+    if !request.rules.is_null() {
+        if let Err(error) = base_engine.load_rules(&request.rules.to_string()) {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "error": format!("rules were rejected: {error}"),
+                "status_code": 400
+            }));
+        }
+    }
 
     // Convert request to internal simulation types.
     let sim_request = SimulationRequest {
@@ -155,7 +174,11 @@ pub async fn run_simulation(request: web::Json<SimulationRunRequest>) -> impl Re
                     .iter()
                     .map(|f| TestFact {
                         id: f.id.clone(),
-                        fields: serde_json::to_value(f).unwrap_or(serde_json::Value::Null),
+                        // The fact's *payload*, not the fact. This serialised the whole `TestFact`
+                        // (`{id, fields}`), so every simulated fact carried keys named `id` and
+                        // `fields` and none of its own attributes — invisible while the runner threw
+                        // the facts away, fatal once it inserts them.
+                        fields: f.fields.clone(),
                     })
                     .collect()
             })

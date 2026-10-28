@@ -12,6 +12,41 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.67] — 2026-10-28 — The what-if simulation answered "success, nothing happened"
+
+`POST /v1/simulation` is a live, documented endpoint. Its runner built a `WorkingMemory` and a `Fact`
+per test fact **and discarded both**, called `execute_forward()` and discarded the result, then returned
+`rules_fired: []`, `output: null` and `success: true`. The handler, meanwhile, built an engine with no
+rules at all. So a user asking "what happens if I change this rule?" got a confident answer that
+simulated nothing — the exact shape of defect this loop exists to find, and the worst kind: a feature
+that looks implemented.
+
+Four things were wrong, and each hid the next:
+
+1. **No rules.** The handler built `EngineBuilder::new().build()` and never loaded anything. The request
+   now carries `rules` (the same JSON `POST /v1/execute` accepts), and unparseable rules are a 400.
+2. **The facts were thrown away** — `let _fact = Fact::new(…)` inside a loop, against a
+   `let _working_memory` that was never attached to the engine. The runner inserts them now.
+3. **The result was thrown away** — `let _execution_result = …`, with `rules_fired` hardcoded to an
+   empty `Vec`. `forward_chaining::ExecutionResult` now carries `fired_rules` (the ids it already had and
+   dropped), the run's added and retracted facts become the variant's `output`, and `success` reflects
+   whether the run reported errors.
+4. **The changes were never applied.** All six `RuleChange` kinds are implemented — `AddCondition`
+   conjoins, `RemoveCondition` drops the `Pattern` leaf (a conjunction that loses its last leaf becomes
+   `True`, since a rule with no conditions left fires), `ModifyAction` replaces at an index,
+   `RemoveRule` deletes, `AddRule` inserts, `DisableRule` sets the condition to `False` — with the errors
+   the types already declared (`RuleNotFound`, `InvalidActionIndex`, …) finally reachable.
+
+A fifth defect fell out on the way: the handler built each simulated fact's payload with
+`serde_json::to_value(f)` — **the whole fact**, not its `fields` — so every fact carried keys named `id`
+and `fields` and none of its own attributes. Invisible while the facts were discarded; fatal the moment
+they were inserted.
+
+`api/tests/simulation_integration.rs` now asserts the behaviour instead of the shape: a satisfied rule
+is reported as fired by id, a `DisableRule` variant reports nothing fired **and** produces a difference,
+and unparseable rules are a 400.
+
+
 ## [9.0.66] — 2026-10-28 — The newest DMN namespace was not in the list, and the check was thrown away
 
 Gap 20 in `specs/dmn-feel.md` had three parts, all true:

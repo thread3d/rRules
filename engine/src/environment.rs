@@ -142,10 +142,32 @@ impl Engine {
             .map_err(|error| format!("rules were rejected: {error}"))
     }
 
+    /// Insert a fact into this engine's working memory.
+    ///
+    /// Distinct from [`Session::insert_fact`]: a session accumulates into its own clone, while this
+    /// writes to the engine the caller holds — which is what a simulation variant needs.
+    pub fn insert_fact_for_simulation(&mut self, fact: crate::fact::Fact) -> Result<(), String> {
+        self.working_memory_mut()
+            .insert_fact(fact)
+            .map_err(|error| format!("the fact was rejected: {error}"))
+    }
+
     /// Executes forward chaining with the current rules and facts.
     /// The rules this engine holds.
     pub(crate) fn rules(&self) -> &[crate::rules::Rule] {
         &self.rule_set.rules
+    }
+
+    /// Add one rule, for the what-if simulation's `AddRule` change.
+    pub fn add_rule(&mut self, rule: crate::rules::Rule) -> Result<(), String> {
+        self.rule_set
+            .add_rules(vec![rule])
+            .map_err(|error| format!("the rule was rejected: {error}"))
+    }
+
+    /// Mutable access to this engine's rules, for the what-if simulation's variant changes.
+    pub(crate) fn rules_mut(&mut self) -> &mut Vec<crate::rules::Rule> {
+        &mut self.rule_set.rules
     }
 
     /// The fixpoint cap this engine was built with.
@@ -217,6 +239,8 @@ impl Session {
     }
 
     /// Inserts a fact into this session's working memory.
+    /// Insert a fact into this session's engine — a session is a handle to the rules, not a copy of
+    /// them, so inserting here is what makes the accumulated facts visible to the next `execute`.
     pub fn insert_fact(&mut self, fact: crate::fact::Fact) -> Result<(), String> {
         if self.destroyed {
             return Err("Session has been destroyed".to_string());

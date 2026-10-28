@@ -165,6 +165,34 @@ pub enum ComparisonOp {
 }
 
 impl Condition {
+    /// Remove every `Pattern` leaf that reads `field`.
+    ///
+    /// Used by the what-if simulation's `RemoveCondition` change: "what happens if this rule stops
+    /// requiring this field?". A conjunction that loses a leaf keeps its remaining leaves; a conjunction
+    /// that loses all of them becomes `True`, because a rule with no conditions left fires — the
+    /// alternative (`False`) would mean "removing a condition disables the rule", which is not what the
+    /// change says.
+    pub fn remove_field(&mut self, field: &str) {
+        match self {
+            Condition::Pattern { field: f, .. } => {
+                if f == field {
+                    *self = Condition::True;
+                }
+            }
+            Condition::And(parts) | Condition::Or(parts) => {
+                for part in parts.iter_mut() {
+                    part.remove_field(field);
+                }
+            }
+            Condition::Not(inner) => inner.remove_field(field),
+            Condition::Compare { left, right, .. } => {
+                left.remove_field(field);
+                right.remove_field(field);
+            }
+            Condition::True | Condition::False => {}
+        }
+    }
+
     /// Evaluates the condition against the supplied fact slice.
     ///
     /// Full `ComparisonOp` coverage (D-05): `Compare` resolves each side via
