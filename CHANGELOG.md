@@ -12,6 +12,39 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.74] — 2026-10-28 — A rule created through the API can now be a rule the engine runs
+
+The first slice of `specs/rule-sources.md`'s option A, and the first round in a while that *adds* a
+capability rather than removing a lie.
+
+`POST /v1/rules` accepts an optional **`rule`** — the engine's own `Rule` JSON. When present:
+
+1. the API **imposes the document's identity** on it, so the id returned to the caller is the id the engine
+   reports and the id `rule_filter.name_pattern` matches. Without this the bridge was built but did not
+   join: the document had a UUID, the rule had whatever the client typed, and a filtered run still matched
+   nothing;
+2. the engine validates it by loading it, so a rule that would not execute is a `400` and nothing is stored;
+3. it is written to `RULE_STORAGE_PATH/<id>.rules`, and the ordinary reload makes it part of the executing
+   set.
+
+`RuleResponse.executable` reports which documents have a rule behind them. A document created with only a
+`dsl_body` is stored and reported `executable: false` — there is no parser from that text to a rule, and the
+response says so instead of leaving the caller to infer it from a zero.
+
+**And a drift this slice exposed:** `build_ruleset_from_dir` had its own file parser accepting only a bare
+rule or an array, while `Engine::load_rules` accepted those *and* the `{"rules": [ … ]}` envelope. The API
+writes the envelope, so its own directory loader skipped its own file — silently, behind a `tracing::warn!`
+that a test never reads. `engine::environment::parse_rules_document` is the one parser now, and both callers
+use it; that is why the newly written rule loads.
+
+Also collapsed: `RuleResponse` was built by **three** `From` implementations with identical field lists —
+adding `executable` meant patching three places, and I patched two before the compiler named the third. One
+canonical conversion, two delegating impls.
+
+Both halves are pinned: a document without a `rule` reports `executable: false` and matches no executed rule;
+a document with one fires, and `rule_filter` selects it by the id the create call returned.
+
+
 ## [9.0.73] — 2026-10-28 — The two rule universes, written down
 
 9.0.72 refused `rule_filter.categories` because the field assumed a link that has never existed. This

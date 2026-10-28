@@ -295,6 +295,26 @@ impl Session {
     }
 }
 
+/// Parse a rules document into rules.
+///
+/// Accepted shapes, all of them formats this project has written over time:
+///
+/// - `{ "rules": [ … ] }` — what a `.rules` file holds and what `POST /v1/rules` writes;
+/// - `[ … ]` — several rules;
+/// - `{ … }` — one rule.
+///
+/// **This is the only parser for that format.** `build_ruleset_from_dir` in the API had its own, accepting
+/// only the bare-rule and array shapes, so a file written in the envelope form — by this project's own
+/// `POST /v1/rules` — was silently skipped at reload (9.0.74). One implementation, two callers.
+pub fn parse_rules_document(text: &str) -> Result<Vec<crate::rules::Rule>, String> {
+    match serde_json::from_str::<LoadedRules>(text) {
+        Ok(LoadedRules::Document { rules }) => Ok(rules),
+        Ok(LoadedRules::Many(rules)) => Ok(rules),
+        Ok(LoadedRules::One(rule)) => Ok(vec![*rule]),
+        Err(error) => Err(format!("rules are not valid JSON: {error}")),
+    }
+}
+
 /// The JSON shapes a rule document may take.
 #[derive(serde::Deserialize)]
 #[serde(untagged)]

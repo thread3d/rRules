@@ -200,6 +200,10 @@ Create a rule. **Auth:** `X-Tenant-ID`.
 | `tags` | [string] | no | default `[]` |
 | `salience` | i32 | no | default `0` |
 | `status` | string | no | default `draft` |
+| `rule` | object | no | the **engine's own rule JSON** (condition + actions). When present the API validates it, imposes the document's id and name on it, and writes it to `RULE_STORAGE_PATH/<id>.rules`, so the next reload makes it executable. See [`specs/rule-sources.md`](../specs/rule-sources.md) |
+
+`dsl_body` is stored and returned but **never compiled** — there is no parser from it to an executable rule.
+A document created without `rule` is reported `executable: false`: it is a draft no engine can run.
 
 **Response:** `201` `RuleResponse` (see below).
 

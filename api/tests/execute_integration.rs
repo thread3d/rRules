@@ -2484,13 +2484,13 @@ async fn a_category_filter_is_refused_with_an_explanation() {
     );
 }
 
-/// A rule created through the API is not a rule the engine runs.
+/// A document with only a `dsl_body` is not executable; one created with a structured `rule` is.
 ///
-/// This is the separation `specs/rule-sources.md` records: `/v1/rules` stores rule *documents* in an
-/// in-memory map (`(tenant, uuid) → StoredRule`) and nothing compiles their `dsl_body`; execution loads
-/// engine `Rule`s from `RULE_STORAGE_PATH/*.rules`, which the API never writes. The test exists so the gap
-/// cannot be half-bridged without a decision: if someone later starts feeding stored documents to the
-/// engine, this assertion fails and points at the document that has to change first.
+/// This is the first slice of `specs/rule-sources.md`'s option A. The separation that document records —
+/// `/v1/rules` stores rule *documents*, execution reads `RULE_STORAGE_PATH/*.rules` — is real, so a document
+/// without a structured rule is stored and reported `executable: false`. When the request carries a `rule`,
+/// the API validates it with the engine and writes it into the rules directory, after which the normal
+/// reload makes it part of the executing set and it can fire.
 #[serial_test::serial]
 #[actix_web::test]
 async fn a_created_rule_is_not_executable_and_its_id_matches_no_executed_rule() {
@@ -2555,4 +2555,85 @@ async fn a_created_rule_is_not_executable_and_its_id_matches_no_executed_rule() 
         filtered_body["rules_matched"], 0,
         "an API rule id selects no executed rule: {filtered_body}"
     );
+
+    // And the document says so, instead of leaving the caller to infer it from a zero.
+    assert_eq!(
+        created_body["executable"], false,
+        "a document with only a dsl_body cannot be executed: {created_body}"
+    );
+}
+
+/// The first slice of option A: a rule created *with* a structured `rule` joins the executing set.
+///
+/// The request carries the engine's own `Rule` JSON; the API validates it by loading it, writes
+/// `<rules dir>/<id>.rules`, and the ordinary reload picks it up — so the rule fires and can be selected by
+/// the id the create call returned. That is the whole point of `specs/rule-sources.md`: the document and the
+/// executing rule are the same rule once someone has bridged them.
+#[serial_test::serial]
+#[actix_web::test]
+async fn a_rule_created_with_a_structured_rule_becomes_executable() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+
+    let app = init_test_app!();
+
+    let created = test::TestRequest::post()
+        .uri("/v1/rules")
+        // No tenant header on this app, so the document lives under `default` — fine for this test; the
+        // executing set is per deployment, not per tenant (specs/rule-sources.md says so).
+        .set_json(json!({
+            "name": "api-executable",
+            "dsl_body": "score > 0",
+            "category": "pricing",
+            "rule": {
+                "id": "api-executable",
+                "name": "api-executable",
+                "salience": 0,
+                "no_loop": false,
+                "lock_on_active": false,
+                "condition": {"Pattern": {"fact_type": "scorecard", "field": "score",
+                                          "value": {"Integer": 0}, "op": "Eq"}},
+                "actions": [{"LogMessage": {"level": "Info", "message": "api rule fired"}}]
+            }
+        }))
+        .to_request();
+    let created_resp = test::call_service(&app, created).await;
+    assert!(
+        created_resp.status().is_success(),
+        "creating a rule with a structured rule succeeds: {}",
+        created_resp.status()
+    );
+    let created_body: Value = test::read_body_json(created_resp).await;
+    assert_eq!(
+        created_body["executable"], true,
+        "and the document reports that it can run: {created_body}"
+    );
+    let rule_id = created_body["id"].as_str().expect("an id").to_string();
+
+    // The file is where the engine reads.
+    let written = dir.join(format!("{rule_id}.rules"));
+    assert!(written.exists(), "{} should exist", written.display());
+
+    // Reload, then select the rule by the id the API returned.
+    let reload = test::TestRequest::post()
+        .uri("/v1/rules/reload")
+        .set_json(json!({ "async_reload": false }))
+        .to_request();
+    assert!(test::call_service(&app, reload).await.status().is_success());
+
+    let filtered = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "engine": "rete",
+            "facts": { "scorecard": { "score": 0 } },
+            "rule_filter": { "name_pattern": rule_id }
+        }))
+        .to_request();
+    let body: Value = test::read_body_json(test::call_service(&app, filtered).await).await;
+    assert_eq!(
+        body["rules_matched"], 1,
+        "the created rule is in the executing set under a name the engine knows: {body}"
+    );
+    assert_eq!(body["rules_fired"], 1, "and it fires on the facts: {body}");
 }

@@ -36,7 +36,7 @@ nothing.
 
 ## Options, and what each would take
 
-**A. Documents become executable (recommended).** Compile `dsl_body` into `engine::rules::Rule` — or, more
+**A. Documents become executable (recommended — first slice shipped in 9.0.74).** Compile `dsl_body` into `engine::rules::Rule` — or, more
 honestly, store the rule **as JSON** in the document instead of a DSL string, since the engine's format is
 what executes. Add a `.rules` writer on create/update/status-change, so the directory and the documents
 agree, and make `/v1/rules/reload` a no-op that reports "already current" rather than the only refresh.
@@ -58,6 +58,29 @@ deploy them without a rebuild") delivered by a directory rather than by the prod
 
 A and C are both defensible; A is what the product claims to be. Neither is a patch to one field, which is
 why 9.0.72 refused instead of inventing a third category vocabulary.
+
+## What shipped: the first slice of A (9.0.74)
+
+`POST /v1/rules` accepts an optional **`rule`** — the engine's own `Rule` JSON. When it is present:
+
+1. the API **imposes the document's identity** on it (id and name), so the id returned to the caller is the
+   id the engine reports and the id `rule_filter.name_pattern` matches;
+2. the engine validates it by loading it — a rule that would not execute is a `400`, and nothing is stored;
+3. it is written to `RULE_STORAGE_PATH/<id>.rules`, and the ordinary `POST /v1/rules/reload` makes it part of
+   the executing set.
+
+`RuleResponse.executable` says which documents have a rule behind them. A document created with only a
+`dsl_body` is stored and reported `executable: false` — there is no parser from that text to a rule, and the
+response now says so rather than leaving a caller to infer it from a zero.
+
+**A drift this slice exposed and closed:** `build_ruleset_from_dir` had its own file parser accepting only a
+bare rule or an array, while `Engine::load_rules` accepted those *and* the `{"rules": [ … ]}` envelope. The
+API writes the envelope, so its own directory loader skipped its own file — silently, with a `tracing::warn!`
+nobody reads in a test. `engine::environment::parse_rules_document` is now the one parser, used by both.
+
+**Still open, in the order that matters:** `dsl_body` is not compiled (there is no rule-syntax parser, and
+`dsl_body` is a FEEL expression inside a rule); the executing set is per deployment rather than per tenant;
+and documents written before this slice have no rule file, so they remain `executable: false`.
 
 ## Evidence
 

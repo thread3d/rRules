@@ -207,20 +207,15 @@ pub fn build_ruleset_from_dir(rules_dir: &str) -> RuleSet {
                 continue;
             }
         };
-        // Try single Rule first, then Vec<Rule> (supports both file shapes).
-        let rules: Vec<Rule> = match serde_json::from_str::<Rule>(&content) {
-            Ok(r) => vec![r],
-            Err(_) => match serde_json::from_str::<Vec<Rule>>(&content) {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!(
-                        file = %name,
-                        error = %e,
-                        "skipping unparseable rule file"
-                    );
-                    continue;
-                }
-            },
+        // One parser, shared with `Engine::load_rules`: it accepts the `{"rules": [ … ]}` envelope the API
+        // writes, a bare rule, or an array. This loader used to accept only the last two, so a file the
+        // API had just written in the envelope form was skipped at reload without an error anyone saw.
+        let rules: Vec<Rule> = match engine::environment::parse_rules_document(&content) {
+            Ok(rules) => rules,
+            Err(e) => {
+                tracing::warn!(file = %name, error = %e, "skipping unparseable rule file");
+                continue;
+            }
         };
         for rule in rules {
             if let Err(e) = ruleset.add_rule(rule) {

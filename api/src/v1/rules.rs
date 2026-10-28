@@ -27,6 +27,68 @@ pub struct StoredRule {
     pub updated_at: String,
     pub created_by: String,
     pub updated_by: Option<String>,
+    /// Whether a structured rule was written to the executing directory for this document.
+    ///
+    /// The document and the executing rule are still two things (see `specs/rule-sources.md`); this field is
+    /// what lets the API say which documents have one and which are drafts that cannot run.
+    #[serde(default)]
+    pub executable: bool,
+}
+
+/// Write an executable rule into the directory the engine loads, returning `Ok(())` when it is there.
+///
+/// The rule is first round-tripped through the engine's own parser, so a rule that would not load is
+/// rejected here rather than appearing in the directory and silently not executing. The file is
+/// `<rule id>.rules` holding `{"rules": [<rule>]}` — the shape `build_ruleset_from_dir` reads.
+///
+/// **Scope of this slice:** the executing set is per deployment, not per tenant, so a rule written here is
+/// visible to every tenant's executions. Tenant-scoped execution is a later step of
+/// `specs/rule-sources.md`; stating it here keeps the limitation findable.
+fn write_executable_rule(
+    rule_id: Uuid,
+    rule_name: &str,
+    rule: &serde_json::Value,
+) -> Result<std::path::PathBuf, String> {
+    // **The API owns identity.** The document's id and name are imposed on the executing rule, so the id a
+    // caller receives from `POST /v1/rules` is the id the engine reports and the id `rule_filter` matches.
+    // Without this the two universes stay disjoint even when the API writes the file: the document had a
+    // UUID and the rule had whatever the client typed.
+    let mut rule = rule.clone();
+    let object = rule
+        .as_object_mut()
+        .ok_or_else(|| "`rule` must be a JSON object describing an engine rule".to_string())?;
+    object.insert(
+        "id".to_string(),
+        serde_json::Value::String(rule_id.to_string()),
+    );
+    object.insert(
+        "name".to_string(),
+        serde_json::Value::String(rule_name.to_string()),
+    );
+
+    let document = serde_json::json!({ "rules": [rule] });
+    let text = serde_json::to_string(&document)
+        .map_err(|e| format!("the rule could not be serialised: {e}"))?;
+
+    // The engine is the authority on what it can execute.
+    let mut probe = engine::environment::EngineBuilder::new().build();
+    probe
+        .load_rules(&text)
+        .map_err(|e| format!("the rule was rejected: {e}"))?;
+
+    let dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
+    let dir = std::path::PathBuf::from(dir);
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        format!(
+            "rules directory {} could not be created: {e}",
+            dir.display()
+        )
+    })?;
+
+    let path = dir.join(format!("{rule_id}.rules"));
+    std::fs::write(&path, text)
+        .map_err(|e| format!("{} could not be written: {e}", path.display()))?;
+    Ok(path)
 }
 
 /// Extract tenant_id from the X-Tenant-ID request header.
@@ -66,6 +128,7 @@ impl Default for StoredRule {
             updated_at: now,
             created_by: "system".to_string(),
             updated_by: None,
+            executable: false,
         }
     }
 }
@@ -90,55 +153,23 @@ impl From<&StoredRule> for RuleResponse {
             version: 1,
             created_at: rule.created_at.clone(),
             updated_at: rule.updated_at.clone(),
+            executable: rule.executable,
         }
     }
 }
 
+// One mapping, three ways to reach it. This used to be three copies of the field list, which meant every
+// new field had to be added in three places — and the last one added (9.0.74's `executable`) was, before
+// this collapse, patched into two of them and forgotten in the third by the compiler's own report.
 impl From<&mut StoredRule> for RuleResponse {
     fn from(rule: &mut StoredRule) -> Self {
-        RuleResponse {
-            id: rule.id.to_string(),
-            name: rule.rule_name.clone(),
-            description: rule.description.clone(),
-            category: Some(rule.category.clone()),
-            owner: None,
-            dsl_body: Some(rule.dsl_body.clone()),
-            tags: rule.tags.clone(),
-            status: match rule.status {
-                RuleStatus::Draft => "draft",
-                RuleStatus::Active => "active",
-                RuleStatus::Inactive => "inactive",
-                RuleStatus::Archived => "archived",
-            }
-            .to_string(),
-            version: 1,
-            created_at: rule.created_at.clone(),
-            updated_at: rule.updated_at.clone(),
-        }
+        Self::from(&*rule)
     }
 }
 
 impl From<&&StoredRule> for RuleResponse {
     fn from(rule: &&StoredRule) -> Self {
-        RuleResponse {
-            id: rule.id.to_string(),
-            name: rule.rule_name.clone(),
-            description: rule.description.clone(),
-            category: Some(rule.category.clone()),
-            owner: None,
-            dsl_body: Some(rule.dsl_body.clone()),
-            tags: rule.tags.clone(),
-            status: match rule.status {
-                RuleStatus::Draft => "draft",
-                RuleStatus::Active => "active",
-                RuleStatus::Inactive => "inactive",
-                RuleStatus::Archived => "archived",
-            }
-            .to_string(),
-            version: 1,
-            created_at: rule.created_at.clone(),
-            updated_at: rule.updated_at.clone(),
-        }
+        Self::from(*rule)
     }
 }
 
@@ -156,8 +187,19 @@ pub struct CreateRuleRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
 
-    /// DSL body of the rule
+    /// DSL body of the rule — the FEEL expression *inside* a rule, not rule syntax.
+    ///
+    /// It is stored and returned but never compiled: there is no parser from it to an executable rule.
     pub dsl_body: String,
+
+    /// The structured rule the engine executes (`engine::rules::Rule` as JSON), optional.
+    ///
+    /// When present it is validated by the engine and written to `RULE_STORAGE_PATH` as
+    /// `<id>.rules`, so the rule joins the executing set at the next reload — the first step of the
+    /// reconciliation `specs/rule-sources.md` describes. When absent the document is stored and reported
+    /// as **not executable**, which is the honest answer rather than a silent one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<serde_json::Value>,
 
     /// Tags for filtering/searching
     #[serde(default)]
@@ -212,6 +254,11 @@ pub struct RuleResponse {
 
     /// When the rule was last updated
     pub updated_at: String,
+    /// Whether this document has an executable rule in the rules directory.
+    ///
+    /// `false` means the document is a draft that no engine can run — see `specs/rule-sources.md`.
+    #[serde(default)]
+    pub executable: bool,
 }
 
 /// Paginated list of rules
@@ -363,6 +410,20 @@ pub async fn create_rule(
         }));
     }
 
+    // If the caller supplied a structured rule, put it where the engine reads. This happens before the
+    // document is stored so a rejected rule leaves nothing behind.
+    let executable_path = match req.rule.as_ref() {
+        Some(structured) => match write_executable_rule(rule_id, &req.name, structured) {
+            Ok(path) => Some(path),
+            Err(error) => {
+                return HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": error
+                }))
+            }
+        },
+        None => None,
+    };
+
     // Create the new rule
     let rule = StoredRule {
         id: rule_id,
@@ -381,6 +442,7 @@ pub async fn create_rule(
         updated_at: now,
         created_by: "system".to_string(),
         updated_by: None,
+        executable: executable_path.is_some(),
     };
 
     crate::v1::audit::record_for_request(
@@ -872,6 +934,7 @@ mod tests {
             updated_at: now,
             created_by: "admin".to_string(),
             updated_by: None,
+            executable: false,
         };
 
         let response = RuleResponse::from(&rule);
@@ -893,6 +956,7 @@ mod tests {
             tags: vec![],
             salience: 0,
             status: None,
+            rule: None,
         };
 
         assert!(req.name.is_empty());
@@ -906,6 +970,7 @@ mod tests {
             tags: vec![],
             salience: 0,
             status: None,
+            rule: None,
         };
 
         assert!(req.dsl_body.is_empty());
@@ -930,6 +995,7 @@ mod tests {
             updated_at: Utc::now().to_rfc3339(),
             created_by: "test".to_string(),
             updated_by: None,
+            executable: false,
         };
 
         let rule2 = StoredRule {
@@ -946,6 +1012,7 @@ mod tests {
             updated_at: Utc::now().to_rfc3339(),
             created_by: "test".to_string(),
             updated_by: None,
+            executable: false,
         };
 
         {
@@ -1001,6 +1068,7 @@ mod tests {
             updated_at: Utc::now().to_rfc3339(),
             created_by: "test".to_string(),
             updated_by: None,
+            executable: false,
         };
 
         // Second rule with same name in same tenant and category - should fail
@@ -1018,6 +1086,7 @@ mod tests {
             updated_at: Utc::now().to_rfc3339(),
             created_by: "test".to_string(),
             updated_by: None,
+            executable: false,
         };
 
         {
