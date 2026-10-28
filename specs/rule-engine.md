@@ -213,7 +213,7 @@ Reuses `AlphaMemory`/`BetaMemory`/`NodeId` from `crate::engine::rete` (`:11`).
 | Structure | Lines | Reality |
 |---|---|---|
 | `AggregationOp` (`Sum`/`Count`/`Max`/`Min`) | `21-91` | Real `compute` over `&[f64]` (`:44-55`) and `compute_from_facts` over `Integer`/`Float` fields (`:58-84`); empty ⇒ `None`. |
-| `AggregationNode` | `95-158` | Tracks `source_facts` + `current_value`; `recalculate()` **always returns `None`** (`:133-137`), so `current_value` never becomes `Some` (`:294-296`). |
+| `AggregationNode` | `95-186` | ~~Tracks `source_facts` + `current_value`; `recalculate()` always returns `None`, so `current_value` never becomes `Some`.~~ **Closed in 9.0.55**: the node keeps each contributing fact's *value* (`source_values`) and recomputes on every add and removal, so `current_value` is real; `execute_aggregations` rewrites the cached values from the facts the engine holds now. |
 | `LeapsNetwork` + `assert_fact` | `188-222`, `271-300` | `base: ReteNetwork` + `agg_nodes` + `aggregated_join_nodes`; insertion feeds the fact id to **every** aggregation node regardless of type/field (`:293-297`). |
 | `join_propagation_with_predecessor` | `330-364` | Looks alpha facts up by `predecessor_id.0` as if it were a fact type (`:338`), whereas Rete uses the predecessor test node's `fact_type_id` (`rete/mod.rs:326`). |
 | `execute_aggregations` | `367-380` | No-op: computes into a local `_value` and discards it (`:375-378`). |
@@ -487,9 +487,13 @@ HTTP endpoint forwards straight into it (`api/src/v1/simulation.rs:150-161`).
    per-node key that can skip a different fact (`:267`, `:275-279`), hardcoded `stats()`
    (`:110-117`), duplicate counters (`:191-192`), `with_cache_size` ignoring its argument
    (`:507-510`).
-6. **LEAPS aggregation never computes:** `recalculate` returns `None`
-   (`leaps/mod.rs:133-137`), `execute_aggregations` discards its result (`:367-380`), and every
-   fact is fed to every node (`:293-297`); only `compute_aggregation` (`:426-440`) works.
+6. ~~**LEAPS aggregation never computes:** `recalculate` returns `None`, `execute_aggregations`
+   discards its result, and every fact is fed to every node.~~ — **closed in 9.0.55**: the node holds
+   the values it aggregates and recomputes on add and on removal; a fact whose payload lacks the
+   aggregated field (or carries it as a non-number) is not made a member, which is also what stops the
+   network treating every fact as an input; and `execute_aggregations` recomputes every node from
+   working memory rather than discarding the result. `engine/src/engine/leaps/mod.rs`'s tests assert the
+   sums and the membership rule.
 7. **~~Salience/conflict resolution unwired~~** (partly closed 2026-10-25): both evaluators now
    order passes by `salience` and honour `lock_on_active` within an agenda group, and
    `Rule::validate` rejects an out-of-range salience. Still open: `Agenda`/`ConflictResolver` have

@@ -12,6 +12,24 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.55] — 2026-10-28 — LEAPS aggregations compute
+
+`AggregationNode` tracked the *ids* of the facts feeding it and nothing else, so `recalculate` had
+nothing to compute from and returned `None`; `current_value` was therefore permanently `None`, and
+`execute_aggregations` computed a value only to discard it. A LEAPS network exists for exactly this
+aggregation, and it had never produced a number.
+
+The node keeps the value each contributing fact supplies, recomputes on every add **and** every
+removal, and caches the result. A fact whose payload lacks the aggregated field — or carries it as
+something that is not a number — contributes nothing and is not made a member, which is also what stops
+the network treating every fact as an input to every node. `execute_aggregations` now recomputes each
+node from the facts working memory holds at that moment instead of throwing the answer away.
+
+The tests state the arithmetic rather than the plumbing: 10 + 25 = 35 after two facts, 25 after the
+first is retracted, `None` when the last one goes; a fact with no `amount` field is not a member; and an
+engine that asserts three orders sees its node hold 60.
+
+
 ## [9.0.54] — 2026-10-28 — Backward chaining answers something
 
 `execute_backward` was the last chaining entry point that returned a fixed result: it emitted

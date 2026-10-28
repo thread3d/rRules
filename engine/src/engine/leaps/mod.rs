@@ -29,6 +29,16 @@ pub enum AggregationOp {
     Min,
 }
 
+/// The value of `field` in `fact`, when it is a number that can be aggregated.
+fn numeric_field(fact: &Fact, field: &str) -> Option<f64> {
+    match fact.payload.get(field)? {
+        crate::data_types::Value::Integer(value) => Some(*value as f64),
+        crate::data_types::Value::Float(value) => Some(*value),
+        crate::data_types::Value::Number(value) => value.to_string().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
 impl AggregationOp {
     /// Returns the display name for this operation.
     pub fn name(&self) -> &'static str {
@@ -101,8 +111,11 @@ pub struct AggregationNode {
     pub field: String,
     /// Current aggregated value
     pub current_value: Option<f64>,
-    /// Source facts that contribute to this aggregation
-    source_facts: HashSet<String>,
+    /// The value each contributing fact supplies, by fact id.
+    ///
+    /// The ids alone were useless: `recalculate` had nothing to compute from, so it returned `None`
+    /// and the node only ever counted names — which is what "aggregations never compute" looked like.
+    source_values: HashMap<String, f64>,
 }
 
 impl AggregationNode {
@@ -113,27 +126,32 @@ impl AggregationNode {
             op,
             field: field.into(),
             current_value: None,
-            source_facts: HashSet::new(),
+            source_values: HashMap::new(),
         }
     }
 
-    /// Adds a fact to this aggregation node.
-    pub fn add_fact(&mut self, fact_id: &str) -> Option<f64> {
-        self.source_facts.insert(fact_id.to_string());
+    /// Adds a fact's contribution and returns the recomputed aggregate.
+    ///
+    /// A fact whose payload lacks the aggregated field — or carries it as something that is not a
+    /// number — contributes nothing and is not tracked. That is also what stops the network feeding
+    /// every fact to every node: only facts that can move the number are members.
+    pub fn add_fact(&mut self, fact: &Fact) -> Option<f64> {
+        let value = numeric_field(fact, &self.field)?;
+        self.source_values.insert(fact.id.to_string(), value);
         self.recalculate()
     }
 
-    /// Removes a fact from this aggregation node.
+    /// Removes a fact's contribution and returns the recomputed aggregate.
     pub fn remove_fact(&mut self, fact_id: &str) -> Option<f64> {
-        self.source_facts.remove(fact_id);
+        self.source_values.remove(fact_id);
         self.recalculate()
     }
 
-    /// Recalculates the aggregated value.
+    /// Recomputes the aggregate from the contributions held.
     fn recalculate(&mut self) -> Option<f64> {
-        // This would need access to facts for actual computation
-        // For now, just track that recalculation is needed
-        None
+        let values: Vec<f64> = self.source_values.values().copied().collect();
+        self.current_value = self.op.compute(&values);
+        self.current_value
     }
 
     /// Forgets every contributing fact and the cached aggregate.
@@ -142,7 +160,7 @@ impl AggregationNode {
     /// snapshot that just changed, and this stub implementation cannot recompute
     /// incrementally, so the node starts over instead of serving a stale number.
     pub fn reset(&mut self) {
-        self.source_facts.clear();
+        self.source_values.clear();
         self.current_value = None;
     }
 
@@ -153,7 +171,7 @@ impl AggregationNode {
 
     /// Gets the number of source facts.
     pub fn source_count(&self) -> usize {
-        self.source_facts.len()
+        self.source_values.len()
     }
 }
 
@@ -304,11 +322,15 @@ impl LeapsEngine {
             self.propagate_to_successors(&node_id, &fact_id);
         }
 
-        // Check aggregation nodes
-        for agg_node in self.network.agg_nodes.values_mut() {
-            if let Some(val) = agg_node.add_fact(&fact_id) {
-                agg_node.current_value = Some(val);
-            }
+        // Feed the aggregation nodes: each takes the fact's contribution and recomputes.
+        if let Some(fact) = self.working_facts.get(&fact_id) {
+            let contributions: Vec<Option<f64>> = self
+                .network
+                .agg_nodes
+                .values_mut()
+                .map(|node| node.add_fact(fact))
+                .collect();
+            let _ = contributions;
         }
 
         self.metrics.record_fact_inserted();
@@ -385,18 +407,17 @@ impl LeapsEngine {
             .record_beta_memory_additions(test_facts_from_alpha.len() + existing_nagrams.len());
     }
 
-    /// Executes aggregation for all nodes.
+    /// Recompute every aggregation node from working memory.
+    ///
+    /// The nodes already recompute as facts arrive and leave; this recomputes them from the facts the
+    /// engine holds *now*, which is what a caller wants after a bulk change and what a stale cache
+    /// would get wrong.
     pub fn execute_aggregations(&mut self) {
-        for agg_node in self.network.agg_nodes.values() {
-            let facts: Vec<&Fact> = agg_node
-                .source_facts
-                .iter()
-                .filter_map(|fid| self.working_facts.get(fid))
-                .collect();
-
-            if let Some(_value) = agg_node.op.compute_from_facts(&facts, &agg_node.field) {
-                // Update node value
-                // Note: We don't have direct mutable access here without borrowing issues
+        let facts: Vec<Fact> = self.working_facts.values().cloned().collect();
+        for agg_node in self.network.agg_nodes.values_mut() {
+            agg_node.reset();
+            for fact in &facts {
+                agg_node.add_fact(fact);
             }
         }
     }
@@ -634,12 +655,74 @@ mod tests {
     fn test_aggregation_node_operations() {
         let mut node = AggregationNode::new("agg1", AggregationOp::Sum, "amount");
 
-        // Test adding facts
-        node.add_fact("fact1");
-        assert_eq!(node.source_count(), 1);
+        let fact = |id: u128, amount: i64| {
+            let mut payload = HashMap::new();
+            payload.insert(
+                "amount".to_string(),
+                crate::data_types::Value::Integer(amount),
+            );
+            Fact::with_id(uuid::Uuid::from_u128(id), "order", payload)
+        };
 
-        node.add_fact("fact2");
+        // The node recomputes as contributions arrive…
+        assert_eq!(node.add_fact(&fact(1, 10)), Some(10.0));
+        assert_eq!(node.source_count(), 1);
+        assert_eq!(node.add_fact(&fact(2, 25)), Some(35.0));
         assert_eq!(node.source_count(), 2);
+
+        // …and on removal.
+        assert_eq!(
+            node.remove_fact(&uuid::Uuid::from_u128(1).to_string()),
+            Some(25.0)
+        );
+        assert_eq!(node.source_count(), 1);
+        assert_eq!(
+            node.remove_fact(&uuid::Uuid::from_u128(2).to_string()),
+            None
+        );
+        assert_eq!(node.source_count(), 0);
+    }
+
+    #[test]
+    fn a_fact_without_the_aggregated_field_is_not_a_member() {
+        let mut node = AggregationNode::new("agg1", AggregationOp::Count, "amount");
+        let mut payload = HashMap::new();
+        payload.insert("other".to_string(), crate::data_types::Value::Integer(1));
+        let unrelated = Fact::with_id(uuid::Uuid::from_u128(9), "order", payload);
+        assert_eq!(node.add_fact(&unrelated), None);
+        assert_eq!(
+            node.source_count(),
+            0,
+            "only contributing facts are members"
+        );
+    }
+
+    #[test]
+    fn the_engine_feeds_its_aggregation_nodes() {
+        // The node the network holds must see the facts the engine asserts — feeding ids alone was
+        // what left every aggregation empty.
+        let mut engine = LeapsEngine::new();
+        engine.network.add_agg_node(AggregationNode::new(
+            "sum_amounts",
+            AggregationOp::Sum,
+            "amount",
+        ));
+        for amount in [10, 20, 30] {
+            let mut payload = HashMap::new();
+            payload.insert(
+                "amount".to_string(),
+                crate::data_types::Value::Integer(amount),
+            );
+            engine.assert_fact(Fact::new("order", payload));
+        }
+
+        let node = engine
+            .network
+            .agg_nodes
+            .get("sum_amounts")
+            .expect("the node is in the network");
+        assert_eq!(node.source_count(), 3);
+        assert_eq!(node.get_value(), Some(60.0), "10 + 20 + 30");
     }
 
     #[test]
