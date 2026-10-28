@@ -341,7 +341,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api"
-version = "9.0.71"
+version = "9.0.72"
 dependencies = [
  "actix",
  "actix-cors",
@@ -1122,7 +1122,7 @@ dependencies = [
 
 [[package]]
 name = "engine"
-version = "9.0.71"
+version = "9.0.72"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1143,7 +1143,7 @@ dependencies = [
 
 [[package]]
 name = "engine_state"
-version = "9.0.71"
+version = "9.0.72"
 dependencies = [
  "chrono",
  "engine",

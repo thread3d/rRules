@@ -12,6 +12,41 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.73] — 2026-10-28 — The two rule universes, written down
+
+9.0.72 refused `rule_filter.categories` because the field assumed a link that has never existed. This
+round writes that link down instead of discovering it again: **`specs/rule-sources.md`** states that rule
+*documents* (`/v1/rules`, an in-memory `HashMap<(tenant, Uuid), StoredRule>`) and the rules the engine
+*executes* (`RULE_STORAGE_PATH/*.rules`) are separate sets that nothing converts into one another — no code
+parses `dsl_body`, no code writes `.rules` files, and a restart loses every document while keeping every
+executed rule.
+
+What that costs, plainly:
+
+- **The rule-authoring IDE does not author executable rules.** Documents and execution share a product, not
+  a data path.
+- **"Test this rule" tests nothing.** `TestRunner.tsx` sends the document's UUID as `name_pattern`, and a
+  document's UUID never equals a disk rule's id, so the run matches zero rules and says so only as
+  `rules_matched: 0`.
+- Categories, tags, owners, status and approvals describe documents that cannot run; salience, conditions
+  and actions describe rules that cannot be edited through the API.
+
+The document lays out four options with what each would take to verify, recommends **compiling documents
+into the executing set** (or storing rules as JSON and writing `.rules` on create/update, so the directory
+and the documents agree), and rejects the status quo — the gap was invisible from outside, which is how it
+survived this long.
+
+It is pinned rather than merely described:
+`api/tests/execute_integration.rs::a_created_rule_is_not_executable_and_its_id_matches_no_executed_rule`
+creates a rule through the API, executes, and asserts that only the disk rule matches — and that filtering
+by the created rule's own id matches nothing. If someone half-bridges the two universes, that test fails
+and points at the document that has to change first.
+
+Mounting `POST /v1/rules` in the integration app also rediscovered a hazard `AGENTS.md` warns about: the
+handler extracts **two** `web::Data` dependencies (`RuleStore` and `AuditStore`), and a hand-rolled app that
+installs neither answers **500 at runtime**, not a compile error.
+
+
 ## [9.0.72] — 2026-10-28 — A filter that filtered nothing, answered instead of ignored
 
 `POST /v1/execute` accepted `rule_filter.categories` and did nothing with it: the executing ruleset is

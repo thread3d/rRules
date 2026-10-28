@@ -3,7 +3,7 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.72** — released from a verified tree: everything in the table below was measured by a gate,
+**9.0.73** — released from a verified tree: everything in the table below was measured by a gate,
 not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
@@ -62,6 +62,7 @@ rather than hidden. Every remaining failure was fixed in the evaluator, not by l
 |---|---|
 | [`specs/README.md`](specs/README.md) | The specification, and how to verify it |
 | [`specs/requirements.md`](specs/requirements.md) | 35 normative requirements with stable ids |
+| [`specs/rule-sources.md`](specs/rule-sources.md) | **The two rule universes**: rule documents created through the API are not the rules the engine executes. Read before changing anything about rules |
 | [`TCK-COVERAGE-GAPS.md`](TCK-COVERAGE-GAPS.md) | Measured conformance, and the one divergence |
 | [`docs/user-guide.md`](docs/user-guide.md) | Using the system |
 | [`docs/API.md`](docs/API.md) | The REST API |

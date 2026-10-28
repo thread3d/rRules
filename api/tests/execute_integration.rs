@@ -44,6 +44,7 @@ use api::v1::execution::{
     batch_execute_rules, execute_rules, get_job_status, init_job_store, list_engines, list_jobs,
     reload_rules, JobStore, SharedRuleSet,
 };
+use api::v1::rules::create_rule;
 use api::v1::sessions::{
     dispose_session, read_session_config, reset_session, SessionConfig, SessionManager,
 };
@@ -393,6 +394,9 @@ fn configure_test_routes(cfg: &mut web::ServiceConfig) {
             .route("/metrics/coverage", web::get().to(coverage_endpoint))
             .route("/metrics/dead-rules", web::get().to(dead_rules_endpoint))
             // Phase 25 (Plan 25-01 Task 2): reload + batch + jobs routes.
+            // The real scope's `POST /v1/rules`, mounted so a test can create a rule *document* and show
+            // that it is not a rule the engine executes (see `specs/rule-sources.md`).
+            .route("/rules", web::post().to(create_rule))
             .route("/rules/batch-execute", web::post().to(batch_execute_rules))
             .route("/rules/reload", web::post().to(reload_rules))
             .route("/jobs/{job_id}", web::get().to(get_job_status))
@@ -431,6 +435,11 @@ macro_rules! init_test_app {
                 .app_data(shared_counters())
                 .app_data(shared_metrics_tx())
                 .app_data(shared_job_store())
+                // The stores `create_rule` extracts — both of them. A handler that gains a `web::Data`
+                // dependency breaks hand-rolled test apps at *runtime* (500), not at compile time; this is
+                // exactly that hazard, found by the test that needed the handler (AGENTS.md).
+                .app_data(web::Data::new(api::v1::rules::init_store()))
+                .app_data(web::Data::new(api::v1::audit::init_store()))
                 // Phase 27 (D-09): shared SessionManager for SC-1..SC-4.
                 .app_data(shared_session_manager())
                 .configure(configure_test_routes)
@@ -2472,5 +2481,78 @@ async fn a_category_filter_is_refused_with_an_explanation() {
         ok_resp.status().is_success(),
         "name_pattern still filters, got {}",
         ok_resp.status()
+    );
+}
+
+/// A rule created through the API is not a rule the engine runs.
+///
+/// This is the separation `specs/rule-sources.md` records: `/v1/rules` stores rule *documents* in an
+/// in-memory map (`(tenant, uuid) → StoredRule`) and nothing compiles their `dsl_body`; execution loads
+/// engine `Rule`s from `RULE_STORAGE_PATH/*.rules`, which the API never writes. The test exists so the gap
+/// cannot be half-bridged without a decision: if someone later starts feeding stored documents to the
+/// engine, this assertion fails and points at the document that has to change first.
+#[serial_test::serial]
+#[actix_web::test]
+async fn a_created_rule_is_not_executable_and_its_id_matches_no_executed_rule() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+    write_rule_file(&dir, "r1", &score_plus_10_rule());
+
+    let app = init_test_app!();
+
+    // Create a rule through the API. It lands in the rule store, not in the executing ruleset.
+    let created = test::TestRequest::post()
+        .uri("/v1/rules")
+        .set_json(json!({
+            "name": "api-created",
+            "dsl_body": "rule \"api-created\" when true then log(\"hi\")",
+            "category": "pricing"
+        }))
+        .to_request();
+    let created_resp = test::call_service(&app, created).await;
+    assert!(
+        created_resp.status().is_success(),
+        "creating a rule succeeds: {}",
+        created_resp.status()
+    );
+    let created_body: Value = test::read_body_json(created_resp).await;
+    let api_rule_id = created_body["id"]
+        .as_str()
+        .expect("the API returns an id")
+        .to_string();
+
+    // Reload so the executing set is whatever is on disk (r1 only) — the created rule is not on disk.
+    let reload = test::TestRequest::post()
+        .uri("/v1/rules/reload")
+        .set_json(json!({ "async_reload": false }))
+        .to_request();
+    assert!(test::call_service(&app, reload).await.status().is_success());
+
+    // Execute unfiltered: the disk rule can fire; the API rule does not exist to the engine.
+    let unfiltered = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({ "engine": "rete", "facts": { "scorecard": { "score": 0 } } }))
+        .to_request();
+    let unfiltered_body: Value =
+        test::read_body_json(test::call_service(&app, unfiltered).await).await;
+    assert_eq!(
+        unfiltered_body["rules_matched"], 1,
+        "only the disk rule is in the executing set: {unfiltered_body}"
+    );
+
+    // Filtered by the API rule's own id — what the IDE's "test this rule" sends — matches nothing.
+    let filtered = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "engine": "rete",
+            "facts": { "scorecard": { "score": 0 } },
+            "rule_filter": { "name_pattern": api_rule_id }
+        }))
+        .to_request();
+    let filtered_body: Value = test::read_body_json(test::call_service(&app, filtered).await).await;
+    assert_eq!(
+        filtered_body["rules_matched"], 0,
+        "an API rule id selects no executed rule: {filtered_body}"
     );
 }
