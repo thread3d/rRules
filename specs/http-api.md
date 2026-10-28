@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.60` (`api/src/openapi.rs:12`).
+  version `9.0.62` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -440,7 +440,7 @@ Client modules under `frontend/src/api`:
 | `client.ts` | axios, `import.meta.env.VITE_API_URL || '/v1'` (`:12`); injects `Authorization` from `localStorage.auth_token` (`:19-30`); on `401` clears storage and redirects to `/login` (`:38-43`) | — | Matches the `{"message"}`-only 401 from the middleware. |
 | `execution.ts` | `/v1` | `POST /execute`, `POST /rules/batch-execute`, `GET /jobs/{id}`, `GET /jobs`, `GET /engines`, `POST /rules/reload` (`:33-77`) | All registered and shapes match. `reloadRules` expects `{job_id,status}` — backend sends `status:"pending"` (`execution.rs:1372-1375`). |
 | `rules.ts` | `/v1` | `GET /rules`, `GET/POST /rules`, `PUT /rules/{id}`, `DELETE /rules/{id}`, **`PATCH /rules/{id}/status`** (`:48`), **`GET /rules/search`** (`:60`) | Two calls are missing server-side: `PATCH /rules/{id}/status` has no route; `GET /rules/search` collides with `GET /rules/{id}` and returns `400 "Invalid rule ID format"` for id=`search`. Additionally `rules.ts` unwraps `response.data.data` (`:17,23,29,35`) but the backend returns `RuleListResponse` / bare `RuleResponse` — **no `data` envelope exists** anywhere in `api/src`. |
-| `decisions.ts` | `/v1` | `POST /decisions/{id}/evaluate`, `GET /decisions`, `GET /decisions/{id}`, `POST /decisions/reload`, `GET /decisions/{id}/ir` (`:107-166`) | Registered. `listDecisions` expects `model_version` (`:122-131`) which the backend never sends. `getDecision` expects `description/question/decision_table` (`:39-51`); `GET /v1/decisions/{id}` returns `content_length/metadata/created_at/updated_at` — the table only comes from `/ir`. |
+| `decisions.ts` | `/v1` | `POST /decisions/{id}/evaluate`, `GET /decisions`, `GET /decisions/{id}`, `POST /decisions/reload`, `GET /decisions/{id}/ir` | Registered. ~~`listDecisions` expects `model_version` (`:122-131`) which the backend never sends. `getDecision` expects `description/question/decision_table` (`:39-51`); `GET /v1/decisions/{id}` returns `content_length/metadata/created_at/updated_at` — the table only comes from `/ir`.~~ **Closed in 9.0.61**: `DecisionListResponse` is the real envelope (`decisions/total/page/per_page/pages`), `DecisionDocument` is the document the endpoint returns, and the table is read from `DmnIrResponse` where it lives. `make frontend-types` compares every declared pair with the keys the handler sends, so a type that invents a field now fails the build instead of every caller. |
 | `types.ts` | — | Type declarations for execution payloads | Consistent with `execution.rs` schemas. |
 
 Auth is fetched with raw `fetch`, not the axios client

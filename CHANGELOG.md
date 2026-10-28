@@ -12,6 +12,54 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.62] — 2026-10-28 — The verification was not broken; the disk was
+
+Two rounds of "`make verify` reported all 35 BLOCKED" ended in the same place: the api half's build
+exceeded its cap with **zero diagnostics**, which is not what a compile error looks like. The cause was
+not the code and not the tool: `target/` had grown to **862 GB** on a filesystem **95% full**, and every
+build was thrashing — a cold full build of the workspace took over eight minutes, and the same build by
+hand showed 8m16s of wall time against 1m10s of CPU, which is waiting, not working. After deleting
+`target/` and `db_tests/target` (412 GB free again) the whole workspace builds and runs 1010 tests in
+**57 seconds**.
+
+**A real defect was found on the way, and fixed.** Adding `db_tests` as a workspace *member* in 9.0.58 put
+`pg-embed` back into every workspace-wide build — the engine's verification build had doubled from ~11 to
+20 minutes — which is exactly what that crate existed to prevent. It is now `exclude`d from the workspace
+with its own `[workspace]` table, built by manifest path, and `make verification-cost` grew a rule for
+it: a workspace member with a **required, non-optional** dependency on a heavy crate fails the gate
+(optional and dev-dependencies are legitimate — `api`'s `sqlx` sits behind the `postgres` feature).
+
+`make lint` and `make db-test` follow the crate to its manifest; `-p db_tests` no longer resolves.
+
+
+## [9.0.61] — 2026-10-28 — The IR spoke a private dialect, and the client types were fiction
+
+Two mismatches at the same seam, one of them a wire-format bug.
+
+**`hit_policy` did not serialise as DMN spells it.** `HitPolicy` and `BuiltinAggregator` derived `Serialize`
+with no renames, so the IR endpoint's JSON said `"RuleOrder"` and `"Sum"` while `as_str()` — the string the
+exporter writes into `<decisionTable hitPolicy="…">` — says `"RULE ORDER"` and `"SUM"`. XML and JSON
+disagreed, and anything comparing `hit_policy === 'COLLECT'` never matched. Both enums now carry explicit
+`#[serde(rename = …)]` for every variant, and `enum_wire_tests` asserts that JSON equals `as_str()` for
+each one and that the names round-trip. This is a wire change: it affects the IR endpoint's JSON only —
+the model is never persisted as JSON, and the database store keeps XML bytes.
+
+**The decision client described an API that does not exist**, and `specs/http-api.md` had recorded it
+since the table was written: `listDecisions` expected a `model_version` the backend never sends, and
+`getDecision` expected a `description/question/decision_table` that only `/ir` returns. Nothing failed,
+because nothing called them — a type that invents a field waits quietly for its first caller to be
+silently wrong. The types now match `DmnSummary`, the document endpoint, and `DmnIrResponse`.
+
+**And the class is now checkable.** `make frontend-types` compares each declared pair — handler or struct
+on the Rust side, interface on the TypeScript side — and fails when their key sets differ, error
+payloads excepted. It reproduced the documented defect before the fix (`DecisionListResponse: declares
+['model_version'], which list_decisions never sends`) and passes now. Five pairs are in the table; adding
+one is how a new client boundary becomes a contract.
+
+`frontend/src/api/__tests__/decisions.test.ts` pins the five wrappers against a stubbed client at run time;
+the type check covers what a test cannot see, since types vanish before the test runs.
+
+
 ## [9.0.60] — 2026-10-28 — The mapping layer that silently broke had no test
 
 The seam between the API's JSON and the interface's view models is where a real bug lived: *"every field

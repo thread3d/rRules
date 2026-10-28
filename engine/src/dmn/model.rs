@@ -498,21 +498,92 @@ pub struct RuleEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HitPolicy {
     /// `UNIQUE` — at most one rule matches; multiple matches are a violation.
+    #[serde(rename = "UNIQUE")]
     Unique,
     /// `ANY` — multiple matching rules must yield the same output.
+    #[serde(rename = "ANY")]
     Any,
     /// `PRIORITY` — select the match whose output is highest in the output
     /// column's `allowedValues` enumeration order (NOT first match by row).
+    #[serde(rename = "PRIORITY")]
     Priority,
     /// `FIRST` — first matching rule in document order wins.
+    #[serde(rename = "FIRST")]
     First,
     /// `RULE ORDER` — all matching rules' outputs, in document order.
+    #[serde(rename = "RULE ORDER")]
     RuleOrder,
     /// `OUTPUT ORDER` — all matching rules' outputs, ordered by the output
     /// column's `allowedValues` enumeration.
+    #[serde(rename = "OUTPUT ORDER")]
     OutputOrder,
     /// `COLLECT` — all matching rules' outputs, optionally aggregated.
+    #[serde(rename = "COLLECT")]
     Collect,
+}
+
+#[cfg(test)]
+mod enum_wire_tests {
+    //! The JSON the IR endpoint emits and the XML the exporter writes must use one vocabulary — DMN's.
+    //!
+    //! They did not: serde emitted Rust variant names (`"RuleOrder"`) while `as_str()`, which the
+    //! exporter writes into `<decisionTable hitPolicy="…">`, is `"RULE ORDER"`. A client comparing the
+    //! IR's `hit_policy` against the DMN string — as `frontend/src/api/decisions.ts` does — never
+    //! matched, and would have shown a blank or wrong hit policy had anything read it.
+
+    use super::{BuiltinAggregator, HitPolicy};
+
+    #[test]
+    fn hit_policies_serialise_as_their_dmn_names() {
+        for policy in [
+            HitPolicy::Unique,
+            HitPolicy::Any,
+            HitPolicy::Priority,
+            HitPolicy::First,
+            HitPolicy::RuleOrder,
+            HitPolicy::OutputOrder,
+            HitPolicy::Collect,
+        ] {
+            assert_eq!(
+                serde_json::to_value(policy).unwrap(),
+                serde_json::Value::String(policy.as_str().to_string()),
+                "{policy:?} should serialise as `{}`",
+                policy.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn aggregators_serialise_as_their_dmn_names() {
+        for aggregator in [
+            BuiltinAggregator::Sum,
+            BuiltinAggregator::Min,
+            BuiltinAggregator::Max,
+            BuiltinAggregator::Count,
+        ] {
+            assert_eq!(
+                serde_json::to_value(aggregator).unwrap(),
+                serde_json::Value::String(aggregator.as_str().to_string()),
+                "{aggregator:?} should serialise as `{}`",
+                aggregator.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn the_dmn_names_round_trip_back() {
+        // A value read from JSON must be the same policy the exporter would write and the parser would
+        // read from XML.
+        for policy in [
+            HitPolicy::RuleOrder,
+            HitPolicy::Collect,
+            HitPolicy::Priority,
+        ] {
+            let json = serde_json::to_string(&policy).unwrap();
+            let back: HitPolicy = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, policy, "{json} should parse back to {policy:?}");
+        }
+    }
 }
 
 impl Default for HitPolicy {
@@ -542,12 +613,16 @@ impl HitPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BuiltinAggregator {
     /// `SUM` — sum of outputs.
+    #[serde(rename = "SUM")]
     Sum,
     /// `MIN` — minimum output.
+    #[serde(rename = "MIN")]
     Min,
     /// `MAX` — maximum output.
+    #[serde(rename = "MAX")]
     Max,
     /// `COUNT` — number of matching rules.
+    #[serde(rename = "COUNT")]
     Count,
 }
 

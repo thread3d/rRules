@@ -1,5 +1,9 @@
 [workspace]
-members = ["engine", "api", "engine_state", "db_tests"]
+members = ["engine", "api", "engine_state"]
+# `db_tests` is deliberately **not** a member: it depends on `pg-embed` to start a real PostgreSQL, and a
+# workspace-wide build would then compile that tree — which is exactly what starved the requirement
+# verification in 9.0.45-9.0.57. It is built on its own by `make db-test`.
+exclude = ["db_tests"]
 resolver = "2"
 
 [workspace.dependencies]

@@ -19,6 +19,7 @@ Exit codes: 0 within budget, 1 over it.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -50,8 +51,18 @@ def tree(crate: str, edges: str) -> set[str]:
     read-only and that is the usual cause.
     """
     base = ["cargo", "tree", "-p", crate, "-e", edges, "--prefix", "none"]
+
+    # This sandbox's `$HOME` is read-only, so an unset `CARGO_HOME` means cargo cannot even read its own
+    # cache consistently. Use the workspace cache when it is there: a gate inside `make ci` should not
+    # require the caller to know which shell variable its environment needs.
+    env = dict(os.environ)
+    if not env.get("CARGO_HOME") and (REPO / ".cargo-home").is_dir():
+        env["CARGO_HOME"] = str(REPO / ".cargo-home")
+
     for extra in (["--offline"], []):
-        result = subprocess.run(base[:2] + extra + base[2:], cwd=REPO, capture_output=True, text=True)
+        result = subprocess.run(
+            base[:2] + extra + base[2:], cwd=REPO, capture_output=True, text=True, env=env
+        )
         if result.returncode == 0:
             names = set()
             for line in result.stdout.splitlines():
@@ -68,8 +79,38 @@ def tree(crate: str, edges: str) -> set[str]:
     )
 
 
+def workspace_heavy_members() -> list[str]:
+    """Workspace members whose dependency trees carry the forbidden heavy crates.
+
+    A workspace-wide build compiles every member, so a heavy member starves the verification just as a
+    heavy dev-dependency does. `db_tests` was a member for two releases and doubled the engine's
+    verification build time before this check existed.
+    """
+    result = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--no-deps"], cwd=REPO, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return []
+    import json
+
+    metadata = json.loads(result.stdout)
+    heavy = []
+    for package in metadata.get("packages", []):
+        for dep in package.get("dependencies", []):
+            # Only a normal, non-optional dependency is compiled by a workspace build. An optional one
+            # sits behind a feature (`api`'s `sqlx` behind `postgres`) and a dev-dependency only in that
+            # crate's own tests (`engine_state`'s `pg-embed`) — neither reaches the verification build.
+            if dep.get("kind") is not None or dep.get("optional"):
+                continue
+            if dep["name"] in FORBIDDEN_DEV:
+                heavy.append(
+                    f"{package['name']} (a workspace member) has a required dependency on `{dep['name']}`"
+                )
+    return heavy
+
+
 def main() -> int:
-    problems = []
+    problems = list(workspace_heavy_members())
     print("verification-cost: what the requirement verification builds")
     for crate in VERIFIED:
         normal_dev = tree(crate, "normal,dev")

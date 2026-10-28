@@ -46,6 +46,11 @@ Out of scope: the Rete/expression engine, the REST layer, and the frontend edito
 | `BusinessKnowledgeModel` | `id`, `name`, `description`, `variable`, `knowledge_requirement: Vec<String>`, `annotations` — **no body field** | `model.rs:238-246` |
 | `DecisionService` | `id`, `output_decisions`, `encapsulated_decisions`, `input_data` (all `Vec<String>`), `annotations` | `model.rs:251-262` |
 | `DecisionTable` | `id`, `name`, `hit_policy: HitPolicy` (default `Unique`), `aggregation: Option<BuiltinAggregator>`, `preferred_orientation`, `output_label`, `input_clauses`, `output_clauses`, `rules` | `model.rs:310-328` |
+
+`HitPolicy` and `BuiltinAggregator` serialise as their **DMN names** — `"RULE ORDER"`, `"COLLECT"`,
+`"SUM"` — the same strings `as_str()` writes into `<decisionTable hitPolicy="…">`, so JSON and XML speak
+one vocabulary (`enum_wire_tests` in `model.rs` pins it). Before 9.0.61 serde emitted the Rust variant
+names (`"RuleOrder"`), which no DMN consumer and no client comparing against the spec string would match.
 | `InputClause` | `id`, `label`, `input_expression: String`, `input_values: Option<AllowedValues>`, `description` | `model.rs:333-341` |
 | `OutputClause` | `id`, `label`, `name`, `type_ref`, `output_values`, `default_output_entry: Option<String>`, `description` | `model.rs:345-356` |
 | `DmnRule` | `id`, `description`, `input_entries`/`output_entries`/`annotation_entries: Vec<RuleEntry>` | `model.rs:363-372` |

@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme singleton-tests verification-cost audit deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme singleton-tests frontend-types verification-cost audit deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -17,7 +17,7 @@ lint:
 	@# The `postgres` feature is off by default, so a plain workspace lint never compiles it.
 	cargo clippy -p engine_state --features postgres --all-targets -- -D warnings
 	cargo clippy -p api --features postgres --all-targets -- -D warnings
-	cargo clippy -p db_tests --all-targets -- -D warnings
+	cargo clippy --manifest-path db_tests/Cargo.toml --all-targets -- -D warnings
 
 # Format code with rustfmt
 fmt:
@@ -54,7 +54,7 @@ db-test:
 	@# The API's database tests live in their own crate so `pg-embed` is not an `api` dev-dependency:
 	@# see `db_tests/Cargo.toml` for why that mattered.
 	@XDG_CACHE_HOME="$${XDG_CACHE_HOME:-$$PWD/.db-cache}" \
-		cargo test -p db_tests -- --ignored --test-threads=1
+		cargo test --manifest-path db_tests/Cargo.toml -- --ignored --test-threads=1
 
 # Every dependency advisory must be either fixed or accounted for in `.cargo/audit.toml`, whose entries
 # carry their reason and are checked for staleness by the tool itself. The advisory database needs the
@@ -66,6 +66,11 @@ audit:
 		echo "       The gate is enforced in CI, which installs it for the job." >&2; \
 		exit 1; }
 	cargo audit
+
+# The interface's declared response shapes must match the keys the API sends: a type that invents a field
+# makes every caller silently wrong, and no compiler can see it.
+frontend-types:
+	./scripts/check-frontend-types.py
 
 # The requirement verification builds and measures `api` and `engine`; a heavy dev-dependency there
 # starves its budget and reports every requirement BLOCKED (9.0.45-9.0.57). This keeps that true.
@@ -219,7 +224,7 @@ e2e:
 	./scripts/e2e-smoke.sh
 
 # Full CI pipeline (build + test + lint + format check + frontend)
-ci: build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets readme singleton-tests verification-cost deploy-env e2e
+ci: build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets readme singleton-tests frontend-types verification-cost deploy-env e2e
 	@echo "CI pipeline complete"
 
 # Run DMN subsystem benchmarks (Criterion, Phase 36+)
@@ -319,6 +324,7 @@ help:
 	@echo "  docs-snippets   - Compile every Rust example in docs/user-guide.md"
 	@echo "  readme          - Check the README's commands against the Makefile and crates"
 	@echo "  singleton-tests - Tests observing a process-wide tracker must be #[serial]"
+	@echo "  frontend-types  - The interface's response shapes match the keys the API sends"
 	@echo "  verification-cost - The verified crates stay light enough for the verification to finish"
 	@echo "  audit           - Dependency advisories: none unaccounted for (needs cargo-audit)"
 	@echo "  deploy-env      - Check chart/manifest variables against the server's"

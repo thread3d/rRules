@@ -29,25 +29,34 @@ export interface EvaluateDecisionResponse {
   trace?: TraceResponse
 }
 
+/** What `GET /v1/decisions` lists — `engine_state::DmnSummary`, not a rich summary. */
 export interface DecisionSummary {
   id: string
   name: string | null
-  description: string | null
-  hit_policy: string
+  version: string | null
+  updated_at: string
 }
 
-export interface DecisionDetail {
+/**
+ * What `GET /v1/decisions/{id}` returns: the stored document's metadata and size, **not** its table.
+ * The decision table comes from `GET /v1/decisions/{id}/ir` (`DmnIrResponse` below).
+ */
+export interface DecisionDocument {
   id: string
-  name: string | null
-  description: string | null
-  question: string | null
-  decision_table: {
-    id: string | null
-    name: string | null
-    hit_policy: string
-    input_clauses: Array<{ label?: string; input_expression: string }>
-    output_clauses: Array<{ name?: string; type_ref?: string }>
-  } | null
+  name: string
+  content_length: number
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+/** The page envelope `GET /v1/decisions` sends — `list_decisions` in `api/src/v1/decisions.rs`. */
+export interface DecisionListResponse {
+  decisions: DecisionSummary[]
+  total: number
+  page: number
+  per_page: number
+  pages: number
 }
 
 export interface ReloadDmnResponse {
@@ -119,14 +128,8 @@ export async function evaluateDecision(
  * List all decisions in the current DMN model.
  * GET /v1/decisions
  */
-export async function listDecisions(): Promise<{
-  decisions: DecisionSummary[]
-  model_version: number
-}> {
-  const response = await apiClient.get<{
-    decisions: DecisionSummary[]
-    model_version: number
-  }>('/decisions')
+export async function listDecisions(): Promise<DecisionListResponse> {
+  const response = await apiClient.get<DecisionListResponse>('/decisions')
   return response.data
 }
 
@@ -134,8 +137,8 @@ export async function listDecisions(): Promise<{
  * Get a specific decision's details.
  * GET /v1/decisions/{id}
  */
-export async function getDecision(id: string): Promise<DecisionDetail> {
-  const response = await apiClient.get<DecisionDetail>(`/decisions/${id}`)
+export async function getDecision(id: string): Promise<DecisionDocument> {
+  const response = await apiClient.get<DecisionDocument>(`/decisions/${id}`)
   return response.data
 }
 
