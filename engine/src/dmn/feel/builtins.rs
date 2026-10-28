@@ -982,7 +982,9 @@ fn built_in_list_replace(args: &[Value]) -> Value {
     }
     let re = match get_or_compile(&pattern_str) {
         Some(r) => r,
-        None => return Value::Array(vec![]),
+        // An uncompilable pattern answers null, like every other regex built-in here. Returning an
+        // empty list said "this list has no elements", which is a different — and wrong — statement.
+        None => return Value::Null,
     };
     let result: Vec<Value> = list
         .iter()
@@ -1985,9 +1987,11 @@ pub fn built_in_get_value(args: &[Value]) -> Value {
     ctx.get(&key).cloned().unwrap_or(Value::Null)
 }
 
-/// `get entries(<context>)` — returns a list of "key:value" string entries.
+/// `get entries(<context>)` — returns a list of key/value pairs, each a context.
 ///
-/// DMN 1.5 §10.3.2.3.8: Each entry is formatted as `"key": value_as_string`.
+/// DMN 1.5 §10.3.4.4: each entry is a context with `key` and `value` entries, not the
+/// `"key:value"` string this comment used to describe — the body below was right and the
+/// description disagreed with it. Entries come out sorted by key so the result is deterministic.
 /// Null arg → null propagation. Non-context arg → null.
 pub fn built_in_get_entries(args: &[Value]) -> Value {
     // DMN 1.5 §10.3.4.4: `get entries(c)` returns a list of key/value pairs,

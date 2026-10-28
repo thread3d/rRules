@@ -692,20 +692,11 @@ pub fn evaluate(expr: &FeelExpression, scope: &Scope) -> Value {
 
             match callee_val {
                 Value::Function(func) => {
-                    if func.body.is_none() {
-                        // Built-in function pointer — not yet registered (31-07).
-                        // Structure the code so 31-07 can populate a registry.
-                        eprintln!(
-                            "unregistered built-in function: arity={} param_names={:?}",
-                            func.arity, func.param_names
-                        );
-                        Value::Null
-                    } else if func.external {
-                        // Non-external constraint (CONTEXT.md): external functions are rejected at invocation.
-                        eprintln!(
-                            "external function invocation rejected: arity={} param_names={:?} — only non-external user lambdas supported",
-                            func.arity, func.param_names
-                        );
+                    if func.body.is_none() || func.external {
+                        // A function value with no body, or an `external` one, is not callable here: both
+                        // answer null. This used to `eprintln!` a diagnostic, which put a library's
+                        // reject path on the caller's stderr — a process-global side effect from a pure
+                        // evaluator, and noise in anything embedding it.
                         Value::Null
                     } else {
                         // Lambda application (31-06): merge captured scope + params, evaluate body.

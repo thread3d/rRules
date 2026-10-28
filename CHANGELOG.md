@@ -12,6 +12,29 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.64] — 2026-10-28 — Four gaps closed, one of them a gap that was not there
+
+Working through `specs/dmn-feel.md`'s remaining gap list, four entries resolved — and the first was the
+mirror image of this loop's usual finding:
+
+- **A *stale* gap: `Value::Range` equality was listed as a `TODO` returning null, and it works.**
+  `ranges_equal` compares bounds *and* inclusivity, because the TCK distinguishes `(=10)` from
+  `[10..10]`. `[1..2] = [1..2]` is `true`, `[1..3]` is `false`, `(1..2]` is `false`, `!=` is `true`. The
+  specification was asserting a defect that no longer existed — the same drift as code keeping an old
+  bug, in the other direction — and nothing had checked it.
+- **`get entries`' description contradicted its own body.** The doc said it returns `"key:value"`
+  strings; the body correctly returned `{key, value}` contexts per DMN §10.3.4.4. The body was right and
+  the sentence above it was wrong.
+- **`list replace` answered an empty list for an uncompilable pattern** while `matches`, `replace` and
+  `split` all answer null. An empty list says "this list has no elements", which is a different and
+  false claim.
+- **The evaluator wrote to `stderr`.** Two reject paths (`no body`, `external`) used `eprintln!`, so a
+  pure evaluator put diagnostics on the embedding process's stream. Both answer null silently now.
+
+`engine/tests/feel_gaps_closed.rs` pins the three observable behaviours, so none of them can regress into
+a gap entry again.
+
+
 ## [9.0.63] — 2026-10-28 — `make preflight`: measure the machine before trusting a gate
 
 The lesson from 9.0.62 was that a slow environment and a broken build produce the same report. That is
