@@ -3982,11 +3982,11 @@ mod boxed {
         assert_eq!(evaluate(&e, &Scope::empty()), Value::Bool(true));
     }
 
-    // ----- FunctionInvocation stub -----
+    // ----- FunctionInvocation -----
 
-    /// A function invocation with an unregistered name returns Null (stub dispatch).
+    /// A callee that is neither a built-in nor a binding resolves to Null: there is nothing to call.
     #[test]
-    fn boxed_function_invocation_stub() {
+    fn an_unknown_callee_evaluates_to_null() {
         let e = FeelExpression::FunctionInvocation {
             callee: Box::new(FeelExpression::Name("unknown_func".into())),
             args: vec![],
@@ -3995,9 +3995,11 @@ mod boxed {
         assert_eq!(evaluate(&e, &Scope::empty()), Value::Null);
     }
 
-    /// FunctionInvocation with a Name that resolves to a bound function value is also stubbed (31-06/31-07 not yet done).
+    /// A bound function value **is** callable; this one declares no parameters and carries no body,
+    /// which is what makes the call return Null — not a missing implementation. Lambda application
+    /// landed with the DMN evaluator, and `engine/tests/feel_functions.rs` pins the working cases.
     #[test]
-    fn boxed_function_invocation_bound_callee_stub() {
+    fn a_bound_function_without_a_body_is_not_callable() {
         let mut scope = Scope::empty();
         scope.bind(
             "f".to_string(),
@@ -4017,7 +4019,7 @@ mod boxed {
             args: vec![],
             named: None,
         };
-        // Lambda application (31-06) is not yet implemented — stub returns Null.
+        // A function value with no body has nothing to apply: Null, not a crash and not a guess.
         assert_eq!(evaluate(&e, &scope), Value::Null);
     }
 

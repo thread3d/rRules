@@ -12,6 +12,32 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.57] — 2026-10-28 — A comment said lambda application was a stub; it had worked all along
+
+Chasing what `specs/dmn-feel.md` listed as an unimplemented lambda path, I found a comment in
+`eval.rs` — *"lambda application is not yet implemented — stub returns Null"* — and a test named
+`boxed_function_invocation_bound_callee_stub` asserting `Null`. Both were **stale**: they describe an
+arity mismatch (a function declaring no parameters, carrying no body), not a missing feature. Probing
+the evaluator showed the machinery working:
+
+```
+(function(x) x * 2)(4)                  → 8
+for f in [function(x) x * 2] return f(3) → [6]
+{ f: function(x) x * 2 }.f(3)            → 6
+sort([3, 1, 2], function(a, b) a > b)    → [3, 2, 1]
+```
+
+Nothing pinned any of it. `engine/tests/feel_functions.rs` does now — six cases including lexical
+capture (the closure sees its *definition* site's `n`, not the caller's) and the two wrong-arity calls
+that correctly answer `null` instead of guessing. The stale test is renamed for what it asserts and its
+comment corrected.
+
+**One thing genuinely is absent, and it is a version boundary rather than a defect:** `let x = … return …`
+is a FEEL **1.6** construct, and this evaluator implements the DMN 1.5 grammar, which has no `let`
+expression. `specs/dmn-feel.md` says so now, so the next reader does not mistake it for a bug — which is
+exactly the mistake the stale comment invited.
+
+
 ## [9.0.56] — 2026-10-28 — The TREAT cache had five defects, one of them a wrong answer
 
 `specs/rule-engine.md` listed five things wrong with TREAT's join cache. All five are fixed, and one of

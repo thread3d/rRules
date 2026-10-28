@@ -391,6 +391,19 @@ A cyclic boxed context yields an `Object` containing only the cyclic entry keys 
 
 ### 5.3 Lambda semantics and capture
 
+**A function value is callable wherever FEEL can hold one** — applied directly, reached through a scope
+binding, or reached as a context member — and the working cases are pinned by
+`engine/tests/feel_functions.rs`: direct application at any arity, a function bound by an iteration and
+called, a member function called through a path, `sort` with an ascending and a descending comparator,
+lexical capture (the closure sees its definition site's bindings), and a call with too few or too many
+arguments evaluating to `null` rather than guessing.
+
+**`let x = … return …` is not implemented, and that is a version boundary rather than a defect:** it is
+a FEEL **1.6** construct, and this evaluator implements the DMN 1.5 grammar, which has no `let`
+expression. A model written for 1.6 that uses it parses to `null` here.
+
+
+
 Capture is **lexical**: `FunctionDefinition` stores `captured = Some(Arc::new(scope.clone()))`
 at definition time (`eval.rs:538`). Application starts from the captured scope and then binds
 parameters, so parameters shadow captured names of the same key (`eval.rs:589-593`,
