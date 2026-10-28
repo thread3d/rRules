@@ -171,13 +171,14 @@ impl Engine {
         )
     }
 
-    /// Executes backward chaining from a goal.
-    pub fn execute_backward(&self, _goal: &str) -> InferenceTrace {
-        // This is a placeholder - full implementation would:
-        // 1. Start from the query/goal
-        // 2. Recursively match rule conditions
-        // 3. Build inference tree showing reasoning path
-        InferenceTrace::new(false, "Backward chaining not yet implemented".to_string())
+    /// Executes backward chaining from a goal — `"<fact_type>.<field>"`.
+    ///
+    /// Delegates to the same search the module exposes, so the engine and the free function cannot
+    /// answer differently; this one renders the trace as the human-readable path its result carries.
+    pub fn execute_backward(&self, goal: &str) -> InferenceTrace {
+        let session = Session::new(self, false, None);
+        let trace = crate::backward_chaining::execute_backward(self, &session, goal);
+        InferenceTrace::new(trace.success, trace.explain())
     }
 }
 

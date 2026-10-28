@@ -318,14 +318,19 @@ does not use, so the two could drift.
   `engine/tests/forward_chaining.rs` loads a rule, fires it, and reads the effect back out of
   working memory. `Engine::execute_forward` reports the count through its own `ExecutionResult`
   rather than the fixed string.
-* **Backward**: `execute_backward(&Engine, &Session, goal)` always returns
-  `InferenceTrace::new(false)` with exactly `Query{goal}` and
-  `Backtrack{"No rules match the query"}` (`engine/src/backward_chaining.rs:80-93`). The
-  surrounding types are real — `InferenceTrace{success, path, fact_matches}` with
-  `with_step`/`explain` (`:9-49`), `InferenceStep`/`StepType`
-  (`Query|RuleApplication|SubGoal|FactMatch|Backtrack`, `:51-75`), `TraceExplorer` with
-  `max_depth = 10` (`:96-160`). `Engine::execute_backward` returns yet another
-  `InferenceTrace` (`engine/src/environment.rs:140-146`, `:235-246`, a single `path: String`).
+* **Backward**: ~~`execute_backward(&Engine, &Session, goal)` always returns
+  `InferenceTrace::new(false)` with exactly `Query{goal}` and `Backtrack{"No rules match the query"}`~~
+  — **closed in 9.0.54**: the search is real. A goal names a field (`"<fact_type>.<field>"`); the
+  search finds the rules whose actions write that field, evaluates their conditions against working
+  memory, and for each unmet condition recurses into "which rule could supply it" (depth-limited to
+  `MAX_DEPTH = 8`). The trace records `Query`, `RuleApplication`, `SubGoal`, `FactMatch` and
+  `Backtrack` steps and `explain()` prints them; `Engine::execute_backward` delegates to the same
+  search and renders its trace as a path, so the two cannot disagree.
+  `engine/tests/forward_chaining.rs` covers a direct hit, a goal nothing can produce, a goal that
+  names no field, and a chain that needs a supplying rule.
+  **Limit:** conditions are matched against the facts that exist and against *rules that could insert*
+  what is missing; there is no variable unification or fact binding across rules, so a goal whose
+  chain needs a fact to be *derived and then matched* is reported as unexplored rather than solved.
 * **Mode selector**: `analyze_rule_structure` returns `GoalDriven` **iff** the condition tree
   contains a `Pattern` whose `fact_type` starts with `"query_"`, else `DataDriven`
   (`engine/src/chaining/mode_selector.rs:42-67`); `InferencePattern::Mixed` is never produced

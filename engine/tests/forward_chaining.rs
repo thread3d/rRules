@@ -205,3 +205,118 @@ fn a_destroyed_session_refuses_to_work() {
     assert!(session.insert_fact(card()).is_err());
     assert!(session.execute().is_err());
 }
+
+#[test]
+fn backward_chaining_explains_how_a_field_is_produced() {
+    // The goal names a field; the search finds the rule that writes it and checks that rule's
+    // conditions against working memory.
+    let mut engine = EngineBuilder::new().build();
+    engine
+        .load_rules(RULE_JSON)
+        .expect("the rule document loads");
+    engine
+        .working_memory_mut()
+        .insert_fact(card())
+        .expect("the fact is inserted");
+
+    let session = engine.create_session(false, None);
+    let trace = engine::backward_chaining::execute_backward(&engine, &session, "scorecard.score");
+    assert!(trace.success, "the goal is reachable: {}", trace.explain());
+    assert!(
+        trace
+            .path
+            .iter()
+            .any(|step| step.rule_id.as_deref() == Some("r1")),
+        "the rule that writes the field should appear: {}",
+        trace.explain()
+    );
+    assert!(
+        trace.explain().contains("Score plus ten"),
+        "the explanation should name the rule: {}",
+        trace.explain()
+    );
+    assert!(
+        !trace.fact_matches.is_empty(),
+        "the fact that satisfied the condition should be listed: {}",
+        trace.explain()
+    );
+}
+
+#[test]
+fn backward_chaining_says_so_when_nothing_can_produce_the_goal() {
+    let mut engine = EngineBuilder::new().build();
+    engine
+        .load_rules(RULE_JSON)
+        .expect("the rule document loads");
+
+    let trace = engine.execute_backward("scorecard.unknown_field");
+    assert!(!trace.is_success());
+    assert!(
+        trace.path().contains("No rule can produce"),
+        "the explanation should say why: {}",
+        trace.path()
+    );
+}
+
+#[test]
+fn backward_chaining_reports_a_goal_that_names_no_field() {
+    let mut engine = EngineBuilder::new().build();
+    engine
+        .load_rules(RULE_JSON)
+        .expect("the rule document loads");
+    let trace = engine.execute_backward("scorecard");
+    assert!(!trace.is_success());
+    assert!(
+        trace.path().contains("<fact_type>.<field>"),
+        "the explanation should say what a goal looks like: {}",
+        trace.path()
+    );
+}
+
+#[test]
+fn backward_chaining_follows_a_chain_through_sub_goals() {
+    // `r2` produces `total`, but only from a `line` fact that nothing has inserted; `r3` produces the
+    // `line` fact. The search must find the supplier rather than give up at the first unmet
+    // condition.
+    let rules = r#"{
+      "rules": [
+        {
+          "id": "r2", "name": "Compute total", "salience": 0,
+          "no_loop": false, "lock_on_active": false,
+          "condition": {"Pattern": {"fact_type": "line", "field": "amount", "value": {"Integer": 100}, "op": "Ge"}},
+          "actions": [{"UpdateFact": {"id": "order", "fields": {"total": {"Literal": {"Integer": 1}}}}}]
+        },
+        {
+          "id": "r3", "name": "Build a line", "salience": 0,
+          "no_loop": false, "lock_on_active": false,
+          "condition": {"Pattern": {"fact_type": "order", "field": "id", "value": {"String": "o-1"}, "op": "Eq"}},
+          "actions": [{"InsertFact": {"fact_type": "line", "fields": {"amount": {"Integer": 100}}}}]
+        }
+      ]
+    }"#;
+    let mut engine = EngineBuilder::new().build();
+    engine.load_rules(rules).expect("the rules load");
+    // The chain's last link: the order the `Build a line` rule reads.
+    let mut order = HashMap::new();
+    order.insert(
+        "id".to_string(),
+        engine::data_types::Value::String("o-1".to_string()),
+    );
+    engine
+        .working_memory_mut()
+        .insert_fact(Fact::new("order", order))
+        .expect("the order fact is inserted");
+
+    let session = engine.create_session(false, None);
+    let trace = engine::backward_chaining::execute_backward(&engine, &session, "order.total");
+    let explanation = trace.explain();
+    assert!(trace.success, "the chain should be found: {explanation}");
+    assert!(
+        explanation.contains("Sub-goal: line.amount"),
+        "the search should name the condition it had to satisfy: {explanation}"
+    );
+    assert!(
+        explanation.contains("Build a line"),
+        "the supplying rule should appear: {explanation}"
+    );
+}

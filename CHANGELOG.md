@@ -12,6 +12,34 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.54] — 2026-10-28 — Backward chaining answers something
+
+`execute_backward` was the last chaining entry point that returned a fixed result: it emitted
+`Query{goal}` and `"No rules match the query"`, whatever the engine held. With forward chaining in
+9.0.52, the pair the project advertises is now both real.
+
+A goal names a field — `"scorecard.score"`. The search finds the rules whose actions write it, evaluates
+their conditions against working memory, and for each unmet condition asks which rule could supply it,
+recursing to a depth limit of 8. The trace records `Query`, `RuleApplication`, `SubGoal`, `FactMatch`
+and `Backtrack` steps, and `explain()` prints them for a human. `Engine::execute_backward` delegates to
+the same search and renders its trace as the path its own result carries, so the two entry points
+cannot answer differently.
+
+**The first version had a real bug, and the chain test found it**: conditions were evaluated against
+the facts of the *sub-goal's* type rather than the types each rule's conditions name — so a rule that
+reads an `order` to produce a `line` looked unsatisfiable one link in, and every multi-step goal
+failed with a plausible-looking trace. `engine/tests/forward_chaining.rs` now covers a direct hit, a
+goal nothing can produce, a goal that names no field, and a two-rule chain.
+
+**State the limit plainly:** the search matches against the facts that exist and against rules that
+could insert what is missing. There is no variable unification or fact binding across rules, so a goal
+whose chain needs a fact to be derived and then matched is reported as unexplored rather than solved.
+Both spec documents say so instead of implying a logic engine.
+
+Verified locally: 1011 tests, TCK 170/0, clippy and rustfmt clean, `make audit` clean, `make e2e` green,
+`make spec-citations` 1129/0, `make singleton-tests` clean, `make deploy-env` 0 dead.
+CI/Deploy not confirmed: account billing.
+
 ## [9.0.53] — 2026-10-27 — The session surface was a pointer to nothing
 
 `Session` kept the engine as a raw `*const Engine` and never dereferenced it. Everything that depended
