@@ -76,15 +76,34 @@ use crate::dmn::feel::{FeelAstCache, ParseEntry};
 /// of the element name + attribute bytes is ever made.
 type Attrs = HashMap<String, String>;
 
-/// Recognized DMN MODEL namespace URIs (DMN 1.1 / 1.3 / 1.5 — DMN-04).
-const DMN_MODEL_NAMESPACES: [&str; 3] = [
+/// The DMN model-namespace URIs this parser recognises.
+///
+/// These are the namespaces the documents in this repository actually declare: the vendored TCK
+/// carries `20200524` in 330 files and `20230324` in 51, and the fixtures carry `20180521` and
+/// `20151101`. Note that **`20230324` was missing** from this list until 9.0.66, so the newest URI —
+/// the one real DMN 1.5 documents declare — was not recognised at all.
+///
+/// Recognising a namespace is not the same as requiring one: see [`crate::dmn::model::DmnModel`]'s
+/// `namespace_is_recognised`, and the note below on foreign roots.
+const DMN_MODEL_NAMESPACES: [&str; 4] = [
     // DMN 1.5
-    "https://www.omg.org/spec/DMN/20200524/MODEL/",
+    "https://www.omg.org/spec/DMN/20230324/MODEL/",
     // DMN 1.3
+    "https://www.omg.org/spec/DMN/20200524/MODEL/",
+    // DMN 1.2
     "https://www.omg.org/spec/DMN/20180521/MODEL/",
-    // DMN 1.1 (historical XSD-style namespace)
+    // DMN 1.1 (the historical XSD-style namespace)
     "http://www.omg.org/spec/DMN/20151101/dmn.xsd",
 ];
+
+/// Is `namespace` a DMN model namespace this parser recognises?
+///
+/// A document with an unrecognised root namespace still parses — foreign and vendor namespaces are
+/// accepted deliberately, because rejecting them would refuse valid documents — so this answers
+/// "was this a namespace we know?" rather than "should we refuse it?".
+pub fn is_known_dmn_namespace(namespace: &str) -> bool {
+    DMN_MODEL_NAMESPACES.contains(&namespace)
+}
 
 /// Parse a DMN document from a string. Wraps [`parse_dmn_bytes`].
 pub fn parse_dmn(input: &str) -> Result<DmnModel, DmnParseError> {
@@ -283,13 +302,11 @@ impl<'a> Parser<'a> {
                         let e = e.into_owned();
                         source_ns = self.resolve_element_ns(e.name());
                         let attrs = collect_attrs(&e)?;
-                        // Lenient namespace check: record but do not hard-reject
-                        // unrecognized roots (T-29-04 accept). The three recognized
-                        // DMN MODEL namespaces (1.1/1.3/1.5) are all accepted;
-                        // unknown namespaces parse by local-name (foreign).
-                        if let Some(ref ns) = source_ns {
-                            let _recognized = DMN_MODEL_NAMESPACES.contains(&ns.as_str());
-                        }
+                        // Lenient namespace check: record, do not hard-reject an unrecognised root
+                        // (T-29-04 accept) — foreign and vendor namespaces are how real documents
+                        // travel, and refusing them would refuse valid models. The namespace is kept
+                        // on the model (`source_namespace`), and `namespace_is_recognised` reports
+                        // whether it was one of the DMN ones, so nothing is discarded here.
                         definitions = Some(self.parse_definitions(attrs)?);
                     }
                     // Non-definitions start elements outside the root are

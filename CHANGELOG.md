@@ -12,6 +12,32 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.66] — 2026-10-28 — The newest DMN namespace was not in the list, and the check was thrown away
+
+Gap 20 in `specs/dmn-feel.md` had three parts, all true:
+
+- **The DMN 1.5 URI was missing.** The table carried `20200524` (labelled 1.5), `20180521` (labelled 1.3)
+  and the 1.1 XSD namespace — so the URI real DMN 1.5 documents declare, `20230324`, was not recognised
+  at all, including in **51 files of the vendored TCK**. All four the repository actually uses are in
+  the table now, labelled by version, with a comment saying the list is evidence-backed rather than a
+  claim about every URI OMG has published.
+- **The check's result was discarded.** `let _recognized = …contains(ns)` computed an answer and dropped
+  it. `parser::is_known_dmn_namespace` is public now and `DmnModel::namespace_is_recognised` reports it
+  on the parsed model, so a caller can ask.
+- **The fixtures' names encoded the wrong mapping.** `decision_1_3.dmn` declared the 1.2 namespace and
+  `decision_1_5.dmn` the 1.3 one — the spec had recorded the correct mapping and the test data
+  disagreed with it. They are `decision_1_2.dmn` and `decision_1_3.dmn` now, joined by a genuine
+  `decision_1_5.dmn` in the `20230324` namespace, and each has a test: every shipped fixture must be
+  recognised, a foreign namespace must parse while reporting itself unrecognised, and the 1.2 document
+  must round-trip with its namespace intact.
+
+**Three error variants no code could construct are deleted** (gap 21): `DmnParseError::InvalidNamespace`
+— unreachable by design, since unknown namespaces parse on purpose — and `DecisionTableError::
+InvalidOutputValue` plus `DecisionEvalError::EvaluationFailed`, which had no construction site. An error
+variant nothing can produce is a promise to callers that cannot happen. This is an API break for a
+matcher on those enums; neither appears in the HTTP surface.
+
+
 ## [9.0.65] — 2026-10-28 — `matches` and `replace` accept the flags DMN gives them
 
 Two entries in `specs/dmn-feel.md`'s gap list said the same thing from different angles: `matches`

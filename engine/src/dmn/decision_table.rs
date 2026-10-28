@@ -34,10 +34,6 @@ pub enum DecisionTableError {
     #[error("aggregator mismatch: {0}")]
     AggregatorMismatch(String),
 
-    /// An output cell value could not be interpreted for the expected type.
-    #[error("invalid output value at rule {0}")]
-    InvalidOutputValue(String),
-
     /// Generic fallback error.
     #[error("{0}")]
     Other(String),

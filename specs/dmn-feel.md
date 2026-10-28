@@ -68,8 +68,8 @@ Invariants:
 - `BuiltinAggregator` has exactly 4 variants — `Sum`, `Min`, `Max`, `Count`. There is **no**
   `distinct` variant (`model.rs:436-458`).
 - `DmnParseError` lives in `model.rs` and is the single DMN error surface (`model.rs:580-601`);
-  variants: `XmlError`, `InvalidNamespace`, `MissingElement`, `UnexpectedElement`,
-  `XxeRejected`, `Io`. `InvalidNamespace` is never constructed (see §10).
+  variants: `XmlError`, `MissingElement`, `UnexpectedElement`, `XxeRejected`, `Io`.
+  (`InvalidNamespace` was declared but unreachable and is deleted in 9.0.66 — see §10.)
 
 Preserved by the parser: element ids, names, descriptions (`TextContent`), the CDATA flag,
 annotation order, and exact cross-type document order via `Vec<DefinitionsChild>`
@@ -106,20 +106,23 @@ Unknown attributes are dropped (only named attributes are read, `parser.rs:2178-
 
 ### 3.2 Accepted XML shapes and namespaces
 
-Parsing is namespace-*aware* but namespace-*lenient*: the root namespace is resolved and
-recorded, then only compared against a constant whose result is discarded — unknown
-namespaces parse by local name (`parser.rs:260-268`). Consequently `DmnParseError::InvalidNamespace`
-is unreachable from this path.
+Parsing is namespace-*aware* and namespace-*lenient*: the root namespace is resolved and recorded on
+the model, the parser reports whether it is one it knows (`DmnModel::namespace_is_recognised`), and an
+unrecognised namespace **parses anyway** — foreign and vendor namespaces are how real documents travel,
+so refusing them would refuse valid models. Nothing is silently discarded: until 9.0.66 the comparison
+was computed and thrown away, which is what made the error variant below dead.
 
-| Constant | URI | Cite |
+| Version | URI | Cite |
 |---|---|---|
-| "DMN 1.5" | `https://www.omg.org/spec/DMN/20200524/MODEL/` | `parser.rs:82` |
-| "DMN 1.3" | `https://www.omg.org/spec/DMN/20180521/MODEL/` | `parser.rs:84` |
-| "DMN 1.1" | `http://www.omg.org/spec/DMN/20151101/dmn.xsd` | `parser.rs:86` |
+| DMN 1.5 | `https://www.omg.org/spec/DMN/20230324/MODEL/` | `engine/src/dmn/parser.rs` (`DMN_MODEL_NAMESPACES`) |
+| DMN 1.3 | `https://www.omg.org/spec/DMN/20200524/MODEL/` | `engine/src/dmn/parser.rs` (`DMN_MODEL_NAMESPACES`) |
+| DMN 1.2 | `https://www.omg.org/spec/DMN/20180521/MODEL/` | `engine/src/dmn/parser.rs` (`DMN_MODEL_NAMESPACES`) |
+| DMN 1.1 | `http://www.omg.org/spec/DMN/20151101/dmn.xsd` | `engine/src/dmn/parser.rs` (`DMN_MODEL_NAMESPACES`) |
 
-(The labels are wrong: `20200524` is DMN 1.3 and `20180521` is DMN 1.2; the DMN 1.5 URI
-`https://www.omg.org/spec/DMN/20230324/MODEL/` is absent from the list — harmless only
-because of the lenient check above.)
+The list is what the repository's own documents declare — the vendored TCK carries `20200524` in 330
+files and `20230324` in 51, the fixtures carry `20180521` and `20151101` — so it is evidence-backed
+rather than a claim about every URI OMG has published. `engine/tests/dmn_parser.rs` asserts that every
+shipped fixture is recognised and that a foreign namespace parses while reporting itself unrecognised.
 
 Element matching is by **local name** (`local_name_str`), so prefixes do not matter
 (`parser.rs:248`, `330`, `331`). Unprefixed documents therefore parse. Elements are mapped
@@ -936,8 +939,8 @@ through with what replaced them; the rest are current.
 | 17 | ~~`Value::Range` equality is a `TODO`; two ranges compare as null~~ — **stale entry, closed in 9.0.64**: `ranges_equal` compares bounds *and* inclusivity (the TCK distinguishes `(=10)` from `[10..10]`), and `engine/tests/feel_gaps_closed.rs` pins `[1..2] = [1..2]` true, `[1..3]` false, `(1..2]` false, `!=` true | `engine/src/dmn/feel/eval.rs` (`ranges_equal`), `engine/src/dmn/feel/eval.rs` (`feel_equals`) |
 | 18 | The built-in registry is reallocated on every `FunctionInvocation`; there is no memoised `OnceLock` equivalent to `multi_word_builtin_names` | `engine/src/dmn/feel/builtins.rs:2237-2351` called from `engine/src/dmn/feel/eval.rs:477` |
 | 19 | ~~Two reject paths write to `stderr` with `eprintln!` inside the evaluator~~ — **closed in 9.0.64**: a function value with no body, or an `external` one, answers null silently. A pure evaluator should not put diagnostics on the embedding process's stderr | `engine/src/dmn/feel/eval.rs` (`FunctionInvocation`) |
-| 20 | The namespace allow-list is mislabelled (`20200524` is DMN 1.3, not 1.5; `20180521` is 1.2) and omits the real DMN 1.5 URI; the check's result is discarded, so `DmnParseError::InvalidNamespace` is unreachable | `engine/src/dmn/parser.rs:79-87`, `266-268`; variant declared at `engine/src/dmn/model.rs:586-587` |
-| 21 | `DmnParseError::InvalidNamespace`, `DecisionTableError::InvalidOutputValue`, `DecisionEvalError::EvaluationFailed` are never constructed | `engine/src/dmn/model.rs:586`, `engine/src/dmn/decision_table.rs:40`, `engine/src/dmn/evaluator/mod.rs:617` |
+| 20 | ~~The namespace allow-list is mislabelled and omits the real DMN 1.5 URI; the check's result is discarded, so `DmnParseError::InvalidNamespace` is unreachable~~ — **closed in 9.0.66**: the table now carries all four namespaces the repository's documents actually declare (`20230324`, `20200524`, `20180521`, `20151101`), labelled by version; `parser::is_known_dmn_namespace` is public and `DmnModel::namespace_is_recognised` reports it on the parsed model, so nothing is discarded. The `InvalidNamespace` variant is deleted rather than left unreachable — unknown namespaces are accepted deliberately, because refusing them would refuse valid vendor documents | `engine/src/dmn/parser.rs` (`DMN_MODEL_NAMESPACES`, `is_known_dmn_namespace`), `engine/src/dmn/model.rs` (`namespace_is_recognised`), `engine/tests/dmn_parser.rs` |
+| 21 | ~~`DmnParseError::InvalidNamespace`, `DecisionTableError::InvalidOutputValue`, `DecisionEvalError::EvaluationFailed` are never constructed~~ — **closed in 9.0.66**: all three are deleted. An error variant no code can produce is a promise to callers that cannot happen; the first was unreachable by design (unknown namespaces parse), and the other two had no construction site in the crate | `engine/src/dmn/model.rs`, `engine/src/dmn/decision_table.rs`, `engine/src/dmn/evaluator/mod.rs` |
 | 22 | Unknown XML children (`extensionElements`, `otherElements`, vendor metadata) are silently dropped, so no extension data survives a round-trip | `engine/src/dmn/parser.rs:613` and the identical `_ => self.skip_element(...)` arm in every element loop |
 | 23 | ~~`BusinessKnowledgeModel` has no body field, so BKM invocation is unimplemented~~ **closed 2026-10-25**: the BKM carries its formal parameters and body, and a call to one evaluates the body with the arguments bound. `required_knowledge` is still not used to order evaluation, and a BKM whose body is not a literal expression is skipped | `engine/src/dmn/model.rs`, `evaluator/mod.rs` |
 | 24 | `DecisionService` is parsed and exported but cannot be evaluated; a service id yields `NotFound` | `engine/src/dmn/model.rs:251-262`, `engine/src/dmn/evaluator/mod.rs:536-541` |

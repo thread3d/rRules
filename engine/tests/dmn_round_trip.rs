@@ -7,8 +7,22 @@ use engine::dmn::exporter::export_dmn;
 use engine::dmn::model::{DefinitionsChild, HitPolicy};
 use engine::dmn::parser::parse_dmn;
 
+/// A document in the DMN 1.2 namespace survives parse → export → parse equal, namespace included.
+#[test]
+fn dmn_1_2_namespace_round_trips() {
+    let (a, b) = round_trip(DMN_1_2);
+    assert_eq!(a, b, "DMN 1.2 IR must round-trip equal");
+    assert_eq!(
+        b.source_namespace.as_deref(),
+        Some("https://www.omg.org/spec/DMN/20180521/MODEL/"),
+        "the root namespace must survive the round trip"
+    );
+    assert!(b.namespace_is_recognised());
+}
+
 const DMN_1_5: &str = include_str!("fixtures/dmn/decision_1_5.dmn");
 const DMN_1_3: &str = include_str!("fixtures/dmn/decision_1_3.dmn");
+const DMN_1_2: &str = include_str!("fixtures/dmn/decision_1_2.dmn");
 const DMN_1_1: &str = include_str!("fixtures/dmn/decision_1_1.dmn");
 const DMN_NO_HITPOLICY: &str = include_str!("fixtures/dmn/no_hitpolicy.dmn");
 const DMN_CDATA: &str = include_str!("fixtures/dmn/cdata_description.dmn");

@@ -48,6 +48,21 @@ pub struct DmnModel {
     pub source_namespace: Option<String>,
 }
 
+impl DmnModel {
+    /// Whether the document's root namespace is one of the DMN model namespaces this project knows.
+    ///
+    /// A document with an unrecognised root namespace parses fine — foreign and vendor namespaces are
+    /// accepted on purpose, because rejecting them would refuse valid documents — so this is
+    /// information for a caller, not a validity check. Until 9.0.66 the parser computed it and threw it
+    /// away, which is why `DmnParseError::InvalidNamespace` could never be produced.
+    pub fn namespace_is_recognised(&self) -> bool {
+        self.source_namespace
+            .as_deref()
+            .map(crate::dmn::parser::is_known_dmn_namespace)
+            .unwrap_or(false)
+    }
+}
+
 /// The `<definitions>` element — the single root of a DMN document.
 ///
 /// `children` preserves exact document element order across heterogeneous
@@ -764,9 +779,6 @@ pub enum DmnParseError {
     /// Low-level XML parse error from `quick-xml`.
     #[error("XML parse error: {0}")]
     XmlError(String),
-    /// The document's namespace is not a recognized DMN MODEL namespace.
-    #[error("invalid DMN namespace: {0}")]
-    InvalidNamespace(String),
     /// A required DMN element was missing.
     #[error("missing required element: {0}")]
     MissingElement(String),

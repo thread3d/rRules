@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<definitions xmlns="https://www.omg.org/spec/DMN/20200524/MODEL/"
-             xmlns:dmn="https://www.omg.org/spec/DMN/20200524/MODEL/"
+<definitions xmlns="https://www.omg.org/spec/DMN/20230324/MODEL/"
+             xmlns:dmn="https://www.omg.org/spec/DMN/20230324/MODEL/"
              id="_defs1" name="EligibilityRules"
-             namespace="https://www.omg.org/spec/DMN/20200524/MODEL/"
+             namespace="https://www.omg.org/spec/DMN/20230324/MODEL/"
              typeLanguage="https://www.omg.org/spec/DMN/20200524/FEEL/"
              expressionLanguage="https://www.omg.org/spec/DMN/20200524/FEEL/">
   <itemDefinition id="_itemAge" name="Age" isCollection="false">

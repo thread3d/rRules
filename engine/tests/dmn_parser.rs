@@ -20,6 +20,7 @@ use engine::dmn::parser::parse_dmn;
 
 const DMN_1_5: &str = include_str!("fixtures/dmn/decision_1_5.dmn");
 const DMN_1_3: &str = include_str!("fixtures/dmn/decision_1_3.dmn");
+const DMN_1_2: &str = include_str!("fixtures/dmn/decision_1_2.dmn");
 const DMN_1_1: &str = include_str!("fixtures/dmn/decision_1_1.dmn");
 const DMN_NO_HITPOLICY: &str = include_str!("fixtures/dmn/no_hitpolicy.dmn");
 const DMN_CDATA: &str = include_str!("fixtures/dmn/cdata_description.dmn");
@@ -74,11 +75,51 @@ fn test_parse_dmn_1_5_imports() {
     );
 }
 
-/// Success criterion 1 (DMN 1.3 namespace acceptance) + PRIORITY hit policy
-/// + enumeration `allowedValues` on the output clause.
+/// Every DMN fixture the project ships declares a namespace the parser recognises, including the
+/// `20230324` URI that was missing from the allow-list until 9.0.66.
 #[test]
-fn test_parse_dmn_1_3_namespace() {
-    let model = parse_dmn(DMN_1_3).expect("DMN 1.3 should parse");
+fn every_shipped_fixture_declares_a_recognised_namespace() {
+    for (version, source) in [
+        ("1.1", DMN_1_1),
+        ("1.2", DMN_1_2),
+        ("1.3", DMN_1_3),
+        ("1.5", DMN_1_5),
+    ] {
+        let model = parse_dmn(source).unwrap_or_else(|e| panic!("DMN {version} should parse: {e}"));
+        assert!(
+            model.namespace_is_recognised(),
+            "DMN {version} fixture declares {:?}, which the parser does not recognise",
+            model.source_namespace
+        );
+    }
+}
+
+/// An unrecognised root namespace parses anyway — foreign and vendor namespaces are how real documents
+/// travel, and refusing them would refuse valid models. It is reported, not rejected.
+#[test]
+fn a_foreign_namespace_parses_and_is_reported_as_unrecognised() {
+    let source = DMN_1_5.replace(
+        "https://www.omg.org/spec/DMN/20230324/MODEL/",
+        "https://example.com/vendor/model/",
+    );
+    let model = parse_dmn(&source).expect("a foreign namespace must still parse");
+    assert!(!model.namespace_is_recognised());
+    assert_eq!(
+        model.source_namespace.as_deref(),
+        Some("https://example.com/vendor/model/")
+    );
+}
+
+/// PRIORITY hit policy + enumeration `allowedValues` on the output clause, on the DMN **1.2**
+/// namespace fixture. This test used to be called `test_parse_dmn_1_3_namespace` while parsing the
+/// `20180521` document — `20200524` is 1.3, `20180521` is 1.2 (spec, gap 20).
+#[test]
+fn test_parse_dmn_1_2_namespace() {
+    let model = parse_dmn(DMN_1_2).expect("DMN 1.2 should parse");
+    assert_eq!(
+        model.source_namespace.as_deref(),
+        Some("https://www.omg.org/spec/DMN/20180521/MODEL/")
+    );
     let dec = match &model.definitions.children[1] {
         DefinitionsChild::Decision(d) => d,
         other => panic!("expected second child to be Decision, got {:?}", other),

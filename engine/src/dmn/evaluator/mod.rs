@@ -1476,9 +1476,6 @@ pub enum DecisionEvalError {
     #[error("decision not found: {0}")]
     NotFound(String),
 
-    #[error("evaluation failed: {0}")]
-    EvaluationFailed(String),
-
     #[error("internal error: {0}")]
     Internal(String),
 
