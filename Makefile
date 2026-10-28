@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme singleton-tests frontend-types verification-cost audit deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme singleton-tests frontend-types verification-cost preflight audit deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
 
 # Build the Rust workspace
 build:
@@ -66,6 +66,11 @@ audit:
 		echo "       The gate is enforced in CI, which installs it for the job." >&2; \
 		exit 1; }
 	cargo audit
+
+# Measure the machine before trusting a gate: the 862 GB `target/` made `make verify` report BLOCKED
+# twice for reasons that had nothing to do with the code.
+preflight:
+	./scripts/preflight.py
 
 # The interface's declared response shapes must match the keys the API sends: a type that invents a field
 # makes every caller silently wrong, and no compiler can see it.
@@ -224,7 +229,7 @@ e2e:
 	./scripts/e2e-smoke.sh
 
 # Full CI pipeline (build + test + lint + format check + frontend)
-ci: build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets readme singleton-tests frontend-types verification-cost deploy-env e2e
+ci: preflight build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets readme singleton-tests frontend-types verification-cost deploy-env e2e
 	@echo "CI pipeline complete"
 
 # Run DMN subsystem benchmarks (Criterion, Phase 36+)
@@ -324,6 +329,7 @@ help:
 	@echo "  docs-snippets   - Compile every Rust example in docs/user-guide.md"
 	@echo "  readme          - Check the README's commands against the Makefile and crates"
 	@echo "  singleton-tests - Tests observing a process-wide tracker must be #[serial]"
+	@echo "  preflight       - Disk, cache and cargo-home sanity: a gate's verdict is only worth reading on a healthy machine"
 	@echo "  frontend-types  - The interface's response shapes match the keys the API sends"
 	@echo "  verification-cost - The verified crates stay light enough for the verification to finish"
 	@echo "  audit           - Dependency advisories: none unaccounted for (needs cargo-audit)"

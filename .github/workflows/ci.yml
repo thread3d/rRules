@@ -202,6 +202,9 @@ jobs:
       - name: Singleton-observing tests serialise
         run: make singleton-tests
 
+      - name: Measure the machine
+        run: make preflight
+
       # The interface's declared response shapes must match what the API sends.
       - name: Frontend types match the API
         run: make frontend-types

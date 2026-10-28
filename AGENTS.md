@@ -67,6 +67,7 @@ make image-check # check the Dockerfile's build logic without a container runtim
 make chart-lint  # lint + render the Helm chart (needs helm v3.14.0; CI's chart job)
 make db-test     # the PostgreSQL store against a real server pg-embed downloads and starts
 make verification-cost  # the verified crates stay light enough for `make verify` to finish
+make preflight   # disk, cache and cargo-home sanity — see "a slow environment" below
 ```
 
 `make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).
@@ -225,6 +226,14 @@ are struck through with the release that closed them, never quietly removed.
   endpoint must take an OS-assigned free port: a stale server on a fixed port made every route render
   blank once, and a fixed DevTools port failed CI.
 - `cmd | tail` reports *tail's* exit status. Use `cmd > log 2>&1; echo "exit=$?"`.
+- **A slow environment produces the same report as a broken one.** `make verify` reported all 35
+  requirements BLOCKED for two rounds; the api build "timed out with 0 diagnostics", which is a
+  *different* message from a compile error and the clue that mattered. `target/` had grown to **862 GB**
+  on a filesystem 95% full, and every build was thrashing. The measurement that settles it in one
+  command: if a build takes minutes of wall time and seconds of CPU (`time cargo build -p api`), the
+  machine is the problem, not the code. Check `df -h .` and `du -sh target` *before* blaming a gate, and
+  `make preflight` does it for you.
+
 - Some tools **replace** their child's environment rather than inheriting it. CodeWitness forwards
   `HOME` but not `CARGO_HOME`, so its cargo resolves against `$HOME/.cargo` and fails on a read-only
   home; `make verify` therefore points `HOME` at `.verify-home/` for that one command. Never put git

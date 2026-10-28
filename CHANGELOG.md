@@ -12,6 +12,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.63] — 2026-10-28 — `make preflight`: measure the machine before trusting a gate
+
+The lesson from 9.0.62 was that a slow environment and a broken build produce the same report. That is
+now a gate rather than a paragraph, and `make ci` runs it first:
+
+- **disk** — free space on the workspace volume against a 15 GB floor (the 862 GB incident had 92 GB
+  free and every build was thrashing);
+- **`target/`** — its own size against a 100 GB ceiling, because an oversized cache costs more in
+  thrashing than a cold rebuild costs in time;
+- **cargo home** — writable or not, with the exact `CARGO_HOME=$PWD/.cargo-home` hint this sandbox
+  needs, since a read-only home makes cargo fail with a message about the *registry* and every gate
+  that shells out to cargo then fails for the wrong reason;
+- **cache variables** — `XDG_CACHE_HOME`, `npm_config_cache`, `HELM_CACHE_HOME` when set.
+
+It prints what it measured, so a green line reads as "this machine can be trusted with a build". Proven
+by stubbing the disk to 5 GB free and watching it fail with both reasons.
+
+`AGENTS.md` records the habit beside the others: check `df -h .` and `du -sh target` before blaming a
+gate, and note that minutes of wall time against seconds of CPU means the machine, not the code.
+
+
 ## [9.0.62] — 2026-10-28 — The verification was not broken; the disk was
 
 Two rounds of "`make verify` reported all 35 BLOCKED" ended in the same place: the api half's build
