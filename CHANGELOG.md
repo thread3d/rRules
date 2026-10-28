@@ -12,6 +12,24 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.60] — 2026-10-28 — The mapping layer that silently broke had no test
+
+The seam between the API's JSON and the interface's view models is where a real bug lived: *"every field
+the API did return arrived as `undefined` — dates included, which is why sorting by date compared
+`NaN`"*. It was fixed, and the fix was commented, and **nothing tested it**. A regression would look like
+a rendering quirk — rows with blank names and invalid dates — not like a mapping bug, which is exactly
+how it survived long enough to need a comment.
+
+`frontend/src/api/__tests__/rules.mapping.test.ts` now drives `getRules` and `getRule` against a stubbed
+client and pins the boundary: every field the API sends arrives camelCased and populated, the paginated
+envelope's `rules` array is the one read (the server renames `items` to `rules`, so a client reading
+`items` would show an empty list for a non-empty page), an unknown status falls back to `draft` instead of
+passing through, and a rule with none of the optional fields still maps. Proven by reverting the mapping
+to `createdAt: ''` and watching the first test fail.
+
+The frontend suite is 32 tests across 6 files now, all green, and the production build is unchanged.
+
+
 ## [9.0.59] — 2026-10-28 — A gate on the gate: the verification cannot be starved again
 
 9.0.58's repair was necessary but not sufficient: it put the database tests where they belong, and left

@@ -41,20 +41,31 @@ FORBIDDEN_DEV = ("pg-embed", "sqlx", "reqwest", "zip")
 
 
 def tree(crate: str, edges: str) -> set[str]:
-    result = subprocess.run(
-        ["cargo", "tree", "-p", crate, "-e", edges, "--prefix", "none"],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
+    """Unique crate names in `crate`'s dependency tree over `edges`.
+
+    Tries `--offline` first: resolving a tree needs the lockfile, not the network, and a check that
+    touches the registry fails on a machine whose cargo home is read-only — which says nothing about the
+    dependency weight it is measuring. Falls back to a resolving run when the local index is too stale to
+    answer, and says where to point `CARGO_HOME` when both fail, because this sandbox's `$HOME` is
+    read-only and that is the usual cause.
+    """
+    base = ["cargo", "tree", "-p", crate, "-e", edges, "--prefix", "none"]
+    for extra in (["--offline"], []):
+        result = subprocess.run(base[:2] + extra + base[2:], cwd=REPO, capture_output=True, text=True)
+        if result.returncode == 0:
+            names = set()
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].startswith("v"):
+                    names.add(parts[0])
+            return names
+        last = result
+
+    raise SystemExit(
+        f"verification-cost: `cargo tree` failed for {crate}:\n{last.stderr.strip()}\n"
+        f"If the message mentions a read-only file system, point cargo at a writable home: "
+        f"CARGO_HOME=$PWD/.cargo-home make verification-cost"
     )
-    if result.returncode != 0:
-        raise SystemExit(f"verification-cost: `cargo tree` failed for {crate}:\n{result.stderr.strip()}")
-    names = set()
-    for line in result.stdout.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[1].startswith("v"):
-            names.add(parts[0])
-    return names
 
 
 def main() -> int:
