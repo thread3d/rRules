@@ -38,6 +38,11 @@ Two consequences worth knowing:
 
 - a rule written by hand into the rules directory is executed directly; that is the format the sections
   below describe;
+- **the body is a real syntax.** `specs/rule-syntax.md` defines it: `rule "name"`, `when
+  <fact>.<field> <op> <value>`, optional `and`/`or` lines, `then log("…")`. A body written that way is
+  compiled into an executable rule when the document is created, so typing a rule and filling in the form
+  are two ways to say the same thing — and the round trip between them is a test. A body that is prose
+  (or half-written) is stored and reported `executable: false`, never rejected;
 - a rule created **before** the form sent structured rules has no executable form and reports
   `executable: false`; the edit page's **Executable rule** section gives it the condition and action it
   describes, and saving writes it into the rules directory — the document keeps its id, its history and its

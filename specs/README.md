@@ -15,6 +15,7 @@ executed experiment and reports what it observed.
 | `rule-engine.md` | Execution semantics, the four engines, fact lifecycle, salience, chaining, observability. |
 | `dmn-feel.md` | DMN 1.5 canonical IR, parser/exporter, FEEL grammar and semantics, the built-in library, decision tables, DRD evaluation, TCK conformance. |
 | `http-api.md` | Server composition, authentication, every registered endpoint, errors, tenancy, persistence, realtime surfaces. |
+| `rule-syntax.md` | **The text form of a rule** — the grammar `dsl_body` is written in, what it deliberately omits, and the round-trip contract between text and the AST. |
 | `rule-sources.md` | **The two rule universes** — rule documents (`/v1/rules`) and the rules the engine executes (`RULE_STORAGE_PATH`) are separate, unconnected sets. States the cost, and the options for reconciling them with a recommendation. Read this before changing anything about rules. |
 
 Each subsystem document records what the code does — with `path:line`

@@ -12,6 +12,45 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.82] — 2026-10-29 — `dsl_body` becomes a syntax, and text authoring works end to end
+
+For several releases `dsl_body` was a pseudo-DSL that **nothing parsed**: the interface stored it, no engine
+saw it, and a rule created through the product could never fire. 9.0.78 made the form build a structured rule
+and *rendered* the body from it, which stopped the two disagreeing but left text a one-way output.
+
+`specs/rule-syntax.md` now defines the text form, `engine::rule_syntax` implements it, and
+`POST /v1/rules` compiles a body that parses — so a rule can be authored as a form, as JSON, or as text:
+
+```
+rule "high-status-customer"
+when customer.status = "premium"
+and customer.score >= 100
+then log("High status customer detected")
+```
+
+The design rule is that the grammar is **a faithful surface for `Condition` and `Action` and nothing more**:
+everything it accepts has a direct AST representation, so text and structure are two spellings of one object
+rather than two objects that drift. What it deliberately omits is stated in the document — `InsertFact`,
+`UpdateFact`, `RetractFact` and `CallFunction` are expressible in JSON but not in text, because a text form
+for `UpdateFact` needs arithmetic expressions, which is a bigger language than this one.
+
+Details that took thought rather than typing:
+
+- **`parse(render(rule)) == rule`** is the contract, and it is a test over every value kind, every operator,
+  conjunctions, disjunctions, negations, and a message containing quotes and backslashes. `1.0` renders as
+  `1.0` so it cannot come back as an integer; a quoted `"42"` stays a string.
+- **Mixed `and`/`or` at one level is rejected**, not resolved: the grammar has no precedence rule, and
+  inventing one silently would make two authors' readings of the same body differ.
+- **Errors carry the line** and say what was expected. In a file of several rules the line is the file's, not
+  the rule's.
+- **A body that does not parse is a draft, not a rejection** — bodies were prose for several releases, so
+  refusing them would break every existing client. `executable: false` says so.
+- **Size is bounded** at 64 KiB, so a rules file cannot spend unbounded time in a parser.
+
+That last point is the difference between this and the placeholder it replaces: the old body was accepted
+because nothing looked at it, and the new one is accepted *after* being looked at.
+
+
 ## [9.0.81] — 2026-10-29 — `make frontend-types` now checks that a field is *read*, and the four gaps it found
 
 The check compared shapes: does the interface declare what the API sends? That is necessary and was not

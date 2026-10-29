@@ -476,7 +476,19 @@ pub async fn create_rule(
                 }))
             }
         },
-        None => None,
+        // No structured rule: the **body itself** may be one. `specs/rule-syntax.md` defines the text form, and
+        // a body that parses is a rule — which is what makes authoring as text work. A body that does not
+        // parse is *not* an error here: bodies were prose for several releases, and refusing them now would
+        // break every existing client. It stays a draft, and `executable: false` says so.
+        None => match engine::rule_syntax::parse_rule_text(&req.dsl_body)
+            .ok()
+            .and_then(|parsed| serde_json::to_value(&parsed).ok())
+        {
+            Some(structured) => {
+                write_executable_rule(rule_id, &req.name, &tenant_id, &structured).ok()
+            }
+            None => None,
+        },
     };
 
     // Create the new rule

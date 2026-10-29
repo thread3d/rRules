@@ -2838,3 +2838,83 @@ async fn a_rejected_rule_on_update_leaves_the_document_alone() {
     );
     assert!(!dir.join("default").is_dir(), "nothing was written");
 }
+
+/// A body written in the rule syntax is a rule.
+///
+/// `specs/rule-syntax.md` defines the text form, and this is the path that makes it worth having: a caller
+/// who types `when customer.status = "premium"` instead of filling in the structured form gets an executable
+/// rule. A body that is *not* syntax stays a draft rather than an error — bodies were prose for several
+/// releases, so refusing them would break every existing client.
+#[serial_test::serial]
+#[actix_web::test]
+async fn a_body_written_in_the_rule_syntax_becomes_executable() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+
+    let app = init_test_app!();
+
+    let created = test::TestRequest::post()
+        .uri("/v1/rules")
+        .set_json(json!({
+            "name": "typed-by-hand",
+            "dsl_body": "rule \"typed-by-hand\"\nwhen scorecard.score = 0\nthen log(\"typed\")",
+            "category": "pricing"
+        }))
+        .to_request();
+    let created_resp = test::call_service(&app, created).await;
+    assert!(created_resp.status().is_success());
+    let created_body: Value = test::read_body_json(created_resp).await;
+    assert_eq!(
+        created_body["executable"], true,
+        "a body that parses is a rule: {created_body}"
+    );
+    let rule_id = created_body["id"].as_str().expect("id").to_string();
+
+    let reload = test::TestRequest::post()
+        .uri("/v1/rules/reload")
+        .set_json(json!({ "async_reload": false }))
+        .to_request();
+    assert!(test::call_service(&app, reload).await.status().is_success());
+
+    let executed = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "engine": "rete",
+            "facts": { "scorecard": { "score": 0 } },
+            "rule_filter": { "name_pattern": rule_id }
+        }))
+        .to_request();
+    let executed_body: Value = test::read_body_json(test::call_service(&app, executed).await).await;
+    assert_eq!(
+        executed_body["rules_fired"], 1,
+        "and it fires on the facts it names: {executed_body}"
+    );
+}
+
+/// A body that is not syntax is a draft, not a rejection.
+#[serial_test::serial]
+#[actix_web::test]
+async fn a_body_that_is_not_syntax_stays_a_draft() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+
+    let app = init_test_app!();
+
+    let created = test::TestRequest::post()
+        .uri("/v1/rules")
+        .set_json(json!({
+            "name": "prose",
+            "dsl_body": "This rule exists in a document we have not written yet.",
+            "category": "pricing"
+        }))
+        .to_request();
+    let resp = test::call_service(&app, created).await;
+    assert!(
+        resp.status().is_success(),
+        "prose is still accepted — it always was"
+    );
+    let body: Value = test::read_body_json(resp).await;
+    assert_eq!(body["executable"], false, "but it cannot run: {body}");
+}

@@ -8,6 +8,9 @@ pub mod environment;
 pub mod fact;
 pub mod rules;
 
+// The text form of a rule (`specs/rule-syntax.md`), beside the AST it parses into.
+pub mod rule_syntax;
+
 // Engine modules (pluggable architecture)
 pub mod engine;
 
