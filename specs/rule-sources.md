@@ -78,6 +78,19 @@ bare rule or an array, while `Engine::load_rules` accepted those *and* the `{"ru
 API writes the envelope, so its own directory loader skipped its own file — silently, with a `tracing::warn!`
 nobody reads in a test. `engine::environment::parse_rules_document` is now the one parser, used by both.
 
+### The tenant boundary (9.0.75)
+
+Execution has **no tenant context**: `SharedRuleSet` is one set for the whole deployment and
+`POST /v1/execute` carries no tenant, while `X-Tenant-ID` scopes only the document store. So a rule written
+on behalf of tenant `acme` would run for every tenant — a cross-tenant leak introduced the moment the API
+began writing the executing set.
+
+`write_executable_rule` therefore refuses a non-default tenant with a 400 that says the set is
+deployment-wide, and nothing is written. A *document* without `rule` is still accepted for any tenant, so
+multi-tenant deployments keep their CRUD and approvals; they simply cannot add an executing rule until
+execution is tenant-scoped. That is the gap `execution has no tenant` names, and it is now a boundary
+rather than a silence.
+
 **Still open, in the order that matters:** `dsl_body` is not compiled (there is no rule-syntax parser, and
 `dsl_body` is a FEEL expression inside a rule); the executing set is per deployment rather than per tenant;
 and documents written before this slice have no rule file, so they remain `executable: false`.

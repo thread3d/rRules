@@ -47,8 +47,21 @@ pub struct StoredRule {
 fn write_executable_rule(
     rule_id: Uuid,
     rule_name: &str,
+    tenant_id: &str,
     rule: &serde_json::Value,
 ) -> Result<std::path::PathBuf, String> {
+    // **Execution is not tenant-scoped**, so the executing set is shared by every tenant. Writing a rule
+    // from one tenant into it would run that tenant's logic for all of them — a cross-tenant leak, and
+    // exactly the kind of thing that is invisible until it matters. The boundary is enforced here, at the
+    // only place a rule can enter the set, until `specs/rule-sources.md`'s tenant step exists.
+    if tenant_id != "default" {
+        return Err(format!(
+            "executable rules are deployment-wide, not tenant-scoped: a rule created for tenant \
+             '{tenant_id}' would run for every tenant. Create the document without `rule`, or use the \
+             default tenant. See specs/rule-sources.md."
+        ));
+    }
+
     // **The API owns identity.** The document's id and name are imposed on the executing rule, so the id a
     // caller receives from `POST /v1/rules` is the id the engine reports and the id `rule_filter` matches.
     // Without this the two universes stay disjoint even when the API writes the file: the document had a
@@ -413,7 +426,8 @@ pub async fn create_rule(
     // If the caller supplied a structured rule, put it where the engine reads. This happens before the
     // document is stored so a rejected rule leaves nothing behind.
     let executable_path = match req.rule.as_ref() {
-        Some(structured) => match write_executable_rule(rule_id, &req.name, structured) {
+        Some(structured) => match write_executable_rule(rule_id, &req.name, &tenant_id, structured)
+        {
             Ok(path) => Some(path),
             Err(error) => {
                 return HttpResponse::BadRequest().json(serde_json::json!({

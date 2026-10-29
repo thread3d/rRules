@@ -12,6 +12,34 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.75] — 2026-10-28 — The leak my own last release opened
+
+9.0.74 made the API write rules into the set the engine executes. That set is **deployment-wide**, and
+`POST /v1/execute` carries no tenant at all — `X-Tenant-ID` scopes the document store and nothing else. So a
+rule created on behalf of tenant `acme` would have run for every tenant in the deployment. I introduced that
+yesterday; this closes it the same way the rest of this loop closes things — with a boundary that refuses and
+explains, not a silence.
+
+`write_executable_rule` refuses any tenant other than `default`:
+
+```
+400 {"error": "executable rules are deployment-wide, not tenant-scoped: a rule created for tenant 'acme'
+     would run for every tenant. Create the document without `rule`, or use the default tenant."}
+```
+
+Nothing is written in that case. A *document* without `rule` is still accepted for any tenant, so
+multi-tenant deployments keep their CRUD, categories and approvals — they simply cannot add an executing
+rule until execution is tenant-scoped.
+
+The test asserts both halves: the refusal (400 with the reason, and the directory left empty) and that the
+same tenant's document is still created, reported `executable: false`. Removing the boundary turns it into
+`201`, so it is testing what it claims.
+
+`specs/rule-sources.md` records the boundary and the real gap it stands in for: **execution has no tenant
+context**. That is the next structural item, and it is a bigger change than the write side — it needs a
+tenant on the execute path, a per-tenant ruleset, and a decision about what a session's tenant is.
+
+
 ## [9.0.74] — 2026-10-28 — A rule created through the API can now be a rule the engine runs
 
 The first slice of `specs/rule-sources.md`'s option A, and the first round in a while that *adds* a

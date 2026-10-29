@@ -2637,3 +2637,77 @@ async fn a_rule_created_with_a_structured_rule_becomes_executable() {
     );
     assert_eq!(body["rules_fired"], 1, "and it fires on the facts: {body}");
 }
+
+/// A non-default tenant cannot put a rule into the deployment-wide executing set.
+///
+/// Execution has no tenant context: `SharedRuleSet` is one set for the whole deployment, and
+/// `POST /v1/execute` carries no tenant. So a rule written on behalf of tenant `acme` would run for every
+/// tenant — a cross-tenant leak. The write boundary refuses it, and says why, until execution is scoped
+/// (`specs/rule-sources.md`). A *document* without a `rule` is still accepted for any tenant.
+#[serial_test::serial]
+#[actix_web::test]
+async fn a_non_default_tenant_cannot_add_an_executable_rule() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+
+    let app = init_test_app!();
+
+    let structured = json!({
+        "id": "ignored",
+        "name": "ignored",
+        "salience": 0,
+        "no_loop": false,
+        "lock_on_active": false,
+        "condition": {"Pattern": {"fact_type": "scorecard", "field": "score",
+                                  "value": {"Integer": 0}, "op": "Eq"}},
+        "actions": [{"LogMessage": {"level": "Info", "message": "acme rule"}}]
+    });
+
+    // With `rule` and a tenant header: refused, and nothing is written.
+    let refused = test::TestRequest::post()
+        .uri("/v1/rules")
+        .insert_header(("X-Tenant-ID", "acme"))
+        .set_json(json!({
+            "name": "acme-executable",
+            "dsl_body": "score > 0",
+            "category": "pricing",
+            "rule": structured
+        }))
+        .to_request();
+    let refused_resp = test::call_service(&app, refused).await;
+    assert_eq!(refused_resp.status().as_u16(), 400, "the write is refused");
+    let body = String::from_utf8_lossy(&test::read_body(refused_resp).await).to_string();
+    assert!(
+        body.contains("deployment-wide, not tenant-scoped"),
+        "the refusal explains the boundary: {body}"
+    );
+    let written: Vec<_> = std::fs::read_dir(&dir)
+        .expect("dir")
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "rules"))
+        .collect();
+    assert!(
+        written.is_empty(),
+        "and nothing reached the executing set: {written:?}"
+    );
+
+    // Without `rule`, the same tenant still gets its document.
+    let document_only = test::TestRequest::post()
+        .uri("/v1/rules")
+        .insert_header(("X-Tenant-ID", "acme"))
+        .set_json(json!({
+            "name": "acme-draft",
+            "dsl_body": "score > 0",
+            "category": "pricing"
+        }))
+        .to_request();
+    let document_resp = test::call_service(&app, document_only).await;
+    assert!(
+        document_resp.status().is_success(),
+        "a document without a rule is fine for any tenant: {}",
+        document_resp.status()
+    );
+    let document_body: Value = test::read_body_json(document_resp).await;
+    assert_eq!(document_body["executable"], false);
+}
