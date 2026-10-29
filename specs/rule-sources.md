@@ -91,6 +91,24 @@ multi-tenant deployments keep their CRUD and approvals; they simply cannot add a
 execution is tenant-scoped. That is the gap `execution has no tenant` names, and it is now a boundary
 rather than a silence.
 
+### Tenant identity now comes from the token (9.0.76)
+
+Tenant-scoped execution was blocked by something more basic: **there was no trustworthy tenant identity.**
+`X-Tenant-ID` was the only mechanism, and any authenticated caller could set it to any value, so scoping
+execution by that header would have looked like isolation and been none.
+
+A JWT now carries the user's `tenant_id` (`auth::Claims`, from `UserRecord::tenant_id`), and
+`extract_tenant_id` resolves: an **admin**'s header (the "manages several tenants" flow), else the **token's
+tenant** whatever the header says, else the header, else `default`. A non-admin therefore cannot reach
+another tenant's rules by forging `X-Tenant-ID`. `api/tests/auth_protection.rs` proves both halves —
+including the admin isolation flow that CodeWitness's `API-003` scenario exercises, which the first version
+of this change broke (`201|1` where `201|0` was required) and which is now a test of its own.
+
+**The write boundary of 9.0.75 still stands**, unchanged: execution remains deployment-wide, so only the
+default tenant may add an executing rule. What changed is that the question "which tenant is asking?" finally
+has an answer that a caller cannot forge — which is the prerequisite for lifting that boundary rather than a
+lift in itself.
+
 **Still open, in the order that matters:** `dsl_body` is not compiled (there is no rule-syntax parser, and
 `dsl_body` is a FEEL expression inside a rule); the executing set is per deployment rather than per tenant;
 and documents written before this slice have no rule file, so they remain `executable: false`.

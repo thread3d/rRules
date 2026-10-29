@@ -74,6 +74,7 @@ fn valid_token(sub: &str, role: &str) -> String {
         role: role.to_string(),
         exp: now + 3600,
         iat: now,
+        tenant_id: Some("default".to_string()),
     })
     .expect("encode valid token")
 }
@@ -87,6 +88,7 @@ fn wrong_secret_token(sub: &str, role: &str) -> String {
         role: role.to_string(),
         exp: now + 3600,
         iat: now,
+        tenant_id: Some("default".to_string()),
     };
     encode(
         &Header::default(),
@@ -283,4 +285,141 @@ async fn valid_token_inserts_role_into_request_extensions() {
     let body = json_body(test::call_service(&app, req).await).await;
     assert_eq!(body["sub"], "author");
     assert_eq!(body["role"], "author");
+}
+
+/// For a non-admin, the tenant comes from the token — not from a header the caller can set.
+///
+/// Before 9.0.76 tenant identity existed only as `X-Tenant-ID`, so any authenticated caller could read
+/// another tenant's rules by sending a different value — the specification said as much for several
+/// releases. A non-admin's token now pins the tenant and the header is ignored; an `admin` may still select
+/// a tenant by header, which is the "manages several tenants" flow the isolation requirement describes.
+#[actix_web::test]
+async fn a_token_tenant_overrides_a_forged_header() {
+    use api::auth::{encode_token, Claims};
+
+    let forged = Claims {
+        sub: "author".to_string(),
+        role: "author".to_string(),
+        exp: (chrono::Utc::now().timestamp() as usize) + 3600,
+        iat: chrono::Utc::now().timestamp() as usize,
+        tenant_id: Some("acme".to_string()),
+    };
+    let token = encode_token(&forged).expect("token");
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(api::v1::rules::init_store()))
+            .app_data(web::Data::new(api::auth::store::init_store()))
+            .app_data(web::Data::new(api::v1::audit::init_store()))
+            .route("/rules", web::post().to(api::v1::rules::create_rule))
+            .route("/rules", web::get().to(api::v1::rules::get_rules)),
+    )
+    .await;
+
+    // Created with the token's tenant, while the header claims another one.
+    let create = test::TestRequest::post()
+        .uri("/rules")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .insert_header(("X-Tenant-ID", "someone-else"))
+        .set_json(serde_json::json!({
+            "name": "acme-only",
+            "dsl_body": "score > 0",
+            "category": "pricing"
+        }))
+        .to_request();
+    let created = test::call_service(&app, create).await;
+    assert!(
+        created.status().is_success(),
+        "create: {}",
+        created.status()
+    );
+
+    // The document is visible to the token's tenant...
+    let own = test::TestRequest::get()
+        .uri("/rules?page=1&page_size=10")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .to_request();
+    let own_body: serde_json::Value =
+        test::read_body_json(test::call_service(&app, own).await).await;
+    assert_eq!(
+        own_body["total_count"], 1,
+        "acme sees its own rule: {own_body}"
+    );
+
+    // ...and not to a caller claiming a different tenant without a token.
+    let other = test::TestRequest::get()
+        .uri("/rules?page=1&page_size=10")
+        .insert_header(("X-Tenant-ID", "someone-else"))
+        .to_request();
+    let other_body: serde_json::Value =
+        test::read_body_json(test::call_service(&app, other).await).await;
+    assert_eq!(
+        other_body["total_count"], 0,
+        "another tenant cannot see it by forging the header: {other_body}"
+    );
+}
+
+/// The admin isolation flow that `API-003`'s scenario describes: an admin creates a rule for one tenant and
+/// cannot see it while acting for another.
+///
+/// This is the counterexample CodeWitness produced against 9.0.76 (`201|1` where `201|0` was required): the
+/// scenario logs in **once** as `admin` and switches tenants with the header. Pinning every caller to the
+/// token's tenant broke that flow, which is why the rule is split by role — the token pins a non-admin, an
+/// admin selects the tenant.
+#[actix_web::test]
+async fn an_admin_can_act_for_one_tenant_and_not_see_another() {
+    use api::auth::{encode_token, Claims};
+
+    let admin = Claims {
+        sub: "admin".to_string(),
+        role: "admin".to_string(),
+        exp: (chrono::Utc::now().timestamp() as usize) + 3600,
+        iat: chrono::Utc::now().timestamp() as usize,
+        tenant_id: Some("default".to_string()),
+    };
+    let token = encode_token(&admin).expect("token");
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(api::v1::rules::init_store()))
+            .app_data(web::Data::new(api::auth::store::init_store()))
+            .app_data(web::Data::new(api::v1::audit::init_store()))
+            .route("/rules", web::post().to(api::v1::rules::create_rule))
+            .route("/rules", web::get().to(api::v1::rules::get_rules)),
+    )
+    .await;
+
+    let create = test::TestRequest::post()
+        .uri("/rules")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .insert_header(("X-Tenant-ID", "tenant-a"))
+        .set_json(serde_json::json!({ "name": "scenario-rule", "dsl_body": "rule r" }))
+        .to_request();
+    let created = test::call_service(&app, create).await;
+    assert_eq!(
+        created.status().as_u16(),
+        201,
+        "the admin creates for tenant-a"
+    );
+
+    let list_other = test::TestRequest::get()
+        .uri("/rules?page=1&page_size=10")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .insert_header(("X-Tenant-ID", "tenant-b"))
+        .to_request();
+    let other: serde_json::Value =
+        test::read_body_json(test::call_service(&app, list_other).await).await;
+    assert_eq!(
+        other["total_count"], 0,
+        "tenant-b does not see tenant-a's rule: {other}"
+    );
+
+    let list_own = test::TestRequest::get()
+        .uri("/rules?page=1&page_size=10")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .insert_header(("X-Tenant-ID", "tenant-a"))
+        .to_request();
+    let own: serde_json::Value =
+        test::read_body_json(test::call_service(&app, list_own).await).await;
+    assert_eq!(own["total_count"], 1, "tenant-a does see it: {own}");
 }

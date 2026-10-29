@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.75` (`api/src/openapi.rs:12`).
+  version `9.0.76` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -385,10 +385,17 @@ decisions/categories/tags/tenants/branches. Inconsistencies:
   created via `POST /v1/rules` is invisible to `POST /v1/execute` unless the create request carried a
   structured `rule`, which the API writes into the on-disk set the engine reads (9.0.74; that write is
   refused for any tenant other than `default`, because execution itself has no tenant context — 9.0.75).
-- **Consequence:** the header is the only isolation mechanism and it is
-  spoofable — any authenticated caller reads another tenant's rules by sending a
-  different value. Cross-origin browser callers cannot send it at all (CORS
-  header list, `app.rs:76`), and no frontend module sets it.
+- **Consequence (corrected in 9.0.76):** the header is no longer the only mechanism. A JWT minted by this
+  server carries the user's `tenant_id` (`auth::Claims`, populated from `UserRecord::tenant_id`), and
+  `extract_tenant_id` resolves the tenant in this order: **an `admin`'s header wins** (managing several
+  tenants is what that role is for, and it is the flow `API-003`'s scenario exercises); otherwise the
+  **token's tenant** decides, whatever the header claims; otherwise the header; otherwise `default`.
+  A non-admin therefore cannot reach another tenant's rules by forging `X-Tenant-ID`, which the previous
+  text recorded as possible for every caller.
+  `api/tests/auth_protection.rs` asserts both halves: a non-admin's token overrules a forged header
+  (`a_token_tenant_overrides_a_forged_header`), and an admin acting for `tenant-a` cannot see that rule
+  while acting for `tenant-b` (`an_admin_can_act_for_one_tenant_and_not_see_another` — the counterexample
+  CodeWitness produced against the first version of this change).
 
 ## Persistence
 

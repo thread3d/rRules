@@ -12,6 +12,44 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.76] — 2026-10-28 — The tenant question finally has an answer a caller cannot forge
+
+Tenant-scoped execution — the thing 9.0.75's boundary stands in for — was blocked by something more basic
+than the ruleset: **there was no trustworthy tenant identity.** `X-Tenant-ID` was the only mechanism, and
+any authenticated caller could set it to any value, which the specification has said for several releases.
+Scoping execution by that header would have looked like isolation and been none.
+
+So this round fixes the prerequisite:
+
+- `UserRecord` gains `tenant_id` (the four demo users live in `default`, which is what every document and
+  rule implicitly used before);
+- `auth::Claims` gains `tenant_id`, minted from the user record, `Option` + `#[serde(default)]` so tokens
+  issued before this still decode;
+- `extract_tenant_id` **prefers the token**: a request holding one acts for that tenant whatever the header
+  says. The header remains only as the fallback for pre-claim tokens and for handlers reached without the
+  auth middleware (the in-process test apps) — an unauthenticated routing hint, not an identity.
+
+`api/tests/auth_protection.rs::a_token_tenant_overrides_a_forged_header` asserts both directions: a token
+for `acme` creates and then lists its own rule while sending `X-Tenant-ID: someone-else`, and a caller
+sending that header *without* a token sees nothing. Removing the token preference makes the first assertion
+fail with `total_count: 0`, so the test is testing what it claims.
+
+**CodeWitness then rejected the first version of this change, correctly.** `API-003` ("Rules are isolated per
+tenant") went from VERIFIED to FAILED with the counterexample `201|1` where `201|0` was required. Reading the
+generated scenario showed why: it logs in **once** as `admin` and switches tenants with the header — the
+"admin manages several tenants" flow, which pinning every caller to their token's tenant broke.
+
+So the rule is split by role, which is also the honest design: an **admin's** `X-Tenant-ID` selects the tenant
+(that is what the role is for), while for everyone else the **token's tenant is authoritative** and a forged
+header reaches nothing. Both halves are tested — the non-admin overrule, and the admin isolation flow that
+was the counterexample. That is the loop working as intended: a normative requirement was load-bearing, and
+the implementation had to answer to it rather than the other way round.
+
+The write boundary of 9.0.75 is unchanged: execution is still deployment-wide, so only the default tenant may
+add an executing rule. What changed is that "which tenant is asking?" now has an answer a caller cannot
+forge — the prerequisite for lifting that boundary, not the lift.
+
+
 ## [9.0.75] — 2026-10-28 — The leak my own last release opened
 
 9.0.74 made the API write rules into the set the engine executes. That set is **deployment-wide**, and

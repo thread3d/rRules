@@ -29,6 +29,12 @@ pub struct Claims {
     pub role: String,
     pub exp: usize,
     pub iat: usize,
+    /// The tenant the token was issued for.
+    ///
+    /// `Option` with a serde default so tokens minted before 9.0.76 still decode; a token without one
+    /// falls back to the `X-Tenant-ID` header, which is what every request used before this existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
 }
 
 /// User object returned to the frontend — mirrors the `User` interface in
@@ -113,6 +119,7 @@ fn build_claims(user: &UserRecord) -> Claims {
         role: user.role.clone(),
         exp: now + TOKEN_TTL_SECONDS,
         iat: now,
+        tenant_id: Some(user.tenant_id.clone()),
     }
 }
 
@@ -266,6 +273,7 @@ mod tests {
             role: "admin".into(),
             exp: (Utc::now().timestamp() as usize) + 60,
             iat: Utc::now().timestamp() as usize,
+            tenant_id: Some("default".to_string()),
         };
         let token = encode_token(&claims).expect("encode");
         let decoded = decode_token(&token).expect("decode");
@@ -280,6 +288,7 @@ mod tests {
             role: "admin".into(),
             exp: (Utc::now().timestamp() as usize) + 60,
             iat: Utc::now().timestamp() as usize,
+            tenant_id: Some("default".to_string()),
         };
         let token = encode(
             &Header::default(),

@@ -104,15 +104,56 @@ fn write_executable_rule(
     Ok(path)
 }
 
-/// Extract tenant_id from the X-Tenant-ID request header.
-/// Returns a default placeholder if absent (for backward compatibility).
+/// The tenant a request is acting for.
+///
+/// **The token decides, except for an admin acting on behalf of a tenant.** A JWT minted by this server
+/// carries the user's `tenant_id`, and a caller cannot edit it. For a non-admin the token's tenant is
+/// authoritative and the `X-Tenant-ID` header is ignored, including when it names someone else's tenant —
+/// which closes the spoofing this function used to permit (any authenticated caller could read another
+/// tenant's rules by sending a different header). An `admin` may select a tenant with the header, because
+/// managing several tenants is what that role is for; the generated isolation scenario for `API-003` is
+/// exactly that flow, and it is why the rule is split by role rather than applied flatly.
+///
+/// The header remains a fallback **only** when no tenant-bearing token is present — an older token that
+/// predates the claim, or a request that reaches a handler without the auth middleware (the in-process test
+/// apps). That path is unauthenticated by construction and is why it stays second: it is a routing hint,
+/// not an identity.
 pub fn extract_tenant_id(headers: &actix_web::HttpRequest) -> String {
+    let header_tenant = || {
+        headers
+            .headers()
+            .get("x-tenant-id")
+            .and_then(|v| v.to_str().ok())
+            .map(String::from)
+    };
+
+    if let Some(claims) = token_claims(headers) {
+        // An **admin** may act for a tenant of their choosing — that is what the header is for, and the
+        // "admin manages several tenants" flow the isolation requirement is written against. Everyone else
+        // is pinned to the tenant their token was issued for, so a forged header reaches nothing.
+        if claims.role == "admin" {
+            if let Some(tenant) = header_tenant() {
+                return tenant;
+            }
+        }
+        if let Some(tenant) = claims.tenant_id.as_deref() {
+            return tenant.to_string();
+        }
+    }
     headers
         .headers()
         .get("x-tenant-id")
         .and_then(|v| v.to_str().ok())
         .map(String::from)
         .unwrap_or_else(|| "default".to_string())
+}
+
+/// The claims of the request's bearer token, when it carries a valid one.
+fn token_claims(headers: &actix_web::HttpRequest) -> Option<crate::auth::Claims> {
+    let header = headers.headers().get("Authorization")?;
+    let value = header.to_str().ok()?;
+    let token = value.strip_prefix("Bearer ")?.trim();
+    crate::middleware::auth::decode_token(token).ok()
 }
 
 /// Rule status enum

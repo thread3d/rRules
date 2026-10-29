@@ -139,6 +139,7 @@ async fn me_with_valid_token_returns_user() {
         role: "author".into(),
         exp: (chrono::Utc::now().timestamp() as usize) + 600,
         iat: chrono::Utc::now().timestamp() as usize,
+        tenant_id: Some("default".to_string()),
     })
     .unwrap();
 
@@ -178,6 +179,7 @@ async fn refresh_with_valid_token_returns_fresh_token() {
         role: "reviewer".into(),
         exp: now + 10,
         iat: now - 60,
+        tenant_id: Some("default".to_string()),
     })
     .unwrap();
 

@@ -16,6 +16,14 @@ pub struct UserRecord {
     pub role: String,
     pub permissions: Vec<String>,
     pub password: String,
+    /// The tenant this user belongs to.
+    ///
+    /// Tenant identity used to exist **only** as the `X-Tenant-ID` request header, which any authenticated
+    /// caller can set to any value — the spec has said so for releases. That makes it a routing hint, not
+    /// an identity, and it is why execution could not be tenant-scoped: scoping by a header a caller
+    /// forges would look like isolation and be none. A user's tenant is recorded here so it can travel in
+    /// the token instead, where it cannot be edited per request.
+    pub tenant_id: String,
 }
 
 /// Shared user store keyed by user id (== username for the demo users).
@@ -41,6 +49,9 @@ pub fn init_store() -> UserStore {
             // Plaintext demo password == username (D-22-01). DO NOT do this in
             // production — v5.0 migrates to argon2/bcrypt.
             password: username.to_string(),
+            // The demo users all live in the deployment's default tenant, which is what every document
+            // and rule implicitly used before a token carried a tenant at all.
+            tenant_id: "default".to_string(),
         };
         map.insert(username.to_string(), record);
     }
