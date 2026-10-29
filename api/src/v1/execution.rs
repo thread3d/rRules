@@ -102,6 +102,13 @@ pub struct ExecuteResponse {
 #[derive(Debug, Clone)]
 pub struct SharedRuleSet {
     pub ruleset: RuleSet,
+    /// Which tenant each rule in `ruleset` belongs to, by rule id.
+    ///
+    /// Rules live at `RULE_STORAGE_PATH/<tenant>/<file>.rules`, and files directly in the root belong to
+    /// `default` — the layout every deployment had before tenants existed, kept so an existing directory
+    /// keeps working. Execution selects the caller's tenant from this map, which is what makes
+    /// `POST /v1/execute` tenant-scoped; before 9.0.77 every tenant ran every rule.
+    pub tenants: HashMap<String, String>,
     pub generation: u64,
 }
 
@@ -109,10 +116,29 @@ pub struct SharedRuleSet {
 pub type SharedRuleSetHandle = std::sync::Arc<std::sync::RwLock<SharedRuleSet>>;
 
 impl SharedRuleSet {
-    /// Construct a new shared payload with generation 0 (pre-reload baseline).
-    pub fn new(ruleset: RuleSet) -> Self {
+    /// Construct a shared payload by loading `rules_dir`, ownership and all — the same call reload makes,
+    /// for callers that are not the reload path (tests, and startup before `app.rs` swaps one in).
+    pub fn from_loaded(ruleset: RuleSet, rules_dir: &str) -> Self {
+        let (_unused_ruleset, tenants) = build_tenant_ruleset_from_dir(rules_dir);
         Self {
             ruleset,
+            tenants,
+            generation: 0,
+        }
+    }
+
+    /// Construct a new shared payload with generation 0 (pre-reload baseline).
+    pub fn new(ruleset: RuleSet) -> Self {
+        // A set built by hand (tests, startup seeds) carries no tenant information, so every rule is
+        // `default` — the tenant that owned everything before there was a choice.
+        let tenants = ruleset
+            .rules
+            .iter()
+            .map(|rule| (rule.id.clone(), "default".to_string()))
+            .collect();
+        Self {
+            ruleset,
+            tenants,
             generation: 0,
         }
     }
@@ -133,10 +159,27 @@ impl SharedRuleSet {
 /// the filtered path clones, and only the matching rules.
 fn filter_ruleset<'a>(
     src: &'a RuleSet,
+    tenants: &'a HashMap<String, String>,
+    tenant: &str,
     filter: Option<&'a RuleFilter>,
 ) -> std::borrow::Cow<'a, RuleSet> {
+    // The caller's tenant comes first: a rule belonging to another tenant is not merely filtered out of a
+    // name search, it never enters the engine for this request.
+    let in_tenant = |rule: &Rule| tenants.get(&rule.id).map(String::as_str) == Some(tenant);
+
     let Some(f) = filter else {
-        return std::borrow::Cow::Borrowed(src);
+        if src.rules.iter().all(&in_tenant) {
+            return std::borrow::Cow::Borrowed(src);
+        }
+        let mut out = RuleSet::new();
+        let _ = out.add_rules(
+            src.rules
+                .iter()
+                .filter(|rule| in_tenant(rule))
+                .cloned()
+                .collect(),
+        );
+        return std::borrow::Cow::Owned(out);
     };
     // Only name_pattern is honored; categories has no Rule metadata to match.
     let Some(pat) = f.name_pattern.as_deref() else {
@@ -145,6 +188,7 @@ fn filter_ruleset<'a>(
     let matching: Vec<Rule> = src
         .rules
         .iter()
+        .filter(|rule| in_tenant(rule))
         .filter(|r| r.id == pat || r.name == pat)
         .cloned()
         .collect();
@@ -175,15 +219,26 @@ fn filter_ruleset<'a>(
 /// skips the offending file/rule. One bad file does not crash startup or
 /// reload. If the resulting ruleset is empty, a warning is logged.
 pub fn build_ruleset_from_dir(rules_dir: &str) -> RuleSet {
+    build_tenant_ruleset_from_dir(rules_dir).0
+}
+
+/// The rules on disk, with the tenant each one belongs to.
+///
+/// Layout: `RULE_STORAGE_PATH/<tenant>/<file>.rules` gives a rule to `<tenant>`; files directly in the root
+/// belong to `default`, which is what every deployment had before tenants existed — so an existing directory
+/// keeps running exactly as it did.
+pub fn build_tenant_ruleset_from_dir(rules_dir: &str) -> (RuleSet, HashMap<String, String>) {
     let path = std::path::Path::new(rules_dir);
+    let mut ruleset = RuleSet::new();
+    let mut tenants: HashMap<String, String> = HashMap::new();
+
     if !path.exists() {
         tracing::warn!(
             rules_dir = %rules_dir,
             "rules directory not found, starting with no rules"
         );
-        return RuleSet::new();
+        return (ruleset, tenants);
     }
-    let mut ruleset = RuleSet::new();
     let entries = match std::fs::read_dir(path) {
         Ok(e) => e,
         Err(e) => {
@@ -192,44 +247,78 @@ pub fn build_ruleset_from_dir(rules_dir: &str) -> RuleSet {
                 error = %e,
                 "failed to read rules dir, starting with no rules"
             );
-            return RuleSet::new();
+            return (ruleset, tenants);
         }
     };
+
     for entry in entries.flatten() {
+        let entry_path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
+
+        if entry_path.is_dir() {
+            // A subdirectory names a tenant. Anything below it is loaded for that tenant.
+            if let Ok(inner) = std::fs::read_dir(&entry_path) {
+                for file in inner.flatten() {
+                    let file_path = file.path();
+                    let file_name = file.file_name().to_string_lossy().to_string();
+                    if !(file_name.ends_with(".rules") || file_name.ends_with(".drl")) {
+                        continue;
+                    }
+                    load_rule_file(&mut ruleset, &mut tenants, &file_path, &file_name, &name);
+                }
+            }
+            continue;
+        }
+
         if !(name.ends_with(".rules") || name.ends_with(".drl")) {
             continue;
         }
-        let content = match std::fs::read_to_string(entry.path()) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(file = %name, error = %e, "skipping unreadable rule file");
-                continue;
-            }
-        };
-        // One parser, shared with `Engine::load_rules`: it accepts the `{"rules": [ … ]}` envelope the API
-        // writes, a bare rule, or an array. This loader used to accept only the last two, so a file the
-        // API had just written in the envelope form was skipped at reload without an error anyone saw.
-        let rules: Vec<Rule> = match engine::environment::parse_rules_document(&content) {
-            Ok(rules) => rules,
-            Err(e) => {
-                tracing::warn!(file = %name, error = %e, "skipping unparseable rule file");
-                continue;
-            }
-        };
-        for rule in rules {
-            if let Err(e) = ruleset.add_rule(rule) {
-                tracing::warn!(error = %e, "skipping rule that failed validation");
-            }
-        }
+        // A file in the root belongs to `default` — the layout every deployment had before tenants existed.
+        load_rule_file(&mut ruleset, &mut tenants, &entry_path, &name, "default");
     }
+
     if ruleset.rules.is_empty() {
         tracing::warn!(
             rules_dir = %rules_dir,
             "no parseable rule files found, starting with no rules"
         );
     }
-    ruleset
+    (ruleset, tenants)
+}
+
+/// Read one rule file into `ruleset`, recording `tenant` as the owner of each rule it contributes.
+fn load_rule_file(
+    ruleset: &mut RuleSet,
+    tenants: &mut HashMap<String, String>,
+    path: &std::path::Path,
+    name: &str,
+    tenant: &str,
+) {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(file = %name, error = %e, "skipping unreadable rule file");
+            return;
+        }
+    };
+    // One parser, shared with `Engine::load_rules`: envelope, array, or bare rule. This loader used to have
+    // its own, accepting only the last two, so a file the API had written in the envelope form was skipped
+    // at reload without an error anyone saw.
+    let rules = match engine::environment::parse_rules_document(&content) {
+        Ok(rules) => rules,
+        Err(e) => {
+            tracing::warn!(file = %name, error = %e, "skipping unparseable rule file");
+            return;
+        }
+    };
+    for rule in rules {
+        let id = rule.id.clone();
+        if let Err(e) = ruleset.add_rule(rule) {
+            tracing::warn!(error = %e, "skipping rule that failed validation");
+            continue;
+        }
+        tenants.insert(id, tenant.to_string());
+    }
 }
 
 /// Complete inference trace with full detail
@@ -312,7 +401,7 @@ pub async fn reload_and_swap(
     // Build the new RuleSet OFF-SIDE — no lock held during I/O + parse
     // (Pitfall 4: lock scope). This is R1/D-05: the same parser used at
     // startup, so the swapped ruleset matches what a restart would load.
-    let new_ruleset = build_ruleset_from_dir(rules_dir);
+    let (new_ruleset, new_tenants) = build_tenant_ruleset_from_dir(rules_dir);
     let rule_count = new_ruleset.rules.len();
 
     // Acquire the write lock ONLY for the single whole-value swap.
@@ -325,6 +414,7 @@ pub async fn reload_and_swap(
     // never `guard.ruleset.rules.push(...)` in-place mutation.
     *guard = SharedRuleSet {
         ruleset: new_ruleset,
+        tenants: new_tenants,
         generation: next_gen,
     };
     // Guard dropped here (implicit on scope exit) — lock released.
@@ -390,6 +480,11 @@ impl ReloadStatus {
 pub type JobStore = Arc<std::sync::RwLock<HashMap<String, ReloadJob>>>;
 
 /// Initialize job store
+/// A fresh counters handle — the constructor the test apps and `app.rs` share.
+pub fn init_counters() -> ExecutionCounters {
+    ExecutionCounters::default()
+}
+
 pub fn init_job_store() -> JobStore {
     Arc::new(std::sync::RwLock::new(HashMap::new()))
 }
@@ -475,8 +570,10 @@ pub struct BatchExecuteResponse {
 /// Pitfall 11) — NEVER by echoing the request input JSON. `rules_not_fired`
 /// is the shared ruleset's rule ids minus `EngineResult.fired_rule_ids`.
 /// `inference_trace` remains `None` (L-04 — Phase 28 populates it).
+#[allow(clippy::too_many_arguments)] // actix extractor protocol: one parameter per `web::Data`
 pub async fn execute_single(
     req: ExecuteRequest,
+    tenant: String,
     registry: web::Data<EngineRegistry>,
     selector: web::Data<EngineSelector>,
     ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
@@ -490,6 +587,7 @@ pub async fn execute_single(
     if req.session_id.is_some() {
         return execute_sessionful(
             req,
+            tenant,
             registry,
             ruleset,
             counters,
@@ -585,7 +683,12 @@ pub async fn execute_single(
                 format!("ruleset lock poisoned: {}", e),
             )
         })?;
-        let loaded = filter_ruleset(&guard.ruleset, req.rule_filter.as_ref());
+        let loaded = filter_ruleset(
+            &guard.ruleset,
+            &guard.tenants,
+            &tenant,
+            req.rule_filter.as_ref(),
+        );
         engine.load_ruleset(&loaded).map_err(|e| {
             (
                 actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -775,6 +878,7 @@ pub async fn execute_single(
 /// (Pitfall 1 — `lookup_or_create` clones the `Arc<Mutex<Entry>>` out).
 async fn execute_sessionful(
     req: ExecuteRequest,
+    tenant: String,
     registry: web::Data<EngineRegistry>,
     ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
     counters: web::Data<ExecutionCounters>,
@@ -955,7 +1059,8 @@ async fn execute_sessionful(
             .or_insert(fact_json);
     }
 
-    // 6. Compute rules_not_fired from the shared ruleset.
+    // 6. Compute rules_not_fired from the *caller's* share of the shared ruleset: a sessionful run reports
+    //    the rules it was asked about, which excludes every other tenant's.
     let all_rule_ids: Vec<String> = {
         let guard = ruleset.read().map_err(|e| {
             (
@@ -963,7 +1068,13 @@ async fn execute_sessionful(
                 format!("ruleset lock poisoned: {}", e),
             )
         })?;
-        guard.ruleset.rules.iter().map(|r| r.id.clone()).collect()
+        guard
+            .ruleset
+            .rules
+            .iter()
+            .filter(|r| guard.tenants.get(&r.id).map(String::as_str) == Some(tenant.as_str()))
+            .map(|r| r.id.clone())
+            .collect()
     };
     let fired_set: std::collections::HashSet<String> =
         engine_result.fired_rule_ids.iter().cloned().collect();
@@ -1022,8 +1133,12 @@ async fn execute_sessionful(
         (status = 400, description = "Unknown engine name"),
     ),
 )]
+#[allow(clippy::too_many_arguments)] // actix extractor protocol: one parameter per `web::Data`
 pub async fn execute_rules(
     req: web::Json<ExecuteRequest>,
+    // Actix supplies the request; this is not a `web::Data` dependency, so a hand-rolled test app needs no
+    // extra wiring (AGENTS.md's 500-at-runtime hazard applies to `Data`, not to the request itself).
+    headers: actix_web::HttpRequest,
     registry: web::Data<EngineRegistry>,
     selector: web::Data<EngineSelector>,
     ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
@@ -1031,8 +1146,10 @@ pub async fn execute_rules(
     metrics_tx: web::Data<MetricsTx>,
     session_manager: web::Data<Arc<SessionManager>>,
 ) -> impl Responder {
+    let tenant = crate::v1::rules::extract_tenant_id(&headers);
     match execute_single(
         req.into_inner(),
+        tenant,
         registry,
         selector,
         ruleset,
@@ -1100,8 +1217,10 @@ pub async fn list_engines(
         (status = 200, description = "Batch executed successfully", body = BatchExecuteResponse),
     ),
 )]
+#[allow(clippy::too_many_arguments)] // actix extractor protocol: one parameter per `web::Data`
 pub async fn batch_execute_rules(
     req: web::Json<BatchExecuteRequest>,
+    headers: actix_web::HttpRequest,
     registry: web::Data<EngineRegistry>,
     selector: web::Data<EngineSelector>,
     ruleset: web::Data<Arc<std::sync::RwLock<SharedRuleSet>>>,
@@ -1109,6 +1228,7 @@ pub async fn batch_execute_rules(
     metrics_tx: web::Data<MetricsTx>,
     session_manager: web::Data<Arc<SessionManager>>,
 ) -> impl Responder {
+    let tenant = crate::v1::rules::extract_tenant_id(&headers);
     let inner = req.into_inner();
     let max_concurrency = inner.max_concurrency.unwrap_or(8).max(1);
     let requests = inner.requests;
@@ -1131,6 +1251,8 @@ pub async fn batch_execute_rules(
         // Phase 27 (D-12): clone the SessionManager into each JoinSet task
         // so sessionful batch items can call execute_single with session_id.
         let session_manager = session_manager.clone();
+        // Each batch item runs for the same caller, so it inherits the same tenant.
+        let tenant = tenant.clone();
         join_set.spawn(async move {
             // Acquire a concurrency permit before running. The semaphore is
             // never explicitly closed, so this only errors if the runtime shuts
@@ -1151,6 +1273,7 @@ pub async fn batch_execute_rules(
             // is now a per-item FAILURE, not a masked success (SC-2).
             execute_single(
                 request,
+                tenant,
                 registry,
                 selector,
                 ruleset,

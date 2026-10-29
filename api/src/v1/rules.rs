@@ -50,17 +50,9 @@ fn write_executable_rule(
     tenant_id: &str,
     rule: &serde_json::Value,
 ) -> Result<std::path::PathBuf, String> {
-    // **Execution is not tenant-scoped**, so the executing set is shared by every tenant. Writing a rule
-    // from one tenant into it would run that tenant's logic for all of them — a cross-tenant leak, and
-    // exactly the kind of thing that is invisible until it matters. The boundary is enforced here, at the
-    // only place a rule can enter the set, until `specs/rule-sources.md`'s tenant step exists.
-    if tenant_id != "default" {
-        return Err(format!(
-            "executable rules are deployment-wide, not tenant-scoped: a rule created for tenant \
-             '{tenant_id}' would run for every tenant. Create the document without `rule`, or use the \
-             default tenant. See specs/rule-sources.md."
-        ));
-    }
+    // The rule is written under its **tenant's** directory, which is where `build_tenant_ruleset_from_dir`
+    // looks for ownership. This is what replaced 9.0.75's refusal of every non-default tenant: execution is
+    // scoped now, so a rule created for `acme` runs for `acme` and for nobody else.
 
     // **The API owns identity.** The document's id and name are imposed on the executing rule, so the id a
     // caller receives from `POST /v1/rules` is the id the engine reports and the id `rule_filter` matches.
@@ -89,8 +81,8 @@ fn write_executable_rule(
         .load_rules(&text)
         .map_err(|e| format!("the rule was rejected: {e}"))?;
 
-    let dir = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
-    let dir = std::path::PathBuf::from(dir);
+    let root = std::env::var("RULE_STORAGE_PATH").unwrap_or_else(|_| "./rules".to_string());
+    let dir = std::path::PathBuf::from(root).join(tenant_id);
     std::fs::create_dir_all(&dir).map_err(|e| {
         format!(
             "rules directory {} could not be created: {e}",

@@ -13,7 +13,7 @@ with the code, the code wins and the drift is recorded in
   wrong for a container, which is why the image sets `RRULES_BIND_ADDRESS=0.0.0.0`.
 - **Versioning:** one `web::scope("/v1")` (`api/src/app.rs:147`). No `/v2`, no
   `Accept`-based version negotiation. The OpenAPI `info.version` is the crate
-  version `9.0.76` (`api/src/openapi.rs:12`).
+  version `9.0.77` (`api/src/openapi.rs:12`).
 - **Content types:** request bodies are JSON. Responses are JSON except the
   four tabulated exceptions below.
 
@@ -383,8 +383,10 @@ decisions/categories/tags/tenants/branches. Inconsistencies:
 - **Not scoped:** categories, tags, rule-tag links, approvals, audit, branches,
   tenants, jobs, metrics, decisions, sessions, and the executing ruleset. A rule
   created via `POST /v1/rules` is invisible to `POST /v1/execute` unless the create request carried a
-  structured `rule`, which the API writes into the on-disk set the engine reads (9.0.74; that write is
-  refused for any tenant other than `default`, because execution itself has no tenant context — 9.0.75).
+  structured `rule`, which the API writes into its tenant's directory under `RULE_STORAGE_PATH`
+  (9.0.74/9.0.77). **Execution is tenant-scoped**: `POST /v1/execute` loads only the caller's tenant's rules
+  (`SharedRuleSet::tenants`, built from the `RULE_STORAGE_PATH/<tenant>/` layout, with root files belonging
+  to `default`). A rule created for one tenant is not loaded for another — `api/tests/tenant_scoped_execution.rs`.
 - **Consequence (corrected in 9.0.76):** the header is no longer the only mechanism. A JWT minted by this
   server carries the user's `tenant_id` (`auth::Claims`, populated from `UserRecord::tenant_id`), and
   `extract_tenant_id` resolves the tenant in this order: **an `admin`'s header wins** (managing several

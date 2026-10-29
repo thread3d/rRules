@@ -109,6 +109,23 @@ default tenant may add an executing rule. What changed is that the question "whi
 has an answer that a caller cannot forge — which is the prerequisite for lifting that boundary rather than a
 lift in itself.
 
+### Execution is tenant-scoped (9.0.77)
+
+`SharedRuleSet` now carries ownership: `tenants: rule id → tenant`, built from the directory layout —
+`RULE_STORAGE_PATH/<tenant>/<file>.rules` gives a rule to `<tenant>`, and files in the root belong to
+`default`, so an existing directory keeps running exactly as it did. `POST /v1/execute` and
+`POST /v1/rules/batch-execute` resolve the caller's tenant (`extract_tenant_id`) and load **only that
+tenant's** rules; `rule_filter.name_pattern` selects within them, and `rules_not_fired` reports only the
+caller's rules on the sessionful path too.
+
+`POST /v1/rules` writes an executable rule under its tenant's directory, so **9.0.75's refusal of every
+non-default tenant is gone** — it was standing in for exactly this scoping. A rule created for `acme` now
+runs for `acme` and for nobody else, which is what the test asserts.
+
+`api/tests/tenant_scoped_execution.rs` covers the three cases that matter: each tenant runs only its own
+rules, a tenant with none matches nothing (and no other tenant's rule ids appear in `rules_not_fired`), and a
+`name_pattern` naming another tenant's rule selects nothing.
+
 **Still open, in the order that matters:** `dsl_body` is not compiled (there is no rule-syntax parser, and
 `dsl_body` is a FEEL expression inside a rule); the executing set is per deployment rather than per tenant;
 and documents written before this slice have no rule file, so they remain `executable: false`.

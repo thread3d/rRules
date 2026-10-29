@@ -12,6 +12,31 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.77] — 2026-10-29 — Execution is tenant-scoped, and the boundary it needed is gone
+
+The last structural item on the list, and the one 9.0.75's refusal was standing in for.
+
+`SharedRuleSet` now carries **ownership**: `tenants: rule id → tenant`, built from the directory layout —
+`RULE_STORAGE_PATH/<tenant>/<file>.rules` gives a rule to `<tenant>`, and files directly in the root belong
+to `default`, so an existing directory keeps running exactly as it did. `POST /v1/execute` and
+`POST /v1/rules/batch-execute` resolve the caller's tenant (`extract_tenant_id`, token-authoritative since
+9.0.76) and load **only that tenant's** rules; `rule_filter.name_pattern` selects within them; and the
+sessionful path reports `rules_not_fired` for the caller's rules alone.
+
+So **9.0.75's blanket refusal is deleted**: a non-default tenant may now create an executable rule, because
+the rule is written under `<rules dir>/<tenant>/` and runs for that tenant and nobody else. The guarantee is
+stronger than the refusal was, and the refusal's test became a scoping test —
+`a_tenant_rule_runs_only_for_that_tenant` asserts the rule is created (201), lands in the tenant's
+directory, and that `acme` executes it while `globex` matches nothing.
+
+Three more cases are covered by `api/tests/tenant_scoped_execution.rs`: each tenant runs only its own rules
+(with a root file belonging to `default`), a tenant with no rules matches nothing and leaks no rule ids into
+`rules_not_fired`, and a `name_pattern` naming another tenant's rule selects nothing.
+
+`clippy::too_many_arguments` fired on three handlers at 8/7 once the tenant parameter arrived; the arity is
+actix's extractor protocol rather than a design choice, so the allowance is local and says so.
+
+
 ## [9.0.76] — 2026-10-28 — The tenant question finally has an answer a caller cannot forge
 
 Tenant-scoped execution — the thing 9.0.75's boundary stands in for — was blocked by something more basic
