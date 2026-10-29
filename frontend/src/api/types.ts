@@ -12,6 +12,12 @@ export interface CreateRuleRequest {
   tags?: string[]
   salience?: number
   status?: 'draft' | 'active'
+  /**
+   * The engine rule this document is. When present the API validates it with the engine and writes it into
+   * the rules directory, so the rule is executable after the next reload; without it the document is a
+   * draft no engine can run (`executable: false`). Build it with `api/rule-builder.ts`.
+   */
+  rule?: unknown
 }
 
 export interface UpdateRuleRequest extends Partial<CreateRuleRequest> {}

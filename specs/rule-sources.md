@@ -126,6 +126,18 @@ runs for `acme` and for nobody else, which is what the test asserts.
 rules, a tenant with none matches nothing (and no other tenant's rule ids appear in `rules_not_fired`), and a
 `name_pattern` naming another tenant's rule selects nothing.
 
+### The interface creates executable rules (9.0.78)
+
+The New Rule form used to collect a free-text body in a pseudo-DSL (`rule "x" when customer.status =
+"premium" then log(…)`) that **nothing parsed**. Every rule created through the interface was therefore a
+draft that could never fire, while the interface presented rule creation as the core action.
+
+The form now collects the structured fields the engine needs — fact type, field, operator, value and a log
+message — and `frontend/src/api/rule-builder.ts` emits the engine's own rule JSON. `dsl_body` is **rendered
+from the same draft**, so the text shown on the edit page describes the rule that runs rather than defining a
+second one. `frontend/src/api/__tests__/rule-builder.test.ts` pins the shape and the rendering, including
+that `1.5` stays a string rather than becoming a silently truncated integer.
+
 **Still open, in the order that matters:** `dsl_body` is not compiled (there is no rule-syntax parser, and
 `dsl_body` is a FEEL expression inside a rule); the executing set is per deployment rather than per tenant;
 and documents written before this slice have no rule file, so they remain `executable: false`.

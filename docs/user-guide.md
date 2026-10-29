@@ -17,6 +17,32 @@ This guide shows you how to write rules for the rRules Business Rules Management
 
 ---
 
+## What a rule *is*, before any syntax
+
+Two things in this system are called "a rule", and only one of them is executed:
+
+| | Rule **document** | Rule the engine **executes** |
+|---|---|---|
+| Created by | the interface, `POST /v1/rules` | written into `RULE_STORAGE_PATH` |
+| Carries | name, description, category, tags, status, body text | a condition over facts and the actions to take |
+| Runs | **no**, unless the create request carried a structured `rule` | yes, via `POST /v1/execute` |
+
+The **New Rule** form in the interface sends the structured form: you choose a fact type, a field, an
+operator and a value for the condition, and a log message for the action, and the API writes the engine's
+own rule into the rules directory — so the rule is executable after the next reload. The body text shown
+afterwards is a rendering of that same rule, not a separate definition.
+
+Two consequences worth knowing:
+
+- a rule written by hand into the rules directory is executed directly; that is the format the sections
+  below describe;
+- a rule created **before** the form sent structured rules has no executable form — the API reports it
+  `executable: false`. Re-create it through the form to make it runnable.
+
+`specs/rule-sources.md` states the whole picture, including what is still missing.
+
+---
+
 ## Basic Rule Structure
 
 A rule has two parts:

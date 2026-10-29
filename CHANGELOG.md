@@ -12,6 +12,41 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.78] — 2026-10-29 — The interface can finally create a rule that runs
+
+The last piece of `specs/rule-sources.md`, and the one a user would notice first.
+
+The New Rule form collected a free-text body in a pseudo-DSL:
+
+```
+rule "high-status-customer"
+when customer.status = "premium"
+then log("High status customer detected")
+```
+
+**Nothing parsed it.** The API stored it, the engine never saw it, and every rule created through the
+interface was a draft that could never fire — while the interface presented rule creation as the product's
+core action. 9.0.74 gave the API a way to accept an executable rule; nothing sent one.
+
+The form now collects the structured fields the engine needs — fact type, field, operator, value, log
+message — and `frontend/src/api/rule-builder.ts` emits the engine's own rule JSON. `dsl_body` is **rendered
+from the same draft**, so the text the edit page shows is a description of the rule that runs rather than a
+second definition that can drift. Value encoding is deliberately conservative: an integer stays an integer,
+and `1.5` becomes the string `"1.5"` instead of a silently truncated number.
+
+So the chain is complete end to end: the form produces a structured rule, the API validates it with the
+engine, imposes the document's identity, writes it under the caller's tenant directory, and the next reload
+makes it executable — for that tenant, and only that tenant.
+
+`frontend/src/api/__tests__/rule-builder.test.ts` pins the JSON shape, the integer/string rule, the trimming
+(engine matching is exact), and the rendering. The frontend suite is 42 tests across 8 files; the browser
+gate still drives the form and the Tailwind assertions.
+
+**Still open:** a rule created before this release has no executable form and reports `executable: false`;
+there is no migration path except re-creating it through the form. Fractions and booleans are not
+expressible in the form yet, and `dsl_body` remains a rendering rather than a syntax anything parses.
+
+
 ## [9.0.77] — 2026-10-29 — Execution is tenant-scoped, and the boundary it needed is gone
 
 The last structural item on the list, and the one 9.0.75's refusal was standing in for.
