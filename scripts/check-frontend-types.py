@@ -27,41 +27,69 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
-# (Rust file, handler **or** response struct, TypeScript file, interface). A handler is matched by name
-# and its `json!({…})` keys are read; a struct has its serde field names read, renames honoured. The
-# interface is read from the given file.
+# (Rust file, handler **or** response struct, TypeScript file, interface, consumer). A handler is matched by
+# name and its `json!({…})` keys are read; a struct has its serde field names read, renames honoured. The
+# interface is read from the given file. `consumer` is the function that turns the response into what a
+# screen shows — **a response field must be read there**, because naming it elsewhere (a comment, a request
+# payload the page sends, a test fixture) is not consuming it. `None` means the response is used directly.
+# A consumer is written `path::function`, because the interface and the function that consumes it often live in
+# different files (`types.ts` declares the shape, `rules.ts` maps it).
 PAIRS = [
+    # `listDecisions`, `getDecision`, `getDecisionIr` and `reloadDmn` were deleted in 9.0.81: they had no
+    # callers, and a correct type nothing consumes is still drift waiting to happen.
+    # Declared against the response *struct*, not the handler: the handler also builds error payloads
+    # (`error_code`, `message`, `policy`) and reading its `json!` blocks conflated the two shapes.
     (
         "api/src/v1/decisions.rs",
-        "list_decisions",
+        "EvaluateDecisionResponse",
         "frontend/src/api/decisions.ts",
-        "DecisionListResponse",
-    ),
-    (
-        "api/src/v1/decisions.rs",
-        "get_decision",
-        "frontend/src/api/decisions.ts",
-        "DecisionDocument",
-    ),
-    (
-        "api/src/v1/decisions.rs",
-        "get_decision_ir",
-        "frontend/src/api/decisions.ts",
-        "DmnIrResponse",
-    ),
-    (
-        "api/src/v1/decisions.rs",
-        "reload_dmn",
-        "frontend/src/api/decisions.ts",
-        "ReloadDmnResponse",
+        "EvaluateDecisionResponse",
+        None,
     ),
     (
         "api/src/v1/rules.rs",
         "RuleListResponse",
         "frontend/src/api/types.ts",
         "PaginatedRulesResponse",
+        "frontend/src/api/rules.ts::getRules",
+    ),
+    (
+        "api/src/v1/rules.rs",
+        "RuleResponse",
+        "frontend/src/api/rules.ts",
+        "ApiRule",
+        "frontend/src/api/rules.ts::toRule",
+    ),
+    (
+        "api/src/v1/audit.rs",
+        "AuditEvent",
+        "frontend/src/features/governance/audit/AuditLogViewer.tsx",
+        "BackendAuditEvent",
+        "frontend/src/features/governance/audit/AuditLogViewer.tsx::mapBackendAuditEvent",
     ),
 ]
+
+# Fields the API sends that the interface is allowed not to read, each with the reason. An entry here is a
+# decision someone made, not a tolerance: "the frontend never shows this" has to be true and stay true.
+UNREAD_ALLOWED = {
+    "EvaluateDecisionResponse": {
+        "decision_id": "the caller passed the id in; the editor does not display it back",
+        "duration_ms": "the editor shows outputs, not timings",
+        "rules_fired": "hit-policy diagnostics for API clients; no screen shows a count",
+    },
+    "ApiRule": {
+        "owner": "always null until ownership is implemented on the API side; no screen has an owner column",
+        "tags": "carried on the view model for filtering; no screen renders tag chips yet",
+    },
+    "RuleResponse": {
+        "owner": "the API always answers null and no screen has an owner column; the field exists for the "
+        "rule-document model, not for the interface",
+        "version": "always 1 until rule versioning lands; the interface displays it from the document's own "
+        "field rather than the wire one",
+    },
+}
+
+TESTS = re.compile(r"__tests__|/test/")
 
 JSON_KEY = re.compile(r'"([a-z_][a-z0-9_]*)":')
 INTERFACE_FIELD = re.compile(r'^\s{2}([a-z_][a-z0-9_]*)\??:', re.M)
@@ -124,9 +152,18 @@ def struct_keys(path: pathlib.Path, struct: str) -> set[str]:
     return keys
 
 
+def find_declaration(text: str, interface: str) -> int:
+    """Where `interface` is declared, exported or module-local."""
+    for prefix in ("export interface ", "interface "):
+        start = text.find(f"{prefix}{interface} ")
+        if start != -1:
+            return start
+    return -1
+
+
 def interface_fields(path: pathlib.Path, interface: str) -> set[str]:
     text = path.read_text(encoding="utf-8")
-    start = text.find(f"export interface {interface} ")
+    start = find_declaration(text, interface)
     if start == -1:
         raise SystemExit(f"check-frontend-types: {interface} not found in {path}")
     # Interfaces here are flat; stop at the closing brace of this one.
@@ -134,9 +171,100 @@ def interface_fields(path: pathlib.Path, interface: str) -> set[str]:
     return set(INTERFACE_FIELD.findall(text[start:end]))
 
 
+BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+LINE_COMMENT = re.compile(r"^\s*//.*$", re.M)
+
+
+def frontend_sources() -> dict[pathlib.Path, str]:
+    """Every frontend source except tests, with comments removed.
+
+    Two exclusions, both learned by watching the check pass when it should have failed: a *test* that names a
+    field is not a consumer of it, and neither is a **comment**. The audit viewer documented its mapping in
+    prose (`ip_address → ipAddress`) and that mention alone kept the check green after the code that did the
+    mapping was deleted.
+    """
+    sources = {}
+    for path in (REPO / "frontend" / "src").rglob("*"):
+        if path.suffix not in {".ts", ".tsx"} or not path.is_file():
+            continue
+        if TESTS.search(str(path)):
+            continue
+        text = path.read_text(encoding="utf-8")
+        text = BLOCK_COMMENT.sub("", text)
+        text = LINE_COMMENT.sub("", text)
+        sources[path] = text
+    return sources
+
+
+def strip_interface(text: str, interface: str) -> str:
+    """`text` without the declaration of `interface` — declaring a field is not reading it."""
+    start = find_declaration(text, interface)
+    if start == -1:
+        return text
+    end = text.index("\n}", start) + 2
+    return text[:start] + text[end:]
+
+
+def unread_keys(
+    sources: dict[pathlib.Path, str],
+    declaring: pathlib.Path,
+    interface: str,
+    keys: set[str],
+    consumer: str | None,
+) -> list[str]:
+    """Keys the API sends that nothing consumes.
+
+    With a `consumer`, a key counts as consumed only when it appears **inside that function** — the place
+    that turns the response into what a screen shows. Without one, the whole frontend is searched, minus the
+    interface declaration and minus comments.
+
+    Counting occurrences anywhere was too weak, and measurably so: deleting the mapping that read
+    `event.ip_address` left the name in a prose comment and in the interface, and the check stayed green; the
+    same happened to `dsl_body`, which the create form legitimately sends as a request field. Neither is a
+    consumer of a *response*.
+    """
+    if consumer:
+        consumer_path, _, consumer_fn = consumer.partition("::")
+        text = sources.get(REPO / consumer_path)
+        if text is None:
+            raise SystemExit(f"check-frontend-types: {consumer_path} is not a frontend source")
+        joined = function_body(text, consumer_fn)
+    else:
+        corpus = []
+        for path, text in sources.items():
+            corpus.append(strip_interface(text, interface) if path == declaring else text)
+        joined = "\n".join(corpus)
+    return sorted(key for key in keys if not re.search(rf"\b{re.escape(key)}\b", joined))
+
+
+def function_body(text: str, name: str) -> str:
+    """The source of `function name(…) { … }`, or of `const name = (…) => { … }`.
+
+    Raises when the consumer cannot be found: a pair that names a consumer which does not exist would
+    otherwise compare against an empty string and report every field as unread, or — worse — be "fixed" by
+    pointing it at something that happens to contain the names.
+    """
+    match = re.search(
+        rf"(?:function\s+{name}\s*\(|const\s+{name}\s*=\s*\()", text
+    )
+    if not match:
+        raise SystemExit(f"check-frontend-types: consumer `{name}` not found")
+    start = text.index("{", match.end())
+    depth = 0
+    for index in range(start, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    raise SystemExit(f"check-frontend-types: consumer `{name}` has no closing brace")
+
+
 def main() -> int:
     problems = []
-    for rust_path, handler, ts_path, interface in PAIRS:
+    sources = frontend_sources()
+    for rust_path, handler, ts_path, interface, consumer in PAIRS:
         rust_file = REPO / rust_path
         sent = (
             handler_keys(rust_file, handler)
@@ -148,7 +276,17 @@ def main() -> int:
         missing = sorted(sent - declared)  # the server sends it, the interface does not declare it
         invented = sorted(declared - sent)  # the interface declares it, the server never sends it
 
-        status = "ok" if not missing and not invented else "FAIL"
+        # Declaring is not reading. A field the API sends, the interface declares and nothing consumes is the
+        # defect that let `dsl_body` be dropped: the edit page's textarea started empty and saving wrote the
+        # empty string back over the stored body.
+        allowed = UNREAD_ALLOWED.get(interface, {})
+        unread = [
+            key
+            for key in unread_keys(sources, REPO / ts_path, interface, sent, consumer)
+            if key not in allowed
+        ]
+
+        status = "ok" if not missing and not invented and not unread else "FAIL"
         print(f"  {status:4} {handler:18} → {interface:24} {len(sent)} keys")
         if missing:
             problems.append(f"{interface}: the API sends {missing}, which the interface does not declare")
@@ -156,6 +294,12 @@ def main() -> int:
             problems.append(
                 f"{interface}: declares {invented}, which `{handler}` never sends — a caller reading "
                 f"them gets `undefined`"
+            )
+        if unread:
+            problems.append(
+                f"{interface}: declares {unread}, which the API sends and no frontend source reads — a "
+                f"declared field nobody consumes is how a page silently shows nothing, or overwrites what it "
+                f"loaded"
             )
 
     if problems:

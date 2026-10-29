@@ -43,6 +43,10 @@ export interface Rule {
   body?: string
   /** Whether an executable rule exists behind this document. */
   executable?: boolean
+  /** The document's category, as the API sends it. */
+  category?: string
+  /** The document's tags, as the API sends them. */
+  tags: string[]
 }
 
 export type RuleStatus = 'draft' | 'active' | 'inactive' | 'pending-approval' | 'deprecated'

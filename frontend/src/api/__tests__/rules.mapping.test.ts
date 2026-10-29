@@ -45,7 +45,7 @@ describe('the rule mapping', () => {
   it('maps every field the API sends onto the view model', async () => {
     get.mockResolvedValue({ data: { rules: [WIRE_RULE] } })
 
-    const [rule] = await getRules()
+    const { rules: [rule] } = await getRules()
 
     expect(rule.id).toBe('rule-1')
     expect(rule.name).toBe('Score plus ten')
@@ -56,6 +56,8 @@ describe('the rule mapping', () => {
     expect(rule.createdAt).toBe('2026-10-01T10:00:00Z')
     expect(rule.updatedAt).toBe('2026-10-02T11:00:00Z')
     expect(rule.version).toBe(3)
+    expect(rule.category).toBe('scorecards')
+    expect(rule.tags).toEqual(['demo'])
   })
 
   it('reads the paginated envelope the API actually sends', async () => {
@@ -63,10 +65,15 @@ describe('the rule mapping', () => {
     // would show an empty list for a non-empty page.
     get.mockResolvedValue({ data: { total_count: 1, rules: [WIRE_RULE], page: 1, page_size: 20, total_pages: 1 } })
 
-    const rules = await getRules()
+    const page = await getRules()
 
-    expect(rules).toHaveLength(1)
-    expect(rules[0].name).toBe('Score plus ten')
+    expect(page.rules).toHaveLength(1)
+    expect(page.rules[0].name).toBe('Score plus ten')
+    // The envelope's counts, which the list needs to say how many rules exist rather than how many it loaded.
+    expect(page.totalCount).toBe(1)
+    expect(page.page).toBe(1)
+    expect(page.pageSize).toBe(20)
+    expect(page.totalPages).toBe(1)
   })
 
   it('carries the body, so the edit page cannot erase it', async () => {

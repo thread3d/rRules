@@ -25,6 +25,9 @@ interface ApiRule {
   status?: string
   version?: number
   executable?: boolean
+  // The API sends `owner` (always null until ownership is implemented). Declared so the interface
+  // describes the whole payload; no screen reads it, which `scripts/check-frontend-types.py` records.
+  owner?: string | null
   created_at?: string
   updated_at?: string
 }
@@ -39,6 +42,10 @@ function toRule(rule: ApiRule): Rule {
     name: rule.name,
     description: rule.description ?? undefined,
     status,
+    // The document's category and tags, which the API has always sent and the model dropped. The category
+    // is shown in the list; tags are carried for filtering.
+    category: rule.category ?? undefined,
+    tags: rule.tags ?? [],
     // Editor-only fields the list does not use yet; the API has no counterpart.
     hitPolicy: 'first',
     conditions: [],
@@ -55,11 +62,30 @@ function toRule(rule: ApiRule): Rule {
 }
 
 // Get all rules with optional filtering
-export async function getRules(params?: FilterRulesRequest): Promise<Rule[]> {
+/** One page of rules, with the counts the list needs in order to say how many there are. */
+export interface RulesPage {
+  rules: Rule[]
+  /** Total matching rules on the server — not `rules.length`, which is one page. */
+  totalCount: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
+export async function getRules(params?: FilterRulesRequest): Promise<RulesPage> {
   // `GET /v1/rules` answers `{total_count, rules[], page, page_size, total_pages}`
   // — the page envelope, not a `data` wrapper (specs/http-api.md, `rules.rs`).
   const response = await apiClient.get<PaginatedRulesResponse>('/rules', { params })
-  return (response.data.rules ?? []).map(toRule)
+  const envelope = response.data
+  return {
+    rules: (envelope.rules ?? []).map(toRule),
+    // These four were declared and never read, so a deployment with 60 rules showed 50 and said nothing about
+    // the other ten: the list counted what it had loaded and called that the total.
+    totalCount: envelope.total_count ?? 0,
+    page: envelope.page ?? 1,
+    pageSize: envelope.page_size ?? 0,
+    totalPages: envelope.total_pages ?? 0,
+  }
 }
 
 // Get a single rule by ID
@@ -113,7 +139,7 @@ export async function getRulesByCategory(category: string): Promise<Rule[]> {
 // search fetches the page and matches names locally; correctness over cleverness
 // until the API grows a query parameter.
 export async function searchRules(query: string): Promise<Rule[]> {
-  const rules = await getRules({ page_size: 200 })
+  const { rules } = await getRules({ page_size: 200 })
   const needle = query.trim().toLowerCase()
   if (!needle) return rules
   return rules.filter((rule) => rule.name.toLowerCase().includes(needle))

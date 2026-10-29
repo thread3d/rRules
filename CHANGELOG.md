@@ -12,6 +12,40 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.81] — 2026-10-29 — `make frontend-types` now checks that a field is *read*, and the four gaps it found
+
+The check compared shapes: does the interface declare what the API sends? That is necessary and was not
+sufficient. Three defects in the last four rounds were the same shape — **the API sent a field and no screen
+read it** — and every one of them passed:
+
+- `dsl_body`, dropped by the view model, so the edit page started blank and Save wrote the blank back;
+- `ip_address` / `user_agent`, declared on the audit payload and never shown, in a trail whose whole purpose
+  is "who did this, from where?";
+- `total_count` / `page` / `page_size` / `total_pages`, so a deployment with 60 rules showed 50 and said
+  nothing about the rest.
+
+Each pair in the check now names the **consumer** — the function that turns the response into what a screen
+shows, `path::function` because the interface and its consumer often live in different files — and a sent key
+counts as read only if it appears *inside that function*. Comments and tests are stripped from the corpus
+first: the audit viewer documents its mapping in prose, and that mention alone kept the check green after the
+code that did the mapping was deleted; `dsl_body` likewise survived because the create form legitimately
+sends it as a request field. Naming a field is not consuming it.
+
+What the stricter check found, and what this release fixes:
+
+| Gap | Fix |
+|---|---|
+| The rules list never read `total_count`, `page`, `page_size`, `total_pages` | `getRules` returns a `RulesPage`, the hook carries it, and the list shows "Page 1 of 2 — 60 rules in total" with Previous/Next. A deployment larger than one page no longer silently looks complete. |
+| The view model dropped `category` and `tags` | both are mapped; the list shows the category it was already filtering on |
+| The audit payload's `ip_address` / `user_agent` | mapped and displayed — `from <ip>`, and the user agent with the full value on hover |
+| `ApiRule` did not declare `owner` | declared; it is allow-listed as never shown, with the reason |
+| `listDecisions`, `getDecision`, `getDecisionIr`, `reloadDmn` | **deleted** — no callers, and a correct type nothing consumes is drift waiting to happen. Their shapes had been fixed in 9.0.61; being right and unused is not a reason to keep them. |
+
+The check is proven against the defects it exists for: removing the audit origin mapping, or the `dsl_body`
+mapping, now fails the gate (`declares ['ip_address', 'user_agent'], which the API sends and no frontend
+source reads`).
+
+
 ## [9.0.80] — 2026-10-29 — Text-only documents can be migrated, and the edit page stops eating bodies
 
 `PUT /v1/rules/{id}` accepts the same `rule` the create request does. That closes the gap 9.0.74 left:

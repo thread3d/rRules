@@ -7,6 +7,11 @@ export interface RulesListProps {
   rules: Rule[]
   isLoading?: boolean
   onRefresh?: () => void
+  /** Total rules on the server, which is not `rules.length` — that is one page. */
+  totalCount?: number
+  page?: number
+  totalPages?: number
+  goToPage?: (page: number) => void
 }
 
 export interface RulesStats {

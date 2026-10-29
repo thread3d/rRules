@@ -15,7 +15,15 @@ const STATUS_BADGE_COLORS: Record<string, string> = {
   archived: 'bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
 }
 
-export function RulesList({ rules, isLoading, onRefresh }: RulesListProps) {
+export function RulesList({
+  rules,
+  isLoading,
+  onRefresh,
+  totalCount = 0,
+  page = 1,
+  totalPages = 1,
+  goToPage,
+}: RulesListProps) {
   const navigate = useNavigate()
   const [busyId, setBusyId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -66,7 +74,9 @@ export function RulesList({ rules, isLoading, onRefresh }: RulesListProps) {
   // Calculate stats
   const stats = useMemo<RulesStats>(() => {
     return {
-      total: rules.length,
+      // The server's count, not the length of this page: showing `rules.length` as "Total Rules" said 50 on a
+      // deployment with 60 and never mentioned the rest.
+      total: totalCount || rules.length,
       active: rules.filter((r) => r.status === 'active').length,
       draft: rules.filter((r) => r.status === 'draft').length,
       zeroHit: 0, // Not implemented yet
@@ -174,6 +184,11 @@ export function RulesList({ rules, isLoading, onRefresh }: RulesListProps) {
                   >
                     {rule.name}
                   </Link>
+                  {rule.category && (
+                    <span className="ml-2 rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                      {rule.category}
+                    </span>
+                  )}
                 </td>
                 <td className="p-2">
                   <span
@@ -216,6 +231,31 @@ export function RulesList({ rules, isLoading, onRefresh }: RulesListProps) {
           )}
         </tbody>
       </table>
+      {totalPages > 1 && goToPage && (
+        <div className="mt-4 flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
+          <span>
+            Page {page} of {totalPages} — {totalCount} rule{totalCount === 1 ? '' : 's'} in total
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => goToPage(page - 1)}
+              disabled={page <= 1}
+              className="rounded-md border px-3 py-1 disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => goToPage(page + 1)}
+              disabled={page >= totalPages}
+              className="rounded-md border px-3 py-1 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

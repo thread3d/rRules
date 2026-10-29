@@ -252,6 +252,10 @@ export interface AuditEvent {
   resourceName?: string
   occurredAt: string
   payload: Record<string, unknown>
+  /** Where the request came from, when the API recorded it. */
+  ipAddress?: string
+  /** The caller's user agent, when the API recorded it. */
+  userAgent?: string
 }
 
 export interface AuditFilter {
@@ -303,6 +307,11 @@ type Option<T> = T | null | undefined
  *   resource_name → resourceName
  *   timestamp     → occurredAt
  *   details       → payload
+ *   ip_address    → ipAddress
+ *   user_agent    → userAgent
+ *
+ * The last two were declared on `BackendAuditEvent` and never read: an audit trail that drops its origin
+ * cannot answer the question it exists for ("who did this, from where?").
  */
 function mapBackendAuditEvent(event: BackendAuditEvent): AuditEvent {
   return {
@@ -315,6 +324,8 @@ function mapBackendAuditEvent(event: BackendAuditEvent): AuditEvent {
     resourceName: event.resource_name ?? undefined,
     occurredAt: event.timestamp,
     payload: event.details ?? {},
+    ipAddress: event.ip_address ?? undefined,
+    userAgent: event.user_agent ?? undefined,
   }
 }
 
@@ -335,6 +346,10 @@ function AuditEventCard({ event }: { event: AuditEvent }) {
           <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
             <span>At {new Date(event.occurredAt).toLocaleString()}</span>
             {event.actorName && <span>by {event.actorName}</span>}
+            {event.ipAddress && <span>| from {event.ipAddress}</span>}
+            {event.userAgent && (
+              <span title={event.userAgent}>| {event.userAgent.slice(0, 24)}…</span>
+            )}
             {event.subjectId && (
               <span>| Subject: {event.subjectType}/{event.subjectId.slice(0, 8)}...</span>
             )}
