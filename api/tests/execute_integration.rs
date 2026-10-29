@@ -44,7 +44,7 @@ use api::v1::execution::{
     batch_execute_rules, execute_rules, get_job_status, init_job_store, list_engines, list_jobs,
     reload_rules, JobStore, SharedRuleSet,
 };
-use api::v1::rules::create_rule;
+use api::v1::rules::{create_rule, get_rule, update_rule};
 use api::v1::sessions::{
     dispose_session, read_session_config, reset_session, SessionConfig, SessionManager,
 };
@@ -397,6 +397,8 @@ fn configure_test_routes(cfg: &mut web::ServiceConfig) {
             // The real scope's `POST /v1/rules`, mounted so a test can create a rule *document* and show
             // that it is not a rule the engine executes (see `specs/rule-sources.md`).
             .route("/rules", web::post().to(create_rule))
+            .route("/rules/{id}", web::get().to(get_rule))
+            .route("/rules/{id}", web::put().to(update_rule))
             .route("/rules/batch-execute", web::post().to(batch_execute_rules))
             .route("/rules/reload", web::post().to(reload_rules))
             .route("/jobs/{job_id}", web::get().to(get_job_status))
@@ -2713,4 +2715,126 @@ async fn a_tenant_rule_runs_only_for_that_tenant() {
         other_body["rules_matched"], 0,
         "and nobody else does: {other_body}"
     );
+}
+
+/// A document that predates structured rules can be made executable through `PUT`.
+///
+/// Documents created before 9.0.74 hold a `dsl_body` and nothing an engine can run, and there was no way to
+/// repair one short of deleting and re-creating it — losing its id, its history and its approvals. `PUT
+/// /v1/rules/{id}` now accepts the same `rule` the create request does: the engine validates it, the API
+/// writes it under the caller's tenant, and the document reports `executable: true` from then on.
+#[serial_test::serial]
+#[actix_web::test]
+async fn a_text_only_document_can_be_made_executable() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+
+    let app = init_test_app!();
+
+    // A document as the old interface produced them: text, nothing executable.
+    let created = test::TestRequest::post()
+        .uri("/v1/rules")
+        .set_json(json!({
+            "name": "legacy-rule",
+            "dsl_body": "rule \"legacy\" when score = 0 then log(\"hi\")",
+            "category": "pricing"
+        }))
+        .to_request();
+    let created_body: Value = test::read_body_json(test::call_service(&app, created).await).await;
+    assert_eq!(
+        created_body["executable"], false,
+        "a text-only document cannot run"
+    );
+    let rule_id = created_body["id"].as_str().expect("id").to_string();
+
+    // Give it the structure it always meant.
+    let updated = test::TestRequest::put()
+        .uri(&format!("/v1/rules/{rule_id}"))
+        .set_json(json!({
+            "rule": {
+                "id": "ignored",
+                "name": "ignored",
+                "salience": 0,
+                "no_loop": false,
+                "lock_on_active": false,
+                "condition": {"Pattern": {"fact_type": "scorecard", "field": "score",
+                                          "value": {"Integer": 0}, "op": "Eq"}},
+                "actions": [{"LogMessage": {"level": "Info", "message": "migrated"}}]
+            }
+        }))
+        .to_request();
+    let updated_resp = test::call_service(&app, updated).await;
+    assert!(
+        updated_resp.status().is_success(),
+        "the update is accepted: {}",
+        updated_resp.status()
+    );
+    let updated_body: Value = test::read_body_json(updated_resp).await;
+    assert_eq!(updated_body["executable"], true, "and it can run now");
+    assert_eq!(
+        updated_body["id"].as_str(),
+        Some(rule_id.as_str()),
+        "the document kept its identity"
+    );
+
+    // It executes, selected by the id the document has always had.
+    let reload = test::TestRequest::post()
+        .uri("/v1/rules/reload")
+        .set_json(json!({ "async_reload": false }))
+        .to_request();
+    assert!(test::call_service(&app, reload).await.status().is_success());
+
+    let executed = test::TestRequest::post()
+        .uri("/v1/execute")
+        .set_json(json!({
+            "engine": "rete",
+            "facts": { "scorecard": { "score": 0 } },
+            "rule_filter": { "name_pattern": rule_id }
+        }))
+        .to_request();
+    let executed_body: Value = test::read_body_json(test::call_service(&app, executed).await).await;
+    assert_eq!(
+        executed_body["rules_matched"], 1,
+        "the migrated rule is in the executing set under the document's id: {executed_body}"
+    );
+}
+
+/// A rule the engine rejects changes nothing — the document stays exactly as it was.
+#[serial_test::serial]
+#[actix_web::test]
+async fn a_rejected_rule_on_update_leaves_the_document_alone() {
+    reset_test_env();
+    let dir = create_test_rules_dir();
+    std::env::set_var("RULE_STORAGE_PATH", dir.to_str().unwrap());
+
+    let app = init_test_app!();
+
+    let created = test::TestRequest::post()
+        .uri("/v1/rules")
+        .set_json(json!({ "name": "untouched", "dsl_body": "text", "category": "c" }))
+        .to_request();
+    let created_body: Value = test::read_body_json(test::call_service(&app, created).await).await;
+    let rule_id = created_body["id"].as_str().expect("id").to_string();
+
+    let bad = test::TestRequest::put()
+        .uri(&format!("/v1/rules/{rule_id}"))
+        .set_json(json!({ "rule": { "not": "a rule" } }))
+        .to_request();
+    let bad_resp = test::call_service(&app, bad).await;
+    assert_eq!(
+        bad_resp.status().as_u16(),
+        400,
+        "a malformed rule is refused"
+    );
+
+    let fetched = test::TestRequest::get()
+        .uri(&format!("/v1/rules/{rule_id}"))
+        .to_request();
+    let fetched_body: Value = test::read_body_json(test::call_service(&app, fetched).await).await;
+    assert_eq!(
+        fetched_body["executable"], false,
+        "and the document is still a draft: {fetched_body}"
+    );
+    assert!(!dir.join("default").is_dir(), "nothing was written");
 }

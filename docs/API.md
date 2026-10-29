@@ -216,6 +216,10 @@ Full/partial update. **Auth:** `X-Tenant-ID`. **Request** (`UpdateRuleRequest`):
 ```json
 { "description": "new desc", "dsl_body": "rule ...", "tags": ["a","b"],
   "salience": 20, "status": "active" }
+
+A `rule` field (the engine's own rule JSON, as on create) makes the document executable — this is how a
+document created before structured rules existed is migrated, keeping its id, its history and its approvals.
+A rule the engine cannot load is a `400` and changes nothing.
 ```
 All fields optional; `tags` replaces the existing set. **Response:** `200`
 `RuleResponse`.

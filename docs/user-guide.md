@@ -38,8 +38,10 @@ Two consequences worth knowing:
 
 - a rule written by hand into the rules directory is executed directly; that is the format the sections
   below describe;
-- a rule created **before** the form sent structured rules has no executable form — the API reports it
-  `executable: false`. Re-create it through the form to make it runnable.
+- a rule created **before** the form sent structured rules has no executable form and reports
+  `executable: false`; the edit page's **Executable rule** section gives it the condition and action it
+  describes, and saving writes it into the rules directory — the document keeps its id, its history and its
+  approvals.
 
 `specs/rule-sources.md` states the whole picture, including what is still missing.
 

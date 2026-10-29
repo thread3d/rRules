@@ -385,6 +385,14 @@ pub struct UpdateRuleRequest {
     /// New status (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+
+    /// The structured rule this document is (`engine::rules::Rule` as JSON), optional.
+    ///
+    /// This is how a document created before 9.0.74 — a `dsl_body` and nothing an engine can run — becomes
+    /// executable: the caller supplies the condition and actions it always meant, the API validates them
+    /// with the engine and writes them under the caller's tenant. Absent leaves executability unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<serde_json::Value>,
 }
 
 /// Shared state for rules API (multi-tenant keyed by tenant_id + rule_uuid).
@@ -729,6 +737,33 @@ pub async fn update_rule(
         }
     };
 
+    // A structured rule makes (or re-makes) the document executable. Validate and write it **before** the
+    // store is touched, so a rule the engine rejects leaves the document exactly as it was.
+    let executable_written = match req.rule.as_ref() {
+        Some(structured) => {
+            let name_for_rule = {
+                let guard = store
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                match guard.get(&(tenant_id.clone(), id)) {
+                    Some(existing) => existing.rule_name.clone(),
+                    None => {
+                        return HttpResponse::NotFound().json(serde_json::json!({
+                            "error": "Rule not found"
+                        }))
+                    }
+                }
+            };
+            match write_executable_rule(id, &name_for_rule, &tenant_id, structured) {
+                Ok(_) => true,
+                Err(error) => {
+                    return HttpResponse::BadRequest().json(serde_json::json!({ "error": error }))
+                }
+            }
+        }
+        None => false,
+    };
+
     // First, check for duplicates and read the current state immutably
     let new_category_ref = req.category.clone();
     let key = (tenant_id.clone(), id);
@@ -804,6 +839,9 @@ pub async fn update_rule(
                     };
                 }
 
+                if executable_written {
+                    rule.executable = true;
+                }
                 rule.updated_at = Utc::now().to_rfc3339();
                 rule.updated_by = Some("system".to_string());
 

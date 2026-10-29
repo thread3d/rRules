@@ -69,6 +69,25 @@ describe('the rule mapping', () => {
     expect(rules[0].name).toBe('Score plus ten')
   })
 
+  it('carries the body, so the edit page cannot erase it', async () => {
+    // The view model dropped `dsl_body`, so the edit page's textarea started empty and Save wrote the empty
+    // string back over the stored text. The mapping is what makes `body` and `executable` reach the page.
+    get.mockResolvedValue({ data: { ...WIRE_RULE, executable: true } })
+
+    const rule = await getRule('rule-1')
+
+    expect(rule.body).toBe('rule "r" when true then log("ok")')
+    expect(rule.executable).toBe(true)
+  })
+
+  it('reports a document as not executable when the API does not say otherwise', async () => {
+    get.mockResolvedValue({ data: { ...WIRE_RULE } })
+
+    const rule = await getRule('rule-1')
+
+    expect(rule.executable).toBe(false)
+  })
+
   it('defaults a status it does not know rather than passing it through', async () => {
     get.mockResolvedValue({ data: { ...WIRE_RULE, status: 'something-new' } })
 

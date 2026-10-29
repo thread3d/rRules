@@ -12,6 +12,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.80] — 2026-10-29 — Text-only documents can be migrated, and the edit page stops eating bodies
+
+`PUT /v1/rules/{id}` accepts the same `rule` the create request does. That closes the gap 9.0.74 left:
+documents created before it hold a `dsl_body` and nothing an engine can run, and the only repair was to
+delete and re-create — losing the id, the history and any approvals.
+
+Now the engine validates the supplied rule, the API writes it under the caller's tenant, and the document
+reports `executable: true` from then on **keeping its identity**. A rule the engine rejects is a `400` before
+the store is touched, so a bad migration changes nothing at all — the test asserts both halves: the migrated
+document executes under its own id, and a malformed rule leaves it a draft with nothing written.
+
+The edit page gains an **Executable rule** section: the same fact/field/operator/type/value/message controls
+the create form has. Filling them in on an old document is the migration; leaving them empty saves only the
+body.
+
+**And a defect the edit page had all along, found while wiring it:** the frontend's view model dropped
+`dsl_body`, so the textarea started empty and saving wrote that empty string back over the stored body —
+opening a rule and pressing Save destroyed its text. `Rule.body` is mapped now; `rules.mapping.test.ts` fails
+without it (`expected undefined to be 'rule "r" when true then log("ok")'`).
+
+
 ## [9.0.79] — 2026-10-29 — The form speaks the engine's value types
 
 The form's value control was untyped: every non-integer became a string, so `1.5` — plainly a number to

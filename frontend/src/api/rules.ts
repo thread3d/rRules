@@ -24,6 +24,7 @@ interface ApiRule {
   tags?: string[]
   status?: string
   version?: number
+  executable?: boolean
   created_at?: string
   updated_at?: string
 }
@@ -43,6 +44,10 @@ function toRule(rule: ApiRule): Rule {
     conditions: [],
     actions: [],
     ownerId: '',
+    // The body the edit page shows and saves. Dropping it meant the page started blank and Save wrote the
+    // blank back over the stored text.
+    body: rule.dsl_body ?? '',
+    executable: rule.executable ?? false,
     createdAt: rule.created_at ?? '',
     updatedAt: rule.updated_at ?? '',
     version: rule.version ?? 1,

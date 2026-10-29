@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { getRule, updateRule } from '@/api/rules'
+import {
+  type ComparisonOperator,
+  type RuleDraft,
+  type RuleValueKind,
+  operatorsFor,
+  renderBody,
+  toEngineRule,
+} from '@/api/rule-builder'
 import { TestRunner } from '@/components/TestRunner'
 
 // Editing a rule: load it, change it, save it.
@@ -17,6 +25,15 @@ function EditRulePage() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [body, setBody] = useState('')
+  // The structured form, used to make a text-only document executable (migration) or to re-declare the rule
+  // behind an existing one. Left empty, the save touches only the body.
+  const [factType, setFactType] = useState('')
+  const [field, setField] = useState('')
+  const [op, setOp] = useState<ComparisonOperator>('Eq')
+  const [value, setValue] = useState('')
+  const [valueKind, setValueKind] = useState<RuleValueKind>('text')
+  const [message, setMessage] = useState('')
+  const [structureError, setStructureError] = useState<string | null>(null)
   const [detail, setDetail] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -32,7 +49,12 @@ function EditRulePage() {
         if (cancelled) return
         setName(rule.name)
         setDescription(rule.description ?? '')
-        setDetail(`status ${rule.status}, version ${rule.version}`)
+        setBody(rule.body ?? '')
+        setDetail(
+          `status ${rule.status}, version ${rule.version}, ${
+            rule.executable ? 'executable' : 'not executable — no engine can run it yet'
+          }`,
+        )
         setLoadError(null)
       })
       .catch((error: unknown) => {
@@ -53,10 +75,30 @@ function EditRulePage() {
     setSaveError(null)
     setSaving(true)
     try {
+      // A filled-in structure is what makes the document executable; the body is then re-rendered from it so
+      // the text describes the rule that runs. An empty structure leaves both alone.
+      const hasStructure = Boolean(factType.trim() && field.trim() && value.trim() && message.trim())
+      let structured: unknown
+      let renderedBody = body
+      if (hasStructure) {
+        const draft: RuleDraft = { factType, field, op, value, valueKind, message, salience: 0 }
+        try {
+          structured = toEngineRule(draft, name.trim())
+          renderedBody = renderBody(draft, name.trim())
+        } catch (error) {
+          setStructureError(
+            error instanceof Error ? error.message : 'The rule could not be built',
+          )
+          setSaving(false)
+          return
+        }
+      }
+      setStructureError(null)
       await updateRule(id, {
         name: name.trim(),
         description: description.trim() || undefined,
-        dsl_body: body,
+        dsl_body: renderedBody,
+        rule: structured,
       })
       setSavedAt(new Date().toLocaleTimeString())
     } catch (error) {
@@ -124,10 +166,98 @@ function EditRulePage() {
             value={body}
             onChange={(event) => setBody(event.target.value)}
             rows={10}
-            placeholder="The rule's body, stored as text and never compiled by the API."
+            placeholder="The rule's body text. Fill in the structure below to make the rule executable; the body is then re-rendered to describe it."
             className="w-full rounded-md border px-3 py-2 font-mono text-sm"
           />
         </label>
+
+        <fieldset className="space-y-3 rounded-md border p-4">
+          <legend className="px-1 text-sm font-medium">
+            Executable rule (optional)
+          </legend>
+          <p className="text-xs text-gray-500">
+            A document with only a body cannot be executed. Fill these in to give it the condition and action
+            it describes, and the API will write it into the rules directory — the document keeps its id,
+            history and approvals.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500">Fact type</span>
+              <input
+                name="fact_type"
+                value={factType}
+                onChange={(event) => setFactType(event.target.value)}
+                placeholder="customer"
+                className="w-full rounded-md border px-3 py-2"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500">Field</span>
+              <input
+                name="field"
+                value={field}
+                onChange={(event) => setField(event.target.value)}
+                placeholder="status"
+                className="w-full rounded-md border px-3 py-2"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500">Operator</span>
+              <select
+                name="operator"
+                value={op}
+                onChange={(event) => setOp(event.target.value as ComparisonOperator)}
+                className="w-full rounded-md border px-3 py-2"
+              >
+                {operatorsFor(valueKind).map((operator) => (
+                  <option key={operator} value={operator}>
+                    {operator}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500">Type</span>
+              <select
+                name="value_kind"
+                value={valueKind}
+                onChange={(event) => {
+                  const kind = event.target.value as RuleValueKind
+                  setValueKind(kind)
+                  if (!operatorsFor(kind).includes(op)) setOp('Eq')
+                }}
+                className="w-full rounded-md border px-3 py-2"
+              >
+                <option value="text">Text</option>
+                <option value="number">Number</option>
+                <option value="boolean">True / false</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500">Value</span>
+              <input
+                name="value"
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+                placeholder="premium"
+                className="w-full rounded-md border px-3 py-2"
+              />
+            </label>
+          </div>
+          <label className="block">
+            <span className="mb-1 block text-xs text-gray-500">Log message</span>
+            <input
+              name="message"
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder="What the rule records when it fires"
+              className="w-full rounded-md border px-3 py-2"
+            />
+          </label>
+          {structureError && (
+            <p className="text-sm text-red-600 dark:text-red-400">{structureError}</p>
+          )}
+        </fieldset>
 
         {saveError && (
           <div className="rounded-md bg-red-50 p-4 dark:bg-red-900/20">

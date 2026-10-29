@@ -150,6 +150,20 @@ list narrows to `=`/`!=` for booleans because ordering one is meaningless.
 `Number('')` being `0` produced one real bug on the way — an empty box became a comparison against zero,
 which looks like a deliberate answer — caught by the test written for the empty case.
 
+### A text-only document can be migrated (9.0.80)
+
+`PUT /v1/rules/{id}` accepts the same `rule` the create request does. That closes the gap left by 9.0.74:
+documents created before it hold a `dsl_body` and nothing an engine can run, and the only repair was to
+delete and re-create — losing the id, the history and any approvals.
+
+The engine validates the rule, the API writes it under the caller's tenant, and the document reports
+`executable: true` from then on, **keeping its identity**. A rule the engine rejects is a `400` before the
+store is touched, so a bad migration changes nothing.
+
+**And a defect the edit page had all along:** the frontend's view model dropped `dsl_body`, so the edit form's
+textarea started empty and saving wrote that empty string back over the stored body — opening a rule and
+pressing Save destroyed its text. `Rule.body` is mapped now, and `rules.mapping.test.ts` fails without it.
+
 **Still open, in the order that matters:** `dsl_body` is not compiled (there is no rule-syntax parser, and
 `dsl_body` is a FEEL expression inside a rule); the executing set is per deployment rather than per tenant;
 and documents written before this slice have no rule file, so they remain `executable: false`.

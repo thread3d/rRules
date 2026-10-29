@@ -32,6 +32,17 @@ export interface Rule {
   createdAt: string
   updatedAt: string
   version: number
+  /**
+   * The document's stored body text.
+   *
+   * It was never mapped from the API's `dsl_body`, so the edit page's textarea started empty and saving
+   * overwrote whatever the rule held with an empty string — the body was destroyed by opening the page and
+   * pressing Save. This field is what the page reads and writes; `executable` says whether an engine can
+   * run the document (`specs/rule-sources.md`).
+   */
+  body?: string
+  /** Whether an executable rule exists behind this document. */
+  executable?: boolean
 }
 
 export type RuleStatus = 'draft' | 'active' | 'inactive' | 'pending-approval' | 'deprecated'
