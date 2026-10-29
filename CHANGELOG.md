@@ -12,6 +12,32 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.79] — 2026-10-29 — The form speaks the engine's value types
+
+The form's value control was untyped: every non-integer became a string, so `1.5` — plainly a number to
+whoever typed it — was stored as `"1.5"` and compared against nothing. A comparison against the wrong kind
+is always false, so the rule silently never fired.
+
+It now asks for the kind — **Text**, **Number**, **True / false** — and `encodeValue` encodes *that kind or
+reports that the text is not one*:
+
+| Typed | Sent | Refused |
+|---|---|---|
+| `42` as Number | `{"Integer": 42}` | `premium` as Number |
+| `1.5` as Number | `{"Float": 1.5}` | `1.5` as True/false |
+| `premium` as Text | `{"String": "premium"}` | an empty Text |
+| `true` as True/false | `{"Bool": true}` | — |
+
+A wrong kind is an error in the form, not a reinterpretation, and the operator list narrows to `=`/`!=` for
+booleans because ordering one is meaningless — the form cannot offer a comparison the engine would refuse.
+
+**One real bug came out of writing the test for it:** `Number('')` is `0` in JavaScript, so an empty number
+box became a comparison against zero — the worst kind of wrong answer, because it looks deliberate. The
+empty case is now rejected, and the test that found it stays.
+
+The frontend suite is 45 tests across 8 files; the browser gate still drives the form.
+
+
 ## [9.0.78] — 2026-10-29 — The interface can finally create a rule that runs
 
 The last piece of `specs/rule-sources.md`, and the one a user would notice first.

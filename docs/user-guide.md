@@ -28,8 +28,10 @@ Two things in this system are called "a rule", and only one of them is executed:
 | Runs | **no**, unless the create request carried a structured `rule` | yes, via `POST /v1/execute` |
 
 The **New Rule** form in the interface sends the structured form: you choose a fact type, a field, an
-operator and a value for the condition, and a log message for the action, and the API writes the engine's
-own rule into the rules directory — so the rule is executable after the next reload. The body text shown
+operator, a **type of value** (text, number or true/false) and the value itself for the condition, plus a log
+message for the action, and the API writes the engine's own rule into the rules directory — so the rule is
+executable after the next reload. A value that is not the type you selected is reported in the form rather
+than reinterpreted, and a boolean offers only `=` and `!=`. The body text shown
 afterwards is a rendering of that same rule, not a separate definition.
 
 Two consequences worth knowing:

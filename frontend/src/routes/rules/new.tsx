@@ -4,6 +4,8 @@ import { createRule } from '@/api/rules'
 import {
   type ComparisonOperator,
   type RuleDraft,
+  type RuleValueKind,
+  operatorsFor,
   renderBody,
   toEngineRule,
 } from '@/api/rule-builder'
@@ -14,13 +16,19 @@ import {
 // table with no name field and no submit button, so a rule could not be created from
 // the interface at all — while the rule list offered a "Create Rule" link to it.
 
-const OPERATORS: Array<{ value: ComparisonOperator; label: string }> = [
-  { value: 'Eq', label: '=' },
-  { value: 'Ne', label: '!=' },
-  { value: 'Gt', label: '>' },
-  { value: 'Ge', label: '>=' },
-  { value: 'Lt', label: '<' },
-  { value: 'Le', label: '<=' },
+const OPERATOR_LABELS: Record<ComparisonOperator, string> = {
+  Eq: '=',
+  Ne: '!=',
+  Gt: '>',
+  Ge: '>=',
+  Lt: '<',
+  Le: '<=',
+}
+
+const VALUE_KINDS: Array<{ value: RuleValueKind; label: string; placeholder: string }> = [
+  { value: 'text', label: 'Text', placeholder: 'premium' },
+  { value: 'number', label: 'Number', placeholder: '100' },
+  { value: 'boolean', label: 'True / false', placeholder: 'true' },
 ]
 
 function NewRulePage() {
@@ -31,6 +39,7 @@ function NewRulePage() {
   const [field, setField] = useState('status')
   const [op, setOp] = useState<ComparisonOperator>('Eq')
   const [value, setValue] = useState('premium')
+  const [valueKind, setValueKind] = useState<RuleValueKind>('text')
   const [message, setMessage] = useState('High status customer detected')
   const [salience, setSalience] = useState(0)
   const [submitting, setSubmitting] = useState(false)
@@ -41,7 +50,7 @@ function NewRulePage() {
     setError(null)
     setSubmitting(true)
     try {
-      const draft: RuleDraft = { factType, field, op, value, message, salience }
+      const draft: RuleDraft = { factType, field, op, value, valueKind, message, salience }
       const trimmed = name.trim()
       await createRule({
         name: trimmed,
@@ -112,7 +121,7 @@ function NewRulePage() {
 
         <fieldset className="space-y-3 rounded-md border p-4">
           <legend className="px-1 text-sm font-medium">When</legend>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
             <label className="block">
               <span className="mb-1 block text-xs text-gray-500">Fact type</span>
               <input
@@ -141,9 +150,31 @@ function NewRulePage() {
                 onChange={(event) => setOp(event.target.value as ComparisonOperator)}
                 className="w-full rounded-md border px-3 py-2"
               >
-                {OPERATORS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
+                {operatorsFor(valueKind).map((operator) => (
+                  <option key={operator} value={operator}>
+                    {OPERATOR_LABELS[operator]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500">Type</span>
+              <select
+                name="value_kind"
+                value={valueKind}
+                onChange={(event) => {
+                  const kind = event.target.value as RuleValueKind
+                  setValueKind(kind)
+                  // A kind that cannot express the chosen operator drops it, with the value, rather than
+                  // sending something the engine will refuse.
+                  if (!operatorsFor(kind).includes(op)) setOp('Eq')
+                  setValue(VALUE_KINDS.find((k) => k.value === kind)?.placeholder ?? '')
+                }}
+                className="w-full rounded-md border px-3 py-2"
+              >
+                {VALUE_KINDS.map((kind) => (
+                  <option key={kind.value} value={kind.value}>
+                    {kind.label}
                   </option>
                 ))}
               </select>
@@ -154,6 +185,7 @@ function NewRulePage() {
                 name="value"
                 value={value}
                 onChange={(event) => setValue(event.target.value)}
+                placeholder={VALUE_KINDS.find((k) => k.value === valueKind)?.placeholder}
                 required
                 className="w-full rounded-md border px-3 py-2"
               />

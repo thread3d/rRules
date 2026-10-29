@@ -19,14 +19,10 @@ export interface RuleDraft {
   /** Field on that fact, e.g. `status`. */
   field: string
   op: ComparisonOperator
-  /**
-   * Value to compare against, as typed by the user.
-   *
-   * A value that parses as an integer becomes `{"Integer": n}` and anything else `{"String": s}` —
-   * the two carriers this form can express. Fractions and booleans are not offered yet, because the
-   * form has no control that distinguishes them from text.
-   */
+  /** Value to compare against, as typed by the user. */
   value: string
+  /** What kind of value that text is. */
+  valueKind: RuleValueKind
   /** Message logged when the rule fires. */
   message: string
   /** Rule salience (higher fires first). */
@@ -44,25 +40,54 @@ export interface EngineRule {
     Pattern: {
       fact_type: string
       field: string
-      value: Record<string, number | string>
+      value: Record<string, number | string | boolean>
       op: ComparisonOperator
     }
   }
   actions: Array<{ LogMessage: { level: string; message: string } }>
 }
 
+/** The kinds of value the form can express, each mapping to an engine `Value` carrier. */
+export type RuleValueKind = 'number' | 'text' | 'boolean'
+
+/** Which comparison operators make sense for a value kind. Ordering a boolean is meaningless. */
+export function operatorsFor(kind: RuleValueKind): ComparisonOperator[] {
+  return kind === 'boolean' ? ['Eq', 'Ne'] : ['Eq', 'Ne', 'Gt', 'Ge', 'Lt', 'Le']
+}
+
 /**
- * The engine value for the form's text.
+ * The engine value for the form's text, or `null` when the text is not that kind of value.
  *
- * `Integer` when the text is an integer — `Number`/`Float` and booleans are deliberately not guessed at,
- * so `1.5` becomes the *string* `"1.5"` rather than a silently truncated number.
+ * **Typed, not guessed.** The caller says which kind it is collecting; a text that does not parse as that
+ * kind is an error the form reports, rather than a value silently reinterpreted. An earlier version had no
+ * kind at all and made every non-integer a string, so `1.5` — which a user plainly meant as a number —
+ * became `"1.5"` and compared against nothing.
  */
-export function encodeValue(raw: string): Record<string, number | string> {
+export function encodeValue(
+  raw: string,
+  kind: RuleValueKind,
+): Record<string, number | string | boolean> | null {
   const trimmed = raw.trim()
-  if (/^-?\d+$/.test(trimmed)) {
-    return { Integer: Number.parseInt(trimmed, 10) }
+  switch (kind) {
+    case 'number': {
+      // `Number('')` is `0`, so an empty box would otherwise become a comparison against zero — the worst
+      // kind of wrong answer, because it looks like a deliberate one.
+      if (trimmed.length === 0) return null
+      if (/^-?\d+$/.test(trimmed)) {
+        const parsed = Number.parseInt(trimmed, 10)
+        return Number.isSafeInteger(parsed) ? { Integer: parsed } : null
+      }
+      const fraction = Number(trimmed)
+      return Number.isFinite(fraction) ? { Float: fraction } : null
+    }
+    case 'boolean': {
+      if (/^true$/i.test(trimmed)) return { Bool: true }
+      if (/^false$/i.test(trimmed)) return { Bool: false }
+      return null
+    }
+    case 'text':
+      return trimmed.length > 0 ? { String: trimmed } : null
   }
-  return { String: trimmed }
 }
 
 /**
@@ -73,6 +98,12 @@ export function encodeValue(raw: string): Record<string, number | string> {
  * They are set here anyway, because a rule without them is not a rule.
  */
 export function toEngineRule(draft: RuleDraft, name: string): EngineRule {
+  const value = encodeValue(draft.value, draft.valueKind)
+  if (!value) {
+    throw new Error(
+      `"${draft.value}" is not a ${draft.valueKind} value — check the value and its type`,
+    )
+  }
   return {
     id: name,
     name,
@@ -83,7 +114,7 @@ export function toEngineRule(draft: RuleDraft, name: string): EngineRule {
       Pattern: {
         fact_type: draft.factType.trim(),
         field: draft.field.trim(),
-        value: encodeValue(draft.value),
+        value,
         op: draft.op,
       },
     },
@@ -109,8 +140,15 @@ const OPERATOR_TEXT: Record<ComparisonOperator, string> = {
  * it, and it is regenerated from the same draft, so the two cannot disagree.
  */
 export function renderBody(draft: RuleDraft, name: string): string {
-  const value = encodeValue(draft.value)
-  const shown = 'String' in value ? JSON.stringify(value.String) : String(value.Integer)
+  const value = encodeValue(draft.value, draft.valueKind)
+  const shown =
+    value === null
+      ? draft.value.trim()
+      : 'String' in value
+        ? JSON.stringify(value.String)
+        : 'Bool' in value
+          ? String(value.Bool)
+          : String('Integer' in value ? value.Integer : value.Float)
   return [
     `rule "${name}"`,
     `when ${draft.factType.trim()}.${draft.field.trim()} ${OPERATOR_TEXT[draft.op]} ${shown}`,

@@ -138,6 +138,18 @@ from the same draft**, so the text shown on the edit page describes the rule tha
 second one. `frontend/src/api/__tests__/rule-builder.test.ts` pins the shape and the rendering, including
 that `1.5` stays a string rather than becoming a silently truncated integer.
 
+### The form speaks the engine's value types (9.0.79)
+
+The form's value control was untyped: every non-integer became a string, so `1.5` — plainly a number to the
+person who typed it — was stored as `"1.5"` and compared against nothing. It now asks for the kind
+(**Text**, **Number**, **True / false**) and `encodeValue` encodes that kind or reports that the text is not
+one: an integer becomes `{"Integer": n}`, a fraction `{"Float": f}`, text `{"String": s}`, `true`/`false`
+`{"Bool": b}`. A value of the wrong kind is an error in the form, not a reinterpretation, and the operator
+list narrows to `=`/`!=` for booleans because ordering one is meaningless.
+
+`Number('')` being `0` produced one real bug on the way — an empty box became a comparison against zero,
+which looks like a deliberate answer — caught by the test written for the empty case.
+
 **Still open, in the order that matters:** `dsl_body` is not compiled (there is no rule-syntax parser, and
 `dsl_body` is a FEEL expression inside a rule); the executing set is per deployment rather than per tenant;
 and documents written before this slice have no rule file, so they remain `executable: false`.
