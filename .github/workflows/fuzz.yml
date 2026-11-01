@@ -52,13 +52,19 @@ jobs:
             engine/fuzz -> target
 
       - name: Build fuzz targets
-        run: make fuzz-build
+        run: make fuzz-build TARGET_TRIPLE=x86_64-unknown-linux-gnu
+        env:
+          CARGO_TARGET_TRIPLE: x86_64-unknown-linux-gnu
 
       - name: Fuzz the FEEL parser
-        run: make fuzz TARGET=feel_parser
+        run: make fuzz TARGET=feel_parser TARGET_TRIPLE=x86_64-unknown-linux-gnu
+        env:
+          CARGO_TARGET_TRIPLE: x86_64-unknown-linux-gnu
 
       - name: Fuzz the decision-table loader
-        run: make fuzz TARGET=decision_table
+        run: make fuzz TARGET=decision_table TARGET_TRIPLE=x86_64-unknown-linux-gnu
+        env:
+          CARGO_TARGET_TRIPLE: x86_64-unknown-linux-gnu
 
       - name: Upload crash artifacts
         if: failure()

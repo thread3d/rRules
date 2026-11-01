@@ -269,7 +269,7 @@ CARGO_HOME ?= $(if $(shell test -w "$$HOME" 2>/dev/null && echo y),$(HOME)/.carg
 
 # Build cargo-fuzz targets (Phase 38+; requires nightly toolchain)
 fuzz-build:
-	cd engine && CARGO_HOME="$(CARGO_HOME)" cargo +nightly fuzz build
+	cd engine && CARGO_HOME="$(CARGO_HOME)" cargo +nightly fuzz build $(if $(TARGET_TRIPLE),--target $(TARGET_TRIPLE),--target x86_64-unknown-linux-gnu)
 
 # Run DMN fuzz targets (Phase 38+; requires nightly + cargo-fuzz).
 # Usage: make fuzz TARGET=decision_table FUZZ_MAX_TOTAL_TIME=300
@@ -286,8 +286,10 @@ fuzz:
 	run() { \
 		echo "Fuzzing $$1 ($(FUZZ_RUNS) runs, max $(FUZZ_MAX_TOTAL_TIME) s)..."; \
 		status=0; \
+		TARGET_TRG="$(if $(TARGET_TRIPLE),$(TARGET_TRIPLE),x86_64-unknown-linux-gnu)"; \
 		(cd engine && CARGO_HOME="$(CARGO_HOME)" timeout --signal=INT --kill-after=30 $(FUZZ_MAX_TOTAL_TIME) \
 			cargo +nightly fuzz run $$1 -- \
+				--target $$TARGET_TRG \
 				-runs=$(FUZZ_RUNS) -max_total_time=$(FUZZ_MAX_TOTAL_TIME)) || status=$$?; \
 		if [ $$status -eq 124 ] || [ $$status -eq 130 ]; then \
 			echo "  $$1: reached its $(FUZZ_MAX_TOTAL_TIME)s budget"; \
