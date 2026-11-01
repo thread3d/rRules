@@ -129,7 +129,7 @@ fn fuzz_value(cur: &mut Cursor) -> Value {
         1 => Value::Number(Decimal::from(cur.u8() as i64)),
         2 => Value::Integer(n as i64 - 128),
         3 => Value::String(format!("s{}", n % 5)),
-        4 => Value::Bool(n % 2 == 0),
+        4 => Value::Bool(n.is_multiple_of(2)),
         _ => Value::Null,
     }
 }
