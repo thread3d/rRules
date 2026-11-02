@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme singleton-tests frontend-types verification-cost preflight audit deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build
+.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme singleton-tests frontend-types verification-cost preflight audit deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build fuzz-invocation
 
 # Build the Rust workspace
 build:
@@ -86,6 +86,12 @@ verification-cost:
 # resettable, and resettability buys nothing when two tests run at once.
 singleton-tests:
 	./scripts/check-singleton-tests.py
+
+# The two fuzz recipes must give cargo-fuzz the same `--target`, before the `--` that hands the rest to
+# libFuzzer: cargo-fuzz's own default is the triple it was compiled for, not the host it runs on, and
+# the prebuilt musl binary makes that musl — no std, no sanitizer. `make fuzz` had it after the `--`.
+fuzz-invocation:
+	./scripts/check-fuzz-invocation.py
 
 # The commands the README tells a reader to run must exist: a target, a binary, a crate, a directory.
 readme:
@@ -241,7 +247,7 @@ e2e:
 	./scripts/e2e-smoke.sh
 
 # Full CI pipeline (build + test + lint + format check + frontend)
-ci: preflight build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets readme singleton-tests frontend-types verification-cost deploy-env e2e
+ci: preflight build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets readme singleton-tests fuzz-invocation frontend-types verification-cost deploy-env e2e
 	@echo "CI pipeline complete"
 
 # Run DMN subsystem benchmarks (Criterion, Phase 36+)
@@ -278,10 +284,28 @@ baseline-update:
 # fall back to the gitignored `.cargo-home/` the workspace already carries. An explicit
 # CARGO_HOME from the environment still wins; where $HOME is writable this is cargo's default.
 CARGO_HOME ?= $(if $(shell test -w "$$HOME" 2>/dev/null && echo y),$(HOME)/.cargo,$(CURDIR)/.cargo-home)
+# Exported, not just defined: `preflight` is a script that decides whether the machine is trustworthy by
+# looking at `$CARGO_HOME`, and a make variable it cannot see is a make variable that does not exist to
+# it — so `make ci` in a clean shell here failed at its first gate on the very condition it had already
+# accounted for, telling the reader to do what the Makefile was doing.
+export CARGO_HOME
+
+# The triple cargo-fuzz builds and runs for — and it has to be given to cargo-fuzz **itself**.
+#
+# `cargo fuzz` defaults `--target` to the triple *it* was compiled for, not the host it runs on
+# (`utils::default_target()` is `current_platform::CURRENT_PLATFORM`, a compile-time constant). The
+# prebuilt musl binary that `taiki-e/install-action` installs therefore asks cargo for
+# `x86_64-unknown-linux-musl`, which fails twice on a runner: that target's std is not installed, and
+# a sanitizer build refuses a statically linked libc ("sanitizer is incompatible with statically
+# linked libc"). That is what failed the nightly Fuzz job on f84fcc1, after `fuzz-build` had
+# succeeded — because `fuzz-build` passed `--target` to cargo-fuzz and `fuzz` passed it to libFuzzer,
+# which ignored it. One variable, passed in one place, before the `--` that hands the rest to
+# libFuzzer; `scripts/check-fuzz-invocation.py` fails the build if they ever disagree again.
+FUZZ_TARGET_TRIPLE ?= $(or $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p'),x86_64-unknown-linux-gnu)
 
 # Build cargo-fuzz targets (Phase 38+; requires nightly toolchain)
 fuzz-build:
-	cd engine && CARGO_HOME="$(CARGO_HOME)" cargo +nightly fuzz build $(if $(TARGET_TRIPLE),--target $(TARGET_TRIPLE),--target x86_64-unknown-linux-gnu)
+	cd engine && CARGO_HOME="$(CARGO_HOME)" cargo +nightly fuzz build --target $(FUZZ_TARGET_TRIPLE)
 
 # Run DMN fuzz targets (Phase 38+; requires nightly + cargo-fuzz).
 # Usage: make fuzz TARGET=decision_table FUZZ_MAX_TOTAL_TIME=300
@@ -298,10 +322,8 @@ fuzz:
 	run() { \
 		echo "Fuzzing $$1 ($(FUZZ_RUNS) runs, max $(FUZZ_MAX_TOTAL_TIME) s)..."; \
 		status=0; \
-		TARGET_TRG="$(if $(TARGET_TRIPLE),$(TARGET_TRIPLE),x86_64-unknown-linux-gnu)"; \
 		(cd engine && CARGO_HOME="$(CARGO_HOME)" timeout --signal=INT --kill-after=30 $(FUZZ_MAX_TOTAL_TIME) \
-			cargo +nightly fuzz run $$1 -- \
-				--target $$TARGET_TRG \
+			cargo +nightly fuzz run --target $(FUZZ_TARGET_TRIPLE) $$1 -- \
 				-runs=$(FUZZ_RUNS) -max_total_time=$(FUZZ_MAX_TOTAL_TIME)) || status=$$?; \
 		if [ $$status -eq 124 ] || [ $$status -eq 130 ]; then \
 			echo "  $$1: reached its $(FUZZ_MAX_TOTAL_TIME)s budget"; \
@@ -343,6 +365,7 @@ help:
 	@echo "  docs-snippets   - Compile every Rust example in docs/user-guide.md"
 	@echo "  readme          - Check the README's commands against the Makefile and crates"
 	@echo "  singleton-tests - Tests observing a process-wide tracker must be #[serial]"
+	@echo "  fuzz-invocation - The fuzz recipes give cargo-fuzz the same --target, before the --"
 	@echo "  preflight       - Disk, cache and cargo-home sanity: a gate's verdict is only worth reading on a healthy machine"
 	@echo "  frontend-types  - The interface's response shapes match the keys the API sends"
 	@echo "  verification-cost - The verified crates stay light enough for the verification to finish"

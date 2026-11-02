@@ -3,7 +3,7 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.84** — released from a verified tree: everything in the table below was measured by a gate,
+**9.0.85** — released from a verified tree: everything in the table below was measured by a gate,
 not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
@@ -35,6 +35,7 @@ make deploy-env      # every variable the chart and manifests set is one the ser
 make image-check     # the Dockerfile's stages build from its COPY set, without a container
 make memcheck        # memory-regression gate against a committed baseline
 make fuzz            # bounded fuzzing of the FEEL parser and the decision-table loader
+make fuzz-invocation # both fuzz recipes hand cargo-fuzz the target it will actually build
 ```
 
 The browser gate, the citation check, the guide's examples, the README's commands and the deployment

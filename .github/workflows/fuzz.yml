@@ -51,20 +51,20 @@ jobs:
             . -> target
             engine/fuzz -> target
 
+      # The triple goes to cargo-fuzz itself — the Makefile puts `--target` *before* the `--` that
+      # hands the rest of the line to libFuzzer. It has to: cargo-fuzz defaults `--target` to the
+      # triple its own binary was compiled for, which for the musl build this action installs is
+      # `x86_64-unknown-linux-musl` — a target with no std on the runner and a sanitizer that refuses
+      # a statically linked libc. The `CARGO_TARGET_TRIPLE` this used to set reads like it did the
+      # same thing; cargo never reads it (`CARGO_BUILD_TARGET` is cargo's variable).
       - name: Build fuzz targets
-        run: make fuzz-build TARGET_TRIPLE=x86_64-unknown-linux-gnu
-        env:
-          CARGO_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+        run: make fuzz-build FUZZ_TARGET_TRIPLE=x86_64-unknown-linux-gnu
 
       - name: Fuzz the FEEL parser
-        run: make fuzz TARGET=feel_parser TARGET_TRIPLE=x86_64-unknown-linux-gnu
-        env:
-          CARGO_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+        run: make fuzz TARGET=feel_parser FUZZ_TARGET_TRIPLE=x86_64-unknown-linux-gnu
 
       - name: Fuzz the decision-table loader
-        run: make fuzz TARGET=decision_table TARGET_TRIPLE=x86_64-unknown-linux-gnu
-        env:
-          CARGO_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+        run: make fuzz TARGET=decision_table FUZZ_TARGET_TRIPLE=x86_64-unknown-linux-gnu
 
       - name: Upload crash artifacts
         if: failure()

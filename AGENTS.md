@@ -73,7 +73,11 @@ make preflight   # disk, cache and cargo-home sanity — see "a slow environment
 `make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).
 `make bench` runs on the pinned stable toolchain and `make memcheck` compares against the tracked
 frozen baseline (`engine/benches/snapshots/baseline.json`); `make fuzz` is the only one that needs
-the nightly toolchain, plus `cargo-fuzz`.
+the nightly toolchain, plus `cargo-fuzz`. `cargo-fuzz` must be given `--target` explicitly
+(`FUZZ_TARGET_TRIPLE`, defaulting to the host triple), *before* the `--` that hands the rest of the
+line to libFuzzer: its own default is the triple `cargo-fuzz` was compiled for — the musl prebuilt
+binary on a runner — whose std is not installed and which no sanitizer accepts.
+`make fuzz-invocation` fails the build when the two fuzz recipes disagree about it.
 
 CodeWitness compiles the crate itself and passes `--offline` to cargo, so `make verify` runs with
 `CARGO_NET_OFFLINE=false`: a lockfile pinning a version newer than its index snapshot otherwise fails
@@ -225,6 +229,11 @@ are struck through with the release that closed them, never quietly removed.
 - Never share a port with something already listening. Both the API server and Chromium's DevTools
   endpoint must take an OS-assigned free port: a stale server on a fixed port made every route render
   blank once, and a fixed DevTools port failed CI.
+- **A hosted runner is not a developer machine.** `ubuntu-latest` presents about 12 GB free on a
+  72 GB root, because its image carries dotnet, the Android SDK, GHC and CodeQL — several GB this
+  project never uses. `make preflight` refuses to trust a build below 15 GB of headroom, so every Rust
+  job in `ci.yml` reclaims those toolchains first (`.github/actions/disk-space`, one composite action
+  for all four). The Documentation job did not, and reported the runner's disk as a verdict on the code.
 - `cmd | tail` reports *tail's* exit status. Use `cmd > log 2>&1; echo "exit=$?"`.
 - **A slow environment produces the same report as a broken one.** `make verify` reported all 35
   requirements BLOCKED for two rounds; the api build "timed out with 0 diagnostics", which is a

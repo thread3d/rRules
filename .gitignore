@@ -28,6 +28,13 @@ engine/fuzz/artifacts/
 #    frozen baseline.json is committed) ─────────────────────────
 engine/benches/snapshots/current.json
 
+# ── Python bytecode ───────────────────────────────────────────
+# The gates are scripts, not an importable package, but a script imported as a module (or run from a
+# REPL) still writes a cache next to itself — and two of those were committed before this rule
+# existed. Nothing here is source.
+__pycache__/
+*.pyc
+
 # ── Logs ──────────────────────────────────────────────────────
 *.log
 npm-debug.log*

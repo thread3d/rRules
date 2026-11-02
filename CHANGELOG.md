@@ -12,6 +12,87 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.85] — 2026-11-02 — The fuzz job never fuzzed, and preflight measured the runner
+
+A hundred notifications had accumulated over four days. Reading them instead of reacting to them split
+them cleanly: of the last hundred workflow runs, **72 failed in under a minute with "The job was not
+started because recent account payments have failed…"** — the account's billing had lapsed, no step ran,
+and nothing in the tree could have fixed it. Eleven actually executed. Two of those had already been
+repaired when they happened (`migrations/` missing from the image's COPY set; the 862 GB `target/` that
+ran the docs-snippets gate out of disk — both now have gates). Five were `Dependabot Updates` errors with
+no configuration behind them. The remaining four were **two defects**: the Fuzz job on `f84fcc1`, and the
+Documentation job on every run that executed since preflight was introduced (`d0a0fee`, `f84fcc1`,
+`c7b17fd`) — neither in a push that touched anything to do with them.
+
+### `make fuzz` never fuzzed
+
+"Build fuzz targets" passed; "Fuzz the FEEL parser" died with `sanitizer is incompatible with statically
+linked libc` and `the x86_64-unknown-linux-musl target may not be installed`. The triple *was* on the
+command line, in the wrong half of it:
+
+    cargo +nightly fuzz run feel_parser -- --target x86_64-unknown-linux-gnu -runs=600000 …
+
+Everything after `--` belongs to libFuzzer, which ignores an option it does not know, so `cargo fuzz`
+never saw `--target` and used its own default: `utils::default_target()`, which is
+`current_platform::CURRENT_PLATFORM` — the triple the **cargo-fuzz binary** was compiled for, not the host
+it runs on. `taiki-e/install-action` installs the musl build, so on a runner the default is
+`x86_64-unknown-linux-musl`: a target whose std is not installed there and which no sanitizer accepts.
+
+That is also why it survived review and every local run: the `cargo-fuzz` a developer installs is a
+dynamically linked GNU binary, whose default happens to be the right triple. The defect was invisible on
+every machine except the only one that runs the fuzzer nightly. `make fuzz-build` had passed the same
+`--target` correctly the whole time — the two recipes were two implementations of one line, and the half
+that only ever executed in CI was the wrong one.
+
+Fixed by giving `--target` to cargo-fuzz, before the `--`, in both recipes, from one variable
+`FUZZ_TARGET_TRIPLE` that defaults to the host triple `rustc -vV` reports (with an explicit fallback, so a
+missing `rustc` can never leave the value empty and turn the target name into one). The workflow's
+`CARGO_TARGET_TRIPLE` is gone: cargo's variable is `CARGO_BUILD_TARGET`, so nothing had ever read it.
+
+`make fuzz-invocation` (`scripts/check-fuzz-invocation.py`, part of `make ci`) reads the commands the
+Makefile actually produces with `make -n` and fails when `--target` is missing from cargo-fuzz's own
+options, when it appears among libFuzzer's arguments, when the two recipes name different triples, or when
+it would be checking nothing at all. It self-tests both forms on every run — the buggy one and the fixed
+one — and it was tested against the defect it was written for: reinstating the old line made it report
+four problems; restoring the fix made it report none. Beyond the dry run, the fixed recipe was executed:
+`make fuzz-build` followed by `make fuzz TARGET=feel_parser` for 20 seconds, 50 000 executions, no crash.
+
+### preflight was measuring the runner, not the code
+
+CI failed on "Measure the machine" with `disk 12 GB free (84% used, floor 15 GB)` — on `d0a0fee`,
+`f84fcc1` and `c7b17fd`, every run since preflight was introduced. A hosted `ubuntu-latest` runner
+presents about 12 GB free on a 72 GB root, because its image carries several GB of toolchains this
+project never uses: dotnet, the Android SDK, GHC, CodeQL. The gates job had known that since it failed
+with "No space left on device" compiling `chrono-tz`, and reclaimed the space first; the Documentation job
+ran the same gate on an unprepared runner, so a true measurement of a stock runner image was reported as
+a verdict on the code.
+
+The reclaim is now one composite action (`.github/actions/disk-space`) used by all four Rust jobs, so
+every job presents the same machine to the same floor — and preflight's failure message names the remedy
+that applies to the machine it is running on, rather than only the one that applies to a developer's box.
+
+Running `make ci` here also showed the mirror image of that problem: the Makefile chose a writable
+`CARGO_HOME` for its own recipes but never exported it, so preflight — a child process that inspects
+`$CARGO_HOME` — reported a read-only home and advised the reader to do what the Makefile was already
+doing. It is exported now.
+
+### Also
+
+- Two committed `.pyc` files left the index and `__pycache__/`/`*.pyc` are ignored: the gates are
+  scripts, not an importable package, and bytecode is not source.
+- `engine/fuzz/Cargo.lock` was refreshed. It still said `9.0.50` while every crate said `9.0.84` — the
+  bump target claims to refresh it, and had not, so the fuzz workspace resolved against a lockfile two
+  hundred releases old.
+- Five `Dependabot Updates` runs failed on 2026-10-28 with "the updater encountered one or more errors"
+  for `cargo in /db_tests`. There is no `.github/dependabot.yml` in the repository (checked in the tree
+  and over the API), and no update has been scheduled since, so there is nothing here to fix: if
+  Dependabot is wanted back, the config has to list `db_tests/` as its own workspace, which is what it is.
+
+Verification: `make ci` green locally — 1063 Rust tests across 51 targets and 43 frontend tests, clippy
+clean in all four configurations, `fmt --check` clean, and the browser gate green over every route;
+`make verify` — 35 VERIFIED, 0 FAILED, 0 UNVERIFIED; `make tck` at its baseline; `make fuzz-invocation`,
+`make fuzz-build` and `make fuzz` run for real, as above.
+
 ## [9.0.84] — 2026-10-29 — `libz-sys` advisory, caught by a fresh advisory database
 
 `make audit` failed on a **new** advisory that appeared in the RustSec database after this session's earlier

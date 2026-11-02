@@ -58,7 +58,8 @@ def main() -> int:
     if free_gb < DISK_FLOOR_GB:
         problems.append(
             f"only {free_gb:.0f} GB free: builds will thrash and gates will time out rather than fail. "
-            f"Free space with `cargo clean` and `rm -rf db_tests/target`."
+            f"Free space with `cargo clean` and `rm -rf db_tests/target`; on a hosted runner it is the "
+            f"image's unused toolchains that are in the way, which `.github/actions/disk-space` reclaims."
         )
 
     # 2. The build cache's own size: an enormous `target/` is the same problem with a head start.
