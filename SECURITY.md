@@ -35,16 +35,37 @@ Fourteen advisories remain, in three groups:
 2. **Pinned by actix-http.** Every release of our HTTP server up to 3.20 depends on `h2 0.3.x` and
    `zstd 0.13.x`, the versions the advisories name. Nothing in this repository can patch a dependency of
    a dependency; the entries in `audit.toml` are what the next actix-http bump must clear.
-3. **Development-only.** `zip` and `webpki-roots` arrive through test-only dependencies (`pg-embed`
-   downloads and extracts a zip; a test client pulls the roots). `cargo tree -e normal -i <crate>`
-   reports both as absent from the shipped dependency set.
+3. **Build- and test-time only.** `zip` arrives on two paths, neither of which reads an archive this
+   project's *users* control: `utoipa-swagger-ui`'s build script unpacks the pinned Swagger UI release
+   while `api` is compiled, and `pg-embed` — a dev-dependency of `engine_state` — unpacks the PostgreSQL
+   build that `make db-test` downloads. `webpki-roots` comes with a test-only TLS client. The exposure is
+   a supply-chain one at build or test time, not a request path. `cargo tree -e normal -i <crate>`
+   reports all three as absent from the shipped runtime graph.
 
 The distinction in group 3 is checkable, which is why it is written down:
 
 ```bash
 cargo tree -e normal -i zip        # empty → not in the shipped binary
-cargo tree -i zip                  # present → the test build carries it
+cargo tree -i zip                  # present → the build and test tree carries it
 ```
+
+### What `make audit` cannot see
+
+`cargo audit` reports **RustSec** advisories, and the gate is exactly as strong as that database. GitHub's
+advisory database knows about more: on 2026-11-02 the default branch carried **11 open Dependabot alerts,
+all on `zip`** (2 critical, 7 high, 2 moderate, counted per lockfile in `Cargo.lock` and
+`db_tests/Cargo.lock`), and none of them is mirrored into RustSec, so `make audit` is green while the
+security page is not. Recorded here rather than left to be rediscovered:
+
+| Path | Version | What would clear it |
+|---|---|---|
+| `utoipa-swagger-ui` 7 build script — build-time, in the shipped image | `zip` 1.x | `utoipa-swagger-ui` 7 → 10, which requires `utoipa` 4 → 5 and therefore a migration of every `#[utoipa::path]` and `#[derive(ToSchema)]` in `api`. Work, not a patch. |
+| `pg-embed` — dev-dependency, `make db-test` | `zip` 8.6.0 | `pg-embed` 1.0.0 is the newest release and pins it; nothing in this repository can move it |
+
+The critical one (`GHSA-m665-v7pm-7grj`, patched in `zip` 9.0.5) is reached only through `pg-embed`, which
+unpacks the PostgreSQL archive it fetched itself. The build-time path unpacks the Swagger UI release pinned
+in `utoipa-swagger-ui`. Both are trusted, fixed inputs — which is why this is recorded as accepted risk
+with its expiry condition rather than treated as an incident.
 
 ## Hardening already in the code
 

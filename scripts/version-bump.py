@@ -14,7 +14,10 @@ root = pathlib.Path('.')
 
 touched = []
 
-for crate in ('engine', 'api', 'engine_state', 'engine/fuzz'):
+# `db_tests` is a separate workspace (excluded from the root so `pg-embed` never reaches `api`), but it
+# is still a crate in this repository whose version is part of the release: 9.0.85 shipped with it at
+# 9.0.58, which is the kind of "every version lives in one place" claim this script exists to keep.
+for crate in ('engine', 'api', 'engine_state', 'engine/fuzz', 'db_tests'):
     p = root / crate / 'Cargo.toml'
     s = p.read_text()
     s2 = re.sub(r'(?m)^version = "[^"]+"', f'version = "{new}"', s, count=1)

@@ -12,6 +12,39 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.86] — 2026-11-02 — A lockfile the bump never refreshed, and the advisories `make audit` cannot see
+
+Two smaller findings from the same pass over the notifications, both of the shape this project keeps
+finding: a claim that nothing executed.
+
+**The bump refreshed two lockfiles out of three.** `make bump-version` resolves `Cargo.lock` and
+`engine/fuzz/Cargo.lock` and then prints "Cargo.lock files refreshed". `db_tests` is a separate workspace,
+excluded from the root on purpose (its `Cargo.toml` says why — `pg-embed` must not be an `api`
+dev-dependency). Its own version was still `9.0.58` while every other crate said `9.0.84`, and its
+lockfile pins the same three path crates. Nothing failed, because `make db-test` runs without `--locked`;
+it was found by running `cargo tree` in that directory, which re-resolved the lockfile in place and
+reported it as an uncommitted change. The bump now writes the version there and resolves that lockfile too.
+
+**GitHub's advisory database knows advisories `cargo audit` cannot see.** The push that shipped 9.0.85
+was answered with "12 vulnerabilities on the default branch"; the alerts API listed eleven open, all on
+`zip` — 2 critical, 7 high, 2 moderate, counted per lockfile in `Cargo.lock` and `db_tests/Cargo.lock`.
+None of them is mirrored into RustSec, so `make audit` reports nothing and the security page reports red.
+That is a true statement about the gate and a misleading one about the tree, and `SECURITY.md` was also
+wrong in a way worth correcting: it called `zip` development-only, while one of its two paths is a build
+script of `utoipa-swagger-ui` that runs while `api` is compiled.
+
+Both paths unpack archives this project's users do not control — the pinned Swagger UI release at build
+time, and the PostgreSQL build `pg-embed` fetches for `make db-test` — so this is recorded as accepted risk
+with its expiry condition, not as an incident. Clearing it means `pg-embed` moving (its newest release,
+1.0.0, pins `zip` 8) or `utoipa` 4 → 5 with `utoipa-swagger-ui` 7 → 10, which is a migration of every
+`#[utoipa::path]` and `#[derive(ToSchema)]` in `api`. `SECURITY.md` now carries that table and the command
+that re-measures it.
+
+Verification: `make bump-version VERSION=9.0.86` resolves all three lockfiles; `make preflight`,
+`spec-citations`, `readme`, `singleton-tests`, `fuzz-invocation`, `verification-cost`, `deploy-env`,
+`audit` and `make test` (1063 tests) all green on this tree. No Rust source changed, so the 9.0.85
+verification result (35 VERIFIED, 0 FAILED, 0 UNVERIFIED) and its TCK baseline still apply.
+
 ## [9.0.85] — 2026-11-02 — The fuzz job never fuzzed, and preflight measured the runner
 
 A hundred notifications had accumulated over four days. Reading them instead of reacting to them split

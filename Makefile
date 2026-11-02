@@ -117,6 +117,10 @@ bump-version:
 	@# `engine/fuzz` is a separate workspace with its own tracked lockfile, so it has to
 	@# be resolved too — otherwise it drifts until someone runs the fuzzer.
 	cargo metadata --manifest-path engine/fuzz/Cargo.toml --format-version 1 > /dev/null
+	@# So is `db_tests` (excluded from the root workspace; see its Cargo.toml). Its lockfile pins the
+	@# same three path crates, and 9.0.85 shipped from a tree whose copy still said 9.0.84 — the drift
+	@# this line exists to prevent, found by running `cargo tree` in that directory.
+	cargo metadata --manifest-path db_tests/Cargo.toml --format-version 1 > /dev/null
 	@echo "Cargo.lock files refreshed for $(VERSION)"
 
 # Check the Dockerfile's build logic without a container runtime: read its COPY

@@ -1,6 +1,6 @@
 [package]
 name = "db_tests"
-version = "9.0.58"
+version = "9.0.86"
 edition = "2021"
 publish = false
 
