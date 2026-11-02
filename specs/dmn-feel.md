@@ -687,6 +687,21 @@ Aggregators (`decision_table.rs:386-459`):
 | `COUNT` | not inspected — counts matching rules | `Number(0)` | `decision_table.rs:456-459` |
 
 Load-time validation (`validate_decision_table`, `decision_table.rs:531-564`) enforces:
+### `COLLECT` with `DISTINCT` (DMN 1.6)
+
+`BuiltinAggregator::Distinct` (`DISTINCT`) is accepted by the parser and computed by the decision table:
+the matching rules' outputs, deduplicated by **FEEL equality**, first occurrence kept. `1` and `1.0` collapse;
+`"1"` does not. An empty match answers an empty list — not `null` like SUM/MIN/MAX — so a consumer can iterate
+the result without a type check. The aggregator survives an XML round trip (`export_dmn` writes
+`aggregation="DISTINCT"`).
+
+**The semantics are derived, and the distinction matters.** The vendored TCK corpus is DMN 1.5, so no document
+in this repository could check a reading of the 1.6 text. What is implemented follows from two behaviours this
+codebase already has and already tests — COLLECT returns outputs in rule order, and FEEL's `distinct values()`
+deduplicates by FEEL equality — which makes it a consistent extension rather than an interpretation.
+`engine/tests/dmn16_collect_distinct.rs` is the executable statement of that, including the equality case and
+the round trip.
+
 COLLECT+aggregation needs exactly one output column (`533-538`); PRIORITY and OUTPUT ORDER need
 `output_values` on the first output clause (`541-556`); `aggregation` is only valid with
 COLLECT (`559-561`). It returns `Result<(), String>` and is **not called** by

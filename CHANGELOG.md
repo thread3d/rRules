@@ -12,6 +12,28 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.83] — 2026-10-29 — `COLLECT` with the DMN 1.6 `DISTINCT` aggregator
+
+The first of the two DMN 1.6 constructs, and the one where the honest work was deciding what "verified" can
+mean without a corpus to verify against.
+
+`BuiltinAggregator::Distinct` is parsed from `aggregation="DISTINCT"`, computed by the decision table, and
+written back by the exporter. Semantics: the matching rules' outputs, deduplicated by **FEEL equality**,
+first occurrence kept, so `1` and `1.0` collapse and `"1"` does not. An empty match answers an **empty list**
+rather than `null` like SUM/MIN/MAX, so a consumer can iterate the result without a type check.
+
+**The semantics are derived, and the code says so in three places** (the variant's doc, the spec, and the test
+file's header). The vendored TCK corpus is DMN 1.5, so nothing in this repository can check a reading of the
+1.6 text. What is implemented follows from two behaviours this codebase already has and already tests —
+`COLLECT` returns outputs in rule order, and FEEL's `distinct values()` deduplicates by FEEL equality — which
+makes it a consistent extension of 1.5 behaviour rather than my interpretation of a document I cannot consult.
+That is weaker than a corpus and stronger than a guess, and a reader deserves to know which it is.
+
+Six tests hold it: duplicates collapse with order preserved, all-same leaves one element, distinct outputs are
+untouched, FEEL equality (not Rust equality) decides duplicates, an empty match is an empty list, and the
+aggregator survives an XML round trip. Disabling the deduplication fails three of them.
+
+
 ## [9.0.82] — 2026-10-29 — `dsl_body` becomes a syntax, and text authoring works end to end
 
 For several releases `dsl_body` was a pseudo-DSL that **nothing parsed**: the interface stored it, no engine

@@ -2970,6 +2970,9 @@ fn parse_aggregator(s: &str) -> Option<BuiltinAggregator> {
         "MIN" => Some(BuiltinAggregator::Min),
         "MAX" => Some(BuiltinAggregator::Max),
         "COUNT" => Some(BuiltinAggregator::Count),
+        // DMN 1.6. Accepted here so a 1.6 document loads; the semantics are derived (see
+        // `BuiltinAggregator::Distinct`) because the vendored corpus is 1.5.
+        "DISTINCT" => Some(BuiltinAggregator::Distinct),
         _ => None,
     }
 }

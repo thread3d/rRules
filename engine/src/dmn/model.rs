@@ -639,6 +639,16 @@ pub enum BuiltinAggregator {
     /// `COUNT` — number of matching rules.
     #[serde(rename = "COUNT")]
     Count,
+    /// `DISTINCT` — the matching rules' outputs with duplicates removed.
+    ///
+    /// A DMN 1.6 aggregator. The semantics here are **derived**, not copied: the vendored corpus is DMN 1.5,
+    /// so nothing in this repository could check a reading of the 1.6 text, and the honest thing is to say so.
+    /// They follow from two things this codebase already does — COLLECT returns the matching rules' outputs in
+    /// rule order, and FEEL's own `distinct values()` removes duplicates by **FEEL equality** (`1` and `1.0`
+    /// are equal; a string is not a number) — so `DISTINCT` is that deduplication applied to the collected
+    /// outputs, keeping the first occurrence of each value.
+    #[serde(rename = "DISTINCT")]
+    Distinct,
 }
 
 impl BuiltinAggregator {
@@ -650,6 +660,7 @@ impl BuiltinAggregator {
             Self::Min => "MIN",
             Self::Max => "MAX",
             Self::Count => "COUNT",
+            Self::Distinct => "DISTINCT",
         }
     }
 }

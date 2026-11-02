@@ -410,6 +410,9 @@ impl DecisionTableEvaluator {
             BuiltinAggregator::Count => {
                 Value::Number(rust_decimal::Decimal::ZERO) // Empty COUNT → 0 (spec exception)
             }
+            // Nothing matched, so there is nothing to deduplicate: an empty list is the answer that keeps
+            // DISTINCT's result type stable (a list), unlike SUM/MIN/MAX's null.
+            BuiltinAggregator::Distinct => Value::Array(Vec::new()),
         }
     }
 
@@ -423,7 +426,29 @@ impl DecisionTableEvaluator {
             BuiltinAggregator::Min => Self::aggregate_min(values),
             BuiltinAggregator::Max => Self::aggregate_max(values),
             BuiltinAggregator::Count => Ok(Self::aggregate_count(values)),
+            BuiltinAggregator::Distinct => Ok(Self::aggregate_distinct(values)),
         }
+    }
+
+    /// DISTINCT aggregator: the outputs with duplicates removed, first occurrence kept.
+    ///
+    /// Deduplication uses **FEEL equality**, the same comparison `distinct values()` uses, so `1` and `1.0`
+    /// collapse while `"1"` does not — a caller who wanted string equality has to mean it. A pair FEEL cannot
+    /// compare (`feel_equals` answering `None`) is kept rather than dropped: discarding a value because an
+    /// equality is unknown would silently lose data.
+    fn aggregate_distinct(values: &[Value]) -> Value {
+        use crate::dmn::feel::eval::cmp::feel_equals;
+
+        let mut kept: Vec<Value> = Vec::with_capacity(values.len());
+        for candidate in values {
+            let duplicate = kept
+                .iter()
+                .any(|existing| feel_equals(existing, candidate) == Some(true));
+            if !duplicate {
+                kept.push(candidate.clone());
+            }
+        }
+        Value::Array(kept)
     }
 
     /// SUM aggregator: sum all numeric outputs. Empty → null. Non-numeric → AggregatorMismatch.
