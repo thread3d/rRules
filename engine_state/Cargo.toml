@@ -1,6 +1,6 @@
 [package]
 name = "engine_state"
-version = "9.0.82"
+version = "9.0.84"
 edition = "2021"
 
 [dependencies]

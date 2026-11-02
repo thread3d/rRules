@@ -208,6 +208,18 @@ verify:
 	@mkdir -p "$${VERIFY_HOME:-$$PWD/.verify-home}"; \
 		[ -e "$${VERIFY_HOME:-$$PWD/.verify-home}/.cargo" ] || \
 		ln -s "$$PWD/.cargo-home" "$${VERIFY_HOME:-$$PWD/.verify-home}/.cargo"
+	@# CodeWitness is a jar installed into a HOME; this gate points HOME at .verify-home, so the jar has to be
+	@# reachable there. If it is missing, copy it from the system installation rather than failing with
+	@# "Unable to access jarfile" — a message that says nothing about what to do.
+	@if [ ! -f "$${VERIFY_HOME:-$$PWD/.verify-home}/.local/lib/codewitness/codewitness.jar" ]; then \
+		mkdir -p "$${VERIFY_HOME:-$$PWD/.verify-home}/.local/lib/codewitness"; \
+		if [ -f "$$HOME/.local/lib/codewitness/codewitness.jar" ]; then \
+			cp "$$HOME/.local/lib/codewitness/codewitness.jar" \
+				"$${VERIFY_HOME:-$$PWD/.verify-home}/.local/lib/codewitness/"; \
+		else \
+			echo "verify: the CodeWitness jar is not installed; see AGENTS.md" >&2; exit 1; \
+		fi; \
+	fi
 	HOME="$${VERIFY_HOME:-$$PWD/.verify-home}" CARGO_NET_OFFLINE=false \
 		codewitness verify engine --requirements specs/requirements.md --in-place --no-mutation
 	HOME="$${VERIFY_HOME:-$$PWD/.verify-home}" CARGO_NET_OFFLINE=false \

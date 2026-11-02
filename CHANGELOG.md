@@ -12,6 +12,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.84] — 2026-10-29 — `libz-sys` advisory, caught by a fresh advisory database
+
+`make audit` failed on a **new** advisory that appeared in the RustSec database after this session's earlier
+runs: RUSTSEC-2026-0402, *`libz-sys` build script leaks environment variables in the build directory*, reached
+through `git2 → libgit2-sys`. That is the gate doing its job on data that changes without this repository
+changing — the reason it runs on every release rather than once.
+
+Fixed by updating within the semver range: `libz-sys 1.1.29 → 1.1.31`, one package, no other change to the
+tree. `make audit` is clean again with the same 15 allowed warnings (each carrying its reason in
+`.cargo/audit.toml`).
+
+Also repaired in the same pass: `frontend/node_modules` had been emptied by a `npm ci` that a gate started and
+that did not finish, so the frontend build and the browser gate failed for reasons that had nothing to do with
+the code. Reinstalled and re-run — both green.
+
+
 ## [9.0.83] — 2026-10-29 — `COLLECT` with the DMN 1.6 `DISTINCT` aggregator
 
 The first of the two DMN 1.6 constructs, and the one where the honest work was deciding what "verified" can
