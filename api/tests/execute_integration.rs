@@ -2582,8 +2582,9 @@ async fn a_rule_created_with_a_structured_rule_becomes_executable() {
 
     let created = test::TestRequest::post()
         .uri("/v1/rules")
-        // No tenant header on this app, so the document lives under `default` — fine for this test; the
-        // executing set is per deployment, not per tenant (specs/rule-sources.md says so).
+        // No tenant header on this app, so the document lives under `default` — which is the tenant
+        // execution will load it for (`filter_ruleset`, api/src/v1/execution.rs). The executing set is
+        // tenant-scoped since 9.0.77; `api/tests/tenant_scoped_execution.rs` is what pins that.
         .set_json(json!({
             "name": "api-executable",
             "dsl_body": "score > 0",

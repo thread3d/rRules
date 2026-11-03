@@ -6,8 +6,10 @@
 //!   3. **decision_table**  — evaluate decision tables under each hit policy (UNIQUE .. COLLECT), ops/sec
 //!   4. **drd_resolution**  — topological sort + evaluation chain time for multi-output DRD services
 //!
-//! Corpus: vendored TCK fixtures at `engine/tests/fixtures/tck/`, plus the import-test corpus
-//! under `api/dmn/`. Both are loaded once per benchmark run via the helpers below.
+//! Corpus: the committed TCK fixtures at `engine/tests/fixtures/tck/`, loaded once per run through
+//! `engine::dmn::bench_util`. The gitignored runtime store `api/dmn/` is deliberately not measured: it
+//! is present on a developer's machine and absent on a clean checkout, so a number taken over it is
+//! not comparable with any other run.
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, SamplingMode};
 use engine::data_types::Value;
@@ -25,64 +27,21 @@ use std::sync::Arc;
 // Corpus helpers — load .dmn files from the test fixtures tree.
 // ---------------------------------------------------------------------------
 
-/// Locate the TCK fixture root relative to the workspace.  Benchmarks always run
-/// out of `target/` so we walk up one level from CARGO_MANIFEST_DIR (which is
-/// `engine/`) to reach the repo root, then descend into `engine/tests/fixtures/tck/`.
-fn tck_root() -> std::path::PathBuf {
-    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let parent1 = manifest
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
-    parent1.join("engine/tests/fixtures/tck")
-}
-
-/// Locate the import-test corpus under `api/dmn/`.
-fn import_corpus_root() -> std::path::PathBuf {
-    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let parent1 = manifest
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
-    parent1.join("api/dmn")
-}
-
-/// Collect every `.dmn` file under a directory (recursively).  Returns the full
-/// paths sorted for deterministic ordering.
-fn collect_dmn_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
-    if !root.is_dir() {
-        return Vec::new();
-    }
-    let mut files = Vec::new();
-    fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        for entry in std::fs::read_dir(d).expect("read dir") {
-            let e = entry.expect("read entry");
-            let p = e.path();
-            if p.is_dir() {
-                walk(&p, out);
-            } else if p.extension().is_some_and(|ext| ext == "dmn") {
-                out.push(p);
-            }
-        }
-    }
-    walk(root, &mut files);
-    files.sort();
-    files
-}
-
-/// Load the combined corpus: TCK fixtures + import-test DMN files.  Returns a
-/// vector of `(name, xml_bytes)` tuples ready for benchmarking.
+/// Load the measured corpus — the committed TCK fixtures — as `(name, xml_bytes)`.
+///
+/// The corpus helpers live in `engine::dmn::bench_util` and are shared with
+/// `engine/tools/memory_baseline.rs`. This file used to carry its own copies that also walked
+/// `api/dmn/`, the gitignored DMN runtime store: two implementations of one thing, one of which
+/// measured whatever documents a particular machine happened to have created.
 fn load_corpus() -> Vec<(String, Vec<u8>)> {
-    let mut items = Vec::new();
-    for p in collect_dmn_files(&tck_root()) {
-        if let Ok(bytes) = std::fs::read(&p) {
-            items.push((p.file_stem().unwrap().to_string_lossy().into_owned(), bytes));
-        }
-    }
-    for p in collect_dmn_files(&import_corpus_root()) {
-        if let Ok(bytes) = std::fs::read(&p) {
-            items.push((p.file_stem().unwrap().to_string_lossy().into_owned(), bytes));
-        }
-    }
-    items
+    engine::dmn::bench_util::load_corpus_files()
+        .into_iter()
+        .filter_map(|p| {
+            std::fs::read(&p)
+                .ok()
+                .map(|bytes| (p.file_stem().unwrap().to_string_lossy().into_owned(), bytes))
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -355,7 +314,7 @@ fn bench_drd_resolution(c: &mut criterion::Criterion) {
     group.sampling_mode(SamplingMode::Flat);
 
     // Parse the multi-output TCK fixture which exercises DRD resolution.
-    let tck_root_path = tck_root();
+    let tck_root_path = engine::dmn::bench_util::tck_root();
     let multi_path = tck_root_path.join("0010-multi-output-U/0010-multi-output-U.dmn");
     if !multi_path.is_file() {
         group.finish();

@@ -1,38 +1,51 @@
-# Rule sources — the two universes, and what reconciling them would take
+# Rule sources — the two universes, and the bridge between them
 
-**Status:** current behaviour, stated so it cannot be discovered by surprise. Written in 9.0.73 after
-`rule_filter.categories` (9.0.72) turned out to be unimplementable: it assumed a link between two rule
-sets that has never existed.
+**Status:** current behaviour. Written in 9.0.73, when nothing converted one store into the other, and
+corrected in 9.0.87: 9.0.74-9.0.82 built the bridge this document's opening section assumed would never
+exist, and left three claims below describing the code as it had been rather than as it is. A gap that
+is closed and still described as open costs a reader the same as a bug that is still there.
 
-## The two universes
+## The two universes, and the bridge
 
 | | Rule **documents** | Rules the engine **executes** |
 |---|---|---|
-| Stored where | in memory, `RuleStore` = `HashMap<(tenant_id, Uuid), StoredRule>` (`api/src/v1/rules.rs`) | `RULE_STORAGE_PATH/*.rules` on disk, parsed into `engine::rules::Rule` |
-| Written by | `POST/PUT /v1/rules` (`create_rule`, `update_rule`) | an operator, or whatever writes the rules directory |
+| Stored where | in memory, `RuleStore` = `HashMap<(tenant_id, Uuid), StoredRule>` (`api/src/v1/rules.rs`) | `RULE_STORAGE_PATH/[<tenant>/]*.rules` on disk, parsed into `engine::rules::Rule` |
+| Written by | `POST/PUT /v1/rules` (`create_rule`, `update_rule`) | an operator, **and** those two handlers when the request carries a `rule` or a `dsl_body` that parses |
 | Carries | `id`, `tenant_id`, `name`, `category`, `tags`, `dsl_body`, `status`, `version`, timestamps | `id` (a string), `name`, `salience`, `no_loop`, `lock_on_active`, `agenda_group`, `condition`, `actions` |
-| Read by | `/v1/rules` CRUD, `/v1/approvals`, the IDE | `build_ruleset_from_dir` → `reload_and_swap` → `POST /v1/execute` |
+| Read by | `/v1/rules` CRUD, `/v1/approvals`, the IDE | `build_tenant_ruleset_from_dir` → `reload_and_swap` → `POST /v1/execute` |
 | Survives a restart | **no** — the map is created empty in `ApiState` | yes, it is the file system |
 
-**Nothing converts one into the other.** No code parses `dsl_body`; no code writes `.rules` files. A rule
-created through the API cannot be executed, and a rule that executes was never created through the API.
-`/v1/rules/reload` reloads the disk set, which the API never writes.
+**What converts one into the other: the create/update request itself.** `POST /v1/rules` (and `PUT`) takes
+an optional `rule`, the engine's own `Rule` JSON. When it is present the API imposes the document's id and
+name on it, validates it by loading it, and writes `<rules dir>/<tenant>/<id>.rules`, so the id the caller
+receives is the id `rule_filter` matches and the id `POST /v1/execute` reports (9.0.74, tenant directory
+since 9.0.77). When `rule` is absent, `dsl_body` is parsed by `engine::rule_syntax::parse_rule_text`
+(`api/src/v1/rules.rs:483`) and, if it parses, written the same way (9.0.82). A body that does not parse is
+**not** an error: it was prose for several releases, so it stays a draft and the response says so with
+`executable: false`.
+
+**What still does not convert:** a document whose body is prose, or a body written in a syntax the parser
+declines (`specs/rule-syntax.md` lists what the text form cannot express). Those remain documents the
+engine never sees, and `executable: false` is the field that says so.
 
 `api/tests/execute_integration.rs::a_created_rule_is_not_executable_and_its_id_matches_no_executed_rule`
-pins this: after creating a rule, `POST /v1/execute` matches only the disk rule, and filtering by the
-created rule's own id — which is what the IDE's "test this rule" sends (`TestRunner.tsx:130`) — matches
-nothing.
+is not a counter-example: its body is `rule "api-created" when true then log("hi")`, and the text grammar
+has no bare-literal condition (`specs/rule-syntax.md`: `expr := ref op literal`), so the body is rejected
+and the test exercises the *draft* path. Its sibling,
+`a_rule_created_with_a_structured_rule_becomes_executable`, is the bridge.
 
-## What that costs a user
+## What the remaining gap costs a user
 
-1. **The rule-authoring IDE does not author executable rules.** Documents and execution share a product,
-   not a data path.
-2. **"Test this rule" tests nothing** unless the document's UUID happens to equal a disk rule's id, which
-   it never does. `rules_matched: 0` is the honest signal, but nothing surfaces it as an error.
-3. **Categories, tags, owners, status and approvals describe documents that cannot run**; salience,
-   conditions and actions describe rules that cannot be edited through the API.
-4. **A restart loses every document** and keeps every executed rule — the opposite of what "the rule store
-   is the source of truth" would suggest.
+1. **The IDE authors executable rules only for shapes the form or the text grammar can express.** A
+   document whose body is prose is stored, approved and listed, and never runs.
+2. **"Test this rule" tests nothing for a draft** — `rules_matched: 0` is the honest signal for a document
+   with no rule behind it, and `executable: false` is what distinguishes that from a rule that ran and
+   matched nothing.
+3. **Categories, tags, owners, status and approvals describe documents; salience, conditions and actions
+   describe rules.** The two sets are bridged per document, not unified: editing `rule` JSON does not
+   change `dsl_body` and vice versa — the form renders one from the other when *it* is the author.
+4. **A restart loses every document** and keeps every executed rule — still true, and the reason the
+   rule file is the durable artefact.
 
 ## Options, and what each would take
 
@@ -164,15 +177,25 @@ store is touched, so a bad migration changes nothing.
 textarea started empty and saving wrote that empty string back over the stored body — opening a rule and
 pressing Save destroyed its text. `Rule.body` is mapped now, and `rules.mapping.test.ts` fails without it.
 
-**Still open, in the order that matters:** `dsl_body` is not compiled (there is no rule-syntax parser, and
-`dsl_body` is a FEEL expression inside a rule); the executing set is per deployment rather than per tenant;
-and documents written before this slice have no rule file, so they remain `executable: false`.
+**Still open, in the order that matters:** a body in a grammar the parser declines stays a draft (see
+`specs/rule-syntax.md` for what the text form deliberately cannot express); and documents written before
+9.0.80 have no rule file until someone sends a `rule` or a parseable body, so they remain
+`executable: false`.
+
+Struck in 9.0.87: "`dsl_body` is not compiled" (9.0.82 compiles it through `engine::rule_syntax`) and "the
+executing set is per deployment rather than per tenant" (9.0.77 made it tenant-scoped, and
+`api/tests/tenant_scoped_execution.rs` holds it there).
 
 ## Evidence
 
-- `api/src/v1/rules.rs` — `RuleStore`, `StoredRule`, `create_rule` (no compile step, no file write).
-- `api/src/v1/execution.rs` — `build_ruleset_from_dir`, `reload_and_swap`, `filter_ruleset`.
+- `api/src/v1/rules.rs` — `RuleStore`, `StoredRule`, `create_rule` (writes a rule file when the request
+  carries `rule` or a parseable `dsl_body`), `write_executable_rule` (the tenant directory, identity
+  imposed, validated by loading).
+- `engine/src/rule_syntax.rs` — `parse_rule_text` / `render_rule_text`, the text form `dsl_body` is in.
+- `api/src/v1/execution.rs` — `build_tenant_ruleset_from_dir`, `reload_and_swap`, `filter_ruleset`
+  (per-tenant).
 - `api/src/app.rs` — `rule_store: v1::rules::init_store()` (empty at startup), `rules_dir` from
   `RULE_STORAGE_PATH`.
-- `specs/http-api.md` — the `/v1/execute` row states the separation.
-- `api/tests/execute_integration.rs` — the two tests named above.
+- `api/tests/execute_integration.rs` — the draft path (`…is_not_executable…`) and the bridge
+  (`…_with_a_structured_rule_becomes_executable`).
+- `api/tests/tenant_scoped_execution.rs` — execution sees only the caller's tenant's rules.

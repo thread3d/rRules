@@ -3,7 +3,7 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.86** — released from a verified tree: everything in the table below was measured by a gate,
+**9.0.87** — released from a verified tree: everything in the table below was measured by a gate,
 not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
@@ -31,6 +31,7 @@ make verify          # CodeWitness: execute specs/requirements.md
 make spec-citations  # every `path:line` in specs/ still resolves to the code it names
 make docs-snippets   # every Rust example in the user guide compiles and its assertions pass
 make readme          # every command the README tells you to run resolves
+make readme-counts   # the test totals quoted below are the totals this tree produces
 make deploy-env      # every variable the chart and manifests set is one the server reads
 make image-check     # the Dockerfile's stages build from its COPY set, without a container
 make memcheck        # memory-regression gate against a committed baseline
@@ -38,8 +39,8 @@ make fuzz            # bounded fuzzing of the FEEL parser and the decision-table
 make fuzz-invocation # both fuzz recipes hand cargo-fuzz the target it will actually build
 ```
 
-The browser gate, the citation check, the guide's examples, the README's commands and the deployment
-variables are all part of `make ci`, which is what CI runs on every push.
+The browser gate, the citation check, the guide's examples, the README's commands and test totals and the
+deployment variables are all part of `make ci`, which is what CI runs on every push.
 
 `make verify` executes the specification with [CodeWitness](https://github.com/codewitness/codewitness),
 which is a jar installed from a source checkout rather than a published package. CI runs it only
@@ -48,7 +49,7 @@ otherwise that job is skipped, which is the honest state and not a pass.
 
 | | Measured |
 |---|---|
-| Tests | **996 Rust tests across 40 targets**, 6 ignored, plus 28 frontend tests — all green |
+| Tests | **1069 Rust tests across 51 test targets**, 6 of them ignored, plus **43 frontend tests** — all green |
 | DMN TCK | **170 layer results pass, 0 fail, 4 skipped** across 51 vectors |
 | Requirements | **35 verified, 0 failed, 0 unverified** (CodeWitness, over the engine and API crates) |
 | Lints | `cargo clippy --workspace -- -D warnings` clean, rustfmt clean |
@@ -63,7 +64,7 @@ rather than hidden. Every remaining failure was fixed in the evaluator, not by l
 |---|---|
 | [`specs/README.md`](specs/README.md) | The specification, and how to verify it |
 | [`specs/requirements.md`](specs/requirements.md) | 35 normative requirements with stable ids |
-| [`specs/rule-sources.md`](specs/rule-sources.md) | **The two rule universes**: rule documents created through the API are not the rules the engine executes. Read before changing anything about rules |
+| [`specs/rule-sources.md`](specs/rule-sources.md) | **The two rule universes**: rule *documents* (`/v1/rules`) and the rules the engine executes (`RULE_STORAGE_PATH`) are separate stores, and what bridges them — a structured `rule`, or a `dsl_body` that parses. Read before changing anything about rules |
 | [`TCK-COVERAGE-GAPS.md`](TCK-COVERAGE-GAPS.md) | Measured conformance, and the one divergence |
 | [`docs/user-guide.md`](docs/user-guide.md) | Using the system |
 | [`docs/API.md`](docs/API.md) | The REST API |
@@ -85,15 +86,16 @@ make tck && make verify          # the conformance and specification gates
 ```
 
 Storage today: rule and decision *documents* live on disk, and rule versioning is a git repository
-(`<RULE_STORAGE_PATH>/.git`, libgit2). Everything the API manages at runtime — rules, categories,
-tags, tenants, approvals, audit events, sessions — is in memory, so a restart starts empty.
+(`<RULE_STORAGE_PATH>/.git`, libgit2). Everything else the API manages at runtime — rules, categories,
+tags, approvals, sessions — is in memory, so a restart starts empty. Three stores have an opt-in
+PostgreSQL backend, each behind its own switch and all behind the `postgres` feature; the in-memory (and,
+for decision documents, filesystem) defaults are unchanged.
 
 Decision documents can also be kept in **PostgreSQL**: build with `--features postgres` and set
 `DMN_PERSISTENCE=postgres` with a `DATABASE_URL`, and the `/v1/decisions` endpoints persist there
-instead of to `DMN_STORAGE_PATH`. The default is unchanged — the filesystem store, which is what git
-tracks — and a deployment that asks for Postgres without the feature or the URL fails at startup
-rather than silently writing files. The tenant and audit stores remain in memory;
-`migrations/` holds their schema.
+instead of to `DMN_STORAGE_PATH`. The filesystem store is the default and stays the one git tracks, and
+a deployment that asks for Postgres without the feature or the URL fails at startup rather than
+silently writing files.
 
 The **audit trail** can be persisted the same way: `AUDIT_PERSISTENCE=postgres` records every
 governance event into a table instead of process memory, so the trail survives a restart — which is the
@@ -104,10 +106,11 @@ table instead of process memory, so a restart no longer forgets every tenant and
 scoped to them.
 
 All of them are exercised against a real database: `make db-test` downloads PostgreSQL with `pg-embed`
-and runs the DMN store's tests, an HTTP-level test that imports, lists, reads, exports and deletes a
-decision, and two that record governance events and read them back — including one that reopens the
-database from a second connection to prove the trail outlived the writer. `specs/http-api.md` records this under its known gaps rather than
-implying otherwise.
+and runs eleven tests over its three stores — the decision store's five (round-trip, id conflict, list,
+delete, plus an HTTP-level import/list/read/export/delete), the audit trail's two, including one that
+reopens the database from a second connection to prove the trail outlived the writer, and the tenant
+registry's two. `specs/http-api.md` records what each one covers rather than implying the rest.
+
 
 ## Licence
 

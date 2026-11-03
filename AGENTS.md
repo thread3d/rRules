@@ -14,9 +14,11 @@ monitor their impact — without modifying application code.
 
 **Layout:** a Cargo workspace (`engine/`, `api/`, `engine_state/`) plus `frontend/` (React 19 +
 TypeScript + Vite + TanStack). Rule and decision documents live on disk, rule versioning is a git
-repository, and every runtime store is in memory — a restart starts empty. A real PostgreSQL-backed DMN
-store exists behind the `postgres` feature, is selected with `DMN_PERSISTENCE=postgres`, and is tested
-against a live server (`make db-test`); the filesystem store remains the default. Ships as a Docker image and a Helm chart
+repository, and the other runtime stores are in memory — a restart starts empty unless a deployment
+persists them. Three can be: decision documents (`DMN_PERSISTENCE=postgres`), the tenant registry
+(`TENANT_PERSISTENCE=postgres`) and the audit trail (`AUDIT_PERSISTENCE=postgres`), all behind the
+`postgres` feature and all exercised against a live server by `make db-test`; the filesystem store and
+the in-memory stores remain the defaults. Ships as a Docker image and a Helm chart
 (`helm/rrules-server`, with dev/staging/prod overlays; `k8s/` holds the equivalent raw manifests for
 `kubectl apply -k`).
 
@@ -67,12 +69,17 @@ make image-check # check the Dockerfile's build logic without a container runtim
 make chart-lint  # lint + render the Helm chart (needs helm v3.14.0; CI's chart job)
 make db-test     # the PostgreSQL store against a real server pg-embed downloads and starts
 make verification-cost  # the verified crates stay light enough for `make verify` to finish
+make readme-counts # the test totals the README quotes are the totals this tree produces
 make preflight   # disk, cache and cargo-home sanity — see "a slow environment" below
 ```
 
 `make help` lists the rest (benchmarks, memory-regression gate, fuzzing, frontend dev server).
 `make bench` runs on the pinned stable toolchain and `make memcheck` compares against the tracked
-frozen baseline (`engine/benches/snapshots/baseline.json`); `make fuzz` is the only one that needs
+frozen baseline (`engine/benches/snapshots/baseline.json`) over the **committed** TCK fixtures only: the
+gitignored runtime store `api/dmn/` used to be measured too, so the same commit measured 302 files on a
+working tree and 51 on a clean checkout and the difference was reported as a regression. A corpus that
+legitimately changes now fails the gate as a corpus change (`make baseline-update` to accept it). `make fuzz`
+is the only gate that needs
 the nightly toolchain, plus `cargo-fuzz`. `cargo-fuzz` must be given `--target` explicitly
 (`FUZZ_TARGET_TRIPLE`, defaulting to the host triple), *before* the `--` that hands the rest of the
 line to libFuzzer: its own default is the triple `cargo-fuzz` was compiled for — the musl prebuilt

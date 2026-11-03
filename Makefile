@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme singleton-tests frontend-types verification-cost preflight audit deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build fuzz-invocation
+.PHONY: build test lint fmt fmt-check tck tck-ledger spec-citations docs-snippets readme readme-counts singleton-tests frontend-types verification-cost preflight audit deploy-env verify e2e image-check chart-lint db-test bump-version docker-build run clean frontend-dev frontend-build frontend-test ci help bench memcheck baseline-update fuzz fuzz-build fuzz-invocation
 
 # Build the Rust workspace
 build:
@@ -96,6 +96,14 @@ fuzz-invocation:
 # The commands the README tells a reader to run must exist: a target, a binary, a crate, a directory.
 readme:
 	./scripts/check-readme.py
+
+# The totals the README's "Measured" table quotes must be the totals this tree produces. A hand-written
+# count goes stale the moment anyone adds a test, and three releases shipped with one ("1005 across
+# 38", then "996 across 40" while the tree ran 1063). This *lists* the tests instead of running them,
+# so it costs seconds once `make test` has built the binaries — which is why it sits after `test` in
+# `make ci`.
+readme-counts:
+	./scripts/check-readme-counts.py
 
 # Every Rust block in the user guide must compile: a guide that shows code is making a claim
 # about the public API, and a snippet the reader copies should build.
@@ -251,7 +259,7 @@ e2e:
 	./scripts/e2e-smoke.sh
 
 # Full CI pipeline (build + test + lint + format check + frontend)
-ci: preflight build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets readme singleton-tests fuzz-invocation frontend-types verification-cost deploy-env e2e
+ci: preflight build test lint fmt-check frontend-build frontend-test spec-citations docs-snippets readme readme-counts singleton-tests fuzz-invocation frontend-types verification-cost deploy-env e2e
 	@echo "CI pipeline complete"
 
 # Run DMN subsystem benchmarks (Criterion, Phase 36+)
@@ -368,6 +376,7 @@ help:
 	@echo "  spec-citations  - Check that spec citations still resolve to code"
 	@echo "  docs-snippets   - Compile every Rust example in docs/user-guide.md"
 	@echo "  readme          - Check the README's commands against the Makefile and crates"
+	@echo "  readme-counts   - The test totals the README quotes are the totals this tree produces"
 	@echo "  singleton-tests - Tests observing a process-wide tracker must be #[serial]"
 	@echo "  fuzz-invocation - The fuzz recipes give cargo-fuzz the same --target, before the --"
 	@echo "  preflight       - Disk, cache and cargo-home sanity: a gate's verdict is only worth reading on a healthy machine"

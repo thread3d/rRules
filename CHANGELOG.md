@@ -12,6 +12,124 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.87] — 2026-11-03 — The memory gate measured a directory git does not track
+
+A full gate run (every target the project claims, not only `make ci`) came back red twice, and the
+reasons were both of the shape this repository keeps meeting: a claim nothing executed. Two of the
+three document defects below had been true statements that the code had since outgrown, which is the
+same failure as a bug and costs a reader more, because the document says "read this before changing
+anything about rules".
+
+### `make memcheck` compared two different corpora and reported the difference as a regression
+
+The gate failed with `Allocation regression 18% exceeds 10% threshold` — 2362 allocations against a
+baseline of 1986. Nothing had got heavier. `memory_baseline` measured the corpus built by
+`load_corpus_files()`, which was the committed TCK fixtures **plus** `api/dmn/` — the DMN runtime store
+the server and the browser gate fill, which is gitignored. On a clean checkout CI measured 51 files; on a
+working tree that had just run `make e2e` this machine measured 302, because 251 documents had been
+stored since. Same commit, two verdicts, decided by which directories happened to exist.
+
+There was a second, older defect underneath it: the frozen baseline was taken over **114** files. The
+committed corpus has 51, so even a clean checkout could not have reproduced it — the numbers were not
+comparable with anything, and the only reason this had not been noticed is that the nightly runs on
+GitHub happened to use a smaller corpus than the one the baseline described.
+
+Three changes, each one a claim made executable:
+
+- `load_corpus_files` measures the committed fixtures and nothing else. The DMN runtime store is not
+  an input to a comparison — it is state.
+- `memcheck-gate.sh` compares the snapshots' recorded `file_count` first and exits **2** when they
+  differ, saying the corpus changed rather than calling it a regression. A corpus that legitimately
+  grows now has to be accepted on purpose (`make baseline-update`), which is what "frozen" means.
+- The baseline was regenerated over the committed corpus: 51 files, 1860 allocations, 21.5 MB peak RSS.
+  Re-running the gate immediately afterwards reports `delta=0%` on both.
+
+`engine/benches/dmn_benchmarks.rs` had its own copies of the same three corpus helpers — the duplication
+that AGENTS.md warns about — and its copies walked `api/dmn/` too, so `make bench` was measuring whatever
+the machine had. They are gone; the benchmark uses `engine::dmn::bench_util`, and the now-unused
+`import_corpus_root` went with them.
+
+### `make audit` found an advisory that this tree cannot clear
+
+`RUSTSEC-2026-0429` (`zip`: `ZipArchive::extract` aborts the process on a symlink entry with a large
+declared size, fixed in `zip` 9.0.0) was published on 2026-10-22 and reached the tree through both `zip`
+paths — 1.x through `utoipa-swagger-ui`'s build script, 8.6.0 through `pg-embed`. Before adding it to
+`.cargo/audit.toml` the obvious question was whether it can be fixed instead: it cannot be, on either
+path. `utoipa-swagger-ui` 7 pins `zip` 1.x (clearing it means `utoipa` 4 → 5 with
+`utoipa-swagger-ui` 10), and `pg-embed` 1.0.0 is the newest release and pins `zip` 8.6.0 — so the
+migration would still leave the advisory reported through the database tests. It is recorded as accepted
+risk with an expiry condition, like the rest of that group: both paths unpack archives this project's
+users do not control, at build time and in the test harness, and `cargo tree -e normal -i zip` shows
+`zip` is absent from the shipped binary.
+
+`SECURITY.md` also carried two claims worth correcting: it said "none of them is mirrored into RustSec",
+and the reason this one *is* visible to the gate is that it is one of the exceptions. It also counted
+"fourteen advisories" that the audit was no longer reporting. Both corrected.
+
+### The README quoted test totals three releases out of date — so the totals are now a gate
+
+It said "**996 Rust tests across 40 targets**, 6 ignored, plus 28 frontend tests". The tree runs **1069
+in 51 test targets** (1063 executing, 6 ignored) and **43** frontend tests; `make readme-counts` measures
+them by listing the tests (`cargo test --workspace -- --list`, `npx vitest list --json`) rather than
+running them, so it costs seconds once `make test` has built the binaries and is part of `make ci`. The
+check was tested the way AGENTS.md says a checker must be: the number was set to 999, the gate failed
+with `total: README says 999, the tree produced 1069` and printed the row to paste back, and the correct
+value was restored.
+
+This is the third release to ship a stale count — "1005 across 38", then "996 across 40" while the tree
+ran 1063 — which is why the third fix is a gate rather than a number.
+
+### Specifications and comments asserted closed gaps as open
+
+`specs/rule-sources.md` — the document the README tells a reader to read *before changing anything about
+rules* — opened with "**Nothing converts one into the other.** No code parses `dsl_body`; no code writes
+`.rules` files. A rule created through the API cannot be executed", and closed with "`dsl_body` is not
+compiled … the executing set is per deployment rather than per tenant". The bridge was built across
+9.0.74–9.0.82, and `specs/http-api.md` already said so. The same stale statements sat in a doc comment on
+`write_executable_rule` in `api/src/v1/rules.rs` ("the executing set is per deployment, not per tenant")
+and in a comment in `api/tests/execute_integration.rs` — the comment was the one that made the other two
+look corroborated.
+
+The specification now states what converts a document into an executable rule (`rule` in the request, or
+a `dsl_body` that the text grammar parses), what still does not (prose bodies, which stay
+`executable: false`), and which test pins which path. The draft-path test it used to cite as proof that
+nothing converts still exists and still passes; its body simply does not parse.
+
+`specs/rule-engine.md`'s Known gaps had the same shape in two more entries, and contradicted the prose
+above them: gap 8 said "chaining does not run" while the section described the fixpoint loop both entry
+points delegate to, and gap 9 called what-if simulation a skeleton when `load_facts` inserts the facts,
+`apply_change` rewrites the rules and `rules_fired` carries the run's own count. Both are struck. What is
+genuinely open is written down in their place: the duplicated `ExecutionResult`/`InferenceTrace` types,
+and `SimulationRequest::base_state`, which is carried from the API and read by nothing, so a caller who
+supplies a baseline working memory silently gets an empty one.
+
+`SECURITY.md` claimed "the parser is bounded in depth and token count". The FEEL expression parser is
+(depth 256); the DMN **XML** parser is not, and `POST /v1/decisions/import` takes a document from an
+authenticated caller — `specs/dmn-feel.md` has recorded the missing bound as gap 43 all along. The
+security note now says which parser it means and what the gap costs. Hardening was **not** done here:
+it is a change to the parser's recursion, with tests, not a sentence.
+
+The README's storage paragraph had the mirror-image problem — it said "the tenant and audit stores remain
+in memory" twelve lines above describing the two switches that persist them — and `make db-test` was
+described as running two suites when it runs three (the tenant registry's two tests were not mentioned).
+
+### Also
+
+- Two `gh` run-log zips (13 KB and 22 bytes) left the index. A previous commit had swept `.gh-cache/` in
+  with `git add`, and `.gitignore` did not cover it — the directory AGENTS.md tells an agent to point
+  `XDG_CACHE_HOME` at. They are generated artefacts, not source; the directory is ignored now.
+- `make help` and both `AGENTS.md` copies list the new gate, and the workspace copy's "Layout" paragraph —
+  which still said every runtime store is in memory — was resynced with the repository copy.
+
+Verification: `make ci` green — 1069 Rust tests (1063 executing, 6 ignored) across 51 test targets,
+clippy in all four configurations, `fmt --check`, the frontend build and its 43 tests, and the browser
+gate over every route; `make tck` at baseline (170 pass / 0 fail / 4 skipped over 51 vectors); `make verify`
+35 VERIFIED / 0 FAILED / 0 UNVERIFIED; `make audit` clean apart from the 15 recorded warnings;
+`make memcheck` PASS over the committed corpus; `make db-test` 11/11 over the three PostgreSQL stores;
+`make image-check`, `make chart-lint`, `make spec-citations` (1094 checked), `make docs-snippets`,
+`make readme` (17 commands), `make readme-counts`, `make singleton-tests`, `make fuzz-invocation`,
+`make verification-cost`, `make deploy-env` and a bounded `make fuzz` run all green.
+
 ## [9.0.86] — 2026-11-02 — A lockfile the bump never refreshed, and the advisories `make audit` cannot see
 
 Two smaller findings from the same pass over the notifications, both of the shape this project keeps

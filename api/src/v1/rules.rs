@@ -41,9 +41,10 @@ pub struct StoredRule {
 /// rejected here rather than appearing in the directory and silently not executing. The file is
 /// `<rule id>.rules` holding `{"rules": [<rule>]}` — the shape `build_ruleset_from_dir` reads.
 ///
-/// **Scope of this slice:** the executing set is per deployment, not per tenant, so a rule written here is
-/// visible to every tenant's executions. Tenant-scoped execution is a later step of
-/// `specs/rule-sources.md`; stating it here keeps the limitation findable.
+/// **Scope:** the rule is written into its **tenant's** directory, and execution is tenant-scoped —
+/// `POST /v1/execute` loads only the caller's tenant's rules (`filter_ruleset`,
+/// `api/src/v1/execution.rs:160`) — so a rule created for one tenant does not run for another. This
+/// paragraph said the opposite for several releases after 9.0.77 had already made it true.
 fn write_executable_rule(
     rule_id: Uuid,
     rule_name: &str,

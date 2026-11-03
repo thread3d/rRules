@@ -57,6 +57,8 @@ Thumbs.db
 .helm/
 # pg-embed's downloaded PostgreSQL binaries, used by `make db-test` when $HOME is not writable
 .db-cache/
+# `gh`'s cache, used when $HOME is not writable (`XDG_CACHE_HOME=$PWD/.gh-cache`)
+.gh-cache/
 # A writable HOME for tools that forward HOME but not CARGO_HOME (`make verify`)
 .verify-home/
 .cargo-home/

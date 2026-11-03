@@ -503,16 +503,23 @@ HTTP endpoint forwards straight into it (`api/src/v1/simulation.rs:150-161`).
    no production callers — the execute path has its own salience sort (`direct_eval.rs:124`). The
    duplication is closed (9.0.30): `agenda.rs` no longer defines a second `ConflictStrategy` and
    `ConflictResolver`, so the exported API cannot drift from itself.
-8. **Chaining does not run:** `execute_forward` returns a default result
-   (`engine/src/forward_chaining.rs:45-57`), `execute_backward` returns a fixed failure trace
-   (`engine/src/backward_chaining.rs:80-93`), `Engine::execute_forward` returns
-   "not yet implemented" (`engine/src/environment.rs:132-138`), and three parallel
-   `ExecutionResult`/`InferenceTrace` type pairs coexist
-   (`forward_chaining.rs:9-40`, `backward_chaining.rs:9-49`, `environment.rs:211-246`).
-9. **What-if simulation is a skeleton:** facts parsed and dropped
-   (`engine/src/simulation/runner.rs:177-189`, `:219-232`), `RuleChange` never applied
-   (`:208-248`), `rules_fired` always empty (`:193`, `:236`), `base_state` ignored
-   (`engine/src/simulation/types.rs:25`).
+8. ~~**Chaining does not run.**~~ **Struck in 9.0.87** — both halves run, and the specification
+   above already said so while this list still said the opposite. `Engine::execute_forward`
+   (`engine/src/environment.rs:182`) and the session-taking entry point both delegate to one fixpoint
+   loop, `engine/src/forward_chaining.rs` (`run`); backward chaining is a bounded "who could supply
+   this field" search over the rules and working memory (`engine/src/backward_chaining.rs`), with no
+   variable unification. **Still open, and worse than the entry claimed:** the result types remain
+   duplicated — `ExecutionResult` in `engine/src/forward_chaining.rs:9` and
+   `engine/src/environment.rs:331`, and `InferenceTrace` in `engine/src/backward_chaining.rs:9`,
+   `engine/src/environment.rs:355` and `engine/src/dmn/evaluator/trace.rs:41`, plus the API's DTO at
+   `api/src/v1/execution.rs:326` — which is the drift the duplication always invites.
+9. **What-if simulation: only `base_state` is still ignored.** ~~Facts parsed and dropped, `RuleChange`
+   never applied, `rules_fired` always empty~~ — **struck in 9.0.87**: `load_facts` inserts each test
+   fact's fields into the variant engine's working memory, `apply_change` rewrites the variant's rules,
+   and the result carries the run's own `fired_rules` (`engine/src/simulation/runner.rs`). Still open:
+   `SimulationRequest::base_state` is carried from the API (`api/src/v1/simulation.rs:167`) into the
+   engine's request and read by nothing (`engine/src/simulation/types.rs:25`), so a caller who supplies
+   a baseline working memory silently gets an empty one.
 10. ~~**Two parallel metric stacks and a dead file:** `engine::engine::metrics` is used,
     `engine::metrics` is not, and `engine/src/metrics/prometheus.rs` is gated on a feature no build
     declares.~~ — **closed in 9.0.58**: `engine::metrics` and its `prometheus` module are deleted, leaving

@@ -33,4 +33,16 @@ ignore = [
     "RUSTSEC-2026-0369", # zip: Unix permissions applied on extraction
     "RUSTSEC-2026-0381", # webpki-roots: bundled roots include distrusted CAs
     "RUSTSEC-2026-0235", # rkyv: archive validation can read out of bounds (test-only path)
+
+    # --- Same two `zip` paths, one advisory newer than the tree's fix ---------------------------------
+    # RUSTSEC-2026-0429 (published 2026-10-22, fixed in zip 9.0.0) is the first `zip` advisory that is
+    # **in RustSec**, so `make audit` sees it where it could not see the GitHub-only ones. Neither path
+    # can move from here: `utoipa-swagger-ui` 7 pins `zip` 1.x and upgrading means `utoipa` 4 -> 5 with
+    # `utoipa-swagger-ui` 10, while `pg-embed` 1.0.0 is the newest release and pins `zip` 8.6.0 — so the
+    # advisory stays even if the Swagger UI migration is done. Both unpack archives this project's users
+    # do not control (the pinned Swagger UI release at build time, the PostgreSQL build `make db-test`
+    # downloads), which is why this is accepted risk with an expiry condition rather than an incident;
+    # `SECURITY.md` carries the reasoning and `cargo tree -e normal -i zip` shows it is not in the shipped
+    # binary.
+    "RUSTSEC-2026-0429", # zip: extract aborts on a symlink entry with a large declared size
 ]

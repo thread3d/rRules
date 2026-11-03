@@ -25,7 +25,7 @@ the list cannot rot into a silencer.
 | `protobuf` 2.x (RUSTSEC-2024-0437) | `prometheus` 0.13 → 0.14 |
 | `zstd-sys` | dropped by the same actix bump |
 
-Fourteen advisories remain, in three groups:
+The advisories that remain fall into three groups:
 
 1. **Unreachable at runtime.** `jsonwebtoken` compiles RSA and ECDSA support for every build, so `rsa`
    and `crypto-bigint` are linked. The API verifies **HS256 only** (`api/src/middleware/auth.rs`); no
@@ -42,6 +42,13 @@ Fourteen advisories remain, in three groups:
    a supply-chain one at build or test time, not a request path. `cargo tree -e normal -i <crate>`
    reports all three as absent from the shipped runtime graph.
 
+`RUSTSEC-2026-0429` (2026-10-22, fixed in `zip` 9.0.0) is the newest member of group 3 and the first `zip`
+advisory that is **in RustSec**, so `make audit` sees it where it could not see the GitHub-only ones below.
+It cannot be cleared from this repository on either path: `utoipa-swagger-ui` 7 pins `zip` 1.x, and
+`pg-embed` 1.0.0 — the newest release — pins `zip` 8.6.0, so even the Swagger UI migration would leave the
+advisory reported through the database tests. It is accepted, with the same expiry conditions as the rest of
+group 3, and `cargo audit` re-reports it on every release until one of those two dependencies moves.
+
 The distinction in group 3 is checkable, which is why it is written down:
 
 ```bash
@@ -54,13 +61,16 @@ cargo tree -i zip                  # present → the build and test tree carries
 `cargo audit` reports **RustSec** advisories, and the gate is exactly as strong as that database. GitHub's
 advisory database knows about more: on 2026-11-02 the default branch carried **11 open Dependabot alerts,
 all on `zip`** (2 critical, 7 high, 2 moderate, counted per lockfile in `Cargo.lock` and
-`db_tests/Cargo.lock`), and none of them is mirrored into RustSec, so `make audit` is green while the
-security page is not. Recorded here rather than left to be rediscovered:
+`db_tests/Cargo.lock`), and none of them was mirrored into RustSec, so `make audit` was green while the
+security page was not. Recorded here rather than left to be rediscovered:
 
 | Path | Version | What would clear it |
 |---|---|---|
 | `utoipa-swagger-ui` 7 build script — build-time, in the shipped image | `zip` 1.x | `utoipa-swagger-ui` 7 → 10, which requires `utoipa` 4 → 5 and therefore a migration of every `#[utoipa::path]` and `#[derive(ToSchema)]` in `api`. Work, not a patch. |
 | `pg-embed` — dev-dependency, `make db-test` | `zip` 8.6.0 | `pg-embed` 1.0.0 is the newest release and pins it; nothing in this repository can move it |
+
+RustSec and GitHub are not disjoint: `RUSTSEC-2026-0429`, published 2026-10-22, is one of these advisories
+and *is* mirrored, which is why `make audit` reports it. The others are still invisible to the gate.
 
 The critical one (`GHSA-m665-v7pm-7grj`, patched in `zip` 9.0.5) is reached only through `pg-embed`, which
 unpacks the PostgreSQL archive it fetched itself. The build-time path unpacks the Swagger UI release pinned
@@ -71,8 +81,11 @@ with its expiry condition rather than treated as an incident.
 
 - Untrusted input never panics: the FEEL parser and the DMN parser return error nodes (FEEL-012,
   SYS-002), and both are fuzzed nightly.
-- DMN parsing rejects `DOCTYPE` and processing instructions (XXE), and the parser is bounded in depth and
-  token count.
+- DMN parsing rejects `DOCTYPE` and processing instructions (XXE). The **FEEL expression** parser is
+  bounded in depth (256) and token count; the **DMN XML** parser is not — it has no size, nesting or
+  element-count limit, which `specs/dmn-feel.md` records as gap 43 — so `POST /v1/decisions/import`
+  accepts an unbounded document from an authenticated caller. This bullet claimed the bound applied to
+  "the parser" until 9.0.87; naming which parser is the point.
 - Every business route requires a JWT (API-001); rules are isolated per tenant (API-003); the audit trail
   records who changed what.
 - The server binds loopback by default, and the chart requires a `API_SECRET_KEY` rather than shipping a

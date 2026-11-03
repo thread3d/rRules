@@ -262,19 +262,17 @@ pub fn tck_root() -> PathBuf {
     repo_root.join("engine/tests/fixtures/tck")
 }
 
-/// Locate the import-test corpus.
-pub fn import_corpus_root() -> PathBuf {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest.parent().unwrap_or_else(|| Path::new("."));
-    repo_root.join("api/dmn")
-}
-
-/// Load the combined corpus: TCK fixtures + import-test DMN files.
+/// Load the measured corpus: the committed TCK fixtures, and nothing else.
+///
+/// A baseline is only comparable with a run over the same inputs, so the corpus is the part of the
+/// tree git tracks. `api/dmn/` — the DMN runtime store, which the server and the browser gate fill —
+/// used to be measured too, and because it is gitignored a working tree that had run either carried
+/// hundreds of documents a clean checkout does not: the same commit produced a 302-file "corpus"
+/// locally and a 51-file one in CI, and the difference was reported as an allocation regression.
+/// `memcheck-gate.sh` now also compares the recorded `file_count` with the baseline's, so a
+/// corpus that has genuinely grown is refused as a comparison rather than called a regression.
 pub fn load_corpus_files() -> Vec<PathBuf> {
-    let mut files = collect_dmn_files(&tck_root());
-    files.extend(collect_dmn_files(&import_corpus_root()));
-    files.sort();
-    files
+    collect_dmn_files(&tck_root())
 }
 
 /// Write a baseline snapshot to the snapshots directory (engine/benches/snapshots/).

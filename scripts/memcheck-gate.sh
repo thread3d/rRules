@@ -59,6 +59,24 @@ echo "  baseline: $BASELINE"
 echo "  current : $CURRENT"
 echo "  thresholds: RSS +${RSS_THRESHOLD}%  alloc +${ALLOC_THRESHOLD}%"
 
+# --- Corpus identity ------------------------------------------------------
+# Two snapshots taken over different corpora are not comparable, and the difference used to be
+# reported as a regression: the benchmark walked the gitignored runtime store `api/dmn/` as well as
+# the committed fixtures, so a working tree that had run the server or the browser gate measured 302
+# files where CI measured 51 — and the extra documents looked like an allocation regression in a run
+# where no code had changed. The corpus is the committed fixtures now (see
+# `engine::dmn::bench_util::load_corpus_files`), and this check makes a corpus that legitimately grows
+# say so instead of failing as if the code had got heavier.
+BASELINE_FILES=$(jq '.file_count' "$BASELINE")
+CURRENT_FILES=$(jq '.file_count' "$CURRENT")
+echo "  corpus files:    baseline=$BASELINE_FILES  current=$CURRENT_FILES"
+if [ "$BASELINE_FILES" != "$CURRENT_FILES" ]; then
+    echo "::error::The corpus changed: the baseline measured $BASELINE_FILES DMN files, this run measured $CURRENT_FILES."
+    echo "  The snapshots are not comparable. If the change is intended (fixtures added or removed),"
+    echo "  refresh the baseline with 'make baseline-update' and commit engine/benches/snapshots/baseline.json."
+    exit 2
+fi
+
 # --- RSS regression -------------------------------------------------------
 # Both files are single MemoryBaseline objects with top-level peak_rss_bytes.
 BASELINE_RSS=$(jq '.peak_rss_bytes' "$BASELINE")
