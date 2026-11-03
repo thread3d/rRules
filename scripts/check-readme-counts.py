@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -40,22 +41,30 @@ CLAIM = re.compile(
 )
 TEST_LINE = re.compile(r": test$")
 TARGET_LINE = re.compile(r"^\s+(?:Running|Doc-tests)\s")
+# Cargo colourises the `Running …` banner when `CARGO_TERM_COLOR` is set — which `.github/workflows/ci.yml`
+# does (`CARGO_TERM_COLOR: always`), so the line starts with an escape sequence rather than whitespace and
+# an anchored match counts zero targets. That is exactly how this gate first ran in CI: 1069 tests in
+# "0 test targets". The escape bytes are stripped before matching, and the child is asked for no colour.
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def cargo_list(extra: tuple[str, ...] = ()) -> tuple[int, int, str]:
     """Return (tests, targets, stderr) for `cargo test --workspace -- --list [--ignored]`."""
     command = ["cargo", "test", "--workspace", "--", "--list", *extra]
+    env = {**os.environ, "CARGO_TERM_COLOR": "never"}
     result = subprocess.run(
-        command, cwd=REPO, capture_output=True, text=True, check=False
+        command, cwd=REPO, capture_output=True, text=True, check=False, env=env
     )
     if result.returncode != 0:
         raise SystemExit(
             f"readme counts: `{' '.join(command)}` failed ({result.returncode}):\n"
-            f"{result.stderr.strip()[-2000:]}"
+            f"{ANSI.sub('', result.stderr).strip()[-2000:]}"
         )
-    tests = sum(1 for line in result.stdout.splitlines() if TEST_LINE.search(line))
-    targets = sum(1 for line in result.stderr.splitlines() if TARGET_LINE.search(line))
-    return tests, targets, result.stderr
+    stdout = ANSI.sub("", result.stdout)
+    stderr = ANSI.sub("", result.stderr)
+    tests = sum(1 for line in stdout.splitlines() if TEST_LINE.search(line))
+    targets = sum(1 for line in stderr.splitlines() if TARGET_LINE.search(line))
+    return tests, targets, stderr
 
 
 def frontend_tests() -> int:

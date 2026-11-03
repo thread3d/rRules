@@ -113,6 +113,16 @@ The README's storage paragraph had the mirror-image problem — it said "the ten
 in memory" twelve lines above describing the two switches that persist them — and `make db-test` was
 described as running two suites when it runs three (the tenant registry's two tests were not mentioned).
 
+### The new gate shipped colour-blind, and CI was the first to say so
+
+`make readme-counts` passed locally and **failed on the first push**: `readme counts: 1069 Rust tests in
+0 test targets`. `.github/workflows/ci.yml` sets `CARGO_TERM_COLOR: always`, so cargo's `     Running …`
+banner starts with an escape sequence and the gate's anchored match counted no targets at all. The
+local check had never been run in the mode the gate runs in — the exact habit AGENTS.md records, and the
+reason its rule is "verify in the mode the gate will run in". It now asks the child for
+`CARGO_TERM_COLOR=never` *and* strips escape sequences before matching, and was re-run with colour forced
+on to prove the fix: 1069 tests in 51 test targets, both ways.
+
 ### Also
 
 - Two `gh` run-log zips (13 KB and 22 bytes) left the index. A previous commit had swept `.gh-cache/` in
