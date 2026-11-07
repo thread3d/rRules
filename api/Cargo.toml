@@ -1,6 +1,6 @@
 [package]
 name = "api"
-version = "9.0.89"
+version = "9.0.90"
 edition = "2021"
 
 [[bin]]
@@ -47,8 +47,8 @@ uuid = { version = "1.0", features = ["v4", "serde", "fast-rng"] }
 chrono = { version = "0.4", features = ["serde"] }
 log = "0.4"
 tracing = "0.1"
-utoipa = { version = "4", features = ["actix_extras", "chrono", "uuid"] }
-utoipa-swagger-ui = { version = "7", features = ["actix-web"] }
+utoipa = { version = "6", features = ["actix_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "10", features = ["actix-web"] }
 # JWT signing/validation (D-22-01). HS256 HMAC with the existing API_SECRET_KEY.
 # Battle-tested standard crate (Keats; RESEARCH §Package Legitimacy: OK).
 # `Validation::new(Algorithm::HS256)` pins the algorithm so `alg:none` is

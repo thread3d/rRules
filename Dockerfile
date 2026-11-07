@@ -58,6 +58,11 @@ COPY engine_state ./engine_state
 # `engine_state/src/postgres.rs` embeds the schema with `include_str!`, so the build needs these
 # present or `--features postgres` fails with "couldn't read .../migrations/21_01_dmn_documents.sql".
 COPY migrations ./migrations
+# `Cargo.toml` patches `pg-embed` to the vendored copy under `vendor/` (see `vendor/README.md`), and cargo
+# resolves that patch in *every* command that reads the workspace, this one included. Without the
+# directory in the context the build stops on a missing `vendor/pg-embed/Cargo.toml` — which is exactly
+# what `make image-check` reported the first time it ran after the patch was added.
+COPY vendor ./vendor
 
 # `--features postgres` compiles the PostgreSQL-backed DMN store, so a deployment can set
 # `DMN_PERSISTENCE=postgres` against this image. Without it the flag would be a documented option

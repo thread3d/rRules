@@ -9,7 +9,7 @@ use utoipa::OpenApi;
 #[openapi(
     info(
         title = "rRules API",
-        version = "9.0.89",
+        version = "9.0.90",
         description = "Production-grade Business Rules Management System REST API",
     ),
     paths(
@@ -88,9 +88,6 @@ use utoipa::OpenApi;
         crate::v1::routes::monitoring::monitoring_health,
         // Simulation
         crate::v1::simulation::run_simulation,
-        // Health (root-level)
-        crate::health::live,
-        crate::health::ready,
         // Metrics (root-level)
         crate::metrics::metrics_endpoint,
         crate::metrics::dead_rules_endpoint,

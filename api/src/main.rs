@@ -19,7 +19,7 @@ async fn main() -> std::io::Result<()> {
         format!("{host}:{port}")
     };
 
-    println!("rRules REST API Server v9.0.89");
+    println!("rRules REST API Server v9.0.90");
     println!("Starting on http://{bind_address}");
 
     // One assembly, shared with the tests: `from_paths` builds every store, the engine registry,

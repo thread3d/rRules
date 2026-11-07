@@ -290,6 +290,35 @@ async fn the_openapi_document_describes_the_documented_routes() {
     );
 }
 
+/// The documentation interface itself is a route, and until 9.0.90 nothing tested it.
+///
+/// `/swagger-ui/` is mounted by `utoipa_swagger_ui`, which unpacks the Swagger UI release in its build
+/// script and embeds the result. Moving that crate from 7 to 10 (to leave the `zip` 1.x it pinned)
+/// changes how the assets are embedded: the mount can stop serving while every other test still passes,
+/// and `docs/API.md` still tells a reader to open it. This asserts the route answers with the interface
+/// rather than with the SPA's `no such endpoint` error.
+#[actix_web::test]
+async fn the_swagger_ui_mount_serves_its_interface() {
+    let root = std::env::temp_dir().join("rrules-swagger-ui-mount");
+    std::fs::create_dir_all(&root).expect("temp dir");
+    let state = api::app::ApiState::for_testing(&root);
+    let app = test::init_service(api::app::build_app(&state)).await;
+
+    let request = test::TestRequest::get().uri("/swagger-ui/").to_request();
+    let response = test::call_service(&app, request).await;
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "/swagger-ui/ must serve the API documentation interface"
+    );
+    let body = String::from_utf8_lossy(&test::read_body(response).await).to_lowercase();
+    assert!(
+        body.contains("swagger"),
+        "the page served at /swagger-ui/ must be Swagger UI, not the SPA shell: {}",
+        &body.chars().take(200).collect::<String>()
+    );
+}
+
 /// Every exemption must still be a route the server serves, or the list is stale.
 #[actix_web::test]
 async fn the_openapi_exemptions_are_real_routes() {

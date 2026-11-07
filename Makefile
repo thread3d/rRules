@@ -59,6 +59,13 @@ db-test:
 # Every dependency advisory must be either fixed or accounted for in `.cargo/audit.toml`, whose entries
 # carry their reason and are checked for staleness by the tool itself. The advisory database needs the
 # network on first run; it is cached afterwards.
+#
+# Three lockfiles, because there are three workspaces: `db_tests` and `engine/fuzz` are `exclude`d from
+# the root and carry their own `Cargo.lock`, and until 9.0.90 nothing audited them. On the day this was
+# written the root lockfile was clean and those two held five advisories it did not — three actix
+# request-path ones, one in `libz-sys` and one in the fuzz lockfile's own `libz-sys` — which Dependabot
+# could see and `make audit` could not. A gate that reads one third of the lockfiles is a gate that
+# reports green on two thirds of the tree.
 audit:
 	@command -v cargo-audit >/dev/null 2>&1 || { \
 		echo "audit: cargo-audit is not installed." >&2; \
@@ -66,6 +73,8 @@ audit:
 		echo "       The gate is enforced in CI, which installs it for the job." >&2; \
 		exit 1; }
 	cargo audit
+	cargo audit --file db_tests/Cargo.lock
+	cargo audit --file engine/fuzz/Cargo.lock
 
 # Measure the machine before trusting a gate: the 862 GB `target/` made `make verify` report BLOCKED
 # twice for reasons that had nothing to do with the code.

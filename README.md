@@ -3,7 +3,7 @@
 A business rules management system in Rust: define business decisions as reusable rules, deploy
 them without rebuilding, and watch their impact.
 
-**9.0.89** — released from a verified tree: everything in the table below was measured by a gate,
+**9.0.90** — released from a verified tree: everything in the table below was measured by a gate,
 not summarised. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped.
 
 ## What it does
@@ -49,7 +49,7 @@ otherwise that job is skipped, which is the honest state and not a pass.
 
 | | Measured |
 |---|---|
-| Tests | **1069 Rust tests across 51 test targets**, 6 of them ignored, plus **43 frontend tests** — all green |
+| Tests | **1070 Rust tests across 51 test targets**, 6 of them ignored, plus **43 frontend tests** — all green |
 | DMN TCK | **170 layer results pass, 0 fail, 4 skipped** across 51 vectors |
 | Requirements | **35 verified, 0 failed, 0 unverified** (CodeWitness, over the engine and API crates) |
 | Lints | `cargo clippy --workspace -- -D warnings` clean, rustfmt clean |

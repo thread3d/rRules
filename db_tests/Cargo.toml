@@ -1,6 +1,6 @@
 [package]
 name = "db_tests"
-version = "9.0.89"
+version = "9.0.90"
 edition = "2021"
 publish = false
 
@@ -28,3 +28,9 @@ sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "chrono", "
 
 # Its own workspace: `exclude`d from the parent, so a workspace build never sees `pg-embed`.
 [workspace]
+
+# `pg-embed` pins `zip` 8, whose known advisories are all fixed in zip 9. Upstream has no release that
+# moves it, so it is vendored with one line changed; see `vendor/pg-embed/Cargo.toml`. This crate is its
+# own workspace, so it needs the same patch as the root `Cargo.toml`.
+[patch.crates-io]
+pg-embed = { path = "../vendor/pg-embed" }

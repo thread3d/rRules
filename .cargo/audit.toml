@@ -1,48 +1,39 @@
 # `cargo audit` configuration.
 #
-# `make audit` fails on any advisory that is not listed here. Each entry is a decision with a reason,
-# not a silencer: `SECURITY.md` explains the assessment behind it, and an entry whose crate leaves the
-# dependency tree will make `cargo audit` report an unused ignore, which is how this list stays honest.
+# `make audit` fails on any advisory that is not listed here, and as of 9.0.90 it audits **all three
+# lockfiles** in this repository — `Cargo.lock`, `db_tests/Cargo.lock` and `engine/fuzz/Cargo.lock` —
+# because the two excluded workspaces carry their own and nothing audited them before that release.
+# Each entry is a decision with a reason, not a silencer: `SECURITY.md` explains the assessment behind
+# it. Entries are removed by the release that removes the crate — 9.0.90 dropped seven this way (the
+# `zip` group, closed by moving both `zip` paths to zip 9, and the `zstd 0.13` group, which left the
+# tree with them).
 
 [advisories]
 ignore = [
     # --- Unreachable at runtime: the API verifies HS256 only (`api/src/middleware/auth.rs`) ---------
     # `jsonwebtoken` compiles its RSA and ECDSA support unconditionally under the `rust_crypto`
-    # feature, so these crates are linked but no code path reaches them. RUSTSEC-2023-0071 has no
-    # fixed release. Removing them means either switching jsonwebtoken's crypto backend to
-    # `aws_lc_rs` (a C toolchain in the image) or replacing the crate — both are recorded as work,
-    # not done quietly.
+    # feature, so `rsa` -> `elliptic-curve` -> `crypto-bigint` are linked while no code path reaches
+    # them (`sqlx-mysql`, an optional feature of an optional dependency, names `rsa` for the same
+    # reason). RUSTSEC-2023-0071 has no fixed release; removing them means switching jsonwebtoken's
+    # crypto backend to `aws_lc_rs` (a C toolchain in the image) or replacing the crate — recorded as
+    # work, not done quietly.
     "RUSTSEC-2023-0071", # rsa: Marvin attack (unfixed upstream)
     "RUSTSEC-2026-0387", # crypto-bigint: timing variability (via elliptic-curve, same path)
 
     # --- Pinned by actix-http, not by this project ------------------------------------------------
-    # Every actix-http release up to 3.20 depends on h2 0.3.x and zstd 0.13.x, the versions these
-    # advisories name. `actix-http` is our HTTP server; we cannot patch its dependencies from here.
-    # Re-audited whenever actix-http is bumped — the entries below are what that bump has to clear.
+    # `actix-http` 3.20.3 — the version that closed five request-path advisories in 9.0.89 — still
+    # resolves `h2 0.3.27`. Nothing in this repository can patch a dependency of a dependency; this
+    # entry is what the next `actix-http` bump has to clear, and `cargo tree -i h2@0.3.27` is the
+    # measurement. (The `zstd 0.13` entries that sat here went in 9.0.90: that version left the tree
+    # with `zip` 8, and `actix-http` 3.20.3 itself resolves `zstd 0.14`.)
     "RUSTSEC-2026-0258", # h2: unbounded empty DATA frames
-    "RUSTSEC-2026-0391", # zstd: data from an abandoned stream leaks into the next
-    "RUSTSEC-2026-0398", # zstd-safe: Seekable::decompress sets a Vec length beyond capacity
-    "RUSTSEC-2026-0403", # zstd-safe: uninitialised memory in streaming decompression
 
-    # --- Development-only paths: not in the shipped binary ----------------------------------------
-    # `pg-embed` (dev-dependency of the database tests) downloads a zip and extracts it, which is the
-    # only way `zip` enters the tree; `webpki-roots` comes with a test-only TLS client. `cargo tree
-    # -e normal -i <crate>` reports both as absent from the normal (shipped) dependency set.
-    "RUSTSEC-2026-0367", # zip: SUID/SGID preservation on extraction
-    "RUSTSEC-2026-0368", # zip: symlink attributes on extraction
-    "RUSTSEC-2026-0369", # zip: Unix permissions applied on extraction
-    "RUSTSEC-2026-0381", # webpki-roots: bundled roots include distrusted CAs
-    "RUSTSEC-2026-0235", # rkyv: archive validation can read out of bounds (test-only path)
-
-    # --- Same two `zip` paths, one advisory newer than the tree's fix ---------------------------------
-    # RUSTSEC-2026-0429 (published 2026-10-22, fixed in zip 9.0.0) is the first `zip` advisory that is
-    # **in RustSec**, so `make audit` sees it where it could not see the GitHub-only ones. Neither path
-    # can move from here: `utoipa-swagger-ui` 7 pins `zip` 1.x and upgrading means `utoipa` 4 -> 5 with
-    # `utoipa-swagger-ui` 10, while `pg-embed` 1.0.0 is the newest release and pins `zip` 8.6.0 — so the
-    # advisory stays even if the Swagger UI migration is done. Both unpack archives this project's users
-    # do not control (the pinned Swagger UI release at build time, the PostgreSQL build `make db-test`
-    # downloads), which is why this is accepted risk with an expiry condition rather than an incident;
-    # `SECURITY.md` carries the reasoning and `cargo tree -e normal -i zip` shows it is not in the shipped
-    # binary.
-    "RUSTSEC-2026-0429", # zip: extract aborts on a symlink entry with a large declared size
+    # --- In the lockfile, absent from every build this repository makes ---------------------------
+    # `rust_decimal`'s optional `rkyv` feature and `pg-embed`'s optional `sqlx` feature resolve into
+    # the lockfile — a lockfile is feature-independent — but no feature this tree enables compiles
+    # either, and `cargo tree -i <crate>` finds no parent in the resolved graph. They are listed
+    # rather than suppressed globally so that enabling either feature meets a decision, not a
+    # surprise.
+    "RUSTSEC-2026-0235", # rkyv: archive validation can read out of bounds (optional rust_decimal feature)
+    "RUSTSEC-2026-0381", # webpki-roots: bundles distrusted CAs (optional pg-embed sqlx feature)
 ]

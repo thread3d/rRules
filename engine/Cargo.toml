@@ -1,6 +1,6 @@
 [package]
 name = "engine"
-version = "9.0.89"
+version = "9.0.90"
 edition = "2021"
 
 [dependencies]
@@ -15,7 +15,7 @@ anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 git2 = "0.21.0"
 prometheus = { workspace = true }
-utoipa = { version = "4", features = ["chrono", "uuid"] }
+utoipa = { version = "6", features = ["chrono", "uuid"] }
 # DMN 1.5 XML parser/exporter (Phase 29+) — streaming NsReader/Writer, multi-namespace.
 # Supply-chain verified 2026-07-06 (Task 1 gate): repo tafia/quick-xml, 322M downloads.
 # 0.40 was found vulnerable by `cargo audit` (RUSTSEC-2026-0194, -0195) — this crate parses untrusted

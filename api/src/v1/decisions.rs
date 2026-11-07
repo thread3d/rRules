@@ -56,7 +56,7 @@ pub struct EvaluateDecisionResponse {
 }
 
 /// Inference trace response (subset of full trace for API exposure).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct TraceResponse {
     /// Decision ID being evaluated.
     pub decision_id: String,
@@ -67,7 +67,7 @@ pub struct TraceResponse {
 }
 
 /// Request body for reloading a DMN model (hot-reload).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct ReloadDmnRequest {
     /// The new DMN XML content.
     pub dmn_content: String,

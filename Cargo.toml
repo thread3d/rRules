@@ -18,3 +18,10 @@ wiremock = "0.6.5"
 proptest = "1.11.0"
 # 0.13 pulled protobuf 2.x, which `cargo audit` reports as vulnerable (RUSTSEC-2024-0437).
 prometheus = { version = "0.14", features = ["process"] }
+
+# `pg-embed` (a dev-dependency of `engine_state`, used by the database tests) pins `zip` 8, whose known
+# advisories are all fixed in zip 9. Upstream has no release that moves it, so the crate is vendored with
+# one line changed — the requirement — and patched in here as well as in `db_tests/Cargo.toml`, whose
+# workspace is separate. `vendor/pg-embed/Cargo.toml` carries the full rationale and the expiry condition.
+[patch.crates-io]
+pg-embed = { path = "vendor/pg-embed" }
