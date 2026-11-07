@@ -1,6 +1,6 @@
 [package]
 name = "api"
-version = "9.0.88"
+version = "9.0.89"
 edition = "2021"
 
 [[bin]]
@@ -23,7 +23,9 @@ engine = { path = "../engine", features = ["engine-rete", "engine-treat", "engin
 engine_state = { path = "../engine_state" }
 sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"], optional = true }
 actix-web = { version = "4.4", features = ["macros", "ws"] }
-actix-files = "0.6"
+# 0.6.10 carried RUSTSEC-2026-0443 (hidden-file disclosure through Windows short names), fixed in
+# 0.7.4, so the requirement moves with the advisory rather than staying on the old line.
+actix-files = "0.7"
 # CORS middleware — required for D-22-05's separate-host prod URL mode (VITE_API_URL
 # absolute) where the browser blocks cross-origin requests without CORS headers.
 # Verified ABSENT at plan time (RESEARCH Pitfall 2); added here so D-22-05 is real.

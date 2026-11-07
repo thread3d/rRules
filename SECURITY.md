@@ -49,6 +49,29 @@ It cannot be cleared from this repository on either path: `utoipa-swagger-ui` 7 
 advisory reported through the database tests. It is accepted, with the same expiry conditions as the rest of
 group 3, and `cargo audit` re-reports it on every release until one of those two dependencies moves.
 
+### The 2026-11-06 HTTP-stack advisories: fixed, not accepted
+
+Five advisories landed against the HTTP stack on **2026-11-06** — after the last CI run that executed and
+before the next one — and every one of them is on the request path of the shipped server, so none of them
+belongs in `audit.toml`:
+
+| Advisory | Crate | Fixed in |
+|---|---|---|
+| `RUSTSEC-2026-0446` request smuggling through malformed chunked trailers | `actix-http` 3.20.0 | 3.20.2 → bumped to **3.20.3** |
+| `RUSTSEC-2026-0448` unbounded decompression exhausts memory and CPU | `actix-http` 3.20.0 | 3.20.1 → **3.20.3** |
+| `RUSTSEC-2026-0455` large-window Brotli bodies bypass decompression limits | `actix-http` 3.20.0 | 3.20.3 |
+| `RUSTSEC-2026-0447` compressed request bodies exhaust memory before extractor limits | `actix-web` 4.16.0 | 4.18.2 |
+| `RUSTSEC-2026-0443` hidden-file disclosure through Windows short names | `actix-files` 0.6.10 | 0.7.4 |
+
+That they were found locally rather than by CI is the point worth keeping: `make audit` runs in `ci.yml`,
+CI could start no job between 2026-11-04 and 2026-11-06 (the account billing lapse recorded in
+`CHANGELOG.md` 9.0.88), and the first push after that would have failed the gate. The `actix-files`
+requirement moved with the advisory (`0.6` → `0.7`), because 0.7.4 is the first fixed release and the
+0.x line does not auto-upgrade across a minor.
+
+`actix-http` 3.20.3 still resolves `h2 0.3.27` and `zstd 0.13.3`, so group 2's ignores are unchanged and
+still needed — re-measured by running the gate, not re-asserted.
+
 The distinction in group 3 is checkable, which is why it is written down:
 
 ```bash

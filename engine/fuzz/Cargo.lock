@@ -233,7 +233,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "engine"
-version = "9.0.88"
+version = "9.0.89"
 dependencies = [
  "anyhow",
  "chrono",
@@ -254,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "engine-fuzz"
-version = "9.0.88"
+version = "9.0.89"
 dependencies = [
  "engine",
  "libfuzzer-sys",

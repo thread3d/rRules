@@ -12,6 +12,60 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.89] — 2026-11-07 — Five request-path advisories, found by the gate CI could not run
+
+`make audit` is a CI gate — the `Dependency advisories` step of `ci.yml`'s *Build, test, lint, format,
+frontend* job — and it had not executed since 2026-11-03 because the account could start no job. Running
+it by hand — which is what 9.0.88's own procedure says to do when CI cannot run — failed with
+**5 vulnerabilities and 15 allowed warnings**:
+
+```
+Crate:     actix-files
+Version:   0.6.10
+Title:     Hidden file disclosure through Windows short names
+ID:        RUSTSEC-2026-0443
+Solution:  Upgrade to >=0.7.4
+```
+
+All five were published on **2026-11-06**, three days after the last run that executed, and all five are on
+the **request path** of the shipped server — the opposite of the build-time and test-only advisories
+recorded in `SECURITY.md`:
+
+| Advisory | Crate | Was | Now |
+|---|---|---|---|
+| `RUSTSEC-2026-0446` — request smuggling through malformed chunked trailers | `actix-http` | 3.20.0 | **3.20.3** |
+| `RUSTSEC-2026-0448` — unbounded decompression exhausts memory and CPU | `actix-http` | 3.20.0 | **3.20.3** |
+| `RUSTSEC-2026-0455` — large-window Brotli bodies bypass decompression limits | `actix-http` | 3.20.0 | **3.20.3** |
+| `RUSTSEC-2026-0447` — compressed bodies exhaust memory before extractor limits | `actix-web` | 4.16.0 | **4.18.2** |
+| `RUSTSEC-2026-0443` — hidden-file disclosure through Windows short names | `actix-files` | 0.6.10 | **0.7.4** |
+
+Three of the four are inside `actix-http`'s decompression and framing code, which every request to the API
+passes through: the request-smuggling one lets a malformed chunked trailer desynchronise the connection,
+and the two decompression ones let a compressed body spend memory and CPU that the extractor limits — the
+limits this server actually relies on — only see afterwards. None of them was accepted as an ignore; a
+request-path vulnerability is fixed, and `audit.toml` stays a list of things that are genuinely not
+reachable.
+
+`actix-files` needed its **requirement** moved, not just its lock: the fixed release is 0.7.4, and a `0.6`
+requirement cannot resolve across the minor. `api/Cargo.toml` says `0.7` with the advisory named in the
+comment, so the next reader learns why the line moved. The API surface used (`Files::new(...)
+.index_file("index.html").show_files_listing()`) is unchanged in 0.7 — the browser gate exercises it,
+because the static-file service is what serves the built interface.
+
+`actix-http` 3.20.3 still resolves `h2 0.3.27` and `zstd 0.13.3`, so the four `audit.toml` ignores in
+group 2 ("pinned by actix-http") are unchanged *and still exercised*: the gate reports 15 allowed warnings
+and 0 vulnerabilities, which is the same reading as before the bump. `SECURITY.md` gained the table above
+and the note that these five were found by hand because the gate could not run.
+
+Verification: `make audit` **0 vulnerabilities, 15 allowed warnings** — the same allowed set as before the
+bump, so group 2's ignores are still needed and still exercised. Full gate list: `make preflight` passes,
+`make ci` green — 1,063 tests across 51 targets plus 43 frontend tests, clippy `-D warnings` and rustfmt
+clean, `spec-citations` 1,094/0, `docs-snippets` 16, `readme` 17, `readme-counts` 1,069/51/43, and the
+browser gate green against the new `actix-files` (13 routes, a deep link, a signed-in flow, rule creation,
+approval, audit, dark mode). `make tck` 170/0 with the 4 recorded skips, `make verify` 35 verified /
+0 failed / 0 unverified, `make db-test` 11 green against real PostgreSQL, `make image-check` and
+`make chart-lint` green. CI/Deploy not confirmed: account billing.
+
 ## [9.0.88] — 2026-11-07 — The nightly gates never ran, and the account was the reason
 
 Six failure emails arrived over three days — three `Benchmarks`, three `Fuzz` — and every one of them is
