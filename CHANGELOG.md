@@ -16,9 +16,9 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 The security page carried **11 open Dependabot alerts**, all on `zip`, counted twice because they sat in
 two lockfiles: five in `Cargo.lock` and six in `db_tests/Cargo.lock`. None of them could be fixed by
-resolving within the requirements that put them there, which is why five releases had recorded them as
-accepted risk with an expiry condition. This release closes all eleven, and the gate that should have
-been warning about the second half of the problem.
+resolving within the requirements that put them there, which is why release after release since 9.0.51 had
+recorded them as accepted risk with an expiry condition. This release closes all eleven, and the gate
+that should have been warning about the second half of the problem.
 
 ### `zip` had two owners, and each had to move
 
@@ -112,7 +112,16 @@ ignored) plus 43 frontend tests, clippy `-D warnings` and rustfmt clean, `spec-c
 new `actix-files` and the migrated Swagger UI mount; `make tck` 170/0 with the 4 recorded skips; `make verify` 35 verified / 0 failed / 0
 unverified; `make db-test` 11 green through the patched `pg-embed`; `make image-check` and
 `make chart-lint` green. Each lockfile holds a single `zip 9.4.1`, reached by `utoipa-swagger-ui`
-10.0.2's build script and by the vendored `pg-embed`. CI/Deploy not confirmed: account
+10.0.2's build script and by the vendored `pg-embed`.
+
+**The alerts themselves close on GitHub's schedule, not this commit's.** Dependabot recalculates them from
+the dependency graph it builds for the default branch, and at the time of writing that graph had not
+rebuilt: its SBOM still listed `utoipa 4.2.3`, `utoipa-swagger-ui 7.1.0`, `actix-web 4.16.0` and
+`zip 8.6.0` — packages that are in no lockfile on `main` any more, including ones 9.0.89 removed an hour
+earlier. That is the same account-level background processing the CI billing lapse is stopping (9.0.88),
+not a repository state: the pushed lockfiles carry `zip 9.4.1`, and `make audit` run against those exact
+files reports zero vulnerabilities. `gh api "/repos/thread3d/rRules/dependabot/alerts?state=open"` is the
+check, and it should return `[]` once the graph catches up. CI/Deploy not confirmed: account
 billing.
 
 ## [9.0.89] — 2026-11-07 — Five request-path advisories, found by the gate CI could not run
