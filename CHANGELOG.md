@@ -12,6 +12,109 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.90] — 2026-11-07 — Eleven alerts, two pinned dependencies, and an audit gate that read a third of the tree
+
+The security page carried **11 open Dependabot alerts**, all on `zip`, counted twice because they sat in
+two lockfiles: five in `Cargo.lock` and six in `db_tests/Cargo.lock`. None of them could be fixed by
+resolving within the requirements that put them there, which is why five releases had recorded them as
+accepted risk with an expiry condition. This release closes all eleven, and the gate that should have
+been warning about the second half of the problem.
+
+### `zip` had two owners, and each had to move
+
+| Path | Was | What moved it |
+|---|---|---|
+| `utoipa-swagger-ui` 7's build script — runs while `api` compiles, and ships in the image | `zip` 1.x | `utoipa-swagger-ui` **10.0.2** declares `zip ^9.0`. Reaching it meant `utoipa` 4 → 6 and `utoipa-swagger-ui` 7 → 10. |
+| `pg-embed` 1.0.0 — dev-dependency of `engine_state` and `db_tests`, what `make db-test` starts | `zip` 8.6.0 | 1.0.0 is the newest release (published 2026-02-24, untouched since) and still declares `zip = "8"`. There is no version to move to, so the crate is **vendored with two marked changes**. |
+
+`utoipa` and `utoipa-swagger-ui` were the version bump `SECURITY.md` had been calling "work, not a patch"
+since 9.0.87, and it was not a version bump. `utoipa` 6 requires every type a `#[utoipa::path]` names to
+implement `ToSchema`, and:
+
+- two api-local types had no derive (`TraceResponse`, `ReloadDmnRequest`);
+- `engine` was still on `utoipa` **4**, so its eight `ToSchema` derives implemented utoipa 4's trait while
+  `api` asked for utoipa 6's — two versions of one trait in one tree, which is why nine types "did not
+  implement" a trait whose derive was already on the line above them (`engine`'s tenant and simulation
+  types among them). `engine` and `api` now share utoipa 6.
+
+It also exposed a genuine defect that had been invisible for as long as the document had existed:
+`crate::health::live` and `crate::health::ready` were listed **twice** in `openapi.rs`'s `paths(...)`.
+utoipa 4 silently deduplicated them; utoipa 6 fails to compile on the duplicate constant. The paths list
+is now what it says it is — and nothing before this release could have told you whether `/health/live`
+appeared once or twice in the generated document, because no gate read the list.
+
+### `pg-embed` is vendored on purpose, and is meant to be deleted
+
+Two changes, both marked `PATCHED BY THIS REPOSITORY`:
+
+1. `Cargo.toml` — `[dependencies.zip] version = "9"` instead of `"8"`.
+2. `src/pg_unpack.rs` — zip 9's `ZipFile::name()` returns `Result<Cow<str>, ZipError>` where zip 8
+   returned `&str`; the entry name is read once, checked, and released before the payload is read.
+
+`pg-embed` uses `zip` in exactly one place, read-only: it opens the Maven JAR, walks its entries and
+copies the `.txz` out. `ZipArchive::new`/`len`/`by_index`/`read_to_end` are unchanged in zip 9. The patch
+does not compile against zip 8, which is the proof that the requirement really moved.
+
+It is patched into **both** workspaces — the root `Cargo.toml` and `db_tests/Cargo.toml`, which is
+`exclude`d and resolves independently — and `vendor/README.md` records why, what changed, how it was
+verified, and the command to check whether upstream has caught up, at which point the directory and both
+`[patch.crates-io]` blocks go.
+
+The patched unpack path was **executed, not assumed**: `make db-test` was run with the `pg-embed` cache
+emptied, so the JAR was downloaded and unpacked by the patched code — 11 tests green — and only then was
+the cache left in place.
+
+### What the migration broke, and what caught it
+
+Two things, and neither was caught by the compiler:
+
+- **The image build lost the vendored manifest.** `make image-check` builds both Dockerfile stages from
+  the COPY set the Dockerfile names — and the patch in `Cargo.toml` is resolved by *every* cargo command
+  that reads the workspace, including `cargo build --release --locked` in the backend stage. `vendor/`
+  was not in the COPY set, so the image would have failed with `failed to read
+  vendor/pg-embed/Cargo.toml`. The gate found it on its first run after the patch; the fix is one `COPY`
+  line and the script that names the failure.
+- **Nothing tested the Swagger UI mount.** `/swagger-ui/` is mounted by the crate that just moved from 7
+  to 10, and `docs/API.md` tells a reader to open it; a mount that stopped serving would have passed
+  every test in the tree. `api/tests/documented_routes.rs` gained
+  `the_swagger_ui_mount_serves_its_interface`, which fetches the page and requires the interface rather
+  than the SPA's `no such endpoint`. It was tested the way `AGENTS.md` says a checker must be: the
+  `SwaggerUi` registration was removed, the test failed, the mount was restored, and it passed.
+
+### The audit gate was reading one lockfile out of three
+
+Fixing `zip` made the root lockfile clean, so `cargo audit` was run against the other two — and they were
+not:
+
+```
+db_tests/Cargo.lock     actix-http 3.20.0   RUSTSEC-2026-0446, -0448, -0455
+                        actix-web 4.18.1    RUSTSEC-2026-0447
+                        libz-sys 1.1.30     RUSTSEC-2026-0418
+engine/fuzz/Cargo.lock  libz-sys 1.1.29     RUSTSEC-2026-0418
+```
+
+Five advisories in a manifest the gate had never opened, four of them the request-path actix batch 9.0.89
+fixed in the root lockfile — because `db_tests` pins `api` by path and resolves `actix-web` for itself,
+so the same bump has to happen twice and only happened once. `make audit` now audits **all three
+lockfiles**, which is a one-line-per-lockfile change with a comment saying what it found.
+
+`.cargo/audit.toml` lost **seven** entries in the same release — the four `zip` advisories and the three
+`zstd 0.13` ones, since `actix-http` 3.20.3 resolves `zstd` 0.14 and `zip` 8 left the tree with the two
+fixes above. Five remain, each with a re-measured reason: `rsa`/`crypto-bigint` (HS256-only API),
+`h2 0.3.27` (pinned by actix-http 3.20.3), and `rkyv`/`webpki-roots` (in a lockfile, in no build — the
+lockfile is feature-independent, and `cargo tree -i` finds no parent).
+
+Verification: `make audit` **0 vulnerabilities across all three lockfiles** (4 allowed warnings, the
+unmaintained/yanked set unchanged); `make ci` green — **1,064 tests across 51 targets** (1,070 listed, 6
+ignored) plus 43 frontend tests, clippy `-D warnings` and rustfmt clean, `spec-citations` 1,094/0,
+`docs-snippets` 16, `readme` 17, `readme-counts`, `singleton-tests`, `fuzz-invocation`,
+`frontend-types`, `verification-cost` and `deploy-env` all clean, and the browser gate green against the
+new `actix-files` and the migrated Swagger UI mount; `make tck` 170/0 with the 4 recorded skips; `make verify` 35 verified / 0 failed / 0
+unverified; `make db-test` 11 green through the patched `pg-embed`; `make image-check` and
+`make chart-lint` green. Each lockfile holds a single `zip 9.4.1`, reached by `utoipa-swagger-ui`
+10.0.2's build script and by the vendored `pg-embed`. CI/Deploy not confirmed: account
+billing.
+
 ## [9.0.89] — 2026-11-07 — Five request-path advisories, found by the gate CI could not run
 
 `make audit` is a CI gate — the `Dependency advisories` step of `ci.yml`'s *Build, test, lint, format,

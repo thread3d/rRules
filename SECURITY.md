@@ -7,10 +7,19 @@ publicly, contact the repository owner directly. There is no bounty programme.
 
 ## Dependency auditing
 
-`make audit` runs [`cargo audit`](https://github.com/rustsec/rustsec) against `Cargo.lock` and **fails on
-any advisory that is not accounted for**. `.cargo/audit.toml` holds the account: each ignored advisory is
-listed with the reason it is acceptable, and an ignore that no longer matches anything is reported, so
-the list cannot rot into a silencer.
+`make audit` runs [`cargo audit`](https://github.com/rustsec/rustsec) against **every lockfile in the
+repository** — `Cargo.lock`, `db_tests/Cargo.lock` and `engine/fuzz/Cargo.lock` — and **fails on any
+advisory that is not accounted for**. `.cargo/audit.toml` holds the account: each ignored advisory is
+listed with the reason it is acceptable, and an entry is removed by the release that removes the crate,
+so the list cannot rot into a silencer.
+
+The three-lockfile sweep is 9.0.90's other lesson. The two excluded workspaces keep their own
+`Cargo.lock`, and until that release the gate read only the root one: on 2026-11-07 the root lockfile
+audited clean while `db_tests/Cargo.lock` held **five** advisories the gate could not see — the four
+actix request-path ones below and one in `libz-sys` — and `engine/fuzz/Cargo.lock` held a sixth, its own
+older `libz-sys`. Dependabot had already told us the manifest mattered: **six of its eleven open `zip`
+alerts were counted against `db_tests/Cargo.lock`**, because its dependency graph reads every lockfile
+where the gate read one. A gate that reads one third of the lockfiles is green on two thirds of the tree.
 
 `npm audit` covers the interface; it reports **0 vulnerabilities** as of 9.0.51.
 
@@ -25,29 +34,52 @@ the list cannot rot into a silencer.
 | `protobuf` 2.x (RUSTSEC-2024-0437) | `prometheus` 0.13 → 0.14 |
 | `zstd-sys` | dropped by the same actix bump |
 
-The advisories that remain fall into three groups:
+Five advisories remain, in three groups, and **9.0.90 closed a fourth** — the `zip` group, carried as
+accepted risk since the gate was introduced and described below.
 
 1. **Unreachable at runtime.** `jsonwebtoken` compiles RSA and ECDSA support for every build, so `rsa`
    and `crypto-bigint` are linked. The API verifies **HS256 only** (`api/src/middleware/auth.rs`); no
-   request reaches those code paths. `RUSTSEC-2023-0071` has no fixed release. Closing this means
-   switching `jsonwebtoken`'s crypto backend to `aws_lc_rs` (which brings a C toolchain into the image)
-   or replacing the crate for a ~50-line HS256 verifier — recorded as work, not assumed.
-2. **Pinned by actix-http.** Every release of our HTTP server up to 3.20 depends on `h2 0.3.x` and
-   `zstd 0.13.x`, the versions the advisories name. Nothing in this repository can patch a dependency of
-   a dependency; the entries in `audit.toml` are what the next actix-http bump must clear.
-3. **Build- and test-time only.** `zip` arrives on two paths, neither of which reads an archive this
-   project's *users* control: `utoipa-swagger-ui`'s build script unpacks the pinned Swagger UI release
-   while `api` is compiled, and `pg-embed` — a dev-dependency of `engine_state` — unpacks the PostgreSQL
-   build that `make db-test` downloads. `webpki-roots` comes with a test-only TLS client. The exposure is
-   a supply-chain one at build or test time, not a request path. `cargo tree -e normal -i <crate>`
-   reports all three as absent from the shipped runtime graph.
+   request reaches those code paths (`sqlx-mysql`, an optional feature of an optional dependency, names
+   `rsa` for the same reason). `RUSTSEC-2023-0071` has no fixed release. Closing this means switching
+   `jsonwebtoken`'s crypto backend to `aws_lc_rs` (which brings a C toolchain into the image) or
+   replacing the crate for a ~50-line HS256 verifier — recorded as work, not assumed.
+2. **Pinned by actix-http.** `actix-http` 3.20.3 — the version that closed the five request-path
+   advisories below — still resolves `h2 0.3.27`, which `RUSTSEC-2026-0258` names. Nothing in this
+   repository can patch a dependency of a dependency; the entry in `audit.toml` is what the next
+   `actix-http` bump has to clear, and `cargo tree -i h2@0.3.27` is the measurement. The two `zstd 0.13`
+   entries that used to sit beside it left with `zip` 8 in 9.0.90: `actix-http` 3.20.3 resolves `zstd`
+   0.14, and there is nothing to ignore any more.
+3. **In a lockfile, absent from every build.** A lockfile is feature-independent, so `rust_decimal`'s
+   optional `rkyv` feature and `pg-embed`'s optional `sqlx` feature resolve into it while no feature this
+   tree enables compiles them — `cargo tree -i rkyv` and `cargo tree -i webpki-roots` find no parent in
+   the resolved graph. They are listed in `audit.toml` rather than suppressed globally, so that enabling
+   either feature meets a decision instead of a surprise.
 
-`RUSTSEC-2026-0429` (2026-10-22, fixed in `zip` 9.0.0) is the newest member of group 3 and the first `zip`
-advisory that is **in RustSec**, so `make audit` sees it where it could not see the GitHub-only ones below.
-It cannot be cleared from this repository on either path: `utoipa-swagger-ui` 7 pins `zip` 1.x, and
-`pg-embed` 1.0.0 — the newest release — pins `zip` 8.6.0, so even the Swagger UI migration would leave the
-advisory reported through the database tests. It is accepted, with the same expiry conditions as the rest of
-group 3, and `cargo audit` re-reports it on every release until one of those two dependencies moves.
+### The `zip` group: closed in 9.0.90
+
+For five releases this document carried `zip` as build-time and test-time risk, because both of its paths
+were pinned by someone else's requirement:
+
+| Path | Was | What moved it |
+|---|---|---|
+| `utoipa-swagger-ui` 7's build script — runs while `api` compiles, ships in the image | `zip` 1.x | `utoipa-swagger-ui` 10.0.2 declares `zip ^9.0`. Reaching it means `utoipa` 4 → 6 and `utoipa-swagger-ui` 7 → 10. |
+| `pg-embed` — dev-dependency of `engine_state` and `db_tests`, what `make db-test` starts | `zip` 8.6.0 | 1.0.0 is the newest release and still pins `zip = "8"`; the crate is **vendored with two marked changes** in `vendor/pg-embed`, and `vendor/README.md` records why, what changed, how it was verified and when to delete it. |
+
+The Swagger UI migration was not a version bump. `utoipa` 6 requires every type a path or a body refers
+to to implement `ToSchema`, and two api-local types (`TraceResponse`, `ReloadDmnRequest`) plus the
+`engine`-owned tenant and simulation types did not — `engine` was still on `utoipa` 4, so its derives
+implemented a *different* trait than the one `api` asked for. `engine` now shares `utoipa` 6, so one
+version of the trait is in the tree. It also exposed a latent defect worth keeping in the record: `crate::health::live` and `crate::health::ready` were listed
+**twice** in `openapi.rs`'s `paths(...)`, which utoipa 4 silently deduplicated; utoipa 6 fails to compile
+on it. That duplicate is the reason the document was generated with each health path once rather than
+twice, and no gate could have told you which it was.
+
+After both paths:
+
+```bash
+cargo tree -i zip        # one zip 9.4.1, build-dependency of utoipa-swagger-ui 10.0.2
+cargo audit              # 0 vulnerabilities in all three lockfiles
+```
 
 ### The 2026-11-06 HTTP-stack advisories: fixed, not accepted
 
@@ -69,36 +101,19 @@ CI could start no job between 2026-11-04 and 2026-11-06 (the account billing lap
 requirement moved with the advisory (`0.6` → `0.7`), because 0.7.4 is the first fixed release and the
 0.x line does not auto-upgrade across a minor.
 
-`actix-http` 3.20.3 still resolves `h2 0.3.27` and `zstd 0.13.3`, so group 2's ignores are unchanged and
-still needed — re-measured by running the gate, not re-asserted.
+`db_tests/Cargo.lock` had the same four actix advisories for the same reason — it pins `api` by path, so
+it resolves `actix-web` independently — which is how the missing half of this gate came to light in
+9.0.90.
 
-The distinction in group 3 is checkable, which is why it is written down:
-
-```bash
-cargo tree -e normal -i zip        # empty → not in the shipped binary
-cargo tree -i zip                  # present → the build and test tree carries it
-```
-
-### What `make audit` cannot see
+### What `make audit` still cannot see
 
 `cargo audit` reports **RustSec** advisories, and the gate is exactly as strong as that database. GitHub's
-advisory database knows about more: on 2026-11-02 the default branch carried **11 open Dependabot alerts,
-all on `zip`** (2 critical, 7 high, 2 moderate, counted per lockfile in `Cargo.lock` and
-`db_tests/Cargo.lock`), and none of them was mirrored into RustSec, so `make audit` was green while the
-security page was not. Recorded here rather than left to be rediscovered:
-
-| Path | Version | What would clear it |
-|---|---|---|
-| `utoipa-swagger-ui` 7 build script — build-time, in the shipped image | `zip` 1.x | `utoipa-swagger-ui` 7 → 10, which requires `utoipa` 4 → 5 and therefore a migration of every `#[utoipa::path]` and `#[derive(ToSchema)]` in `api`. Work, not a patch. |
-| `pg-embed` — dev-dependency, `make db-test` | `zip` 8.6.0 | `pg-embed` 1.0.0 is the newest release and pins it; nothing in this repository can move it |
-
-RustSec and GitHub are not disjoint: `RUSTSEC-2026-0429`, published 2026-10-22, is one of these advisories
-and *is* mirrored, which is why `make audit` reports it. The others are still invisible to the gate.
-
-The critical one (`GHSA-m665-v7pm-7grj`, patched in `zip` 9.0.5) is reached only through `pg-embed`, which
-unpacks the PostgreSQL archive it fetched itself. The build-time path unpacks the Swagger UI release pinned
-in `utoipa-swagger-ui`. Both are trusted, fixed inputs — which is why this is recorded as accepted risk
-with its expiry condition rather than treated as an incident.
+advisory database knows about more, and the two are not the same set: on 2026-11-02 the default branch
+carried **11 open Dependabot alerts, all on `zip`**, none of which was mirrored into RustSec — so
+`make audit` was green while the security page was not. Those eleven are closed by 9.0.90, and the lesson
+is kept rather than archived: **when the two disagree, the security page is the one that is telling the
+truth**, and a mirror is not a superset. The check is `gh api "/repos/OWNER/REPO/dependabot/alerts?state=open"`,
+and Dependabot scans all three lockfiles where `make audit` used to scan one.
 
 ## Hardening already in the code
 
