@@ -99,6 +99,12 @@ Repayment is one command per run, on commits that are already pushed, once billi
       gh run rerun "$id"
     done
 
+The push that carried this release (`02fe326`) added its own pair — CI `42340980346` (five jobs) and
+Deploy `42340980344`, every one of them blocked in three seconds with the same annotation — and every
+push until billing returns will add another. `gh run list --limit 20` per workflow is therefore the
+authority for the current list; the six ids above are the ones this release diagnosed, not the whole
+debt.
+
 Verification: `make preflight` passes; `make ci` green end to end — **1,063 tests across 51 targets**
 (1,069 listed, 6 ignored) and **43 frontend tests**, `cargo clippy --workspace --all-targets -D warnings`
 plus the `postgres` feature builds and `db_tests`, `cargo fmt --all -- --check`, `spec-citations`
