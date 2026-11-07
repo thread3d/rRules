@@ -266,11 +266,29 @@ The agreed procedure when that happens:
 1. **Keep working**, on local gates only. Do not describe a release as CI-green.
 2. **Mark the release in `CHANGELOG.md`**: append `CI/Deploy not confirmed: account billing` to the
    entry's verification line, so the debt is visible where a reader looks.
-3. **Keep the exact list of unverified commits.** `gh run list --limit N` reproduces it afterwards.
-4. **Repay the debt when billing returns**: `gh run rerun <run-id>` for every workflow run of every
+3. **Keep the exact list of unverified commits, and the blocked runs per workflow.** `gh run list
+   --limit N` reproduces the push runs; a commit whose `CI` and `Deploy` runs are green can still have
+   had no benchmark or fuzz run at all, because those workflows are scheduled rather than triggered by
+   a commit. List them per workflow — `gh run list --workflow=bench.yml --limit N` and `gh run list
+   --workflow=fuzz.yml --limit N` — and put the run ids in the release entry, so the repayment has a
+   checklist instead of a memory. (9.0.88: `a1e685d` was green on push and had six blocked nightly
+   runs.)
+4. **Run locally what the blocked jobs would have run, and record the numbers.** A blocked nightly
+   gate leaves no measurement behind: `make bench`, `make memcheck` and `make fuzz` by hand are the
+   only evidence that the tree those jobs would have measured is sound, and the release entry should
+   quote them.
+5. **Read the annotation, not the duration.** A lapse can also kill a run *in flight*: on 2026-11-04
+   the `Criterion benchmarks` job ran 26 minutes and then reported `failure` with no steps recorded and
+   its log already gone (`gh run view --log-failed` → `log not found`,
+   `gh api .../actions/jobs/<id>/logs` → `BlobNotFound`), while the memory gate in the same run passed
+   in 40 s and the check-run annotation was the billing message
+   (`gh api /repos/<owner>/<repo>/check-runs/<job-id>/annotations`). A failure with no steps, no log and
+   a duration inside the job's own timeout is a suspension, not a result — do not go looking for it in
+   the harness.
+6. **Repay the debt when billing returns**: `gh run rerun <run-id>` for every workflow run of every
    unverified commit (the commits are already pushed; nothing is lost), then confirm green in `gh run
    view` before resuming normal operation.
-5. Do **not** mark the goal complete while any pushed commit is unverified by CI.
+7. Do **not** mark the goal complete while any pushed commit is unverified by CI.
 
 ## Never commit binaries
 

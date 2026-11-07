@@ -12,6 +12,107 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [9.0.88] — 2026-11-07 — The nightly gates never ran, and the account was the reason
+
+Six failure emails arrived over three days — three `Benchmarks`, three `Fuzz` — and every one of them is
+the same sentence, quoted verbatim from the check-run annotation of the newest run:
+
+> The job was not started because recent account payments have failed or your spending limit needs to
+> be increased. Please check the 'Billing & plans' section in your settings
+
+No step ran, no measurement was taken, and nothing in this tree could have changed the outcome: a valid
+payment method or a spending limit that covers the month is the fix, and neither is something a commit
+can carry. What a commit *can* do is what `AGENTS.md`'s "When CI cannot run" procedure asks for —
+run the blocked work locally, name the blocked runs so the debt can be repaid, and write down the
+reading error that made one of them look like a code failure for three days.
+
+### A commit with green push runs and no nightly coverage at all
+
+`a1e685d` is the commit all six runs were scheduled against. Its push runs on 2026-11-03 are **green** —
+CI `41628735540`, Deploy `41628735513` — which is exactly why these six had to be read rather than
+inferred: `gh run list --limit 1` makes the commit look verified, while the two workflows that were
+meant to measure it never started.
+
+| Run | Workflow | When | What happened |
+|---|---|---|---|
+| `41800221646` | Benchmarks | 2026-11-04 08:31 | `Criterion benchmarks` started, failed at 08:58:11 after 26m14s; the memory gate in the same run passed in 40 s |
+| `41812645717` | Fuzz | 2026-11-04 10:12 | job never started (5 s) |
+| `41998036649` | Benchmarks | 2026-11-05 08:54 | job never started (4 s) |
+| `42007860039` | Fuzz | 2026-11-05 10:06 | job never started (5 s) |
+| `42190954030` | Benchmarks | 2026-11-06 08:53 | job never started (4 s) |
+| `42200658655` | Fuzz | 2026-11-06 10:10 | job never started (4 s) |
+
+The last night on which both gates actually executed was 2026-11-03, against `71b12ad` — Benchmarks
+`41607114150` (19m19s) and Fuzz `41618354985` (10m49s), both green. `a1e685d` has had no benchmark run
+and no fuzz run at all, and this release inherits that gap rather than closing it.
+
+### The 26-minute failure was a suspension, not a benchmark result
+
+The 2026-11-04 `Criterion benchmarks` job is the one that reads like a defect: it ran 26m14s and
+concluded `failure`, and 26 minutes is long enough to be a hang. Three measurements say otherwise:
+
+- `bench.yml` sets `timeout-minutes: 30`, so 26m14s is *inside* the job's own timeout, not a timeout;
+- the API reports **no steps at all** for that job (`gh api .../actions/runs/<id>/jobs` returns
+  `steps: null`), and its log is already gone — `gh run view --log-failed` answers `log not found` and
+  `gh api .../actions/jobs/126473879119/logs` answers `BlobNotFound`;
+- its check-run annotation is the billing message above (`gh api
+  /repos/thread3d/rRules/check-runs/126473879119/annotations`), and the memory gate in the *same run*
+  started at 08:38:41 and passed 40 seconds later.
+
+A job that ran, recorded no step, left no log and carries a billing annotation was killed by the account
+suspension mid-run. It was not a benchmark regression, and looking for one in the harness would have
+been a day spent on a defect that does not exist.
+
+### The tree those jobs would have measured, measured here
+
+No source changed in this release, so what matters is that the same commands were run by hand, on a
+machine `make preflight` is willing to trust: `target/` had reached **114.8 GB** (116,070 files) and
+`cargo clean` was needed before any number meant anything — the "a slow environment produces the same
+report as a broken one" failure `AGENTS.md` records, caught by the gate this time instead of by a
+mystified reader. After the clean, `make preflight` reports 258 GB free and passes.
+
+- **`make memcheck` — PASS.** Corpus 51 files on both sides; peak RSS 21,553,152 → 21,663,744 bytes
+  (0%), total allocations 1,860 → 1,860 (0%). The 9.0.87 fix holds: the gate compares the committed
+  fixtures and nothing else.
+- **`make bench` — completed, no failure**: **89 benchmarks** across all five groups (`parser`,
+  `feel_evaluator`, `decision_table`, `drd_resolution`, `feel_cache_concurrency`) in about fifteen
+  minutes including a cold release build. Criterion records rather than gates; the gate that can fail
+  is the memory comparison above.
+- **`make fuzz` — no findings.** `feel_parser` completed its 600,000-run budget in 72 s; `decision_table`
+  used its whole 300 s budget (225,503 executions) and was stopped by `timeout`, which is how a bounded
+  run is supposed to end. No new `crash-`, `oom-` or `timeout-` artifact was written. The one file under
+  `engine/fuzz/artifacts/` is a 25-byte `oom-` input dated 2026-10-26; replayed against this tree it
+  finishes in 0 ms at 44 MB peak RSS, so whatever it recorded has since been fixed.
+
+### The debt, and the reading error, are now written down
+
+`AGENTS.md` in both copies gained the two things this incident cost. The blocked runs are now listed
+**per workflow** — a commit whose `CI` and `Deploy` runs are green can still have had no scheduled run
+at all — with the run ids kept in the release entry so repayment has a checklist instead of a memory.
+And a failure with no steps, no log and a duration inside the job's own timeout is read through its
+check-run annotation, not through the harness, because a lapse can kill a run *in flight* as well as
+prevent it from starting.
+
+Repayment is one command per run, on commits that are already pushed, once billing returns:
+
+    for id in 41800221646 41812645717 41998036649 42007860039 42190954030 42200658655; do
+      gh run rerun "$id"
+    done
+
+Verification: `make preflight` passes; `make ci` green end to end — **1,063 tests across 51 targets**
+(1,069 listed, 6 ignored) and **43 frontend tests**, `cargo clippy --workspace --all-targets -D warnings`
+plus the `postgres` feature builds and `db_tests`, `cargo fmt --all -- --check`, `spec-citations`
+1,094 checked / 0 unresolved, `docs-snippets` 16 blocks, `readme` 17 commands, `readme-counts`
+1,069 / 51 / 43, `singleton-tests` 0, `fuzz-invocation` 0 problems, `frontend-types` 4 shapes,
+`verification-cost` api 262/320 and engine 198/330 crates, `deploy-env` 0 dead and 0
+security-relevant unset, and the browser gate green (13 routes, a deep link, a signed-in flow, rule
+creation, approval and audit). `make tck` **170 layer results, 0 fail, 4 skipped**, baseline met;
+`make verify` **35 verified, 0 failed, 0 unverified**; `make db-test` 11 tests green against the real
+PostgreSQL it starts; `make image-check` and `make chart-lint` (helm v3.14.0, default values plus the
+three overlays) green; `make memcheck`, `make bench` and `make fuzz` as above. No Rust, frontend or
+workflow source changed — the only thing a compiler sees is the workspace version string.
+CI/Deploy not confirmed: account billing.
+
 ## [9.0.87] — 2026-11-03 — The memory gate measured a directory git does not track
 
 A full gate run (every target the project claims, not only `make ci`) came back red twice, and the
